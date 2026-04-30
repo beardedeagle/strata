@@ -129,6 +129,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         module.records.iter().map(|record| record.name.as_str()),
     )?;
     validate_unique_names("enum", module.enums.iter().map(|item| item.name.as_str()))?;
+    validate_unique_type_names(&module)?;
     for item in &module.enums {
         validate_unique_names(
             &format!("variant in enum {}", item.name),
@@ -209,6 +210,22 @@ fn validate_unique_names<'a>(kind: &str, names: impl IntoIterator<Item = &'a str
     for name in names {
         if !seen.insert(name) {
             return Err(Error::new(format!("duplicate {kind} declaration {name}")));
+        }
+    }
+    Ok(())
+}
+
+fn validate_unique_type_names(module: &Module) -> Result<()> {
+    let mut seen = BTreeMap::new();
+    for record in &module.records {
+        seen.insert(record.name.as_str(), "record");
+    }
+    for item in &module.enums {
+        if let Some(previous_kind) = seen.insert(item.name.as_str(), "enum") {
+            return Err(Error::new(format!(
+                "duplicate type declaration {} used by {} and enum",
+                item.name, previous_kind
+            )));
         }
     }
     Ok(())
@@ -1351,6 +1368,17 @@ proc Main mailbox bounded(1) {
         assert!(err
             .to_string()
             .contains("duplicate variant in enum MainMsg declaration Start"));
+    }
+
+    #[test]
+    fn rejects_record_enum_type_name_collision() {
+        let source = HELLO.replace("enum MainMsg { Start };", "enum MainState { Start };");
+
+        let err = check_source(&source).expect_err("type name collision should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("duplicate type declaration MainState used by record and enum"));
     }
 
     #[test]

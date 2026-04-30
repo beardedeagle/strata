@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{LineWriter, Write};
 use std::path::{Path, PathBuf};
 
 use mantle_artifact::{
@@ -432,27 +432,27 @@ impl ProcessInstance {
         let message = self
             .mailbox
             .front()
-            .cloned()
             .ok_or_else(|| Error::new(format!("process {} mailbox is empty", self.name)))?;
         let queue_depth = self.mailbox.len() - 1;
         trace.push(format!(
             "{{\"event\":\"message_dequeued\",\"pid\":{},\"process\":\"{}\",\"message\":\"{}\",\"queue_depth\":{}}}",
             self.pid,
             json_escape(&self.name),
-            json_escape(&message),
+            json_escape(message),
             queue_depth
         ))?;
-        let removed = self
-            .mailbox
-            .pop_front()
-            .ok_or_else(|| Error::new(format!("process {} mailbox is empty", self.name)))?;
-        debug_assert_eq!(removed, message);
+        let removed = self.mailbox.pop_front().ok_or_else(|| {
+            Error::new(format!(
+                "process {} mailbox changed during dequeue",
+                self.name
+            ))
+        })?;
         Ok(removed)
     }
 }
 
 struct RuntimeTrace {
-    file: File,
+    file: LineWriter<File>,
     bytes_written: usize,
     max_bytes: usize,
 }
@@ -460,7 +460,7 @@ struct RuntimeTrace {
 impl RuntimeTrace {
     fn new(file: File, max_bytes: usize) -> Self {
         Self {
-            file,
+            file: LineWriter::new(file),
             bytes_written: 0,
             max_bytes,
         }
@@ -482,8 +482,9 @@ impl RuntimeTrace {
             )));
         }
 
-        self.file.write_all(line.as_bytes())?;
-        self.file.write_all(b"\n")?;
+        let mut trace_line = line;
+        trace_line.push('\n');
+        self.file.write_all(trace_line.as_bytes())?;
         self.bytes_written = next_bytes;
         Ok(())
     }
