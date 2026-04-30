@@ -9,6 +9,8 @@ use mantle_artifact::{
 };
 
 pub const DEFAULT_MAX_DISPATCHES: usize = 10_000;
+pub const DEFAULT_MAX_TRACE_BYTES: usize = 8 * 1024 * 1024;
+pub const DEFAULT_MAX_EMITTED_OUTPUT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunReport {
@@ -52,12 +54,16 @@ pub enum ProcessStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunLimits {
     pub max_dispatches: usize,
+    pub max_trace_bytes: usize,
+    pub max_emitted_output_bytes: usize,
 }
 
 impl Default for RunLimits {
     fn default() -> Self {
         Self {
             max_dispatches: DEFAULT_MAX_DISPATCHES,
+            max_trace_bytes: DEFAULT_MAX_TRACE_BYTES,
+            max_emitted_output_bytes: DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
         }
     }
 }
@@ -66,6 +72,14 @@ impl RunLimits {
     fn validate(self) -> Result<()> {
         if self.max_dispatches == 0 {
             return Err(Error::new("max_dispatches must be greater than zero"));
+        }
+        if self.max_trace_bytes == 0 {
+            return Err(Error::new("max_trace_bytes must be greater than zero"));
+        }
+        if self.max_emitted_output_bytes == 0 {
+            return Err(Error::new(
+                "max_emitted_output_bytes must be greater than zero",
+            ));
         }
         Ok(())
     }
@@ -89,14 +103,15 @@ pub fn run_artifact_with_limits(
     artifact.validate()?;
 
     let trace_path = path.with_extension("observability.jsonl");
-    let mut trace_file = prepare_trace_file(&trace_path)?;
+    let trace_file = prepare_trace_file(&trace_path)?;
 
     let definitions = artifact
         .processes
         .iter()
         .map(|process| (process.name.as_str(), process))
         .collect::<BTreeMap<_, _>>();
-    let mut run = RuntimeRun::new(definitions);
+    let trace = RuntimeTrace::new(trace_file, limits.max_trace_bytes);
+    let mut run = RuntimeRun::new(definitions, trace, limits.max_emitted_output_bytes);
     run.trace.push(format!(
         "{{\"event\":\"artifact_loaded\",\"format\":\"{}\",\"format_version\":\"{}\",\"source_language\":\"{}\",\"module\":\"{}\",\"entry_process\":\"{}\",\"process_count\":{}}}",
         json_escape(&artifact.format),
@@ -105,15 +120,13 @@ pub fn run_artifact_with_limits(
         json_escape(&artifact.module),
         json_escape(&artifact.entry_process),
         artifact.processes.len()
-    ));
+    ))?;
 
     run.spawn_process(&artifact.entry_process, None)?;
     run.send_message(&artifact.entry_process, &artifact.entry_message, None)?;
     run.drain_mailboxes(limits.max_dispatches)?;
     run.reject_unhandled_messages()?;
-
-    trace_file.write_all(run.trace.finish().as_bytes())?;
-    trace_file.flush()?;
+    run.trace.flush()?;
 
     Ok(RunReport {
         artifact_path: path.to_path_buf(),
@@ -154,18 +167,26 @@ struct RuntimeRun<'a> {
     processes: Vec<ProcessInstance>,
     next_pid: u64,
     trace: RuntimeTrace,
+    emitted_output_bytes: usize,
+    max_emitted_output_bytes: usize,
     spawned_processes: Vec<SpawnReport>,
     delivered_messages: Vec<MessageDelivery>,
     emitted_outputs: Vec<String>,
 }
 
 impl<'a> RuntimeRun<'a> {
-    fn new(definitions: BTreeMap<&'a str, &'a ArtifactProcess>) -> Self {
+    fn new(
+        definitions: BTreeMap<&'a str, &'a ArtifactProcess>,
+        trace: RuntimeTrace,
+        max_emitted_output_bytes: usize,
+    ) -> Self {
         Self {
             definitions,
             processes: Vec::new(),
             next_pid: 1,
-            trace: RuntimeTrace::new(),
+            trace,
+            emitted_output_bytes: 0,
+            max_emitted_output_bytes,
             spawned_processes: Vec::new(),
             delivered_messages: Vec::new(),
             emitted_outputs: Vec::new(),
@@ -206,15 +227,15 @@ impl<'a> RuntimeRun<'a> {
                 json_escape(&process.state),
                 process.mailbox_bound,
                 parent_pid
-            )),
+            ))?,
             None => self.trace.push(format!(
                 "{{\"event\":\"process_spawned\",\"pid\":{},\"process\":\"{}\",\"state\":\"{}\",\"mailbox_bound\":{}}}",
                 process.pid,
                 json_escape(&process.name),
                 json_escape(&process.state),
                 process.mailbox_bound
-            )),
-        }
+            ))?,
+        };
         self.spawned_processes.push(SpawnReport {
             pid: process.pid,
             process: process.name.clone(),
@@ -253,24 +274,24 @@ impl<'a> RuntimeRun<'a> {
             )));
         }
 
-        process.mailbox.push_back(message.to_string());
         match sender_pid {
             Some(pid) => self.trace.push(format!(
                 "{{\"event\":\"message_accepted\",\"pid\":{},\"process\":\"{}\",\"message\":\"{}\",\"queue_depth\":{},\"sender_pid\":{}}}",
                 process.pid,
                 json_escape(&process.name),
                 json_escape(message),
-                process.mailbox.len(),
+                process.mailbox.len() + 1,
                 pid
-            )),
+            ))?,
             None => self.trace.push(format!(
                 "{{\"event\":\"message_accepted\",\"pid\":{},\"process\":\"{}\",\"message\":\"{}\",\"queue_depth\":{}}}",
                 process.pid,
                 json_escape(&process.name),
                 json_escape(message),
-                process.mailbox.len()
-            )),
-        }
+                process.mailbox.len() + 1
+            ))?,
+        };
+        process.mailbox.push_back(message.to_string());
         self.delivered_messages.push(MessageDelivery {
             pid: process.pid,
             process: process.name.clone(),
@@ -322,12 +343,21 @@ impl<'a> RuntimeRun<'a> {
         for action in &definition.actions {
             match action {
                 ArtifactAction::Emit { text } => {
+                    let emitted_output_bytes =
+                        checked_output_bytes(self.emitted_output_bytes, text.len())?;
+                    if emitted_output_bytes > self.max_emitted_output_bytes {
+                        return Err(Error::new(format!(
+                            "emitted output exceeded maximum size of {} bytes",
+                            self.max_emitted_output_bytes
+                        )));
+                    }
                     self.trace.push(format!(
                         "{{\"event\":\"program_output\",\"pid\":{},\"process\":\"{}\",\"stream\":\"stdout\",\"text\":\"{}\"}}",
                         pid,
                         json_escape(&process_name),
                         json_escape(text)
-                    ));
+                    ))?;
+                    self.emitted_output_bytes = emitted_output_bytes;
                     self.emitted_outputs.push(text.clone());
                 }
                 ArtifactAction::Spawn { target } => self.spawn_process(target, Some(pid))?,
@@ -346,7 +376,7 @@ impl<'a> RuntimeRun<'a> {
                 json_escape(&process_name),
                 json_escape(&previous_state),
                 json_escape(&definition.final_state)
-            ));
+            ))?;
         }
 
         let result_name = match definition.step_result {
@@ -363,13 +393,13 @@ impl<'a> RuntimeRun<'a> {
             json_escape(message),
             result_name,
             json_escape(&self.processes[process_index].state)
-        ));
+        ))?;
         if self.processes[process_index].status == ProcessStatus::Stopped {
             self.trace.push(format!(
                 "{{\"event\":\"process_stopped\",\"pid\":{},\"process\":\"{}\",\"reason\":\"normal\"}}",
                 pid,
                 json_escape(&process_name)
-            ));
+            ))?;
         }
         Ok(())
     }
@@ -401,37 +431,76 @@ impl ProcessInstance {
     fn dequeue(&mut self, trace: &mut RuntimeTrace) -> Result<String> {
         let message = self
             .mailbox
-            .pop_front()
+            .front()
+            .cloned()
             .ok_or_else(|| Error::new(format!("process {} mailbox is empty", self.name)))?;
+        let queue_depth = self.mailbox.len() - 1;
         trace.push(format!(
             "{{\"event\":\"message_dequeued\",\"pid\":{},\"process\":\"{}\",\"message\":\"{}\",\"queue_depth\":{}}}",
             self.pid,
             json_escape(&self.name),
             json_escape(&message),
-            self.mailbox.len()
-        ));
-        Ok(message)
+            queue_depth
+        ))?;
+        let removed = self
+            .mailbox
+            .pop_front()
+            .ok_or_else(|| Error::new(format!("process {} mailbox is empty", self.name)))?;
+        debug_assert_eq!(removed, message);
+        Ok(removed)
     }
 }
 
 struct RuntimeTrace {
-    lines: Vec<String>,
+    file: File,
+    bytes_written: usize,
+    max_bytes: usize,
 }
 
 impl RuntimeTrace {
-    fn new() -> Self {
-        Self { lines: Vec::new() }
+    fn new(file: File, max_bytes: usize) -> Self {
+        Self {
+            file,
+            bytes_written: 0,
+            max_bytes,
+        }
     }
 
-    fn push(&mut self, line: String) {
-        self.lines.push(line);
+    fn push(&mut self, line: String) -> Result<()> {
+        let line_bytes = line
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| Error::new("runtime trace line size overflowed"))?;
+        let next_bytes = self
+            .bytes_written
+            .checked_add(line_bytes)
+            .ok_or_else(|| Error::new("runtime trace size overflowed"))?;
+        if next_bytes > self.max_bytes {
+            return Err(Error::new(format!(
+                "runtime trace exceeded maximum size of {} bytes",
+                self.max_bytes
+            )));
+        }
+
+        self.file.write_all(line.as_bytes())?;
+        self.file.write_all(b"\n")?;
+        self.bytes_written = next_bytes;
+        Ok(())
     }
 
-    fn finish(&self) -> String {
-        let mut output = self.lines.join("\n");
-        output.push('\n');
-        output
+    fn flush(&mut self) -> Result<()> {
+        self.file.flush()?;
+        Ok(())
     }
+}
+
+fn checked_output_bytes(current: usize, next_output_len: usize) -> Result<usize> {
+    let next_output_with_newline = next_output_len
+        .checked_add(1)
+        .ok_or_else(|| Error::new("emitted output size overflowed"))?;
+    current
+        .checked_add(next_output_with_newline)
+        .ok_or_else(|| Error::new("emitted output size overflowed"))
 }
 
 fn json_escape(value: &str) -> String {
@@ -592,13 +661,65 @@ mod tests {
         let trace_path = artifact_path.with_extension("observability.jsonl");
         let artifact = looping_artifact();
 
-        let err =
-            run_artifact_with_limits(&artifact_path, &artifact, RunLimits { max_dispatches: 3 })
-                .expect_err("looping artifact should hit the dispatch budget");
+        let err = run_artifact_with_limits(
+            &artifact_path,
+            &artifact,
+            RunLimits {
+                max_dispatches: 3,
+                ..RunLimits::default()
+            },
+        )
+        .expect_err("looping artifact should hit the dispatch budget");
 
         assert!(err
             .to_string()
             .contains("runtime dispatch budget exceeded after 3 process step(s)"));
+
+        let _ = fs::remove_file(trace_path);
+    }
+
+    #[test]
+    fn runtime_rejects_trace_limit_exhaustion() {
+        let artifact_path = unique_current_dir_artifact_path("runtime-trace-limit");
+        let trace_path = artifact_path.with_extension("observability.jsonl");
+        let artifact = valid_artifact();
+
+        let err = run_artifact_with_limits(
+            &artifact_path,
+            &artifact,
+            RunLimits {
+                max_trace_bytes: 8,
+                ..RunLimits::default()
+            },
+        )
+        .expect_err("small trace limit should fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("runtime trace exceeded maximum size of 8 bytes"));
+
+        let _ = fs::remove_file(trace_path);
+    }
+
+    #[test]
+    fn runtime_rejects_emitted_output_limit_exhaustion() {
+        let artifact_path = unique_current_dir_artifact_path("runtime-output-limit");
+        let trace_path = artifact_path.with_extension("observability.jsonl");
+        let artifact = valid_artifact();
+
+        let err = run_artifact_with_limits(
+            &artifact_path,
+            &artifact,
+            RunLimits {
+                max_emitted_output_bytes: "worker handled Ping".len(),
+                ..RunLimits::default()
+            },
+        )
+        .expect_err("small emitted output limit should fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("emitted output exceeded maximum size"));
 
         let _ = fs::remove_file(trace_path);
     }

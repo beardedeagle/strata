@@ -366,7 +366,7 @@ fn check_step(
         }
         _ => {
             return Err(Error::new(
-                "step body must return Stop(state), Continue(state), or a concrete state value",
+                "step body must return Stop(<state value>) or Continue(<state value>)",
             ))
         }
     };
@@ -1328,6 +1328,18 @@ proc Main mailbox bounded(1) {
         assert!(err
             .to_string()
             .contains("emit output exceeds maximum length"));
+    }
+
+    #[test]
+    fn rejects_bare_concrete_state_return_with_accurate_message() {
+        let source = ACTOR_PING.replace("return Stop(Handled);", "return Handled;");
+
+        let err = check_source(&source).expect_err("bare state return should be rejected");
+
+        let message = err.to_string();
+        assert!(message
+            .contains("step body must return Stop(<state value>) or Continue(<state value>)"));
+        assert!(!message.contains("or a concrete state value"));
     }
 
     #[test]

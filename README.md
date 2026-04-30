@@ -45,7 +45,7 @@ target/debug/mantle run target/strata/actor_ping.mta
 
 That example spawns a worker process, sends it a message, handles the message,
 updates worker state, terminates both processes normally, and records the
-runtime path in:
+runtime trace at:
 
 ```text
 target/strata/actor_ping.observability.jsonl

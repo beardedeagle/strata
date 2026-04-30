@@ -25,17 +25,42 @@ fn target_dir(root: &Path) -> PathBuf {
         .unwrap_or_else(|| root.join("target"))
 }
 
+fn cargo_profile() -> String {
+    std::env::var("PROFILE")
+        .ok()
+        .filter(|profile| !profile.is_empty())
+        .or_else(profile_from_current_exe)
+        .expect("Cargo profile should be available from PROFILE or current test executable path")
+}
+
+fn profile_from_current_exe() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let deps_dir = exe.parent()?;
+    let profile_dir = deps_dir.parent()?;
+    profile_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(String::from)
+}
+
 fn binary_path(root: &Path, name: &str) -> PathBuf {
     target_dir(root)
-        .join("debug")
+        .join(cargo_profile())
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
 fn ensure_workspace_binaries(root: &Path) {
     BUILD_WORKSPACE_BINS.call_once(|| {
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-        let build = Command::new(cargo)
-            .args(["build", "--workspace", "--bins"])
+        let profile = cargo_profile();
+        let mut build = Command::new(cargo);
+        build.args(["build", "--workspace", "--bins"]);
+        if profile == "release" {
+            build.arg("--release");
+        } else if profile != "debug" {
+            build.args(["--profile", profile.as_str()]);
+        }
+        let build = build
             .current_dir(root)
             .output()
             .expect("cargo build should run");
