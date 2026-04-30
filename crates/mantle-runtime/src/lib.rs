@@ -1,0 +1,730 @@
+use std::collections::{BTreeMap, VecDeque};
+use std::env;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use mantle_artifact::{
+    read_artifact, ArtifactAction, ArtifactProcess, Error, MantleArtifact, Result, StepResult,
+};
+
+pub const DEFAULT_MAX_DISPATCHES: usize = 10_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunReport {
+    pub artifact_path: PathBuf,
+    pub trace_path: PathBuf,
+    pub entry_process: String,
+    pub entry_message: String,
+    pub spawned_processes: Vec<SpawnReport>,
+    pub delivered_messages: Vec<MessageDelivery>,
+    pub processes: Vec<ProcessReport>,
+    pub emitted_outputs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnReport {
+    pub pid: u64,
+    pub process: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageDelivery {
+    pub pid: u64,
+    pub process: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessReport {
+    pub pid: u64,
+    pub process: String,
+    pub state: String,
+    pub status: ProcessStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessStatus {
+    Running,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunLimits {
+    pub max_dispatches: usize,
+}
+
+impl Default for RunLimits {
+    fn default() -> Self {
+        Self {
+            max_dispatches: DEFAULT_MAX_DISPATCHES,
+        }
+    }
+}
+
+impl RunLimits {
+    fn validate(self) -> Result<()> {
+        if self.max_dispatches == 0 {
+            return Err(Error::new("max_dispatches must be greater than zero"));
+        }
+        Ok(())
+    }
+}
+
+pub fn run_artifact_path(path: &Path) -> Result<RunReport> {
+    let artifact = read_artifact(path)?;
+    run_artifact(path, &artifact)
+}
+
+pub fn run_artifact(path: &Path, artifact: &MantleArtifact) -> Result<RunReport> {
+    run_artifact_with_limits(path, artifact, RunLimits::default())
+}
+
+pub fn run_artifact_with_limits(
+    path: &Path,
+    artifact: &MantleArtifact,
+    limits: RunLimits,
+) -> Result<RunReport> {
+    limits.validate()?;
+    artifact.validate()?;
+
+    let trace_path = path.with_extension("observability.jsonl");
+    let mut trace_file = prepare_trace_file(&trace_path)?;
+
+    let definitions = artifact
+        .processes
+        .iter()
+        .map(|process| (process.name.as_str(), process))
+        .collect::<BTreeMap<_, _>>();
+    let mut run = RuntimeRun::new(definitions);
+    run.trace.push(format!(
+        "{{\"event\":\"artifact_loaded\",\"format\":\"{}\",\"format_version\":\"{}\",\"source_language\":\"{}\",\"module\":\"{}\",\"entry_process\":\"{}\",\"process_count\":{}}}",
+        json_escape(&artifact.format),
+        json_escape(&artifact.format_version),
+        json_escape(&artifact.source_language),
+        json_escape(&artifact.module),
+        json_escape(&artifact.entry_process),
+        artifact.processes.len()
+    ));
+
+    run.spawn_process(&artifact.entry_process, None)?;
+    run.send_message(&artifact.entry_process, &artifact.entry_message, None)?;
+    run.drain_mailboxes(limits.max_dispatches)?;
+    run.reject_unhandled_messages()?;
+
+    trace_file.write_all(run.trace.finish().as_bytes())?;
+    trace_file.flush()?;
+
+    Ok(RunReport {
+        artifact_path: path.to_path_buf(),
+        trace_path,
+        entry_process: artifact.entry_process.clone(),
+        entry_message: artifact.entry_message.clone(),
+        spawned_processes: run.spawned_processes,
+        delivered_messages: run.delivered_messages,
+        processes: run
+            .processes
+            .into_iter()
+            .map(|process| ProcessReport {
+                pid: process.pid,
+                process: process.name,
+                state: process.state,
+                status: process.status,
+            })
+            .collect(),
+        emitted_outputs: run.emitted_outputs,
+    })
+}
+
+fn prepare_trace_file(path: &Path) -> Result<File> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    Ok(OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)?)
+}
+
+struct RuntimeRun<'a> {
+    definitions: BTreeMap<&'a str, &'a ArtifactProcess>,
+    processes: Vec<ProcessInstance>,
+    next_pid: u64,
+    trace: RuntimeTrace,
+    spawned_processes: Vec<SpawnReport>,
+    delivered_messages: Vec<MessageDelivery>,
+    emitted_outputs: Vec<String>,
+}
+
+impl<'a> RuntimeRun<'a> {
+    fn new(definitions: BTreeMap<&'a str, &'a ArtifactProcess>) -> Self {
+        Self {
+            definitions,
+            processes: Vec::new(),
+            next_pid: 1,
+            trace: RuntimeTrace::new(),
+            spawned_processes: Vec::new(),
+            delivered_messages: Vec::new(),
+            emitted_outputs: Vec::new(),
+        }
+    }
+
+    fn spawn_process(&mut self, process_name: &str, spawned_by_pid: Option<u64>) -> Result<()> {
+        let definition = self
+            .definitions
+            .get(process_name)
+            .ok_or_else(|| Error::new(format!("process {process_name} is not defined")))?;
+        if self
+            .processes
+            .iter()
+            .any(|process| process.name == process_name)
+        {
+            return Err(Error::new(format!(
+                "process {process_name} is already spawned"
+            )));
+        }
+
+        let pid = self.next_pid;
+        self.next_pid += 1;
+        let process = ProcessInstance {
+            pid,
+            name: definition.name.clone(),
+            state: definition.init_state.clone(),
+            status: ProcessStatus::Running,
+            mailbox_bound: definition.mailbox_bound,
+            mailbox: VecDeque::new(),
+        };
+
+        match spawned_by_pid {
+            Some(parent_pid) => self.trace.push(format!(
+                "{{\"event\":\"process_spawned\",\"pid\":{},\"process\":\"{}\",\"state\":\"{}\",\"mailbox_bound\":{},\"spawned_by_pid\":{}}}",
+                process.pid,
+                json_escape(&process.name),
+                json_escape(&process.state),
+                process.mailbox_bound,
+                parent_pid
+            )),
+            None => self.trace.push(format!(
+                "{{\"event\":\"process_spawned\",\"pid\":{},\"process\":\"{}\",\"state\":\"{}\",\"mailbox_bound\":{}}}",
+                process.pid,
+                json_escape(&process.name),
+                json_escape(&process.state),
+                process.mailbox_bound
+            )),
+        }
+        self.spawned_processes.push(SpawnReport {
+            pid: process.pid,
+            process: process.name.clone(),
+        });
+        self.processes.push(process);
+        Ok(())
+    }
+
+    fn send_message(&mut self, target: &str, message: &str, sender_pid: Option<u64>) -> Result<()> {
+        let Some(target_process) = self.definitions.get(target).filter(|process| {
+            process
+                .message_variants
+                .iter()
+                .any(|variant| variant == message)
+        }) else {
+            return Err(Error::new(format!(
+                "message {message} is not accepted by process {target}"
+            )));
+        };
+
+        let process = self
+            .processes
+            .iter_mut()
+            .find(|process| process.name == target_process.name)
+            .ok_or_else(|| Error::new(format!("process {target} is not spawned")))?;
+        if process.status != ProcessStatus::Running {
+            return Err(Error::new(format!(
+                "send to process {} failed because it is not running",
+                process.name
+            )));
+        }
+        if process.mailbox.len() >= process.mailbox_bound {
+            return Err(Error::new(format!(
+                "mailbox for process {} is full; message was not accepted",
+                process.name
+            )));
+        }
+
+        process.mailbox.push_back(message.to_string());
+        match sender_pid {
+            Some(pid) => self.trace.push(format!(
+                "{{\"event\":\"message_accepted\",\"pid\":{},\"process\":\"{}\",\"message\":\"{}\",\"queue_depth\":{},\"sender_pid\":{}}}",
+                process.pid,
+                json_escape(&process.name),
+                json_escape(message),
+                process.mailbox.len(),
+                pid
+            )),
+            None => self.trace.push(format!(
+                "{{\"event\":\"message_accepted\",\"pid\":{},\"process\":\"{}\",\"message\":\"{}\",\"queue_depth\":{}}}",
+                process.pid,
+                json_escape(&process.name),
+                json_escape(message),
+                process.mailbox.len()
+            )),
+        }
+        self.delivered_messages.push(MessageDelivery {
+            pid: process.pid,
+            process: process.name.clone(),
+            message: message.to_string(),
+        });
+        Ok(())
+    }
+
+    fn drain_mailboxes(&mut self, max_dispatches: usize) -> Result<()> {
+        let mut dispatches = 0usize;
+        while let Some(process_index) = self.next_runnable_process() {
+            if dispatches >= max_dispatches {
+                return Err(Error::new(format!(
+                    "runtime dispatch budget exceeded after {max_dispatches} process step(s)"
+                )));
+            }
+            let message = self.processes[process_index].dequeue(&mut self.trace)?;
+            let process_name = self.processes[process_index].name.clone();
+            let definition = *self
+                .definitions
+                .get(process_name.as_str())
+                .ok_or_else(|| Error::new(format!("process {process_name} is not defined")))?;
+            self.step_process(process_index, &message, definition)?;
+            dispatches += 1;
+        }
+        Ok(())
+    }
+
+    fn next_runnable_process(&self) -> Option<usize> {
+        self.processes.iter().position(|process| {
+            process.status == ProcessStatus::Running && !process.mailbox.is_empty()
+        })
+    }
+
+    fn step_process(
+        &mut self,
+        process_index: usize,
+        message: &str,
+        definition: &ArtifactProcess,
+    ) -> Result<()> {
+        let pid = self.processes[process_index].pid;
+        let process_name = self.processes[process_index].name.clone();
+        if self.processes[process_index].status != ProcessStatus::Running {
+            return Err(Error::new(format!(
+                "process {process_name} cannot step because it is not running"
+            )));
+        }
+
+        for action in &definition.actions {
+            match action {
+                ArtifactAction::Emit { text } => {
+                    self.trace.push(format!(
+                        "{{\"event\":\"program_output\",\"pid\":{},\"process\":\"{}\",\"stream\":\"stdout\",\"text\":\"{}\"}}",
+                        pid,
+                        json_escape(&process_name),
+                        json_escape(text)
+                    ));
+                    self.emitted_outputs.push(text.clone());
+                }
+                ArtifactAction::Spawn { target } => self.spawn_process(target, Some(pid))?,
+                ArtifactAction::Send { target, message } => {
+                    self.send_message(target, message, Some(pid))?;
+                }
+            }
+        }
+
+        let previous_state = self.processes[process_index].state.clone();
+        if previous_state != definition.final_state {
+            self.processes[process_index].state = definition.final_state.clone();
+            self.trace.push(format!(
+                "{{\"event\":\"state_updated\",\"pid\":{},\"process\":\"{}\",\"from\":\"{}\",\"to\":\"{}\"}}",
+                pid,
+                json_escape(&process_name),
+                json_escape(&previous_state),
+                json_escape(&definition.final_state)
+            ));
+        }
+
+        let result_name = match definition.step_result {
+            StepResult::Continue => "Continue",
+            StepResult::Stop => {
+                self.processes[process_index].status = ProcessStatus::Stopped;
+                "Stop"
+            }
+        };
+        self.trace.push(format!(
+            "{{\"event\":\"process_stepped\",\"pid\":{},\"process\":\"{}\",\"message\":\"{}\",\"result\":\"{}\",\"state\":\"{}\"}}",
+            pid,
+            json_escape(&process_name),
+            json_escape(message),
+            result_name,
+            json_escape(&self.processes[process_index].state)
+        ));
+        if self.processes[process_index].status == ProcessStatus::Stopped {
+            self.trace.push(format!(
+                "{{\"event\":\"process_stopped\",\"pid\":{},\"process\":\"{}\",\"reason\":\"normal\"}}",
+                pid,
+                json_escape(&process_name)
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_unhandled_messages(&self) -> Result<()> {
+        for process in &self.processes {
+            if !process.mailbox.is_empty() {
+                return Err(Error::new(format!(
+                    "process {} has {} unhandled message(s)",
+                    process.name,
+                    process.mailbox.len()
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+struct ProcessInstance {
+    pid: u64,
+    name: String,
+    state: String,
+    status: ProcessStatus,
+    mailbox_bound: usize,
+    mailbox: VecDeque<String>,
+}
+
+impl ProcessInstance {
+    fn dequeue(&mut self, trace: &mut RuntimeTrace) -> Result<String> {
+        let message = self
+            .mailbox
+            .pop_front()
+            .ok_or_else(|| Error::new(format!("process {} mailbox is empty", self.name)))?;
+        trace.push(format!(
+            "{{\"event\":\"message_dequeued\",\"pid\":{},\"process\":\"{}\",\"message\":\"{}\",\"queue_depth\":{}}}",
+            self.pid,
+            json_escape(&self.name),
+            json_escape(&message),
+            self.mailbox.len()
+        ));
+        Ok(message)
+    }
+}
+
+struct RuntimeTrace {
+    lines: Vec<String>,
+}
+
+impl RuntimeTrace {
+    fn new() -> Self {
+        Self { lines: Vec::new() }
+    }
+
+    fn push(&mut self, line: String) {
+        self.lines.push(line);
+    }
+
+    fn finish(&self) -> String {
+        let mut output = self.lines.join("\n");
+        output.push('\n');
+        output
+    }
+}
+
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::new();
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
+pub fn mantle_main<I>(args: I) -> Result<()>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let _program = args.next();
+    match args.next().as_deref() {
+        Some("run") => {
+            let path = required_path(args.next(), "mantle run <artifact.mta>")?;
+            ensure_no_extra_args(args)?;
+            let report = run_artifact_path(&path)?;
+            println!("mantle: loaded {}", report.artifact_path.display());
+            for spawned in &report.spawned_processes {
+                println!("mantle: spawned {} pid={}", spawned.process, spawned.pid);
+            }
+            for delivery in &report.delivered_messages {
+                println!(
+                    "mantle: delivered {} to {}",
+                    delivery.message, delivery.process
+                );
+            }
+            for output in &report.emitted_outputs {
+                println!("{output}");
+            }
+            for process in &report.processes {
+                match process.status {
+                    ProcessStatus::Running => {
+                        println!("mantle: process {} remains running", process.process);
+                    }
+                    ProcessStatus::Stopped => {
+                        println!("mantle: stopped {} normally", process.process);
+                    }
+                }
+            }
+            println!("mantle: trace {}", report.trace_path.display());
+            Ok(())
+        }
+        Some("--help") | Some("-h") => {
+            print_mantle_usage();
+            Ok(())
+        }
+        Some(other) => Err(Error::new(format!("unknown mantle command {other:?}"))),
+        None => {
+            print_mantle_usage();
+            Err(Error::new("missing mantle command"))
+        }
+    }
+}
+
+fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
+    value
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::new(format!("missing path; usage: {usage}")))
+}
+
+fn ensure_no_extra_args(args: impl IntoIterator<Item = String>) -> Result<()> {
+    let extras: Vec<String> = args.into_iter().collect();
+    if extras.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "unexpected arguments: {}",
+            extras.join(" ")
+        )))
+    }
+}
+
+fn print_mantle_usage() {
+    println!("usage:");
+    println!("  mantle run <path.mta>");
+}
+
+pub fn run_mantle_from_env() -> Result<()> {
+    mantle_main(env::args())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mantle_artifact::{
+        write_artifact, ArtifactAction, ArtifactProcess, ARTIFACT_FORMAT, ARTIFACT_VERSION,
+        STRATA_SOURCE_LANGUAGE,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn runtime_rejects_invalid_artifact_identity() {
+        let mut artifact = valid_artifact();
+        artifact.format = "other".to_string();
+
+        let err = run_artifact(Path::new("target/test/bad.mta"), &artifact)
+            .expect_err("invalid artifact must fail closed");
+        assert!(err.to_string().contains("unsupported artifact format"));
+    }
+
+    #[test]
+    fn runtime_rejects_blocked_trace_sink_before_returning_run_report() {
+        let dir = unique_test_dir("blocked-trace-sink");
+        fs::create_dir_all(&dir).expect("test dir should be created");
+        let blocked_parent = dir.join("blocked");
+        fs::write(&blocked_parent, "not a directory").expect("blocking file should be written");
+
+        let artifact_path = blocked_parent.join("hello.mta");
+        let trace_path = artifact_path.with_extension("observability.jsonl");
+        let artifact = valid_artifact();
+
+        let err = run_artifact(&artifact_path, &artifact)
+            .expect_err("blocked trace sink should fail before a run report is returned");
+
+        assert!(!err.to_string().is_empty());
+        assert!(!trace_path.exists(), "trace path must not be created");
+
+        let _ = fs::remove_file(blocked_parent);
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn run_artifact_path_writes_trace_for_current_directory_artifact() {
+        let artifact_path = unique_current_dir_artifact_path("runtime-current-dir");
+        let trace_path = artifact_path.with_extension("observability.jsonl");
+        let artifact = valid_artifact();
+
+        write_artifact(&artifact_path, &artifact).expect("artifact write should succeed");
+
+        let report =
+            run_artifact_path(&artifact_path).expect("current-directory artifact run should work");
+
+        assert_eq!(report.trace_path, trace_path);
+        assert!(trace_path.exists(), "runtime trace should be written");
+        let trace = fs::read_to_string(&trace_path).expect("runtime trace should be readable");
+        assert!(trace.contains(r#""event":"artifact_loaded""#));
+        assert!(trace.contains(r#""event":"process_stopped""#));
+
+        fs::remove_file(artifact_path).expect("test artifact should be removed");
+        fs::remove_file(trace_path).expect("test trace should be removed");
+    }
+
+    #[test]
+    fn runtime_rejects_dispatch_budget_exhaustion() {
+        let artifact_path = unique_current_dir_artifact_path("runtime-budget");
+        let trace_path = artifact_path.with_extension("observability.jsonl");
+        let artifact = looping_artifact();
+
+        let err =
+            run_artifact_with_limits(&artifact_path, &artifact, RunLimits { max_dispatches: 3 })
+                .expect_err("looping artifact should hit the dispatch budget");
+
+        assert!(err
+            .to_string()
+            .contains("runtime dispatch budget exceeded after 3 process step(s)"));
+
+        let _ = fs::remove_file(trace_path);
+    }
+
+    #[test]
+    fn actor_artifact_spawns_sends_updates_state_and_stops() {
+        let artifact_path = unique_current_dir_artifact_path("runtime-actor");
+        let trace_path = artifact_path.with_extension("observability.jsonl");
+        let artifact = valid_artifact();
+
+        write_artifact(&artifact_path, &artifact).expect("artifact write should succeed");
+
+        let report = run_artifact_path(&artifact_path).expect("actor artifact should run");
+
+        assert_eq!(report.spawned_processes.len(), 2);
+        assert_eq!(report.delivered_messages.len(), 2);
+        assert_eq!(report.emitted_outputs, ["worker handled Ping"]);
+        assert!(report
+            .processes
+            .iter()
+            .any(|process| process.process == "Worker"
+                && process.state == "Handled"
+                && process.status == ProcessStatus::Stopped));
+
+        let trace = fs::read_to_string(&trace_path).expect("runtime trace should be readable");
+        assert!(trace.contains(r#""event":"process_spawned""#));
+        assert!(trace.contains(r#""process":"Worker""#));
+        assert!(trace.contains(r#""event":"message_accepted""#));
+        assert!(trace.contains(r#""message":"Ping""#));
+        assert!(trace.contains(r#""event":"message_dequeued""#));
+        assert!(trace.contains(r#""event":"state_updated""#));
+        assert!(trace.contains(r#""from":"Idle","to":"Handled""#));
+        assert!(trace.contains(r#""event":"process_stopped""#));
+
+        fs::remove_file(artifact_path).expect("test artifact should be removed");
+        fs::remove_file(trace_path).expect("test trace should be removed");
+    }
+
+    fn valid_artifact() -> MantleArtifact {
+        MantleArtifact {
+            format: ARTIFACT_FORMAT.to_string(),
+            format_version: ARTIFACT_VERSION.to_string(),
+            source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+            module: "actor_ping".to_string(),
+            entry_process: "Main".to_string(),
+            entry_message: "Start".to_string(),
+            processes: vec![
+                ArtifactProcess {
+                    name: "Main".to_string(),
+                    state_type: "MainState".to_string(),
+                    state_values: vec!["MainState".to_string()],
+                    message_type: "MainMsg".to_string(),
+                    message_variants: vec!["Start".to_string()],
+                    mailbox_bound: 1,
+                    init_state: "MainState".to_string(),
+                    step_result: StepResult::Stop,
+                    final_state: "MainState".to_string(),
+                    actions: vec![
+                        ArtifactAction::Spawn {
+                            target: "Worker".to_string(),
+                        },
+                        ArtifactAction::Send {
+                            target: "Worker".to_string(),
+                            message: "Ping".to_string(),
+                        },
+                    ],
+                },
+                ArtifactProcess {
+                    name: "Worker".to_string(),
+                    state_type: "WorkerState".to_string(),
+                    state_values: vec!["Idle".to_string(), "Handled".to_string()],
+                    message_type: "WorkerMsg".to_string(),
+                    message_variants: vec!["Ping".to_string()],
+                    mailbox_bound: 1,
+                    init_state: "Idle".to_string(),
+                    step_result: StepResult::Stop,
+                    final_state: "Handled".to_string(),
+                    actions: vec![ArtifactAction::Emit {
+                        text: "worker handled Ping".to_string(),
+                    }],
+                },
+            ],
+            source_hash_fnv1a64: "0000000000000000".to_string(),
+        }
+    }
+
+    fn looping_artifact() -> MantleArtifact {
+        MantleArtifact {
+            format: ARTIFACT_FORMAT.to_string(),
+            format_version: ARTIFACT_VERSION.to_string(),
+            source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+            module: "looping".to_string(),
+            entry_process: "Main".to_string(),
+            entry_message: "Start".to_string(),
+            processes: vec![ArtifactProcess {
+                name: "Main".to_string(),
+                state_type: "MainState".to_string(),
+                state_values: vec!["MainState".to_string()],
+                message_type: "MainMsg".to_string(),
+                message_variants: vec!["Start".to_string()],
+                mailbox_bound: 1,
+                init_state: "MainState".to_string(),
+                step_result: StepResult::Continue,
+                final_state: "MainState".to_string(),
+                actions: vec![ArtifactAction::Send {
+                    target: "Main".to_string(),
+                    message: "Start".to_string(),
+                }],
+            }],
+            source_hash_fnv1a64: "0000000000000000".to_string(),
+        }
+    }
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(unique_artifact_name(name))
+    }
+
+    fn unique_current_dir_artifact_path(name: &str) -> PathBuf {
+        PathBuf::from(unique_artifact_name(name))
+    }
+
+    fn unique_artifact_name(name: &str) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after UNIX epoch")
+            .as_nanos();
+        format!("strata-{name}-{}-{nanos}.mta", std::process::id())
+    }
+}

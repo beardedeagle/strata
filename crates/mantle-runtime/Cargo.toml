@@ -1,0 +1,16 @@
+[package]
+name = "mantle-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+mantle-artifact = { path = "../mantle-artifact" }
+
+[lib]
+name = "mantle_runtime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mantle"
+path = "src/bin/mantle.rs"

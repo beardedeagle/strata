@@ -3,5 +3,19 @@
 version = 4
 
 [[package]]
+name = "mantle-artifact"
+version = "0.1.0"
+
+[[package]]
+name = "mantle-runtime"
+version = "0.1.0"
+dependencies = [
+ "mantle-artifact",
+]
+
+[[package]]
 name = "strata"
 version = "0.1.0"
+dependencies = [
+ "mantle-artifact",
+]

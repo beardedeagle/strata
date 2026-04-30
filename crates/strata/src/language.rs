@@ -1,4 +1,9 @@
-use crate::{Error, Result};
+use std::collections::{BTreeMap, BTreeSet};
+
+use mantle_artifact::{
+    source_hash_fnv1a64, ArtifactAction, ArtifactProcess, Error, MantleArtifact, Result,
+    StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION, MAX_FIELD_VALUE_BYTES, STRATA_SOURCE_LANGUAGE,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
@@ -42,8 +47,15 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionBody {
-    pub emits: Vec<String>,
+    pub statements: Vec<Statement>,
     pub returns: ReturnExpr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Statement {
+    Emit(String),
+    Spawn(String),
+    Send { target: String, message: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,16 +81,25 @@ pub enum ReturnExpr {
 pub struct CheckedProgram {
     pub module: Module,
     pub entry_process: String,
-    pub message_variant: String,
-    pub init_state: String,
-    pub step_result: StepResult,
-    pub emitted_outputs: Vec<String>,
+    pub entry_message: String,
+    pub processes: Vec<ArtifactProcess>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StepResult {
-    Continue,
-    Stop,
+impl CheckedProgram {
+    pub fn to_artifact(&self, source: &str) -> Result<MantleArtifact> {
+        let artifact = MantleArtifact {
+            format: ARTIFACT_FORMAT.to_string(),
+            format_version: ARTIFACT_VERSION.to_string(),
+            source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+            module: self.module.name.clone(),
+            entry_process: self.entry_process.clone(),
+            entry_message: self.entry_message.clone(),
+            processes: self.processes.clone(),
+            source_hash_fnv1a64: source_hash_fnv1a64(source),
+        };
+        artifact.validate()?;
+        Ok(artifact)
+    }
 }
 
 pub fn parse_source(source: &str) -> Result<Module> {
@@ -87,7 +108,9 @@ pub fn parse_source(source: &str) -> Result<Module> {
 
 pub fn check_source(source: &str) -> Result<CheckedProgram> {
     let module = parse_source(source)?;
-    check_module(module)
+    let checked = check_module(module)?;
+    checked.to_artifact(source)?;
+    Ok(checked)
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -101,22 +124,53 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         return Err(Error::new("expected at least one process declaration"));
     }
 
-    let process = module
+    validate_unique_names(
+        "record",
+        module.records.iter().map(|record| record.name.as_str()),
+    )?;
+    validate_unique_names("enum", module.enums.iter().map(|item| item.name.as_str()))?;
+    for item in &module.enums {
+        validate_unique_names(
+            &format!("variant in enum {}", item.name),
+            item.variants.iter().map(String::as_str),
+        )?;
+    }
+    validate_unique_names(
+        "process",
+        module.processes.iter().map(|process| process.name.as_str()),
+    )?;
+
+    let entry = module
         .processes
         .iter()
         .find(|candidate| candidate.name == "Main")
         .or_else(|| module.processes.first())
         .ok_or_else(|| Error::new("expected an entry process"))?;
 
-    require_record(&module, &process.state_type)?;
-    let msg_enum = require_enum(&module, &process.msg_type)?;
-    let message_variant = msg_enum.variants.first().cloned().ok_or_else(|| {
-        Error::new(format!(
-            "enum {} must declare at least one variant",
-            msg_enum.name
-        ))
-    })?;
+    let mut checked_processes = Vec::with_capacity(module.processes.len());
+    for process in &module.processes {
+        checked_processes.push(check_process(&module, process)?);
+    }
 
+    let entry_process = entry.name.clone();
+    validate_action_references(&checked_processes, &entry_process)?;
+
+    let entry_message = checked_processes
+        .iter()
+        .find(|process| process.name == entry_process)
+        .and_then(|process| process.message_variants.first())
+        .cloned()
+        .ok_or_else(|| Error::new(format!("entry process {entry_process} has no messages")))?;
+
+    Ok(CheckedProgram {
+        module,
+        entry_process,
+        entry_message,
+        processes: checked_processes,
+    })
+}
+
+fn check_process(module: &Module, process: &Process) -> Result<ArtifactProcess> {
     if process.mailbox_bound == 0 {
         return Err(Error::new(format!(
             "process {} mailbox bound must be greater than zero",
@@ -124,19 +178,40 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         )));
     }
 
-    check_init(process)?;
-    let (init_state, step_result, emitted_outputs) = check_step(process)?;
+    let state_values = state_values_for_type(module, &process.state_type)?;
+    let msg_enum = require_enum(module, &process.msg_type)?;
+    if msg_enum.variants.is_empty() {
+        return Err(Error::new(format!(
+            "enum {} must declare at least one variant",
+            msg_enum.name
+        )));
+    }
 
-    let entry_process = process.name.clone();
+    let init_state = check_init(process, &state_values)?;
+    let (step_result, final_state, actions) = check_step(process, &state_values, &init_state)?;
 
-    Ok(CheckedProgram {
-        module,
-        entry_process,
-        message_variant,
+    Ok(ArtifactProcess {
+        name: process.name.clone(),
+        state_type: process.state_type.clone(),
+        state_values,
+        message_type: process.msg_type.clone(),
+        message_variants: msg_enum.variants.clone(),
+        mailbox_bound: process.mailbox_bound,
         init_state,
         step_result,
-        emitted_outputs,
+        final_state,
+        actions,
     })
+}
+
+fn validate_unique_names<'a>(kind: &str, names: impl IntoIterator<Item = &'a str>) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for name in names {
+        if !seen.insert(name) {
+            return Err(Error::new(format!("duplicate {kind} declaration {name}")));
+        }
+    }
+    Ok(())
 }
 
 fn require_record<'a>(module: &'a Module, name: &str) -> Result<&'a Record> {
@@ -155,12 +230,28 @@ fn require_enum<'a>(module: &'a Module, name: &str) -> Result<&'a Enum> {
         .ok_or_else(|| Error::new(format!("type {name} is not declared as an enum")))
 }
 
-fn check_init(process: &Process) -> Result<()> {
+fn state_values_for_type(module: &Module, name: &str) -> Result<Vec<String>> {
+    if require_record(module, name).is_ok() {
+        return Ok(vec![name.to_string()]);
+    }
+    if let Ok(item) = require_enum(module, name) {
+        if item.variants.is_empty() {
+            return Err(Error::new(format!(
+                "enum {} must declare at least one variant",
+                item.name
+            )));
+        }
+        return Ok(item.variants.clone());
+    }
+    Err(Error::new(format!(
+        "state type {name} must be declared as a record or enum"
+    )))
+}
+
+fn check_init(process: &Process, state_values: &[String]) -> Result<String> {
     let init = &process.init;
     if !init.params.is_empty() {
-        return Err(Error::new(
-            "initial hello slice requires init() with no parameters",
-        ));
+        return Err(Error::new("init must declare no parameters"));
     }
     if init.return_type != process.state_type {
         return Err(Error::new(format!(
@@ -168,34 +259,43 @@ fn check_init(process: &Process) -> Result<()> {
             init.return_type, process.state_type
         )));
     }
-    if !init.effects.is_empty() || !init.may.is_empty() {
-        return Err(Error::new(
-            "initial hello slice requires init effects and may-behaviors to be empty",
-        ));
+    if !init.may.is_empty() {
+        return Err(Error::new("init may-behaviors must be empty"));
     }
     if init.determinism != Determinism::Det {
-        return Err(Error::new(
-            "initial hello slice requires deterministic init",
-        ));
+        return Err(Error::new("init must be deterministic"));
     }
+
     let Some(body) = &init.body else {
         return Err(Error::new("init must have a body for buildable source"));
     };
-    if !body.emits.is_empty() {
+    if !body.statements.is_empty() {
         return Err(Error::new(
-            "init may not emit output in the initial hello slice",
+            "init body must not perform statements in this slice",
         ));
     }
-    match &body.returns {
-        ReturnExpr::TypeValue(name) if name == &process.state_type => Ok(()),
-        _ => Err(Error::new(format!(
-            "init body must return {}",
+    validate_effects("init", &init.effects, BTreeSet::new())?;
+
+    let ReturnExpr::TypeValue(value) = &body.returns else {
+        return Err(Error::new(format!(
+            "init body must return a value of {}",
             process.state_type
-        ))),
+        )));
+    };
+    if !state_values.iter().any(|candidate| candidate == value) {
+        return Err(Error::new(format!(
+            "init body returns {}, which is not a value of {}",
+            value, process.state_type
+        )));
     }
+    Ok(value.clone())
 }
 
-fn check_step(process: &Process) -> Result<(String, StepResult, Vec<String>)> {
+fn check_step(
+    process: &Process,
+    state_values: &[String],
+    init_state: &str,
+) -> Result<(StepResult, String, Vec<ArtifactAction>)> {
     let step = &process.step;
     if step.params.len() != 2 {
         return Err(Error::new("step must declare state and msg parameters"));
@@ -223,56 +323,201 @@ fn check_step(process: &Process) -> Result<(String, StepResult, Vec<String>)> {
         )));
     }
     if !step.may.is_empty() {
-        return Err(Error::new(
-            "initial hello slice requires step may-behaviors to be empty",
-        ));
+        return Err(Error::new("step may-behaviors must be empty"));
     }
     if step.determinism != Determinism::Det {
-        return Err(Error::new(
-            "initial hello slice requires deterministic step",
-        ));
+        return Err(Error::new("step must be deterministic"));
     }
 
     let Some(body) = &step.body else {
         return Err(Error::new("step must have a body for buildable source"));
     };
-    if body.emits.is_empty() {
-        if !step.effects.is_empty() {
-            return Err(Error::new(
-                "step without emit statements must declare no effects in the initial hello slice",
-            ));
-        }
-    } else if step.effects.as_slice() != ["emit"] {
-        return Err(Error::new(
-            "step with emit statements must declare exactly ! [emit] in the initial hello slice",
-        ));
-    }
-    for output in &body.emits {
-        validate_emit_text(output)?;
-    }
 
-    let step_result = match &body.returns {
-        ReturnExpr::Call { name, arg } if arg == "state" && name == "Stop" => StepResult::Stop,
-        ReturnExpr::Call { name, arg } if arg == "state" && name == "Continue" => {
-            StepResult::Continue
+    let mut used_effects = BTreeSet::new();
+    let mut actions = Vec::with_capacity(body.statements.len());
+    for statement in &body.statements {
+        match statement {
+            Statement::Emit(text) => {
+                validate_emit_text(text)?;
+                used_effects.insert("emit");
+                actions.push(ArtifactAction::Emit { text: text.clone() });
+            }
+            Statement::Spawn(target) => {
+                used_effects.insert("spawn");
+                actions.push(ArtifactAction::Spawn {
+                    target: target.clone(),
+                });
+            }
+            Statement::Send { target, message } => {
+                used_effects.insert("send");
+                actions.push(ArtifactAction::Send {
+                    target: target.clone(),
+                    message: message.clone(),
+                });
+            }
+        }
+    }
+    validate_effects("step", &step.effects, used_effects)?;
+
+    let (step_result, state_arg) = match &body.returns {
+        ReturnExpr::Call { name, arg } if name == "Stop" => (StepResult::Stop, arg.as_str()),
+        ReturnExpr::Call { name, arg } if name == "Continue" => {
+            (StepResult::Continue, arg.as_str())
         }
         _ => {
             return Err(Error::new(
-                "step body must return Stop(state) or Continue(state)",
+                "step body must return Stop(state), Continue(state), or a concrete state value",
             ))
         }
     };
+    let final_state = if state_arg == "state" {
+        init_state.to_string()
+    } else if state_values.iter().any(|candidate| candidate == state_arg) {
+        state_arg.to_string()
+    } else {
+        return Err(Error::new(format!(
+            "step returns state value {}, which is not a value of {}",
+            state_arg, process.state_type
+        )));
+    };
 
-    Ok((process.state_type.clone(), step_result, body.emits.clone()))
+    reject_unsupported_self_requeue(process, step_result, &actions)?;
+
+    Ok((step_result, final_state, actions))
+}
+
+fn validate_effects(
+    function_name: &str,
+    declared_effects: &[String],
+    used_effects: BTreeSet<&'static str>,
+) -> Result<()> {
+    let mut declared = BTreeSet::new();
+    for effect in declared_effects {
+        match effect.as_str() {
+            "emit" | "spawn" | "send" => {}
+            _ => {
+                return Err(Error::new(format!(
+                    "{function_name} declares unsupported effect {effect}"
+                )))
+            }
+        }
+        if !declared.insert(effect.as_str()) {
+            return Err(Error::new(format!(
+                "{function_name} declares duplicate effect {effect}"
+            )));
+        }
+    }
+
+    for used in &used_effects {
+        if !declared.contains(used) {
+            return Err(Error::new(format!(
+                "{function_name} uses effect {used} but does not declare it"
+            )));
+        }
+    }
+    for declared_effect in declared {
+        if !used_effects.contains(declared_effect) {
+            return Err(Error::new(format!(
+                "{function_name} declares effect {declared_effect} but does not use it"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_action_references(processes: &[ArtifactProcess], entry_process: &str) -> Result<()> {
+    let by_name: BTreeMap<&str, &ArtifactProcess> = processes
+        .iter()
+        .map(|process| (process.name.as_str(), process))
+        .collect();
+
+    let mut spawned_targets = BTreeMap::new();
+    for process in processes {
+        for action in &process.actions {
+            match action {
+                ArtifactAction::Emit { .. } => {}
+                ArtifactAction::Spawn { target } => {
+                    if !by_name.contains_key(target.as_str()) {
+                        return Err(Error::new(format!(
+                            "process {} spawns undefined process {}",
+                            process.name, target
+                        )));
+                    }
+                    if target == entry_process {
+                        return Err(Error::new(format!(
+                            "process {} spawns entry process {}, which is already started",
+                            process.name, target
+                        )));
+                    }
+                    if let Some(previous_process) =
+                        spawned_targets.insert(target.as_str(), process.name.as_str())
+                    {
+                        return Err(Error::new(format!(
+                            "process {} duplicates spawn target {} already spawned by {}",
+                            process.name, target, previous_process
+                        )));
+                    }
+                }
+                ArtifactAction::Send { target, message } => {
+                    let Some(target_process) = by_name.get(target.as_str()) else {
+                        return Err(Error::new(format!(
+                            "process {} sends to undefined process {}",
+                            process.name, target
+                        )));
+                    };
+                    if !target_process
+                        .message_variants
+                        .iter()
+                        .any(|variant| variant == message)
+                    {
+                        return Err(Error::new(format!(
+                            "process {} sends message {} not accepted by {}",
+                            process.name, message, target
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn reject_unsupported_self_requeue(
+    process: &Process,
+    step_result: StepResult,
+    actions: &[ArtifactAction],
+) -> Result<()> {
+    if step_result != StepResult::Continue {
+        return Ok(());
+    }
+
+    if actions.iter().any(|action| {
+        matches!(
+            action,
+            ArtifactAction::Send { target, .. } if target == &process.name
+        )
+    }) {
+        return Err(Error::new(format!(
+            "process {} continues after sending to itself, which is not supported in this source slice",
+            process.name
+        )));
+    }
+
+    Ok(())
 }
 
 fn validate_emit_text(output: &str) -> Result<()> {
     if output.is_empty() {
         return Err(Error::new("emit output must not be empty"));
     }
+    if output.len() > MAX_FIELD_VALUE_BYTES {
+        return Err(Error::new(format!(
+            "emit output exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
+        )));
+    }
     if output.chars().any(char::is_control) {
         return Err(Error::new(
-            "emit output must not contain control characters in the initial hello slice",
+            "emit output must not contain control characters",
         ));
     }
     Ok(())
@@ -460,7 +705,7 @@ impl<'a> Lexer<'a> {
                 }
                 '\\' => {
                     return Err(Error::new(format!(
-                        "string escapes are not supported in the initial hello slice at byte {offset}"
+                        "string escapes are not supported in this source slice at byte {offset}"
                     )));
                 }
                 _ => {
@@ -651,17 +896,18 @@ impl Parser {
             None
         } else {
             self.expect_symbol('{')?;
-            let mut emits = Vec::new();
-            while self.peek_keyword("emit") {
-                self.expect_keyword("emit")?;
-                emits.push(self.expect_string_literal()?);
-                self.expect_symbol(';')?;
+            let mut statements = Vec::new();
+            while !self.peek_keyword("return") {
+                statements.push(self.parse_function_statement()?);
             }
             self.expect_keyword("return")?;
             let returns = self.parse_return_expr()?;
             self.expect_symbol(';')?;
             self.expect_symbol('}')?;
-            Some(FunctionBody { emits, returns })
+            Some(FunctionBody {
+                statements,
+                returns,
+            })
         };
 
         Ok(Function {
@@ -673,6 +919,29 @@ impl Parser {
             determinism,
             body,
         })
+    }
+
+    fn parse_function_statement(&mut self) -> Result<Statement> {
+        if self.peek_keyword("emit") {
+            self.expect_keyword("emit")?;
+            let text = self.expect_string_literal()?;
+            self.expect_symbol(';')?;
+            return Ok(Statement::Emit(text));
+        }
+        if self.peek_keyword("spawn") {
+            self.expect_keyword("spawn")?;
+            let target = self.expect_ident()?;
+            self.expect_symbol(';')?;
+            return Ok(Statement::Spawn(target));
+        }
+        if self.peek_keyword("send") {
+            self.expect_keyword("send")?;
+            let target = self.expect_ident()?;
+            let message = self.expect_ident()?;
+            self.expect_symbol(';')?;
+            return Ok(Statement::Send { target, message });
+        }
+        Err(self.error_here("expected emit, spawn, send, or return statement"))
     }
 
     fn parse_type(&mut self) -> Result<String> {
@@ -872,15 +1141,95 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
+    const ACTOR_PING: &str = r#"
+module actor_ping;
+
+record MainState;
+enum MainMsg { Start };
+enum WorkerState { Idle, Handled };
+enum WorkerMsg { Ping };
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        spawn Worker;
+        send Worker Ping;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }
+}
+"#;
+
     #[test]
     fn parses_and_checks_hello() {
         let checked = check_source(HELLO).expect("hello should check");
 
         assert_eq!(checked.module.name, "hello");
         assert_eq!(checked.entry_process, "Main");
-        assert_eq!(checked.message_variant, "Start");
-        assert_eq!(checked.step_result, StepResult::Stop);
-        assert_eq!(checked.emitted_outputs, ["hello from Strata"]);
+        assert_eq!(checked.entry_message, "Start");
+        assert_eq!(checked.processes.len(), 1);
+        assert_eq!(checked.processes[0].step_result, StepResult::Stop);
+        assert_eq!(
+            checked.processes[0].actions,
+            [ArtifactAction::Emit {
+                text: "hello from Strata".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_and_checks_actor_ping() {
+        let checked = check_source(ACTOR_PING).expect("actor ping should check");
+
+        assert_eq!(checked.module.name, "actor_ping");
+        assert_eq!(checked.entry_process, "Main");
+        assert_eq!(checked.entry_message, "Start");
+        assert_eq!(checked.processes.len(), 2);
+
+        let main = checked
+            .processes
+            .iter()
+            .find(|process| process.name == "Main")
+            .expect("Main should be checked");
+        assert_eq!(
+            main.actions,
+            [
+                ArtifactAction::Spawn {
+                    target: "Worker".to_string()
+                },
+                ArtifactAction::Send {
+                    target: "Worker".to_string(),
+                    message: "Ping".to_string()
+                }
+            ]
+        );
+
+        let worker = checked
+            .processes
+            .iter()
+            .find(|process| process.name == "Worker")
+            .expect("Worker should be checked");
+        assert_eq!(worker.init_state, "Idle");
+        assert_eq!(worker.final_state, "Handled");
     }
 
     #[test]
@@ -919,7 +1268,77 @@ proc Main mailbox bounded(1) {
 "#;
 
         let err = check_source(source).expect_err("undeclared emit should be rejected");
-        assert!(err.to_string().contains("must declare exactly ! [emit]"));
+        assert!(err
+            .to_string()
+            .contains("step uses effect emit but does not declare it"));
+    }
+
+    #[test]
+    fn rejects_spawn_without_declared_effect() {
+        let source = ACTOR_PING.replace("! [spawn, send]", "! [send]");
+
+        let err = check_source(&source).expect_err("undeclared spawn should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("step uses effect spawn but does not declare it"));
+    }
+
+    #[test]
+    fn rejects_duplicate_static_spawn_target() {
+        let source = ACTOR_PING.replace("spawn Worker;", "spawn Worker;\n        spawn Worker;");
+
+        let err = check_source(&source).expect_err("duplicate spawn should be rejected");
+
+        assert!(err.to_string().contains("duplicates spawn target Worker"));
+    }
+
+    #[test]
+    fn rejects_send_to_unknown_message() {
+        let source = ACTOR_PING.replace("send Worker Ping;", "send Worker Unknown;");
+
+        let err = check_source(&source).expect_err("unknown message should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("sends message Unknown not accepted by Worker"));
+    }
+
+    #[test]
+    fn rejects_continue_after_self_send() {
+        let source = HELLO
+            .replace("! [emit]", "! [send]")
+            .replace(r#"emit "hello from Strata";"#, "send Main Start;")
+            .replace("return Stop(state);", "return Continue(state);");
+
+        let err = check_source(&source).expect_err("self-send continuation should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("continues after sending to itself"));
+    }
+
+    #[test]
+    fn rejects_emit_output_too_large_for_artifacts() {
+        let output = "a".repeat(MAX_FIELD_VALUE_BYTES + 1);
+        let source = HELLO.replace("hello from Strata", &output);
+
+        let err = check_source(&source).expect_err("oversized emit output should fail");
+
+        assert!(err
+            .to_string()
+            .contains("emit output exceeds maximum length"));
+    }
+
+    #[test]
+    fn rejects_duplicate_enum_variants() {
+        let source = HELLO.replace("enum MainMsg { Start };", "enum MainMsg { Start, Start };");
+
+        let err = check_source(&source).expect_err("duplicate variant should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("duplicate variant in enum MainMsg declaration Start"));
     }
 
     #[test]

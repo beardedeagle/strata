@@ -2,10 +2,9 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::artifact::{default_artifact_path, write_artifact, MantleArtifact};
+use mantle_artifact::{default_artifact_path, write_artifact, Error, Result};
+
 use crate::language::check_source;
-use crate::runtime::{run_artifact_path, ProcessStatus};
-use crate::{Error, Result};
 
 pub fn strata_main<I>(args: I) -> Result<()>
 where
@@ -43,7 +42,7 @@ where
             }
             let source = fs::read_to_string(&path)?;
             let checked = check_source(&source)?;
-            let artifact = MantleArtifact::from_checked(&checked, &source)?;
+            let artifact = checked.to_artifact(&source)?;
             let artifact_path = output.unwrap_or(default_artifact_path(&path)?);
             write_artifact(&artifact_path, &artifact)?;
             println!(
@@ -61,46 +60,6 @@ where
         None => {
             print_strata_usage();
             Err(Error::new("missing strata command"))
-        }
-    }
-}
-
-pub fn mantle_main<I>(args: I) -> Result<()>
-where
-    I: IntoIterator<Item = String>,
-{
-    let mut args = args.into_iter();
-    let _program = args.next();
-    match args.next().as_deref() {
-        Some("run") => {
-            let path = required_path(args.next(), "mantle run <artifact.mta>")?;
-            ensure_no_extra_args(args)?;
-            let report = run_artifact_path(&path)?;
-            println!("mantle: loaded {}", report.artifact_path.display());
-            println!("mantle: spawned {} pid=1", report.process);
-            println!("mantle: delivered {}", report.message);
-            for output in &report.emitted_outputs {
-                println!("{output}");
-            }
-            match report.status {
-                ProcessStatus::Running => {
-                    println!("mantle: process {} remains running", report.process);
-                }
-                ProcessStatus::Stopped => {
-                    println!("mantle: stopped {} normally", report.process);
-                }
-            }
-            println!("mantle: trace {}", report.trace_path.display());
-            Ok(())
-        }
-        Some("--help") | Some("-h") => {
-            print_mantle_usage();
-            Ok(())
-        }
-        Some(other) => Err(Error::new(format!("unknown mantle command {other:?}"))),
-        None => {
-            print_mantle_usage();
-            Err(Error::new("missing mantle command"))
         }
     }
 }
@@ -129,15 +88,6 @@ fn print_strata_usage() {
     println!("  strata build <path.str> [--output <path.mta>]");
 }
 
-fn print_mantle_usage() {
-    println!("usage:");
-    println!("  mantle run <path.mta>");
-}
-
 pub fn run_strata_from_env() -> Result<()> {
     strata_main(env::args())
-}
-
-pub fn run_mantle_from_env() -> Result<()> {
-    mantle_main(env::args())
 }

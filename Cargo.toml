@@ -1,17 +1,7 @@
-[package]
-name = "strata"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-
-[lib]
-name = "strata"
-path = "src/lib.rs"
-
-[[bin]]
-name = "strata"
-path = "src/bin/strata.rs"
-
-[[bin]]
-name = "mantle"
-path = "src/bin/mantle.rs"
+[workspace]
+resolver = "2"
+members = [
+    "crates/mantle-artifact",
+    "crates/mantle-runtime",
+    "crates/strata",
+]
