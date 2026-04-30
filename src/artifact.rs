@@ -248,11 +248,19 @@ impl ArtifactFields {
             .emitted_output_count
             .ok_or_else(|| Error::new("missing artifact field emitted_output_count"))?;
         self.emitted_outputs.sort_by_key(|(index, _)| *index);
-        if self.emitted_outputs.len() != expected {
-            return Err(Error::new(format!(
-                "emitted output count mismatch: expected {expected}, found {}",
-                self.emitted_outputs.len()
-            )));
+        let mut previous_index = None;
+        for (actual_index, _) in &self.emitted_outputs {
+            if previous_index == Some(*actual_index) {
+                return Err(Error::new(format!(
+                    "duplicate emitted output index {actual_index}"
+                )));
+            }
+            if *actual_index >= expected {
+                return Err(Error::new(format!(
+                    "unexpected emitted output index {actual_index}"
+                )));
+            }
+            previous_index = Some(*actual_index);
         }
         for (expected_index, (actual_index, _)) in self.emitted_outputs.iter().enumerate() {
             if *actual_index != expected_index {
@@ -260,6 +268,12 @@ impl ArtifactFields {
                     "missing emitted output index {expected_index}"
                 )));
             }
+        }
+        if self.emitted_outputs.len() != expected {
+            return Err(Error::new(format!(
+                "emitted output count mismatch: expected {expected}, found {}",
+                self.emitted_outputs.len()
+            )));
         }
         Ok(std::mem::take(&mut self.emitted_outputs)
             .into_iter()
@@ -363,6 +377,35 @@ proc Main mailbox bounded(1) {
 
         let err = MantleArtifact::decode("not-mta\n").expect_err("bad magic should fail");
         assert!(err.to_string().contains("invalid Mantle artifact magic"));
+    }
+
+    #[test]
+    fn decode_reports_duplicate_emitted_output_indices() {
+        let mut artifact = valid_artifact();
+        artifact.emitted_outputs = vec!["first".to_string(), "second".to_string()];
+        let encoded = artifact
+            .encode()
+            .replace("emitted_output_1=second", "emitted_output_0=second");
+
+        let err =
+            MantleArtifact::decode(&encoded).expect_err("duplicate emitted output should fail");
+
+        assert!(err.to_string().contains("duplicate emitted output index 0"));
+    }
+
+    #[test]
+    fn decode_reports_unexpected_emitted_output_indices() {
+        let encoded = valid_artifact().encode().replace(
+            "emitted_output_0=hello from Strata",
+            "emitted_output_2=hello from Strata",
+        );
+
+        let err =
+            MantleArtifact::decode(&encoded).expect_err("unexpected emitted output should fail");
+
+        assert!(err
+            .to_string()
+            .contains("unexpected emitted output index 2"));
     }
 
     #[test]
