@@ -388,13 +388,6 @@ impl<'a> RuntimeRun<'a> {
         let target_process = self.program.process(target)?;
         let message_label = self.program.message_label(target, message)?;
         let process_label = target_process.debug_name.as_str();
-        if message.index() >= target_process.message_variants.len() {
-            return Err(Error::new(format!(
-                "message id {} is not accepted by process {}",
-                message.as_u32(),
-                process_label
-            )));
-        }
 
         let process = self
             .processes
@@ -462,25 +455,25 @@ impl<'a> RuntimeRun<'a> {
     }
 
     fn step_process(&mut self, process_index: usize, message: MessageId) -> Result<()> {
+        let program = self.program;
         let pid = self.processes[process_index].pid;
         let process_id = self.processes[process_index].process_id;
-        let process_name = self.program.process_label(process_id)?.to_string();
-        let message_label = self.program.message_label(process_id, message)?.to_string();
+        let process_name = program.process_label(process_id)?.to_string();
+        let message_label = program.message_label(process_id, message)?.to_string();
         if self.processes[process_index].status != ProcessStatus::Running {
             return Err(Error::new(format!(
                 "process {process_name} cannot step because it is not running"
             )));
         }
 
-        let definition = self.program.process(process_id)?;
-        let actions = definition.actions.clone();
+        let definition = program.process(process_id)?;
         let final_state = definition.final_state;
         let step_result = definition.step_result;
 
-        for action in actions {
+        for &action in &definition.actions {
             match action {
                 LoadedAction::Emit { output } => {
-                    let text = self.program.output(output)?.to_string();
+                    let text = program.output(output)?.to_string();
                     let emitted_output_bytes =
                         checked_output_bytes(self.emitted_output_bytes, text.len())?;
                     if emitted_output_bytes > self.max_emitted_output_bytes {
@@ -511,8 +504,8 @@ impl<'a> RuntimeRun<'a> {
                 "{{\"event\":\"state_updated\",\"pid\":{},\"process\":\"{}\",\"from\":\"{}\",\"to\":\"{}\"}}",
                 pid,
                 json_escape(&process_name),
-                json_escape(self.program.state_label(process_id, previous_state)?),
-                json_escape(self.program.state_label(process_id, final_state)?)
+                json_escape(program.state_label(process_id, previous_state)?),
+                json_escape(program.state_label(process_id, final_state)?)
             ))?;
             self.processes[process_index].state = final_state;
         }
@@ -527,7 +520,7 @@ impl<'a> RuntimeRun<'a> {
             json_escape(&process_name),
             json_escape(&message_label),
             result_name,
-            json_escape(self.program.state_label(process_id, self.processes[process_index].state)?)
+            json_escape(program.state_label(process_id, self.processes[process_index].state)?)
         ))?;
         if step_result == StepResult::Stop {
             self.trace.push(format!(
