@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 pub const ARTIFACT_MAGIC: &str = "MTA0";
 pub const ARTIFACT_FORMAT: &str = "mantle-target-artifact";
-pub const ARTIFACT_VERSION: &str = "1";
+pub const ARTIFACT_VERSION: &str = "2";
 pub const STRATA_SOURCE_LANGUAGE: &str = "strata";
 pub const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 pub const MAX_ARTIFACT_FIELDS: usize = 16_384;
@@ -15,6 +15,7 @@ pub const MAX_IDENTIFIER_BYTES: usize = 128;
 pub const MAX_PROCESS_COUNT: usize = 256;
 pub const MAX_STATE_VALUES_PER_PROCESS: usize = 1024;
 pub const MAX_MESSAGE_VARIANTS_PER_PROCESS: usize = 1024;
+pub const MAX_OUTPUT_LITERALS: usize = 4096;
 pub const MAX_ACTIONS_PER_PROCESS: usize = 4096;
 pub const MAX_MAILBOX_BOUND: usize = 65_536;
 
@@ -70,14 +71,48 @@ impl StepResult {
     }
 }
 
+macro_rules! define_id {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub struct $name(u32);
+
+        impl $name {
+            pub const fn new(value: u32) -> Self {
+                Self(value)
+            }
+
+            pub fn from_index(index: usize) -> Result<Self> {
+                let value = u32::try_from(index).map_err(|_| {
+                    Error::new(format!("{} index {index} is too large", stringify!($name)))
+                })?;
+                Ok(Self(value))
+            }
+
+            pub const fn as_u32(self) -> u32 {
+                self.0
+            }
+
+            pub fn index(self) -> usize {
+                self.0 as usize
+            }
+        }
+    };
+}
+
+define_id!(ProcessId);
+define_id!(StateId);
+define_id!(MessageId);
+define_id!(OutputId);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MantleArtifact {
     pub format: String,
     pub format_version: String,
     pub source_language: String,
     pub module: String,
-    pub entry_process: String,
-    pub entry_message: String,
+    pub entry_process: ProcessId,
+    pub entry_message: MessageId,
+    pub outputs: Vec<String>,
     pub processes: Vec<ArtifactProcess>,
     pub source_hash_fnv1a64: String,
 }
@@ -85,21 +120,25 @@ pub struct MantleArtifact {
 impl MantleArtifact {
     pub fn encode(&self) -> String {
         let mut encoded = format!(
-            "{ARTIFACT_MAGIC}\nformat={}\nformat_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\nprocess_count={}\n",
+            "{ARTIFACT_MAGIC}\nformat={}\nformat_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\noutput_count={}\nprocess_count={}\n",
             self.format,
             self.format_version,
             self.source_language,
             self.module,
-            self.entry_process,
-            self.entry_message,
+            self.entry_process.as_u32(),
+            self.entry_message.as_u32(),
+            self.outputs.len(),
             self.processes.len()
         );
+        for (output_index, output) in self.outputs.iter().enumerate() {
+            encoded.push_str(&format!("output.{output_index}={output}\n"));
+        }
 
         for (process_index, process) in self.processes.iter().enumerate() {
             let prefix = format!("process.{process_index}");
             encoded.push_str(&format!(
-                "{prefix}.name={}\n{prefix}.state_type={}\n{prefix}.state_value_count={}\n",
-                process.name,
+                "{prefix}.debug_name={}\n{prefix}.state_type={}\n{prefix}.state_value_count={}\n",
+                process.debug_name,
                 process.state_type,
                 process.state_values.len()
             ));
@@ -117,27 +156,31 @@ impl MantleArtifact {
             encoded.push_str(&format!(
                 "{prefix}.mailbox_bound={}\n{prefix}.init_state={}\n{prefix}.step_result={}\n{prefix}.final_state={}\n{prefix}.action_count={}\n",
                 process.mailbox_bound,
-                process.init_state,
+                process.init_state.as_u32(),
                 process.step_result.as_str(),
-                process.final_state,
+                process.final_state.as_u32(),
                 process.actions.len()
             ));
             for (action_index, action) in process.actions.iter().enumerate() {
                 let action_prefix = format!("{prefix}.action.{action_index}");
                 match action {
-                    ArtifactAction::Emit { text } => {
+                    ArtifactAction::Emit { output } => {
                         encoded.push_str(&format!(
-                            "{action_prefix}.kind=emit\n{action_prefix}.text={text}\n"
+                            "{action_prefix}.kind=emit\n{action_prefix}.output={}\n",
+                            output.as_u32()
                         ));
                     }
                     ArtifactAction::Spawn { target } => {
                         encoded.push_str(&format!(
-                            "{action_prefix}.kind=spawn\n{action_prefix}.target={target}\n"
+                            "{action_prefix}.kind=spawn\n{action_prefix}.target_process={}\n",
+                            target.as_u32()
                         ));
                     }
                     ArtifactAction::Send { target, message } => {
                         encoded.push_str(&format!(
-                            "{action_prefix}.kind=send\n{action_prefix}.target={target}\n{action_prefix}.message={message}\n"
+                            "{action_prefix}.kind=send\n{action_prefix}.target_process={}\n{action_prefix}.message={}\n",
+                            target.as_u32(),
+                            message.as_u32()
                         ));
                     }
                 }
@@ -154,6 +197,11 @@ impl MantleArtifact {
     pub fn decode(contents: &str) -> Result<Self> {
         let mut fields = ArtifactFields::parse(contents)?;
         let process_count = fields.take_bounded_usize("process_count", 1, MAX_PROCESS_COUNT)?;
+        let output_count = fields.take_bounded_usize("output_count", 0, MAX_OUTPUT_LITERALS)?;
+        let mut outputs = Vec::with_capacity(output_count);
+        for output_index in 0..output_count {
+            outputs.push(fields.take_required(&format!("output.{output_index}"))?);
+        }
 
         let mut processes = Vec::with_capacity(process_count);
         for process_index in 0..process_count {
@@ -191,14 +239,16 @@ impl MantleArtifact {
                 let kind = fields.take_required(&format!("{action_prefix}.kind"))?;
                 let action = match kind.as_str() {
                     "emit" => ArtifactAction::Emit {
-                        text: fields.take_required(&format!("{action_prefix}.text"))?,
+                        output: fields.take_output_id(&format!("{action_prefix}.output"))?,
                     },
                     "spawn" => ArtifactAction::Spawn {
-                        target: fields.take_required(&format!("{action_prefix}.target"))?,
+                        target: fields
+                            .take_process_id(&format!("{action_prefix}.target_process"))?,
                     },
                     "send" => ArtifactAction::Send {
-                        target: fields.take_required(&format!("{action_prefix}.target"))?,
-                        message: fields.take_required(&format!("{action_prefix}.message"))?,
+                        target: fields
+                            .take_process_id(&format!("{action_prefix}.target_process"))?,
+                        message: fields.take_message_id(&format!("{action_prefix}.message"))?,
                     },
                     _ => return Err(Error::new(format!("invalid artifact action kind {kind:?}"))),
                 };
@@ -206,7 +256,7 @@ impl MantleArtifact {
             }
 
             processes.push(ArtifactProcess {
-                name: fields.take_required(&format!("{prefix}.name"))?,
+                debug_name: fields.take_required(&format!("{prefix}.debug_name"))?,
                 state_type: fields.take_required(&format!("{prefix}.state_type"))?,
                 state_values,
                 message_type: fields.take_required(&format!("{prefix}.message_type"))?,
@@ -216,9 +266,9 @@ impl MantleArtifact {
                     1,
                     MAX_MAILBOX_BOUND,
                 )?,
-                init_state: fields.take_required(&format!("{prefix}.init_state"))?,
+                init_state: fields.take_state_id(&format!("{prefix}.init_state"))?,
                 step_result: fields.take_step_result(&format!("{prefix}.step_result"))?,
-                final_state: fields.take_required(&format!("{prefix}.final_state"))?,
+                final_state: fields.take_state_id(&format!("{prefix}.final_state"))?,
                 actions,
             });
         }
@@ -228,8 +278,9 @@ impl MantleArtifact {
             format_version: fields.take_required("format_version")?,
             source_language: fields.take_required("source_language")?,
             module: fields.take_required("module")?,
-            entry_process: fields.take_required("entry_process")?,
-            entry_message: fields.take_required("entry_message")?,
+            entry_process: fields.take_process_id("entry_process")?,
+            entry_message: fields.take_message_id("entry_message")?,
+            outputs,
             processes,
             source_hash_fnv1a64: fields.take_required("source_hash_fnv1a64")?,
         };
@@ -254,43 +305,40 @@ impl MantleArtifact {
         }
         validate_ident_field("source_language", &self.source_language)?;
         validate_ident_field("module", &self.module)?;
-        validate_ident_field("entry_process", &self.entry_process)?;
-        validate_ident_field("entry_message", &self.entry_message)?;
         validate_source_hash(&self.source_hash_fnv1a64)?;
         validate_count("process_count", self.processes.len(), 1, MAX_PROCESS_COUNT)?;
+        validate_count("output_count", self.outputs.len(), 0, MAX_OUTPUT_LITERALS)?;
+        for output in &self.outputs {
+            validate_output_text(output)?;
+        }
 
-        let mut process_names = BTreeSet::new();
-        let mut processes_by_name = BTreeMap::new();
+        let mut process_debug_names = BTreeSet::new();
         for process in &self.processes {
             process.validate_identity()?;
-            if !process_names.insert(process.name.as_str()) {
+            if !process_debug_names.insert(process.debug_name.as_str()) {
                 return Err(Error::new(format!(
-                    "duplicate process definition {}",
-                    process.name
+                    "duplicate process debug_name {}",
+                    process.debug_name
                 )));
             }
-            processes_by_name.insert(process.name.as_str(), process);
         }
 
-        let Some(entry_process) = processes_by_name.get(self.entry_process.as_str()) else {
+        let Some(entry_process) = self.processes.get(self.entry_process.index()) else {
             return Err(Error::new(format!(
-                "entry process {} is not defined",
-                self.entry_process
+                "entry process id {} is not defined",
+                self.entry_process.as_u32()
             )));
         };
-        if !entry_process
-            .message_variants
-            .iter()
-            .any(|message| message == &self.entry_message)
-        {
+        if self.entry_message.index() >= entry_process.message_variants.len() {
             return Err(Error::new(format!(
-                "entry message {} is not accepted by {}",
-                self.entry_message, self.entry_process
+                "entry message id {} is not accepted by process id {}",
+                self.entry_message.as_u32(),
+                self.entry_process.as_u32()
             )));
         }
 
         for process in &self.processes {
-            process.validate_references(&processes_by_name)?;
+            process.validate_references(self)?;
         }
         validate_encoded_artifact_size(self)?;
 
@@ -300,25 +348,23 @@ impl MantleArtifact {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactProcess {
-    pub name: String,
+    pub debug_name: String,
     pub state_type: String,
     pub state_values: Vec<String>,
     pub message_type: String,
     pub message_variants: Vec<String>,
     pub mailbox_bound: usize,
-    pub init_state: String,
+    pub init_state: StateId,
     pub step_result: StepResult,
-    pub final_state: String,
+    pub final_state: StateId,
     pub actions: Vec<ArtifactAction>,
 }
 
 impl ArtifactProcess {
     fn validate_identity(&self) -> Result<()> {
-        validate_ident_field("process name", &self.name)?;
+        validate_ident_field("process debug_name", &self.debug_name)?;
         validate_ident_field("state_type", &self.state_type)?;
         validate_ident_field("message_type", &self.message_type)?;
-        validate_ident_field("init_state", &self.init_state)?;
-        validate_ident_field("final_state", &self.final_state)?;
         validate_count("mailbox_bound", self.mailbox_bound, 1, MAX_MAILBOX_BOUND)?;
         validate_count(
             "state_value_count",
@@ -340,62 +386,58 @@ impl ArtifactProcess {
         )?;
         validate_unique_ident_list("state value", &self.state_values)?;
         validate_unique_ident_list("message variant", &self.message_variants)?;
-        if !self
-            .state_values
-            .iter()
-            .any(|value| value == &self.init_state)
-        {
+        if self.init_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(
-                "process {} init_state {} is not a valid state value",
-                self.name, self.init_state
+                "process {} init_state id {} is not a valid state value",
+                self.debug_name,
+                self.init_state.as_u32()
             )));
         }
-        if !self
-            .state_values
-            .iter()
-            .any(|value| value == &self.final_state)
-        {
+        if self.final_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(
-                "process {} final_state {} is not a valid state value",
-                self.name, self.final_state
+                "process {} final_state id {} is not a valid state value",
+                self.debug_name,
+                self.final_state.as_u32()
             )));
         }
         Ok(())
     }
 
-    fn validate_references(
-        &self,
-        processes_by_name: &BTreeMap<&str, &ArtifactProcess>,
-    ) -> Result<()> {
+    fn validate_references(&self, artifact: &MantleArtifact) -> Result<()> {
         for action in &self.actions {
             match action {
-                ArtifactAction::Emit { text } => validate_output_text(text)?,
-                ArtifactAction::Spawn { target } => {
-                    validate_ident_field("spawn target", target)?;
-                    if !processes_by_name.contains_key(target.as_str()) {
+                ArtifactAction::Emit { output } => {
+                    if output.index() >= artifact.outputs.len() {
                         return Err(Error::new(format!(
-                            "process {} spawns undefined process {}",
-                            self.name, target
+                            "process {} emits undefined output id {}",
+                            self.debug_name,
+                            output.as_u32()
+                        )));
+                    }
+                }
+                ArtifactAction::Spawn { target } => {
+                    if target.index() >= artifact.processes.len() {
+                        return Err(Error::new(format!(
+                            "process {} spawns undefined process id {}",
+                            self.debug_name,
+                            target.as_u32()
                         )));
                     }
                 }
                 ArtifactAction::Send { target, message } => {
-                    validate_ident_field("send target", target)?;
-                    validate_ident_field("send message", message)?;
-                    let Some(target_process) = processes_by_name.get(target.as_str()) else {
+                    let Some(target_process) = artifact.processes.get(target.index()) else {
                         return Err(Error::new(format!(
-                            "process {} sends to undefined process {}",
-                            self.name, target
+                            "process {} sends to undefined process id {}",
+                            self.debug_name,
+                            target.as_u32()
                         )));
                     };
-                    if !target_process
-                        .message_variants
-                        .iter()
-                        .any(|variant| variant == message)
-                    {
+                    if message.index() >= target_process.message_variants.len() {
                         return Err(Error::new(format!(
-                            "process {} sends message {} not accepted by {}",
-                            self.name, message, target
+                            "process {} sends message id {} not accepted by process id {}",
+                            self.debug_name,
+                            message.as_u32(),
+                            target.as_u32()
                         )));
                     }
                 }
@@ -407,9 +449,16 @@ impl ArtifactProcess {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactAction {
-    Emit { text: String },
-    Spawn { target: String },
-    Send { target: String, message: String },
+    Emit {
+        output: OutputId,
+    },
+    Spawn {
+        target: ProcessId,
+    },
+    Send {
+        target: ProcessId,
+        message: MessageId,
+    },
 }
 
 struct ArtifactFields {
@@ -474,6 +523,26 @@ impl ArtifactFields {
         let value = self.take_usize(key)?;
         validate_count(key, value, min, max)?;
         Ok(value)
+    }
+
+    fn take_process_id(&mut self, key: &str) -> Result<ProcessId> {
+        ProcessId::from_index(self.take_bounded_usize(key, 0, MAX_PROCESS_COUNT - 1)?)
+    }
+
+    fn take_state_id(&mut self, key: &str) -> Result<StateId> {
+        StateId::from_index(self.take_bounded_usize(key, 0, MAX_STATE_VALUES_PER_PROCESS - 1)?)
+    }
+
+    fn take_message_id(&mut self, key: &str) -> Result<MessageId> {
+        MessageId::from_index(self.take_bounded_usize(
+            key,
+            0,
+            MAX_MESSAGE_VARIANTS_PER_PROCESS - 1,
+        )?)
+    }
+
+    fn take_output_id(&mut self, key: &str) -> Result<OutputId> {
+        OutputId::from_index(self.take_bounded_usize(key, 0, MAX_OUTPUT_LITERALS - 1)?)
     }
 
     fn take_step_result(&mut self, key: &str) -> Result<StepResult> {
@@ -609,8 +678,24 @@ fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
         &artifact.source_language,
     )?;
     add_field_bytes(&mut encoded_len, "module", &artifact.module)?;
-    add_field_bytes(&mut encoded_len, "entry_process", &artifact.entry_process)?;
-    add_field_bytes(&mut encoded_len, "entry_message", &artifact.entry_message)?;
+    add_field_bytes(
+        &mut encoded_len,
+        "entry_process",
+        &artifact.entry_process.as_u32().to_string(),
+    )?;
+    add_field_bytes(
+        &mut encoded_len,
+        "entry_message",
+        &artifact.entry_message.as_u32().to_string(),
+    )?;
+    add_field_bytes(
+        &mut encoded_len,
+        "output_count",
+        &artifact.outputs.len().to_string(),
+    )?;
+    for (output_index, output) in artifact.outputs.iter().enumerate() {
+        add_field_bytes(&mut encoded_len, &format!("output.{output_index}"), output)?;
+    }
     add_field_bytes(
         &mut encoded_len,
         "process_count",
@@ -619,7 +704,11 @@ fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
 
     for (process_index, process) in artifact.processes.iter().enumerate() {
         let prefix = format!("process.{process_index}");
-        add_field_bytes(&mut encoded_len, &format!("{prefix}.name"), &process.name)?;
+        add_field_bytes(
+            &mut encoded_len,
+            &format!("{prefix}.debug_name"),
+            &process.debug_name,
+        )?;
         add_field_bytes(
             &mut encoded_len,
             &format!("{prefix}.state_type"),
@@ -662,7 +751,7 @@ fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
         add_field_bytes(
             &mut encoded_len,
             &format!("{prefix}.init_state"),
-            &process.init_state,
+            &process.init_state.as_u32().to_string(),
         )?;
         add_field_bytes(
             &mut encoded_len,
@@ -672,7 +761,7 @@ fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
         add_field_bytes(
             &mut encoded_len,
             &format!("{prefix}.final_state"),
-            &process.final_state,
+            &process.final_state.as_u32().to_string(),
         )?;
         add_field_bytes(
             &mut encoded_len,
@@ -682,21 +771,33 @@ fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
         for (action_index, action) in process.actions.iter().enumerate() {
             let action_prefix = format!("{prefix}.action.{action_index}");
             match action {
-                ArtifactAction::Emit { text } => {
+                ArtifactAction::Emit { output } => {
                     add_field_bytes(&mut encoded_len, &format!("{action_prefix}.kind"), "emit")?;
-                    add_field_bytes(&mut encoded_len, &format!("{action_prefix}.text"), text)?;
+                    add_field_bytes(
+                        &mut encoded_len,
+                        &format!("{action_prefix}.output"),
+                        &output.as_u32().to_string(),
+                    )?;
                 }
                 ArtifactAction::Spawn { target } => {
                     add_field_bytes(&mut encoded_len, &format!("{action_prefix}.kind"), "spawn")?;
-                    add_field_bytes(&mut encoded_len, &format!("{action_prefix}.target"), target)?;
+                    add_field_bytes(
+                        &mut encoded_len,
+                        &format!("{action_prefix}.target_process"),
+                        &target.as_u32().to_string(),
+                    )?;
                 }
                 ArtifactAction::Send { target, message } => {
                     add_field_bytes(&mut encoded_len, &format!("{action_prefix}.kind"), "send")?;
-                    add_field_bytes(&mut encoded_len, &format!("{action_prefix}.target"), target)?;
+                    add_field_bytes(
+                        &mut encoded_len,
+                        &format!("{action_prefix}.target_process"),
+                        &target.as_u32().to_string(),
+                    )?;
                     add_field_bytes(
                         &mut encoded_len,
                         &format!("{action_prefix}.message"),
-                        message,
+                        &message.as_u32().to_string(),
                     )?;
                 }
             }
@@ -775,6 +876,8 @@ mod tests {
         let decoded = MantleArtifact::decode(&encoded).expect("artifact should decode");
 
         assert_eq!(decoded, artifact);
+        assert!(encoded.contains("entry_process=0"));
+        assert!(encoded.contains("process.0.action.0.target_process=1"));
 
         let err = MantleArtifact::decode("not-mta\n").expect_err("bad magic should fail");
         assert!(err.to_string().contains("invalid Mantle artifact magic"));
@@ -783,15 +886,15 @@ mod tests {
     #[test]
     fn decode_reports_duplicate_fields() {
         let encoded = valid_artifact().encode().replace(
-            "process.0.name=Main",
-            "process.0.name=Main\nprocess.0.name=Other",
+            "process.0.debug_name=Main",
+            "process.0.debug_name=Main\nprocess.0.debug_name=Other",
         );
 
         let err = MantleArtifact::decode(&encoded).expect_err("duplicate field should fail");
 
         assert!(err
             .to_string()
-            .contains("duplicate artifact field \"process.0.name\""));
+            .contains("duplicate artifact field \"process.0.debug_name\""));
     }
 
     #[test]
@@ -867,9 +970,7 @@ mod tests {
     fn validate_rejects_encoded_artifacts_above_size_limit() {
         let mut artifact = valid_artifact();
         let text = "a".repeat(MAX_FIELD_VALUE_BYTES);
-        artifact.processes[1].actions = (0..70)
-            .map(|_| ArtifactAction::Emit { text: text.clone() })
-            .collect();
+        artifact.outputs = (0..70).map(|_| text.clone()).collect();
 
         let err = artifact
             .validate()
@@ -884,8 +985,8 @@ mod tests {
     fn validate_rejects_unknown_send_message() {
         let mut artifact = valid_artifact();
         artifact.processes[0].actions.push(ArtifactAction::Send {
-            target: "Worker".to_string(),
-            message: "Unknown".to_string(),
+            target: ProcessId::new(1),
+            message: MessageId::new(1),
         });
 
         let err = artifact
@@ -894,7 +995,73 @@ mod tests {
 
         assert!(err
             .to_string()
-            .contains("sends message Unknown not accepted by Worker"));
+            .contains("sends message id 1 not accepted by process id 1"));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_spawn_target() {
+        let mut artifact = valid_artifact();
+        artifact.processes[0].actions.push(ArtifactAction::Spawn {
+            target: ProcessId::new(99),
+        });
+
+        let err = artifact
+            .validate()
+            .expect_err("unknown spawn target should fail");
+
+        assert!(err.to_string().contains("spawns undefined process id 99"));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_output_id() {
+        let mut artifact = valid_artifact();
+        artifact.processes[1].actions = vec![ArtifactAction::Emit {
+            output: OutputId::new(99),
+        }];
+
+        let err = artifact
+            .validate()
+            .expect_err("unknown output id should fail");
+
+        assert!(err.to_string().contains("emits undefined output id 99"));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_entry_process_id() {
+        let mut artifact = valid_artifact();
+        artifact.entry_process = ProcessId::new(99);
+
+        let err = artifact
+            .validate()
+            .expect_err("unknown entry process id should fail");
+
+        assert!(err
+            .to_string()
+            .contains("entry process id 99 is not defined"));
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_process_debug_names() {
+        let mut artifact = valid_artifact();
+        artifact.processes[1].debug_name = "Main".to_string();
+
+        let err = artifact
+            .validate()
+            .expect_err("duplicate debug labels should fail");
+
+        assert!(err
+            .to_string()
+            .contains("duplicate process debug_name Main"));
+    }
+
+    #[test]
+    fn validate_treats_debug_names_as_metadata_not_targets() {
+        let mut artifact = valid_artifact();
+        artifact.processes[1].debug_name = "RenamedWorker".to_string();
+
+        artifact
+            .validate()
+            .expect("renaming debug metadata should not affect indexed references");
     }
 
     #[test]
@@ -946,41 +1113,42 @@ mod tests {
             format_version: ARTIFACT_VERSION.to_string(),
             source_language: STRATA_SOURCE_LANGUAGE.to_string(),
             module: "actor_ping".to_string(),
-            entry_process: "Main".to_string(),
-            entry_message: "Start".to_string(),
+            entry_process: ProcessId::new(0),
+            entry_message: MessageId::new(0),
+            outputs: vec!["worker handled Ping".to_string()],
             processes: vec![
                 ArtifactProcess {
-                    name: "Main".to_string(),
+                    debug_name: "Main".to_string(),
                     state_type: "MainState".to_string(),
                     state_values: vec!["MainState".to_string()],
                     message_type: "MainMsg".to_string(),
                     message_variants: vec!["Start".to_string()],
                     mailbox_bound: 1,
-                    init_state: "MainState".to_string(),
+                    init_state: StateId::new(0),
                     step_result: StepResult::Stop,
-                    final_state: "MainState".to_string(),
+                    final_state: StateId::new(0),
                     actions: vec![
                         ArtifactAction::Spawn {
-                            target: "Worker".to_string(),
+                            target: ProcessId::new(1),
                         },
                         ArtifactAction::Send {
-                            target: "Worker".to_string(),
-                            message: "Ping".to_string(),
+                            target: ProcessId::new(1),
+                            message: MessageId::new(0),
                         },
                     ],
                 },
                 ArtifactProcess {
-                    name: "Worker".to_string(),
+                    debug_name: "Worker".to_string(),
                     state_type: "WorkerState".to_string(),
                     state_values: vec!["Idle".to_string(), "Handled".to_string()],
                     message_type: "WorkerMsg".to_string(),
                     message_variants: vec!["Ping".to_string()],
                     mailbox_bound: 1,
-                    init_state: "Idle".to_string(),
+                    init_state: StateId::new(0),
                     step_result: StepResult::Stop,
-                    final_state: "Handled".to_string(),
+                    final_state: StateId::new(1),
                     actions: vec![ArtifactAction::Emit {
-                        text: "worker handled Ping".to_string(),
+                        output: OutputId::new(0),
                     }],
                 },
             ],

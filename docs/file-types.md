@@ -24,10 +24,12 @@ The extension is intentionally language-neutral. Strata can emit `.mta`; a futur
 Minimum artifact identity fields:
 
 ```text
-format: mantle-target-artifact
-format_version: 0
-source_language: strata
+format=mantle-target-artifact
+format_version=2
+source_language=strata
 ```
+
+Executable references inside `.mta` use validated table IDs. Names are retained for diagnostics, traces, and metadata, but Mantle execution must load and run resolved IDs rather than dispatching by source text.
 
 The first product target path is:
 

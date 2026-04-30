@@ -1,9 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
-    source_hash_fnv1a64, ArtifactAction, ArtifactProcess, Error, MantleArtifact, Result,
-    StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION, MAX_FIELD_VALUE_BYTES, STRATA_SOURCE_LANGUAGE,
+    source_hash_fnv1a64, ArtifactAction, ArtifactProcess, Error, MantleArtifact, MessageId,
+    OutputId, ProcessId, Result, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
+    MAX_FIELD_VALUE_BYTES, MAX_OUTPUT_LITERALS, STRATA_SOURCE_LANGUAGE,
 };
+
+const STATIC_RUNTIME_DISPATCH_LIMIT: usize = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
@@ -80,8 +83,9 @@ pub enum ReturnExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedProgram {
     pub module: Module,
-    pub entry_process: String,
-    pub entry_message: String,
+    pub entry_process: ProcessId,
+    pub entry_message: MessageId,
+    pub outputs: Vec<String>,
     pub processes: Vec<ArtifactProcess>,
 }
 
@@ -92,8 +96,9 @@ impl CheckedProgram {
             format_version: ARTIFACT_VERSION.to_string(),
             source_language: STRATA_SOURCE_LANGUAGE.to_string(),
             module: self.module.name.clone(),
-            entry_process: self.entry_process.clone(),
-            entry_message: self.entry_message.clone(),
+            entry_process: self.entry_process,
+            entry_message: self.entry_message,
+            outputs: self.outputs.clone(),
             processes: self.processes.clone(),
             source_hash_fnv1a64: source_hash_fnv1a64(source),
         };
@@ -111,6 +116,60 @@ pub fn check_source(source: &str) -> Result<CheckedProgram> {
     let checked = check_module(module)?;
     checked.to_artifact(source)?;
     Ok(checked)
+}
+
+struct Symbols<'a> {
+    process_ids: BTreeMap<&'a str, ProcessId>,
+}
+
+impl<'a> Symbols<'a> {
+    fn build(module: &'a Module) -> Result<Self> {
+        let mut process_ids = BTreeMap::new();
+        for (index, process) in module.processes.iter().enumerate() {
+            process_ids.insert(process.name.as_str(), ProcessId::from_index(index)?);
+        }
+        Ok(Self { process_ids })
+    }
+
+    fn process_id(&self, name: &str) -> Result<ProcessId> {
+        self.process_ids
+            .get(name)
+            .copied()
+            .ok_or_else(|| Error::new(format!("process {name} is not declared")))
+    }
+}
+
+struct OutputPool {
+    values: Vec<String>,
+    by_text: BTreeMap<String, OutputId>,
+}
+
+impl OutputPool {
+    fn new() -> Self {
+        Self {
+            values: Vec::new(),
+            by_text: BTreeMap::new(),
+        }
+    }
+
+    fn intern(&mut self, value: &str) -> Result<OutputId> {
+        if let Some(id) = self.by_text.get(value) {
+            return Ok(*id);
+        }
+        if self.values.len() >= MAX_OUTPUT_LITERALS {
+            return Err(Error::new(format!(
+                "program emits more than {MAX_OUTPUT_LITERALS} distinct output literals"
+            )));
+        }
+        let id = OutputId::from_index(self.values.len())?;
+        self.values.push(value.to_string());
+        self.by_text.insert(value.to_string(), id);
+        Ok(id)
+    }
+
+    fn into_values(self) -> Vec<String> {
+        self.values
+    }
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -148,30 +207,50 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         .or_else(|| module.processes.first())
         .ok_or_else(|| Error::new("expected an entry process"))?;
 
+    let symbols = Symbols::build(&module)?;
+    let entry_process = symbols.process_id(&entry.name)?;
+    let mut outputs = OutputPool::new();
     let mut checked_processes = Vec::with_capacity(module.processes.len());
-    for process in &module.processes {
-        checked_processes.push(check_process(&module, process)?);
+    for (index, process) in module.processes.iter().enumerate() {
+        let process_id = ProcessId::from_index(index)?;
+        checked_processes.push(check_process(
+            &module,
+            process,
+            process_id,
+            &symbols,
+            &mut outputs,
+        )?);
     }
 
-    let entry_process = entry.name.clone();
     validate_action_references(&checked_processes, &entry_process)?;
 
-    let entry_message = checked_processes
-        .iter()
-        .find(|process| process.name == entry_process)
-        .and_then(|process| process.message_variants.first())
-        .cloned()
-        .ok_or_else(|| Error::new(format!("entry process {entry_process} has no messages")))?;
+    let entry_message = MessageId::new(0);
+    let entry_process_definition = checked_processes
+        .get(entry_process.index())
+        .ok_or_else(|| Error::new("entry process id is not defined"))?;
+    if entry_process_definition.message_variants.is_empty() {
+        return Err(Error::new(format!(
+            "entry process {} has no messages",
+            entry_process_definition.debug_name
+        )));
+    }
 
     Ok(CheckedProgram {
         module,
         entry_process,
         entry_message,
+        outputs: outputs.into_values(),
         processes: checked_processes,
     })
 }
 
-fn check_process(module: &Module, process: &Process) -> Result<ArtifactProcess> {
+fn check_process(
+    module: &Module,
+    process: &Process,
+    process_id: ProcessId,
+    symbols: &Symbols<'_>,
+    outputs: &mut OutputPool,
+) -> Result<ArtifactProcess> {
     if process.mailbox_bound == 0 {
         return Err(Error::new(format!(
             "process {} mailbox bound must be greater than zero",
@@ -189,10 +268,18 @@ fn check_process(module: &Module, process: &Process) -> Result<ArtifactProcess> 
     }
 
     let init_state = check_init(process, &state_values)?;
-    let (step_result, final_state, actions) = check_step(process, &state_values, &init_state)?;
+    let (step_result, final_state, actions) = check_step(
+        module,
+        process,
+        process_id,
+        symbols,
+        &state_values,
+        init_state,
+        outputs,
+    )?;
 
     Ok(ArtifactProcess {
-        name: process.name.clone(),
+        debug_name: process.name.clone(),
         state_type: process.state_type.clone(),
         state_values,
         message_type: process.msg_type.clone(),
@@ -265,7 +352,7 @@ fn state_values_for_type(module: &Module, name: &str) -> Result<Vec<String>> {
     )))
 }
 
-fn check_init(process: &Process, state_values: &[String]) -> Result<String> {
+fn check_init(process: &Process, state_values: &[String]) -> Result<StateId> {
     let init = &process.init;
     if !init.params.is_empty() {
         return Err(Error::new("init must declare no parameters"));
@@ -299,20 +386,32 @@ fn check_init(process: &Process, state_values: &[String]) -> Result<String> {
             process.state_type
         )));
     };
-    if !state_values.iter().any(|candidate| candidate == value) {
-        return Err(Error::new(format!(
+    state_id_for_value(state_values, value).map_err(|_| {
+        Error::new(format!(
             "init body returns {}, which is not a value of {}",
             value, process.state_type
-        )));
-    }
-    Ok(value.clone())
+        ))
+    })
+}
+
+fn state_id_for_value(state_values: &[String], value: &str) -> Result<StateId> {
+    state_values
+        .iter()
+        .position(|candidate| candidate == value)
+        .map(StateId::from_index)
+        .transpose()?
+        .ok_or_else(|| Error::new(format!("unknown state value {value}")))
 }
 
 fn check_step(
+    module: &Module,
     process: &Process,
+    process_id: ProcessId,
+    symbols: &Symbols<'_>,
     state_values: &[String],
-    init_state: &str,
-) -> Result<(StepResult, String, Vec<ArtifactAction>)> {
+    init_state: StateId,
+    outputs: &mut OutputPool,
+) -> Result<(StepResult, StateId, Vec<ArtifactAction>)> {
     let step = &process.step;
     if step.params.len() != 2 {
         return Err(Error::new("step must declare state and msg parameters"));
@@ -357,19 +456,23 @@ fn check_step(
             Statement::Emit(text) => {
                 validate_emit_text(text)?;
                 used_effects.insert("emit");
-                actions.push(ArtifactAction::Emit { text: text.clone() });
+                actions.push(ArtifactAction::Emit {
+                    output: outputs.intern(text)?,
+                });
             }
             Statement::Spawn(target) => {
                 used_effects.insert("spawn");
                 actions.push(ArtifactAction::Spawn {
-                    target: target.clone(),
+                    target: symbols.process_id(target)?,
                 });
             }
             Statement::Send { target, message } => {
+                let target_id = symbols.process_id(target)?;
+                let message_id = message_id_for_process(module, &process.name, target_id, message)?;
                 used_effects.insert("send");
                 actions.push(ArtifactAction::Send {
-                    target: target.clone(),
-                    message: message.clone(),
+                    target: target_id,
+                    message: message_id,
                 });
             }
         }
@@ -388,19 +491,46 @@ fn check_step(
         }
     };
     let final_state = if state_arg == "state" {
-        init_state.to_string()
-    } else if state_values.iter().any(|candidate| candidate == state_arg) {
-        state_arg.to_string()
+        init_state
     } else {
-        return Err(Error::new(format!(
-            "step returns state value {}, which is not a value of {}",
-            state_arg, process.state_type
-        )));
+        state_id_for_value(state_values, state_arg).map_err(|_| {
+            Error::new(format!(
+                "step returns state value {}, which is not a value of {}",
+                state_arg, process.state_type
+            ))
+        })?
     };
 
-    reject_unsupported_self_requeue(process, step_result, &actions)?;
+    reject_unsupported_self_send(process, process_id, &actions)?;
 
     Ok((step_result, final_state, actions))
+}
+
+fn message_id_for_process(
+    module: &Module,
+    sender_process: &str,
+    process_id: ProcessId,
+    message: &str,
+) -> Result<MessageId> {
+    let process = module.processes.get(process_id.index()).ok_or_else(|| {
+        Error::new(format!(
+            "process id {} is not declared",
+            process_id.as_u32()
+        ))
+    })?;
+    let msg_enum = require_enum(module, &process.msg_type)?;
+    msg_enum
+        .variants
+        .iter()
+        .position(|variant| variant == message)
+        .map(MessageId::from_index)
+        .transpose()?
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} sends message {} not accepted by {}",
+                sender_process, message, process.name
+            ))
+        })
 }
 
 fn validate_effects(
@@ -442,80 +572,216 @@ fn validate_effects(
     Ok(())
 }
 
-fn validate_action_references(processes: &[ArtifactProcess], entry_process: &str) -> Result<()> {
-    let by_name: BTreeMap<&str, &ArtifactProcess> = processes
-        .iter()
-        .map(|process| (process.name.as_str(), process))
-        .collect();
-
+fn validate_action_references(
+    processes: &[ArtifactProcess],
+    entry_process: &ProcessId,
+) -> Result<()> {
     let mut spawned_targets = BTreeMap::new();
-    for process in processes {
+    for (process_index, process) in processes.iter().enumerate() {
+        let process_id = ProcessId::from_index(process_index)?;
         for action in &process.actions {
             match action {
                 ArtifactAction::Emit { .. } => {}
                 ArtifactAction::Spawn { target } => {
-                    if !by_name.contains_key(target.as_str()) {
+                    if target.index() >= processes.len() {
                         return Err(Error::new(format!(
-                            "process {} spawns undefined process {}",
-                            process.name, target
+                            "process {} spawns undefined process id {}",
+                            process.debug_name,
+                            target.as_u32()
                         )));
                     }
                     if target == entry_process {
                         return Err(Error::new(format!(
                             "process {} spawns entry process {}, which is already started",
-                            process.name, target
+                            process.debug_name,
+                            process_label(processes, *target)?
                         )));
                     }
-                    if let Some(previous_process) =
-                        spawned_targets.insert(target.as_str(), process.name.as_str())
-                    {
+                    if *target == process_id {
+                        return Err(Error::new(format!(
+                            "process {} spawns itself, which is not supported in this source slice",
+                            process.debug_name
+                        )));
+                    }
+                    if let Some(previous_process) = spawned_targets.insert(*target, process_id) {
                         return Err(Error::new(format!(
                             "process {} duplicates spawn target {} already spawned by {}",
-                            process.name, target, previous_process
+                            process.debug_name,
+                            process_label(processes, *target)?,
+                            process_label(processes, previous_process)?
                         )));
                     }
                 }
                 ArtifactAction::Send { target, message } => {
-                    let Some(target_process) = by_name.get(target.as_str()) else {
+                    let Some(target_process) = processes.get(target.index()) else {
                         return Err(Error::new(format!(
-                            "process {} sends to undefined process {}",
-                            process.name, target
+                            "process {} sends to undefined process id {}",
+                            process.debug_name,
+                            target.as_u32()
                         )));
                     };
-                    if !target_process
-                        .message_variants
-                        .iter()
-                        .any(|variant| variant == message)
-                    {
+                    if message.index() >= target_process.message_variants.len() {
                         return Err(Error::new(format!(
-                            "process {} sends message {} not accepted by {}",
-                            process.name, message, target
+                            "process {} sends message id {} not accepted by {}",
+                            process.debug_name,
+                            message.as_u32(),
+                            target_process.debug_name
                         )));
                     }
                 }
             }
         }
     }
+    validate_static_runtime_order(processes, *entry_process)?;
     Ok(())
 }
 
-fn reject_unsupported_self_requeue(
-    process: &Process,
-    step_result: StepResult,
-    actions: &[ArtifactAction],
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaticProcessStatus {
+    Running,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StaticProcessInstance {
+    process_id: ProcessId,
+    status: StaticProcessStatus,
+    mailbox_depth: usize,
+}
+
+fn validate_static_runtime_order(
+    processes: &[ArtifactProcess],
+    entry_process: ProcessId,
 ) -> Result<()> {
-    if step_result != StepResult::Continue {
-        return Ok(());
+    let mut instances = vec![StaticProcessInstance {
+        process_id: entry_process,
+        status: StaticProcessStatus::Running,
+        mailbox_depth: 1,
+    }];
+    let mut dispatches = 0usize;
+
+    while let Some(process_index) = next_static_runnable(&instances) {
+        if dispatches >= STATIC_RUNTIME_DISPATCH_LIMIT {
+            return Err(Error::new(format!(
+                "static runtime validation exceeded {STATIC_RUNTIME_DISPATCH_LIMIT} process step(s)"
+            )));
+        }
+
+        let process_id = instances[process_index].process_id;
+        let process = process_by_id(processes, process_id)?;
+        instances[process_index].mailbox_depth -= 1;
+
+        for action in &process.actions {
+            match action {
+                ArtifactAction::Emit { .. } => {}
+                ArtifactAction::Spawn { target } => {
+                    let target_process = process_by_id(processes, *target)?;
+                    if instances
+                        .iter()
+                        .any(|instance| instance.process_id == *target)
+                    {
+                        return Err(Error::new(format!(
+                            "process {} spawns process {}, which is already spawned",
+                            process.debug_name, target_process.debug_name
+                        )));
+                    }
+                    instances.push(StaticProcessInstance {
+                        process_id: *target,
+                        status: StaticProcessStatus::Running,
+                        mailbox_depth: 0,
+                    });
+                }
+                ArtifactAction::Send { target, message } => {
+                    let target_process = process_by_id(processes, *target)?;
+                    if message.index() >= target_process.message_variants.len() {
+                        return Err(Error::new(format!(
+                            "process {} sends message id {} not accepted by {}",
+                            process.debug_name,
+                            message.as_u32(),
+                            target_process.debug_name
+                        )));
+                    }
+
+                    let Some(target_index) = instances
+                        .iter()
+                        .position(|instance| instance.process_id == *target)
+                    else {
+                        return Err(Error::new(format!(
+                            "process {} sends to {} before it is spawned",
+                            process.debug_name, target_process.debug_name
+                        )));
+                    };
+
+                    if instances[target_index].status != StaticProcessStatus::Running {
+                        return Err(Error::new(format!(
+                            "process {} sends to {}, which is not running",
+                            process.debug_name, target_process.debug_name
+                        )));
+                    }
+                    if instances[target_index].mailbox_depth >= target_process.mailbox_bound {
+                        return Err(Error::new(format!(
+                            "process {} sends to {}, but its mailbox would exceed bound {}",
+                            process.debug_name,
+                            target_process.debug_name,
+                            target_process.mailbox_bound
+                        )));
+                    }
+                    instances[target_index].mailbox_depth += 1;
+                }
+            }
+        }
+
+        if process.step_result == StepResult::Stop {
+            instances[process_index].status = StaticProcessStatus::Stopped;
+        }
+        dispatches += 1;
     }
 
+    for instance in &instances {
+        if instance.mailbox_depth != 0 {
+            return Err(Error::new(format!(
+                "process {} would retain {} unhandled message(s)",
+                process_label(processes, instance.process_id)?,
+                instance.mailbox_depth
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn next_static_runnable(instances: &[StaticProcessInstance]) -> Option<usize> {
+    instances.iter().position(|instance| {
+        instance.status == StaticProcessStatus::Running && instance.mailbox_depth > 0
+    })
+}
+
+fn process_by_id(processes: &[ArtifactProcess], process_id: ProcessId) -> Result<&ArtifactProcess> {
+    processes
+        .get(process_id.index())
+        .ok_or_else(|| Error::new(format!("process id {} is not defined", process_id.as_u32())))
+}
+
+fn process_label(processes: &[ArtifactProcess], process_id: ProcessId) -> Result<&str> {
+    processes
+        .get(process_id.index())
+        .map(|process| process.debug_name.as_str())
+        .ok_or_else(|| Error::new(format!("process id {} is not defined", process_id.as_u32())))
+}
+
+fn reject_unsupported_self_send(
+    process: &Process,
+    process_id: ProcessId,
+    actions: &[ArtifactAction],
+) -> Result<()> {
     if actions.iter().any(|action| {
         matches!(
             action,
-            ArtifactAction::Send { target, .. } if target == &process.name
+            ArtifactAction::Send { target, .. } if *target == process_id
         )
     }) {
         return Err(Error::new(format!(
-            "process {} continues after sending to itself, which is not supported in this source slice",
+            "process {} sends to itself, which is not supported in this source slice",
             process.name
         )));
     }
@@ -1201,14 +1467,15 @@ proc Worker mailbox bounded(1) {
         let checked = check_source(HELLO).expect("hello should check");
 
         assert_eq!(checked.module.name, "hello");
-        assert_eq!(checked.entry_process, "Main");
-        assert_eq!(checked.entry_message, "Start");
+        assert_eq!(checked.entry_process, ProcessId::new(0));
+        assert_eq!(checked.entry_message, MessageId::new(0));
+        assert_eq!(checked.outputs, ["hello from Strata"]);
         assert_eq!(checked.processes.len(), 1);
         assert_eq!(checked.processes[0].step_result, StepResult::Stop);
         assert_eq!(
             checked.processes[0].actions,
             [ArtifactAction::Emit {
-                text: "hello from Strata".to_string()
+                output: OutputId::new(0)
             }]
         );
     }
@@ -1218,24 +1485,25 @@ proc Worker mailbox bounded(1) {
         let checked = check_source(ACTOR_PING).expect("actor ping should check");
 
         assert_eq!(checked.module.name, "actor_ping");
-        assert_eq!(checked.entry_process, "Main");
-        assert_eq!(checked.entry_message, "Start");
+        assert_eq!(checked.entry_process, ProcessId::new(0));
+        assert_eq!(checked.entry_message, MessageId::new(0));
+        assert_eq!(checked.outputs, ["worker handled Ping"]);
         assert_eq!(checked.processes.len(), 2);
 
         let main = checked
             .processes
             .iter()
-            .find(|process| process.name == "Main")
+            .find(|process| process.debug_name == "Main")
             .expect("Main should be checked");
         assert_eq!(
             main.actions,
             [
                 ArtifactAction::Spawn {
-                    target: "Worker".to_string()
+                    target: ProcessId::new(1)
                 },
                 ArtifactAction::Send {
-                    target: "Worker".to_string(),
-                    message: "Ping".to_string()
+                    target: ProcessId::new(1),
+                    message: MessageId::new(0)
                 }
             ]
         );
@@ -1243,10 +1511,10 @@ proc Worker mailbox bounded(1) {
         let worker = checked
             .processes
             .iter()
-            .find(|process| process.name == "Worker")
+            .find(|process| process.debug_name == "Worker")
             .expect("Worker should be checked");
-        assert_eq!(worker.init_state, "Idle");
-        assert_eq!(worker.final_state, "Handled");
+        assert_eq!(worker.init_state, StateId::new(0));
+        assert_eq!(worker.final_state, StateId::new(1));
     }
 
     #[test]
@@ -1311,6 +1579,57 @@ proc Main mailbox bounded(1) {
     }
 
     #[test]
+    fn rejects_static_self_spawn() {
+        let source = ACTOR_PING
+            .replace("! [emit] ~ [] @det", "! [spawn] ~ [] @det")
+            .replace(r#"emit "worker handled Ping";"#, "spawn Worker;");
+
+        let err = check_source(&source).expect_err("self-spawn should be rejected");
+
+        assert!(err.to_string().contains("process Worker spawns itself"));
+    }
+
+    #[test]
+    fn rejects_send_before_static_spawn() {
+        let source = ACTOR_PING.replace(
+            "spawn Worker;\n        send Worker Ping;",
+            "send Worker Ping;\n        spawn Worker;",
+        );
+
+        let err = check_source(&source).expect_err("send before spawn should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("sends to Worker before it is spawned"));
+    }
+
+    #[test]
+    fn rejects_send_without_static_spawn() {
+        let source = ACTOR_PING
+            .replace("! [spawn, send] ~ [] @det", "! [send] ~ [] @det")
+            .replace("        spawn Worker;\n", "");
+
+        let err = check_source(&source).expect_err("send without spawn should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("sends to Worker before it is spawned"));
+    }
+
+    #[test]
+    fn rejects_send_to_stopped_process() {
+        let source = ACTOR_PING
+            .replace("! [emit] ~ [] @det", "! [send] ~ [] @det")
+            .replace(r#"emit "worker handled Ping";"#, "send Main Start;");
+
+        let err = check_source(&source).expect_err("send to stopped process should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("sends to Main, which is not running"));
+    }
+
+    #[test]
     fn rejects_send_to_unknown_message() {
         let source = ACTOR_PING.replace("send Worker Ping;", "send Worker Unknown;");
 
@@ -1332,7 +1651,7 @@ proc Main mailbox bounded(1) {
 
         assert!(err
             .to_string()
-            .contains("continues after sending to itself"));
+            .contains("sends to itself, which is not supported"));
     }
 
     #[test]

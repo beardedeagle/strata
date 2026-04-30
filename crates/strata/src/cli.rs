@@ -18,11 +18,16 @@ where
             ensure_no_extra_args(args)?;
             let source = fs::read_to_string(&path)?;
             let checked = check_source(&source)?;
+            let entry = checked
+                .processes
+                .get(checked.entry_process.index())
+                .map(|process| process.debug_name.as_str())
+                .ok_or_else(|| Error::new("checked entry process is not defined"))?;
             println!(
                 "strata: checked {} (module {}, entry {})",
                 path.display(),
                 checked.module.name,
-                checked.entry_process
+                entry
             );
             Ok(())
         }
