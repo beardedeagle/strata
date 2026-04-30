@@ -1,0 +1,18 @@
+module hello;
+
+record MainState;
+enum MainMsg { Start };
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "hello from Strata";
+        return Stop(state);
+    }
+}

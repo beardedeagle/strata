@@ -1,0 +1,37 @@
+{
+  "name": "strata-language-support",
+  "displayName": "Strata Language Support",
+  "description": "File associations for Strata source and Mantle Target Artifacts.",
+  "version": "0.0.0",
+  "publisher": "beardedeagle",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "strata",
+        "aliases": [
+          "Strata",
+          "strata"
+        ],
+        "extensions": [
+          ".str"
+        ]
+      },
+      {
+        "id": "mantle-target-artifact",
+        "aliases": [
+          "Mantle Target Artifact",
+          "mta"
+        ],
+        "extensions": [
+          ".mta"
+        ]
+      }
+    ]
+  }
+}

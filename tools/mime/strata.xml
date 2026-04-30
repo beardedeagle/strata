@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="text/x-strata">
+    <comment>Strata source</comment>
+    <glob pattern="*.str"/>
+  </mime-type>
+  <mime-type type="application/vnd.mantle.target-artifact">
+    <comment>Mantle Target Artifact</comment>
+    <glob pattern="*.mta"/>
+  </mime-type>
+</mime-info>
