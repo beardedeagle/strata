@@ -334,6 +334,14 @@ impl<'a> Lexer<'a> {
             }
             if ch == '@' {
                 self.bump_char();
+                match self.peek_char() {
+                    Some((_, next)) if is_ident_start(next) => {}
+                    _ => {
+                        return Err(Error::new(format!(
+                            "expected identifier after '@' at byte {offset}"
+                        )));
+                    }
+                }
                 let ident = self.read_ident()?;
                 tokens.push(Token {
                     kind: TokenKind::AtIdent(ident),
@@ -912,5 +920,14 @@ proc Main mailbox bounded(1) {
 
         let err = check_source(source).expect_err("undeclared emit should be rejected");
         assert!(err.to_string().contains("must declare exactly ! [emit]"));
+    }
+
+    #[test]
+    fn rejects_invalid_annotation_identifier_start() {
+        let source = HELLO.replacen("@det", "@1", 1);
+
+        let err = parse_source(&source).expect_err("invalid annotation should fail lexing");
+
+        assert!(err.to_string().contains("expected identifier after '@'"));
     }
 }
