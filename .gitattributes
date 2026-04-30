@@ -1,0 +1,2 @@
+*.str text eol=lf
+*.mta -text
