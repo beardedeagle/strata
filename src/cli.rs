@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::artifact::{default_artifact_path, write_artifact, MantleArtifact};
 use crate::language::check_source;
@@ -140,9 +140,4 @@ pub fn run_strata_from_env() -> Result<()> {
 
 pub fn run_mantle_from_env() -> Result<()> {
     mantle_main(env::args())
-}
-
-#[allow(dead_code)]
-fn _is_path(value: &Path) -> bool {
-    !value.as_os_str().is_empty()
 }
