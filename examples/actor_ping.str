@@ -1,0 +1,35 @@
+module actor_ping;
+
+record MainState;
+enum MainMsg { Start };
+enum WorkerState { Idle, Handled };
+enum WorkerMsg { Ping };
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        spawn Worker;
+        send Worker Ping;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }
+}

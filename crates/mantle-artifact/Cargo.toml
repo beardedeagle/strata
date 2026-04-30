@@ -1,0 +1,9 @@
+[package]
+name = "mantle-artifact"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "mantle_artifact"
+path = "src/lib.rs"

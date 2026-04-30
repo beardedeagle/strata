@@ -35,6 +35,22 @@ This is not yet a complete language or a production runtime. It is the first
 source-to-runtime slice: a real `.str` file can be checked, built into `.mta`,
 and executed by Mantle.
 
+The first actor/runtime gate is also in place:
+
+```sh
+target/debug/strata check examples/actor_ping.str
+target/debug/strata build examples/actor_ping.str
+target/debug/mantle run target/strata/actor_ping.mta
+```
+
+That example spawns a worker process, sends it a message, handles the message,
+updates worker state, terminates both processes normally, and records the
+runtime trace at:
+
+```text
+target/strata/actor_ping.observability.jsonl
+```
+
 ## What Strata Is For
 
 Strata is aimed at programs where the important behavior should be explicit:
@@ -91,15 +107,15 @@ idiomatic corpus needed for the language itself.
 
 ## Project Direction
 
-The next milestones are expected to expand the current vertical slice into a
+The next milestones are expected to expand the current vertical slices into a
 usable MVP:
 
 - richer `.str` parsing and diagnostics;
-- actors/processes with typed mailboxes;
-- message send and receive behavior;
-- process state updates;
+- richer actors/processes with typed mailboxes;
+- broader message send and receive behavior;
+- broader process state transitions;
 - normal termination and failure reporting;
-- explicit effect checking beyond the current `emit` slice;
+- explicit effect checking beyond the current `emit`, `spawn`, and `send` slice;
 - Mantle runtime traces that prove execution happened inside the runtime;
 - conformance tests and example programs that double as corpus material.
 
@@ -119,12 +135,11 @@ MIME identifiers, and tooling notes.
 
 ```text
 examples/                 runnable Strata examples
-src/bin/strata.rs          Strata CLI entrypoint
-src/bin/mantle.rs          Mantle CLI entrypoint
-src/language.rs            current Strata parser and checker slice
-src/artifact.rs            Mantle Target Artifact encode/decode/validation
-src/runtime.rs             local Mantle runtime slice
-tests/first_gate.rs        source-to-runtime acceptance test
+crates/strata/             Strata source checker, builder, and CLI
+crates/mantle-artifact/    Mantle Target Artifact encode/decode/validation
+crates/mantle-runtime/     local Mantle runtime and CLI
+crates/mantle-runtime/tests/product_gates.rs
+                          source-to-runtime acceptance tests
 tools/                     editor and MIME metadata
 ```
 
@@ -146,4 +161,7 @@ cargo build
 target/debug/strata check examples/hello.str
 target/debug/strata build examples/hello.str
 target/debug/mantle run target/strata/hello.mta
+target/debug/strata check examples/actor_ping.str
+target/debug/strata build examples/actor_ping.str
+target/debug/mantle run target/strata/actor_ping.mta
 ```
