@@ -369,8 +369,35 @@ proc Main mailbox bounded(1) {
     fn write_artifact_rejects_invalid_artifacts_before_writing() {
         let dir = unique_test_dir("invalid-artifact-write");
         let path = dir.join("bad.mta");
-        let artifact = MantleArtifact {
-            format: "invalid-format".to_string(),
+        let mut artifact = valid_artifact();
+        artifact.format = "invalid-format".to_string();
+
+        let err = write_artifact(&path, &artifact).expect_err("invalid artifact should fail");
+
+        assert!(err.to_string().contains("unsupported artifact format"));
+        assert!(!path.exists(), "invalid artifact must not be written");
+        assert!(
+            !dir.exists(),
+            "invalid artifact must not create parent dirs"
+        );
+    }
+
+    #[test]
+    fn write_artifact_accepts_current_directory_output_path() {
+        let path = unique_current_dir_artifact_path("artifact-current-dir");
+        let artifact = valid_artifact();
+
+        write_artifact(&path, &artifact).expect("current-directory artifact write should succeed");
+
+        let decoded = read_artifact(&path).expect("written artifact should decode");
+        assert_eq!(decoded, artifact);
+
+        fs::remove_file(path).expect("test artifact should be removed");
+    }
+
+    fn valid_artifact() -> MantleArtifact {
+        MantleArtifact {
+            format: ARTIFACT_FORMAT.to_string(),
             format_version: ARTIFACT_VERSION.to_string(),
             source_language: STRATA_SOURCE_LANGUAGE.to_string(),
             module: "hello".to_string(),
@@ -383,23 +410,22 @@ proc Main mailbox bounded(1) {
             step_result: StepResult::Stop,
             emitted_outputs: vec!["hello from Strata".to_string()],
             source_hash_fnv1a64: "0000000000000000".to_string(),
-        };
-
-        let err = write_artifact(&path, &artifact).expect_err("invalid artifact should fail");
-
-        assert!(err.to_string().contains("unsupported artifact format"));
-        assert!(!path.exists(), "invalid artifact must not be written");
-        assert!(
-            !dir.exists(),
-            "invalid artifact must not create parent dirs"
-        );
+        }
     }
 
     fn unique_test_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(unique_artifact_name(name))
+    }
+
+    fn unique_current_dir_artifact_path(name: &str) -> PathBuf {
+        PathBuf::from(unique_artifact_name(name))
+    }
+
+    fn unique_artifact_name(name: &str) -> String {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after UNIX epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("strata-{name}-{}-{nanos}", std::process::id()))
+        format!("strata-{name}-{}-{nanos}.mta", std::process::id())
     }
 }

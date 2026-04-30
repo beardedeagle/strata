@@ -224,7 +224,7 @@ fn json_escape(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::artifact::{
-        MantleArtifact, ARTIFACT_FORMAT, ARTIFACT_VERSION, STRATA_SOURCE_LANGUAGE,
+        write_artifact, MantleArtifact, ARTIFACT_FORMAT, ARTIFACT_VERSION, STRATA_SOURCE_LANGUAGE,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -272,6 +272,27 @@ mod tests {
         let _ = fs::remove_dir(dir);
     }
 
+    #[test]
+    fn run_artifact_path_writes_trace_for_current_directory_artifact() {
+        let artifact_path = unique_current_dir_artifact_path("runtime-current-dir");
+        let trace_path = artifact_path.with_extension("observability.jsonl");
+        let artifact = valid_artifact();
+
+        write_artifact(&artifact_path, &artifact).expect("artifact write should succeed");
+
+        let report =
+            run_artifact_path(&artifact_path).expect("current-directory artifact run should work");
+
+        assert_eq!(report.trace_path, trace_path);
+        assert!(trace_path.exists(), "runtime trace should be written");
+        let trace = fs::read_to_string(&trace_path).expect("runtime trace should be readable");
+        assert!(trace.contains(r#""event":"artifact_loaded""#));
+        assert!(trace.contains(r#""event":"process_stopped""#));
+
+        fs::remove_file(artifact_path).expect("test artifact should be removed");
+        fs::remove_file(trace_path).expect("test trace should be removed");
+    }
+
     fn valid_artifact() -> MantleArtifact {
         MantleArtifact {
             format: ARTIFACT_FORMAT.to_string(),
@@ -291,10 +312,18 @@ mod tests {
     }
 
     fn unique_test_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(unique_artifact_name(name))
+    }
+
+    fn unique_current_dir_artifact_path(name: &str) -> PathBuf {
+        PathBuf::from(unique_artifact_name(name))
+    }
+
+    fn unique_artifact_name(name: &str) -> String {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after UNIX epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("strata-{name}-{}-{nanos}", std::process::id()))
+        format!("strata-{name}-{}-{nanos}.mta", std::process::id())
     }
 }
