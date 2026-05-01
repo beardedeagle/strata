@@ -262,7 +262,7 @@ impl Parser {
             self.expect_keyword("emit")?;
             let text = self.expect_string_literal()?;
             self.expect_symbol(';')?;
-            return Ok(Statement::Emit(OutputLiteral::new(text)));
+            return Ok(Statement::Emit(OutputLiteral::new(text)?));
         }
         if self.peek_keyword("spawn") {
             self.expect_keyword("spawn")?;
@@ -422,7 +422,7 @@ impl Parser {
     }
 
     fn expect_identifier(&mut self) -> Result<Identifier> {
-        self.expect_ident().map(Identifier::new)
+        Identifier::new(self.expect_ident()?)
     }
 
     fn expect_number(&mut self) -> Result<String> {

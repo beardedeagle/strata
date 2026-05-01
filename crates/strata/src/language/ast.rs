@@ -1,11 +1,15 @@
 use std::fmt;
 
+use mantle_artifact::{Error, Result, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES};
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Identifier(String);
 
 impl Identifier {
-    pub(super) fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        validate_identifier(&value)?;
+        Ok(Self(value))
     }
 
     pub fn as_str(&self) -> &str {
@@ -19,12 +23,30 @@ impl fmt::Display for Identifier {
     }
 }
 
+impl TryFrom<&str> for Identifier {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<String> for Identifier {
+    type Error = Error;
+
+    fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputLiteral(String);
 
 impl OutputLiteral {
-    pub(super) fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        validate_output_literal(&value)?;
+        Ok(Self(value))
     }
 
     pub fn as_str(&self) -> &str {
@@ -36,6 +58,63 @@ impl fmt::Display for OutputLiteral {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
+}
+
+impl TryFrom<&str> for OutputLiteral {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<String> for OutputLiteral {
+    type Error = Error;
+
+    fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+fn validate_identifier(value: &str) -> Result<()> {
+    if value.len() > MAX_IDENTIFIER_BYTES {
+        return Err(Error::new(format!(
+            "identifier exceeds maximum length of {MAX_IDENTIFIER_BYTES} bytes"
+        )));
+    }
+    if is_identifier(value) {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "identifier must start with an ASCII letter or '_' and contain only ASCII letters, digits, or '_', got {value:?}"
+        )))
+    }
+}
+
+fn is_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn validate_output_literal(value: &str) -> Result<()> {
+    if value.is_empty() {
+        return Err(Error::new("output literal must not be empty"));
+    }
+    if value.len() > MAX_FIELD_VALUE_BYTES {
+        return Err(Error::new(format!(
+            "output literal exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(Error::new(
+            "output literal must not contain control characters",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

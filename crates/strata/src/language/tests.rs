@@ -88,10 +88,31 @@ fn parses_step_return_type_as_structured_type_ref() {
     assert_eq!(
         step_return_type,
         &TypeRef::Applied {
-            constructor: Identifier::new(PROC_RESULT_TYPE),
-            args: vec![TypeRef::Named(Identifier::new("MainState"))],
+            constructor: Identifier::new(PROC_RESULT_TYPE).expect("ProcResult identifier"),
+            args: vec![TypeRef::Named(
+                Identifier::new("MainState").expect("MainState identifier")
+            )],
         }
     );
+}
+
+#[test]
+fn public_ast_constructors_validate_values() {
+    let identifier = Identifier::new("MainState").expect("valid identifier should construct");
+    assert_eq!(identifier.as_str(), "MainState");
+    let identifier_from_try =
+        Identifier::try_from("Worker").expect("TryFrom should construct identifiers");
+    assert_eq!(identifier_from_try.as_str(), "Worker");
+    assert!(Identifier::new("1Invalid").is_err());
+    assert!(Identifier::new("invalid-name").is_err());
+
+    let output = OutputLiteral::new("hello from Strata").expect("valid output should construct");
+    assert_eq!(output.as_str(), "hello from Strata");
+    let output_from_try =
+        OutputLiteral::try_from("worker handled Ping").expect("TryFrom should construct output");
+    assert_eq!(output_from_try.as_str(), "worker handled Ping");
+    assert!(OutputLiteral::new("").is_err());
+    assert!(OutputLiteral::new("bad\noutput").is_err());
 }
 
 #[test]
@@ -491,7 +512,7 @@ fn rejects_emit_output_too_large_for_artifacts() {
 
     assert!(err
         .to_string()
-        .contains("emit output exceeds maximum length"));
+        .contains("output literal exceeds maximum length"));
 }
 
 #[test]

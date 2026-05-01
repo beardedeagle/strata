@@ -80,7 +80,8 @@ fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
 }
 
 fn read_source_file(path: &Path) -> Result<String> {
-    let metadata = fs::metadata(path)?;
+    let mut file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(Error::new(format!(
             "source path {} is not a regular file",
@@ -94,7 +95,6 @@ fn read_source_file(path: &Path) -> Result<String> {
         )));
     }
 
-    let mut file = fs::File::open(path)?;
     let mut bytes = Vec::new();
     file.by_ref()
         .take((MAX_SOURCE_BYTES + 1) as u64)
@@ -164,6 +164,18 @@ mod tests {
         assert!(err.to_string().contains("is not valid UTF-8"));
 
         fs::remove_file(path).expect("test source should be removed");
+    }
+
+    #[test]
+    fn read_source_file_rejects_directory_source() {
+        let path = unique_source_path("directory");
+        fs::create_dir_all(&path).expect("test source dir should be created");
+
+        let err = read_source_file(&path).expect_err("directory source should fail");
+
+        assert!(err.to_string().contains("is not a regular file"));
+
+        fs::remove_dir(path).expect("test source dir should be removed");
     }
 
     #[test]

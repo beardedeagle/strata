@@ -10,7 +10,7 @@ use mantle_artifact::{
     MAX_FIELD_VALUE_BYTES, STRATA_SOURCE_LANGUAGE,
 };
 
-use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement, TypeRef};
+use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement};
 use super::PROC_RESULT_TYPE;
 use outputs::OutputPool;
 use static_validation::{reject_unsupported_self_send, validate_action_references};
@@ -225,10 +225,7 @@ fn check_step(
         return Err(Error::new(format!(
             "step returns {}, expected {}",
             step.return_type,
-            TypeRef::Applied {
-                constructor: super::ast::Identifier::new(PROC_RESULT_TYPE),
-                args: vec![process.state_type.clone()]
-            }
+            format_args!("{PROC_RESULT_TYPE}<{}>", process.state_type)
         )));
     }
     if !step.may.is_empty() {

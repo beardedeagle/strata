@@ -78,7 +78,7 @@ impl SemanticIndex {
         let mut processes = BTreeMap::new();
 
         let _module_symbol = symbols.intern(&module.name)?;
-        let proc_result_type = symbols.intern(&Identifier::new(PROC_RESULT_TYPE))?;
+        let proc_result_type = symbols.intern(&Identifier::new(PROC_RESULT_TYPE)?)?;
 
         for (index, record) in module.records.iter().enumerate() {
             let symbol = symbols.intern(&record.name)?;
