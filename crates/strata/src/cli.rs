@@ -80,14 +80,9 @@ fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
 }
 
 fn read_source_file(path: &Path) -> Result<String> {
-    let mut file = fs::File::open(path)?;
+    let mut file = open_source_file(path)?;
     let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return Err(Error::new(format!(
-            "source path {} is not a regular file",
-            path.display()
-        )));
-    }
+    validate_source_file_metadata(path, &metadata)?;
     if metadata.len() > MAX_SOURCE_BYTES as u64 {
         return Err(Error::new(format!(
             "source {} exceeds maximum size of {MAX_SOURCE_BYTES} bytes",
@@ -112,6 +107,36 @@ fn read_source_file(path: &Path) -> Result<String> {
             path.display()
         ))
     })
+}
+
+fn open_source_file(path: &Path) -> Result<fs::File> {
+    match fs::File::open(path) {
+        Ok(file) => Ok(file),
+        Err(open_err) => {
+            if fs::metadata(path)
+                .map(|metadata| !metadata.is_file())
+                .unwrap_or(false)
+            {
+                return Err(non_regular_source_path_error(path));
+            }
+            Err(open_err.into())
+        }
+    }
+}
+
+fn validate_source_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    if metadata.is_file() {
+        Ok(())
+    } else {
+        Err(non_regular_source_path_error(path))
+    }
+}
+
+fn non_regular_source_path_error(path: &Path) -> Error {
+    Error::new(format!(
+        "source path {} is not a regular file",
+        path.display()
+    ))
 }
 
 fn ensure_no_extra_args(args: impl IntoIterator<Item = String>) -> Result<()> {
