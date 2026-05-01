@@ -16,6 +16,8 @@ use outputs::OutputPool;
 use static_validation::{reject_unsupported_self_send, validate_action_references};
 use symbols::SemanticIndex;
 
+const STEP_STATE_PARAMETER_NAME: &str = "state";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedProgram {
     pub module: Module,
@@ -108,6 +110,7 @@ fn check_process(
     }
 
     let state_values = semantic_index.state_values_for_type(module, &process.state_type)?;
+    reject_reserved_state_values(process, &state_values)?;
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
     if msg_enum.variants.is_empty() {
         return Err(Error::new(format!(
@@ -139,6 +142,19 @@ fn check_process(
         final_state,
         actions,
     })
+}
+
+fn reject_reserved_state_values(process: &Process, state_values: &[String]) -> Result<()> {
+    if state_values
+        .iter()
+        .any(|value| value == STEP_STATE_PARAMETER_NAME)
+    {
+        return Err(Error::new(format!(
+            "process {} state value {} conflicts with reserved step state parameter name",
+            process.name, STEP_STATE_PARAMETER_NAME
+        )));
+    }
+    Ok(())
 }
 
 fn check_init(
@@ -204,7 +220,7 @@ fn check_step(
     }
     let state_param = &step.params[0];
     let msg_param = &step.params[1];
-    if state_param.name.as_str() != "state"
+    if state_param.name.as_str() != STEP_STATE_PARAMETER_NAME
         || !semantic_index.same_type(&state_param.ty, &process.state_type)
     {
         return Err(Error::new(format!(
@@ -285,7 +301,7 @@ fn check_step(
             ))
         }
     };
-    let final_state = if state_arg.as_str() == "state" {
+    let final_state = if state_arg.as_str() == STEP_STATE_PARAMETER_NAME {
         init_state
     } else {
         semantic_index

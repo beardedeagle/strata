@@ -146,6 +146,36 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn rejects_state_value_named_like_step_state_parameter() {
+    let source = r#"
+module reserved_state_value;
+
+record Marker;
+enum MainState { state };
+enum MainMsg { start };
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return state;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("reserved state value should fail");
+
+    assert!(err
+        .to_string()
+        .contains("state value state conflicts with reserved step state parameter name"));
+}
+
+#[test]
 fn parses_and_checks_actor_ping() {
     let checked = check_source(ACTOR_PING).expect("actor ping should check");
 
