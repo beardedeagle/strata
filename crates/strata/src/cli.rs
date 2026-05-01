@@ -1,10 +1,11 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use mantle_artifact::{default_artifact_path, write_artifact, Error, Result};
 
-use crate::language::check_source;
+use crate::language::{check_source, MAX_SOURCE_BYTES};
 
 pub fn strata_main<I>(args: I) -> Result<()>
 where
@@ -16,7 +17,7 @@ where
         Some("check") => {
             let path = required_path(args.next(), "strata check <path>")?;
             ensure_no_extra_args(args)?;
-            let source = fs::read_to_string(&path)?;
+            let source = read_source_file(&path)?;
             let checked = check_source(&source)?;
             let entry = checked
                 .processes
@@ -37,6 +38,9 @@ where
             let mut rest = args.peekable();
             while let Some(arg) = rest.next() {
                 if arg == "--output" {
+                    if output.is_some() {
+                        return Err(Error::new("duplicate --output argument"));
+                    }
                     output = Some(required_path(
                         rest.next(),
                         "strata build <path> --output <path>",
@@ -45,7 +49,7 @@ where
                     return Err(Error::new(format!("unexpected argument {arg:?}")));
                 }
             }
-            let source = fs::read_to_string(&path)?;
+            let source = read_source_file(&path)?;
             let checked = check_source(&source)?;
             let artifact = checked.to_artifact(&source)?;
             let artifact_path = output.unwrap_or(default_artifact_path(&path)?);
@@ -75,6 +79,41 @@ fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
         .ok_or_else(|| Error::new(format!("missing path; usage: {usage}")))
 }
 
+fn read_source_file(path: &Path) -> Result<String> {
+    let metadata = fs::metadata(path)?;
+    if !metadata.is_file() {
+        return Err(Error::new(format!(
+            "source path {} is not a regular file",
+            path.display()
+        )));
+    }
+    if metadata.len() > MAX_SOURCE_BYTES as u64 {
+        return Err(Error::new(format!(
+            "source {} exceeds maximum size of {MAX_SOURCE_BYTES} bytes",
+            path.display()
+        )));
+    }
+
+    let mut file = fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take((MAX_SOURCE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_SOURCE_BYTES {
+        return Err(Error::new(format!(
+            "source {} exceeds maximum size of {MAX_SOURCE_BYTES} bytes",
+            path.display()
+        )));
+    }
+
+    String::from_utf8(bytes).map_err(|err| {
+        Error::new(format!(
+            "source {} is not valid UTF-8: {err}",
+            path.display()
+        ))
+    })
+}
+
 fn ensure_no_extra_args(args: impl IntoIterator<Item = String>) -> Result<()> {
     let extras: Vec<String> = args.into_iter().collect();
     if extras.is_empty() {
@@ -95,4 +134,62 @@ fn print_strata_usage() {
 
 pub fn run_strata_from_env() -> Result<()> {
     strata_main(env::args())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn read_source_file_rejects_oversized_source() {
+        let path = unique_source_path("oversized");
+        fs::write(&path, vec![b'a'; MAX_SOURCE_BYTES + 1])
+            .expect("oversized test source should be written");
+
+        let err = read_source_file(&path).expect_err("oversized source should fail");
+
+        assert!(err.to_string().contains("exceeds maximum size"));
+
+        fs::remove_file(path).expect("test source should be removed");
+    }
+
+    #[test]
+    fn read_source_file_rejects_non_utf8_source() {
+        let path = unique_source_path("non-utf8");
+        fs::write(&path, [0xff]).expect("non-UTF-8 test source should be written");
+
+        let err = read_source_file(&path).expect_err("non-UTF-8 source should fail");
+
+        assert!(err.to_string().contains("is not valid UTF-8"));
+
+        fs::remove_file(path).expect("test source should be removed");
+    }
+
+    #[test]
+    fn strata_build_rejects_duplicate_output_argument() {
+        let err = strata_main([
+            "strata".to_string(),
+            "build".to_string(),
+            "examples/hello.str".to_string(),
+            "--output".to_string(),
+            "one.mta".to_string(),
+            "--output".to_string(),
+            "two.mta".to_string(),
+        ])
+        .expect_err("duplicate output should fail");
+
+        assert!(err.to_string().contains("duplicate --output argument"));
+    }
+
+    fn unique_source_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after UNIX epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "strata-source-{name}-{}-{nanos}.str",
+            std::process::id()
+        ))
+    }
 }

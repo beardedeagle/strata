@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, File, OpenOptions};
