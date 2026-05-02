@@ -110,7 +110,8 @@ fn read_source_file(path: &Path) -> Result<String> {
 }
 
 fn open_source_file(path: &Path) -> Result<fs::File> {
-    match fs::File::open(path) {
+    reject_non_regular_source_path_before_open(path)?;
+    match open_source_file_handle(path) {
         Ok(file) => Ok(file),
         Err(open_err) => {
             if fs::metadata(path)
@@ -122,6 +123,63 @@ fn open_source_file(path: &Path) -> Result<fs::File> {
             Err(open_err.into())
         }
     }
+}
+
+#[cfg(unix)]
+fn open_source_file_handle(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(unix_nonblocking_open_flag())
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_source_file_handle(path: &Path) -> std::io::Result<fs::File> {
+    fs::File::open(path)
+}
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))
+))]
+fn open_source_file_handle(_path: &Path) -> std::io::Result<fs::File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "source file opening requires a nonblocking open flag for this Unix target",
+    ))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn unix_nonblocking_open_flag() -> i32 {
+    0o4000
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn unix_nonblocking_open_flag() -> i32 {
+    0x0004
+}
+
+fn reject_non_regular_source_path_before_open(path: &Path) -> Result<()> {
+    let metadata = fs::metadata(path)?;
+    validate_source_file_metadata(path, &metadata)
 }
 
 fn validate_source_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()> {
@@ -201,6 +259,50 @@ mod tests {
         assert!(err.to_string().contains("is not a regular file"));
 
         fs::remove_dir(path).expect("test source dir should be removed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_source_file_rejects_fifo_source_before_opening() {
+        let path = unique_source_path("fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("mkfifo should run");
+        assert!(status.success(), "mkfifo should create test fifo");
+
+        let err = read_source_file(&path).expect_err("fifo source should fail");
+
+        assert!(err.to_string().contains("is not a regular file"));
+
+        fs::remove_file(path).expect("test fifo should be removed");
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    #[test]
+    fn open_source_file_handle_does_not_block_on_fifo_source() {
+        let path = unique_source_path("fifo-handle");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("mkfifo should run");
+        assert!(status.success(), "mkfifo should create test fifo");
+
+        let file = open_source_file_handle(&path).expect("fifo open should not block");
+        let metadata = file.metadata().expect("fifo metadata should be available");
+
+        assert!(!metadata.is_file());
+
+        fs::remove_file(path).expect("test fifo should be removed");
     }
 
     #[test]
