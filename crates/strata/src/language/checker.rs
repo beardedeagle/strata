@@ -1,4 +1,5 @@
 mod outputs;
+mod state_space;
 mod static_validation;
 mod symbols;
 
@@ -6,14 +7,15 @@ use std::collections::BTreeSet;
 
 use mantle_artifact::{
     source_hash_fnv1a64, ArtifactAction, ArtifactProcess, Error, MantleArtifact, MessageId,
-    ProcessId, Result, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
+    NextState, ProcessId, Result, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
     MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS, STRATA_SOURCE_LANGUAGE,
+    MAX_PROCESS_COUNT, STRATA_SOURCE_LANGUAGE,
 };
 
-use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement};
+use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement, ValueExpr};
 use super::PROC_RESULT_TYPE;
 use outputs::OutputPool;
+use state_space::StateSpace;
 use static_validation::{reject_unsupported_self_send, validate_action_references};
 use symbols::SemanticIndex;
 
@@ -116,14 +118,6 @@ fn check_process(
         MAX_MAILBOX_BOUND,
     )?;
 
-    let state_values = semantic_index.state_values_for_type(module, &process.state_type)?;
-    validate_count(
-        &format!("process {} state_value_count", process.name),
-        state_values.len(),
-        1,
-        MAX_STATE_VALUES_PER_PROCESS,
-    )?;
-    reject_reserved_state_values(process, &state_values)?;
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
     if msg_enum.variants.is_empty() {
         return Err(Error::new(format!(
@@ -138,16 +132,17 @@ fn check_process(
         MAX_MESSAGE_VARIANTS_PER_PROCESS,
     )?;
 
-    let init_state = check_init(semantic_index, process, &state_values)?;
-    let (step_result, final_state, actions) = check_step(
+    let mut state_space = StateSpace::new(module, semantic_index, process)?;
+    let init_state = check_init(semantic_index, process, &mut state_space)?;
+    let (step_result, next_state, actions) = check_step(
         module,
         process,
         process_id,
         semantic_index,
-        &state_values,
-        init_state,
+        &mut state_space,
         outputs,
     )?;
+    let state_values = state_space.into_values()?;
 
     Ok(ArtifactProcess {
         debug_name: process.name.to_string(),
@@ -158,28 +153,15 @@ fn check_process(
         mailbox_bound: process.mailbox_bound,
         init_state,
         step_result,
-        final_state,
+        next_state,
         actions,
     })
-}
-
-fn reject_reserved_state_values(process: &Process, state_values: &[String]) -> Result<()> {
-    if state_values
-        .iter()
-        .any(|value| value == STEP_STATE_PARAMETER_NAME)
-    {
-        return Err(Error::new(format!(
-            "process {} state value {} conflicts with reserved step state parameter name",
-            process.name, STEP_STATE_PARAMETER_NAME
-        )));
-    }
-    Ok(())
 }
 
 fn check_init(
     semantic_index: &SemanticIndex,
     process: &Process,
-    state_values: &[String],
+    state_space: &mut StateSpace<'_>,
 ) -> Result<StateId> {
     let init = &process.init;
     if !init.params.is_empty() {
@@ -208,20 +190,13 @@ fn check_init(
     }
     validate_effects("init", &init.effects, BTreeSet::new())?;
 
-    let ReturnExpr::Identifier(value) = &body.returns else {
+    let ReturnExpr::Value(value) = &body.returns else {
         return Err(Error::new(format!(
             "init body must return a value of {}",
             process.state_type
         )));
     };
-    semantic_index
-        .state_id_for_value(state_values, value)
-        .map_err(|_| {
-            Error::new(format!(
-                "init body returns {}, which is not a value of {}",
-                value, process.state_type
-            ))
-        })
+    state_space.resolve_state_value(semantic_index, value)
 }
 
 fn check_step(
@@ -229,10 +204,9 @@ fn check_step(
     process: &Process,
     process_id: ProcessId,
     semantic_index: &SemanticIndex,
-    state_values: &[String],
-    init_state: StateId,
+    state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
-) -> Result<(StepResult, StateId, Vec<ArtifactAction>)> {
+) -> Result<(StepResult, NextState, Vec<ArtifactAction>)> {
     let step = &process.step;
     if step.params.len() != 2 {
         return Err(Error::new("step must declare state and msg parameters"));
@@ -325,22 +299,16 @@ fn check_step(
             ))
         }
     };
-    let final_state = if state_arg.as_str() == STEP_STATE_PARAMETER_NAME {
-        init_state
+    let next_state = if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
+    {
+        NextState::Current
     } else {
-        semantic_index
-            .state_id_for_value(state_values, state_arg)
-            .map_err(|_| {
-                Error::new(format!(
-                    "step returns state value {}, which is not a value of {}",
-                    state_arg, process.state_type
-                ))
-            })?
+        NextState::Value(state_space.resolve_state_value(semantic_index, state_arg)?)
     };
 
     reject_unsupported_self_send(process, process_id, &actions)?;
 
-    Ok((step_result, final_state, actions))
+    Ok((step_result, next_state, actions))
 }
 
 fn validate_count(field: &str, value: usize, min: usize, max: usize) -> Result<()> {

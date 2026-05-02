@@ -1,7 +1,7 @@
 use crate::fields::ArtifactFields;
 use crate::validation::{
     validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
-    validate_source_hash, validate_unique_ident_list,
+    validate_source_hash, validate_unique_ident_list, validate_unique_state_value_list,
 };
 use crate::{
     Error, MessageId, OutputId, ProcessId, Result, StateId, ARTIFACT_FORMAT, ARTIFACT_MAGIC,
@@ -28,6 +28,21 @@ impl StepResult {
             "Continue" => Ok(Self::Continue),
             "Stop" => Ok(Self::Stop),
             _ => Err(Error::new(format!("invalid step_result value {value:?}"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NextState {
+    Current,
+    Value(StateId),
+}
+
+impl NextState {
+    pub(crate) fn kind_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Value(_) => "value",
         }
     }
 }
@@ -82,11 +97,17 @@ impl MantleArtifact {
                 encoded.push_str(&format!("{prefix}.message.{message_index}={message}\n"));
             }
             encoded.push_str(&format!(
-                "{prefix}.mailbox_bound={}\n{prefix}.init_state={}\n{prefix}.step_result={}\n{prefix}.final_state={}\n{prefix}.action_count={}\n",
+                "{prefix}.mailbox_bound={}\n{prefix}.init_state={}\n{prefix}.step_result={}\n{prefix}.next_state={}\n",
                 process.mailbox_bound,
                 process.init_state.as_u32(),
                 process.step_result.as_str(),
-                process.final_state.as_u32(),
+                process.next_state.kind_str()
+            ));
+            if let NextState::Value(state) = process.next_state {
+                encoded.push_str(&format!("{prefix}.next_state_value={}\n", state.as_u32()));
+            }
+            encoded.push_str(&format!(
+                "{prefix}.action_count={}\n",
                 process.actions.len()
             ));
             for (action_index, action) in process.actions.iter().enumerate() {
@@ -196,7 +217,7 @@ impl MantleArtifact {
                 )?,
                 init_state: fields.take_state_id(&format!("{prefix}.init_state"))?,
                 step_result: fields.take_step_result(&format!("{prefix}.step_result"))?,
-                final_state: fields.take_state_id(&format!("{prefix}.final_state"))?,
+                next_state: fields.take_next_state(&prefix)?,
                 actions,
             });
         }
@@ -284,7 +305,7 @@ pub struct ArtifactProcess {
     pub mailbox_bound: usize,
     pub init_state: StateId,
     pub step_result: StepResult,
-    pub final_state: StateId,
+    pub next_state: NextState,
     pub actions: Vec<ArtifactAction>,
 }
 
@@ -312,7 +333,7 @@ impl ArtifactProcess {
             0,
             MAX_ACTIONS_PER_PROCESS,
         )?;
-        validate_unique_ident_list("state value", &self.state_values)?;
+        validate_unique_state_value_list(&self.state_values)?;
         validate_unique_ident_list("message variant", &self.message_variants)?;
         if self.init_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(
@@ -321,12 +342,14 @@ impl ArtifactProcess {
                 self.init_state.as_u32()
             )));
         }
-        if self.final_state.index() >= self.state_values.len() {
-            return Err(Error::new(format!(
-                "process {} final_state id {} is not a valid state value",
-                self.debug_name,
-                self.final_state.as_u32()
-            )));
+        if let NextState::Value(state) = self.next_state {
+            if state.index() >= self.state_values.len() {
+                return Err(Error::new(format!(
+                    "process {} next_state id {} is not a valid state value",
+                    self.debug_name,
+                    state.as_u32()
+                )));
+            }
         }
         Ok(())
     }

@@ -82,6 +82,11 @@ fn validate_identifier(value: &str) -> Result<()> {
             "identifier exceeds maximum length of {MAX_IDENTIFIER_BYTES} bytes"
         )));
     }
+    if is_mutability_keyword(value) {
+        return Err(Error::new(format!(
+            "identifier {value:?} is reserved for immutable Strata semantics"
+        )));
+    }
     if is_identifier(value) {
         Ok(())
     } else {
@@ -98,6 +103,10 @@ fn is_identifier(value: &str) -> bool {
     };
     (first.is_ascii_alphabetic() || first == '_')
         && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn is_mutability_keyword(value: &str) -> bool {
+    matches!(value, "mut" | "var")
 }
 
 fn validate_output_literal(value: &str) -> Result<()> {
@@ -128,6 +137,13 @@ pub struct Module {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
     pub name: Identifier,
+    pub fields: Vec<RecordField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordField {
+    pub name: Identifier,
+    pub ty: TypeRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,6 +271,46 @@ impl fmt::Display for Effect {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReturnExpr {
+    Value(ValueExpr),
+    Call { name: Identifier, arg: ValueExpr },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValueExpr {
     Identifier(Identifier),
-    Call { name: Identifier, arg: Identifier },
+    Record(RecordValue),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordValue {
+    pub name: Identifier,
+    pub fields: Vec<RecordValueField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordValueField {
+    pub name: Identifier,
+    pub value: ValueExpr,
+}
+
+impl fmt::Display for ValueExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Identifier(name) => write!(f, "{name}"),
+            Self::Record(value) => write!(f, "{value}"),
+        }
+    }
+}
+
+impl fmt::Display for RecordValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{{", self.name)?;
+        for (index, field) in self.fields.iter().enumerate() {
+            if index > 0 {
+                f.write_str(",")?;
+            }
+            write!(f, "{}:{}", field.name, field.value)?;
+        }
+        f.write_str("}")
+    }
 }

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use mantle_artifact::{Error, MessageId, ProcessId, Result, StateId};
+use mantle_artifact::{Error, MessageId, ProcessId, Result};
 
-use super::super::ast::{Enum, Identifier, Module, TypeRef};
+use super::super::ast::{Enum, Identifier, Module, Record, TypeRef};
 use super::super::PROC_RESULT_TYPE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -59,6 +59,49 @@ fn reject_reserved_type_name(name: &str, symbol: Symbol, reserved: Symbol) -> Re
     Ok(())
 }
 
+fn validate_record_fields(
+    symbols: &SymbolTable,
+    types: &BTreeMap<Symbol, TypeDecl>,
+    record: &Record,
+) -> Result<()> {
+    let mut field_names = BTreeMap::new();
+    for field in &record.fields {
+        let field_symbol = symbols
+            .resolve(field.name.as_str())
+            .ok_or_else(|| Error::new(format!("field {} is not interned", field.name)))?;
+        if field_names.insert(field_symbol, ()).is_some() {
+            return Err(Error::new(format!(
+                "record {} declares duplicate field {}",
+                record.name, field.name
+            )));
+        }
+        type_decl_from_tables(symbols, types, &field.ty).map_err(|_| {
+            Error::new(format!(
+                "record {} field {} uses undeclared type {}",
+                record.name, field.name, field.ty
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+fn type_decl_from_tables(
+    symbols: &SymbolTable,
+    types: &BTreeMap<Symbol, TypeDecl>,
+    ty: &TypeRef,
+) -> Result<TypeDecl> {
+    let Some(name) = ty.as_named() else {
+        return Err(Error::new(format!("type {ty} is not declared")));
+    };
+    let symbol = symbols
+        .resolve(name)
+        .ok_or_else(|| Error::new(format!("type {name} is not declared")))?;
+    types
+        .get(&symbol)
+        .copied()
+        .ok_or_else(|| Error::new(format!("type {name} is not declared")))
+}
+
 #[derive(Debug)]
 pub(super) struct SemanticIndex {
     symbols: SymbolTable,
@@ -95,6 +138,9 @@ impl SemanticIndex {
                     record.name,
                     previous.kind()
                 )));
+            }
+            for field in &record.fields {
+                symbols.intern(&field.name)?;
             }
         }
 
@@ -139,6 +185,10 @@ impl SemanticIndex {
                     process.name
                 )));
             }
+        }
+
+        for record in &module.records {
+            validate_record_fields(&symbols, &types, record)?;
         }
 
         Ok(Self {
@@ -223,49 +273,17 @@ impl SemanticIndex {
     }
 
     pub(super) fn enum_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Enum> {
-        match self.type_decl(ty) {
-            Ok(TypeDecl::Enum(index)) => Ok(&module.enums[index]),
-            _ => Err(Error::new(format!("type {ty} is not declared as an enum"))),
+        match self.type_decl(ty)? {
+            TypeDecl::Enum(index) => Ok(&module.enums[index]),
+            TypeDecl::Record(_) => Err(Error::new(format!("type {ty} is not declared as an enum"))),
         }
     }
 
-    pub(super) fn state_values_for_type(
-        &self,
-        module: &Module,
-        ty: &TypeRef,
-    ) -> Result<Vec<String>> {
-        match self.type_decl(ty) {
-            Ok(TypeDecl::Record(index)) => Ok(vec![module.records[index].name.to_string()]),
-            Ok(TypeDecl::Enum(index)) => {
-                let item = &module.enums[index];
-                if item.variants.is_empty() {
-                    return Err(Error::new(format!(
-                        "enum {} must declare at least one variant",
-                        item.name
-                    )));
-                }
-                Ok(item.variants.iter().map(ToString::to_string).collect())
-            }
-            Err(_) => Err(Error::new(format!(
-                "state type {ty} must be declared as a record or enum"
-            ))),
+    pub(super) fn record_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Record> {
+        match self.type_decl(ty)? {
+            TypeDecl::Record(index) => Ok(&module.records[index]),
+            TypeDecl::Enum(_) => Err(Error::new(format!("type {ty} is not declared as a record"))),
         }
-    }
-
-    pub(super) fn state_id_for_value(
-        &self,
-        state_values: &[String],
-        value: &Identifier,
-    ) -> Result<StateId> {
-        let Some(value_symbol) = self.symbols.resolve(value.as_str()) else {
-            return Err(Error::new(format!("unknown state value {value}")));
-        };
-        state_values
-            .iter()
-            .position(|candidate| self.symbols.resolve(candidate.as_str()) == Some(value_symbol))
-            .map(StateId::from_index)
-            .transpose()?
-            .ok_or_else(|| Error::new(format!("unknown state value {value}")))
     }
 
     pub(super) fn message_id_for_process(

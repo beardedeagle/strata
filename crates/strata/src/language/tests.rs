@@ -1,16 +1,16 @@
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
-    ArtifactAction, MessageId, OutputId, ProcessId, StateId, StepResult, MAX_ACTIONS_PER_PROCESS,
-    MAX_FIELD_VALUE_BYTES, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
-    MAX_STATE_VALUES_PER_PROCESS,
+    ArtifactAction, MessageId, NextState, OutputId, ProcessId, StateId, StepResult,
+    MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
 };
 
 const HELLO: &str = r#"
 module hello;
 
 record MainState;
-enum MainMsg { Start };
+enum MainMsg { Start }
 
 proc Main mailbox bounded(1) {
     type State = MainState;
@@ -31,9 +31,9 @@ const ACTOR_PING: &str = r#"
 module actor_ping;
 
 record MainState;
-enum MainMsg { Start };
-enum WorkerState { Idle, Handled };
-enum WorkerMsg { Ping };
+enum MainMsg { Start }
+enum WorkerState { Idle, Handled }
+enum WorkerMsg { Ping }
 
 proc Main mailbox bounded(1) {
     type State = MainState;
@@ -75,6 +75,7 @@ fn parses_and_checks_hello() {
     assert_eq!(checked.outputs, ["hello from Strata"]);
     assert_eq!(checked.processes.len(), 1);
     assert_eq!(checked.processes[0].step_result, StepResult::Stop);
+    assert_eq!(checked.processes[0].next_state, NextState::Current);
     assert_eq!(
         checked.processes[0].actions,
         [ArtifactAction::Emit {
@@ -108,6 +109,8 @@ fn public_ast_constructors_validate_values() {
     assert_eq!(identifier_from_try.as_str(), "Worker");
     assert!(Identifier::new("1Invalid").is_err());
     assert!(Identifier::new("invalid-name").is_err());
+    assert!(Identifier::new("mut").is_err());
+    assert!(Identifier::new("var").is_err());
 
     let output = OutputLiteral::new("hello from Strata").expect("valid output should construct");
     assert_eq!(output.as_str(), "hello from Strata");
@@ -124,8 +127,8 @@ fn resolves_lowercase_state_values_without_casing_semantics() {
 module lowercase_state;
 
 record Marker;
-enum MainState { ready };
-enum MainMsg { start };
+enum MainState { ready }
+enum MainMsg { start }
 
 proc Main mailbox bounded(1) {
     type State = MainState;
@@ -145,7 +148,10 @@ proc Main mailbox bounded(1) {
 
     assert_eq!(checked.processes[0].state_values, ["ready"]);
     assert_eq!(checked.processes[0].init_state, StateId::new(0));
-    assert_eq!(checked.processes[0].final_state, StateId::new(0));
+    assert_eq!(
+        checked.processes[0].next_state,
+        NextState::Value(StateId::new(0))
+    );
 }
 
 #[test]
@@ -154,8 +160,8 @@ fn rejects_state_value_named_like_step_state_parameter() {
 module reserved_state_value;
 
 record Marker;
-enum MainState { state };
-enum MainMsg { start };
+enum MainState { state }
+enum MainMsg { start }
 
 proc Main mailbox bounded(1) {
     type State = MainState;
@@ -212,7 +218,7 @@ fn parses_and_checks_actor_ping() {
         .find(|process| process.debug_name == "Worker")
         .expect("Worker should be checked");
     assert_eq!(worker.init_state, StateId::new(0));
-    assert_eq!(worker.final_state, StateId::new(1));
+    assert_eq!(worker.next_state, NextState::Value(StateId::new(1)));
 }
 
 #[test]
@@ -221,9 +227,9 @@ fn resolves_process_references_to_ids_before_artifact_encoding() {
 module actor_ping;
 
 record MainState;
-enum MainMsg { Start };
-enum WorkerState { Idle, Handled };
-enum WorkerMsg { Ping };
+enum MainMsg { Start }
+enum WorkerState { Idle, Handled }
+enum WorkerMsg { Ping }
 
 proc Worker mailbox bounded(1) {
     type State = WorkerState;
@@ -290,7 +296,7 @@ fn rejects_declaration_only_entry_points() {
     let source = r#"
 module hello;
 record MainState;
-enum MainMsg { Start };
+enum MainMsg { Start }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
@@ -323,7 +329,7 @@ fn rejects_process_count_above_artifact_limit_during_checking() {
     let mut source = r#"
 module too_many_processes;
 record MainState;
-enum MainMsg { Start };
+enum MainMsg { Start }
 "#
     .to_string();
     for index in 0..=MAX_PROCESS_COUNT {
@@ -390,11 +396,11 @@ fn rejects_state_value_count_above_artifact_limit_during_checking() {
     let source = HELLO
         .replace(
             "record MainState;",
-            &format!("enum MainState {{ {state_values} }};"),
+            &format!("enum MainState {{ {state_values} }}"),
         )
         .replace(
-            "enum MainMsg { Start };",
-            "record Marker;\nenum MainMsg { Start };",
+            "enum MainMsg { Start }",
+            "record Marker;\nenum MainMsg { Start }",
         )
         .replace("return MainState;", "return State0;");
     let module = parse_source(&source).expect("state-value-count source should parse");
@@ -407,14 +413,46 @@ fn rejects_state_value_count_above_artifact_limit_during_checking() {
 }
 
 #[test]
+fn rejects_empty_state_enum_with_enum_diagnostic() {
+    let source = HELLO.replace("record MainState;", "record Marker;\nenum MainState {}");
+
+    let err = check_source(&source).expect_err("empty state enum should fail");
+
+    assert!(err
+        .to_string()
+        .contains("enum MainState must declare at least one variant"));
+}
+
+#[test]
+fn preserves_undeclared_state_type_diagnostics() {
+    for (source, expected) in [
+        (
+            HELLO.replace("type State = MainState;", "type State = MissingState;"),
+            "type MissingState is not declared",
+        ),
+        (
+            HELLO.replace("type State = MainState;", "type State = Box<MainState>;"),
+            "type Box<MainState> is not declared",
+        ),
+    ] {
+        let err = check_source(&source).expect_err("undeclared state type should fail");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+}
+
+#[test]
 fn rejects_message_count_above_artifact_limit_during_checking() {
     let messages = (0..=MAX_MESSAGE_VARIANTS_PER_PROCESS)
         .map(|index| format!("Msg{index}"))
         .collect::<Vec<_>>()
         .join(", ");
     let source = HELLO.replace(
-        "enum MainMsg { Start };",
-        &format!("enum MainMsg {{ {messages} }};"),
+        "enum MainMsg { Start }",
+        &format!("enum MainMsg {{ {messages} }}"),
     );
     let module = parse_source(&source).expect("message-count source should parse");
 
@@ -485,7 +523,7 @@ fn rejects_duplicate_process_members() {
 #[test]
 fn rejects_missing_list_separators() {
     for source in [
-        HELLO.replace("enum MainMsg { Start };", "enum MainMsg { Start Other };"),
+        HELLO.replace("enum MainMsg { Start }", "enum MainMsg { Start Other }"),
         HELLO.replace("! [emit] ~ []", "! [emit send] ~ []"),
         HELLO.replace("ProcResult<MainState>", "ProcResult<MainState MainMsg>"),
     ] {
@@ -547,11 +585,26 @@ fn rejects_excessive_type_nesting() {
 }
 
 #[test]
+fn rejects_excessive_value_nesting_while_parsing() {
+    let value = nested_record_value_source(MAX_VALUE_NESTING + 1);
+    let source = HELLO.replacen("return MainState;", &format!("return {value};"), 1);
+
+    let err = parse_source(&source).expect_err("excessive value nesting should fail");
+
+    let message = err.to_string();
+    assert!(message.contains("value nesting exceeds maximum depth"));
+    assert!(
+        message.contains(" at byte "),
+        "expected byte-offset context in diagnostic: {message}"
+    );
+}
+
+#[test]
 fn rejects_emit_without_declared_effect() {
     let source = r#"
 module hello;
 record MainState;
-enum MainMsg { Start };
+enum MainMsg { Start }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
@@ -587,6 +640,242 @@ fn rejects_unknown_effect_name() {
     let err = parse_source(&source).expect_err("unknown effect should fail");
 
     assert!(err.to_string().contains("unsupported effect write"));
+}
+
+#[test]
+fn parses_and_checks_immutable_record_state_constructors() {
+    let source = r#"
+module record_state;
+
+enum Phase { Idle, Handled }
+record MainState {
+    phase: Phase,
+}
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { phase: Idle };
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(MainState { phase: Handled });
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("immutable record state should check");
+
+    assert_eq!(
+        checked.processes[0].state_values,
+        ["MainState{phase:Idle}", "MainState{phase:Handled}"]
+    );
+    assert_eq!(checked.processes[0].init_state, StateId::new(0));
+    assert_eq!(
+        checked.processes[0].next_state,
+        NextState::Value(StateId::new(1))
+    );
+}
+
+#[test]
+fn rejects_semicolons_after_braced_type_declarations() {
+    for (source, expected) in [
+        (
+            HELLO.replace("enum MainMsg { Start }", "enum MainMsg { Start };"),
+            "braced enum declarations are terminated by '}', not ';'",
+        ),
+        (
+            HELLO.replace(
+                "record MainState;",
+                "enum Phase { Idle }\nrecord MainState { phase: Phase };",
+            ),
+            "braced record declarations are terminated by '}', not ';'",
+        ),
+    ] {
+        let err = parse_source(&source).expect_err("braced type semicolon should be rejected");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_empty_braced_record_declarations() {
+    let source = HELLO.replace("record MainState;", "record MainState {}");
+
+    let err = parse_source(&source).expect_err("empty braced records should be rejected");
+
+    assert!(
+        err.to_string().contains(
+            "fieldless records use `record MainState;`; braced records must declare at least one field"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_mutable_record_field_declarations() {
+    let source = HELLO.replace(
+        "record MainState;",
+        "enum Phase { Idle }\nrecord MainState { mut phase: Phase }",
+    );
+
+    let err = parse_source(&source).expect_err("mutable record fields should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("record fields are immutable; mutable field declarations are not supported"));
+}
+
+#[test]
+fn rejects_security_declarations_instead_of_erasing_source() {
+    let source = HELLO.replace(
+        "record MainState;",
+        "security mut policy;\nrecord MainState;",
+    );
+
+    let err = parse_source(&source).expect_err("security declarations should not be skipped");
+
+    assert!(err
+        .to_string()
+        .contains("security declarations are not supported"));
+}
+
+#[test]
+fn rejects_mutability_keywords_as_state_values() {
+    for keyword in ["mut", "var"] {
+        let source = r#"
+module reserved_mutability_keyword;
+
+record Marker;
+enum MainState { REPLACE_KEYWORD }
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return REPLACE_KEYWORD;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(REPLACE_KEYWORD);
+    }
+}
+"#
+        .replace("REPLACE_KEYWORD", keyword);
+
+        let err = parse_source(&source).expect_err("mutability keyword should be reserved");
+
+        assert!(
+            err.to_string()
+                .contains(&format!("identifier {keyword:?} is reserved")),
+            "unexpected error for {keyword}: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_assignment_syntax_in_record_values() {
+    let source = HELLO
+        .replace(
+            "record MainState;",
+            "enum Phase { Idle }\nrecord MainState { phase: Phase }",
+        )
+        .replace("return MainState;", "return MainState { phase = Idle };");
+
+    let err = parse_source(&source).expect_err("record value assignment should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("record value fields use ':'; assignment syntax is not supported"));
+}
+
+#[test]
+fn rejects_empty_braced_record_values() {
+    let source = HELLO.replace("return MainState;", "return MainState {};");
+
+    let err = parse_source(&source).expect_err("empty braced record values should be rejected");
+
+    assert!(
+        err.to_string().contains(
+            "fieldless record values use `MainState`; braced record values must declare at least one field"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_incomplete_or_invalid_record_values() {
+    for (source, expected) in [
+        (
+            HELLO
+                .replace(
+                    "record MainState;",
+                    "enum Phase { Idle }\nenum Mode { Cold }\nrecord MainState { phase: Phase, mode: Mode }",
+                )
+                .replace("return MainState;", "return MainState { phase: Idle };"),
+            "record value MainState is missing field mode",
+        ),
+        (
+            HELLO
+                .replace(
+                    "record MainState;",
+                    "enum Phase { Idle }\nrecord MainState { phase: Phase }",
+                )
+                .replace(
+                    "return MainState;",
+                    "return MainState { phase: Idle, extra: Idle };",
+                ),
+            "record value MainState declares unknown field extra",
+        ),
+        (
+            HELLO
+                .replace(
+                    "record MainState;",
+                    "enum Phase { Idle }\nrecord MainState { phase: Phase }",
+                )
+                .replace(
+                    "return MainState;",
+                    "return MainState { phase: Idle, phase: Idle };",
+                ),
+            "record value MainState duplicates field phase",
+        ),
+        (
+            HELLO
+                .replace(
+                    "record MainState;",
+                    "enum Phase { Idle }\nenum Other { Wrong }\nrecord MainState { phase: Phase }",
+                )
+                .replace("return MainState;", "return MainState { phase: Wrong };"),
+            "value Wrong is not a variant of enum Phase",
+        ),
+        (
+            HELLO
+                .replace(
+                    "record MainState;",
+                    "enum Phase { Idle }\nrecord MainState { phase: Phase }",
+                )
+                .replace(
+                    "return MainState;",
+                    "return MainState { phase: Other { value: Idle } };",
+                ),
+            "expected enum variant identifier for enum Phase",
+        ),
+    ] {
+        let err = check_source(&source).expect_err("invalid record value should be rejected");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
 }
 
 #[test]
@@ -714,7 +1003,7 @@ fn rejects_step_proc_result_with_wrong_state_argument() {
 fn rejects_reserved_proc_result_type_declarations() {
     for source in [
         HELLO.replace("record MainState;", "record ProcResult;"),
-        HELLO.replace("enum MainMsg { Start };", "enum ProcResult { Start };"),
+        HELLO.replace("enum MainMsg { Start }", "enum ProcResult { Start }"),
     ] {
         let err = check_source(&source).expect_err("reserved type name should fail");
 
@@ -724,7 +1013,7 @@ fn rejects_reserved_proc_result_type_declarations() {
 
 #[test]
 fn rejects_duplicate_enum_variants() {
-    let source = HELLO.replace("enum MainMsg { Start };", "enum MainMsg { Start, Start };");
+    let source = HELLO.replace("enum MainMsg { Start }", "enum MainMsg { Start, Start }");
 
     let err = check_source(&source).expect_err("duplicate variant should be rejected");
 
@@ -735,7 +1024,7 @@ fn rejects_duplicate_enum_variants() {
 
 #[test]
 fn rejects_record_enum_type_name_collision() {
-    let source = HELLO.replace("enum MainMsg { Start };", "enum MainState { Start };");
+    let source = HELLO.replace("enum MainMsg { Start }", "enum MainState { Start }");
 
     let err = check_source(&source).expect_err("type name collision should be rejected");
 
@@ -751,4 +1040,12 @@ fn rejects_invalid_annotation_identifier_start() {
     let err = parse_source(&source).expect_err("invalid annotation should fail lexing");
 
     assert!(err.to_string().contains("expected identifier after '@'"));
+}
+
+fn nested_record_value_source(depth: usize) -> String {
+    let mut value = "Leaf".to_string();
+    for index in (0..depth).rev() {
+        value = format!("State{index} {{ next: {value} }}");
+    }
+    value
 }

@@ -11,6 +11,9 @@ fn artifact_round_trips_and_validates_magic() {
 
     assert_eq!(decoded, artifact);
     assert!(encoded.contains("entry_process=0"));
+    assert!(encoded.contains("process.0.next_state=current"));
+    assert!(encoded.contains("process.1.next_state=value"));
+    assert!(encoded.contains("process.1.next_state_value=1"));
     assert!(encoded.contains("process.0.action.0.target_process=1"));
 
     let err = MantleArtifact::decode("not-mta\n").expect_err("bad magic should fail");
@@ -100,6 +103,57 @@ fn validate_rejects_invalid_source_language_identifier() {
 }
 
 #[test]
+fn validate_accepts_structured_state_value_labels() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].state_values = vec![
+        "MainState{phase:Idle}".to_string(),
+        "MainState{phase:Handled}".to_string(),
+    ];
+    artifact.processes[0].next_state = NextState::Value(StateId::new(1));
+
+    artifact
+        .validate()
+        .expect("structured state labels should remain display metadata");
+
+    let decoded =
+        MantleArtifact::decode(&artifact.encode()).expect("structured labels should decode");
+    assert_eq!(
+        decoded.processes[0].state_values,
+        artifact.processes[0].state_values
+    );
+}
+
+#[test]
+fn validate_state_value_label_defines_artifact_metadata_boundary() {
+    validate_state_value_label("MainState{phase:Idle}")
+        .expect("structured state labels should be valid artifact metadata");
+
+    for (value, expected) in [
+        (
+            "",
+            "state values must be non-empty and contain no control characters",
+        ),
+        (
+            "MainState\n",
+            "state values must be non-empty and contain no control characters",
+        ),
+    ] {
+        let err = validate_state_value_label(value).expect_err("invalid label should fail");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+
+    let oversized = "a".repeat(MAX_FIELD_VALUE_BYTES + 1);
+    let err = validate_state_value_label(&oversized).expect_err("oversized label should fail");
+    assert!(err
+        .to_string()
+        .contains("state value exceeds maximum length"));
+}
+
+#[test]
 fn validate_rejects_encoded_artifacts_above_size_limit() {
     let mut artifact = valid_artifact();
     let text = "a".repeat(MAX_FIELD_VALUE_BYTES);
@@ -171,6 +225,20 @@ fn validate_rejects_unknown_entry_process_id() {
     assert!(err
         .to_string()
         .contains("entry process id 99 is not defined"));
+}
+
+#[test]
+fn validate_rejects_unknown_next_state_value_id() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].next_state = NextState::Value(StateId::new(99));
+
+    let err = artifact
+        .validate()
+        .expect_err("unknown next state value should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker next_state id 99 is not a valid state value"));
 }
 
 #[test]
@@ -320,7 +388,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 step_result: StepResult::Stop,
-                final_state: StateId::new(0),
+                next_state: NextState::Current,
                 actions: vec![
                     ArtifactAction::Spawn {
                         target: ProcessId::new(1),
@@ -340,7 +408,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 step_result: StepResult::Stop,
-                final_state: StateId::new(1),
+                next_state: NextState::Value(StateId::new(1)),
                 actions: vec![ArtifactAction::Emit {
                     output: OutputId::new(0),
                 }],

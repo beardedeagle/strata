@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use mantle_artifact::{
-    Error, MantleArtifact, MessageId, OutputId, ProcessId, Result, StateId, StepResult,
+    Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId, Result, StateId, StepResult,
 };
 
 use crate::event::{
@@ -272,14 +272,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
         let step = ActiveStep::new(self.program, &self.processes[process_index], message)?;
         let definition = self.program.process(step.process_id)?;
-        let final_state = definition.final_state;
+        let next_state = definition.next_state;
         let step_result = definition.step_result;
 
         for &action in &definition.actions {
             self.execute_action(&step, action)?;
         }
 
-        self.apply_final_state(process_index, &step, final_state)?;
+        self.apply_next_state(process_index, &step, next_state)?;
         self.record_step_completion(process_index, &step, step_result)
     }
 
@@ -316,12 +316,16 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         Ok(())
     }
 
-    fn apply_final_state(
+    fn apply_next_state(
         &mut self,
         process_index: usize,
         step: &ActiveStep,
-        final_state: StateId,
+        next_state: NextState,
     ) -> Result<()> {
+        let final_state = match next_state {
+            NextState::Current => self.processes[process_index].state,
+            NextState::Value(state) => state,
+        };
         let previous_state = self.processes[process_index].state;
         if previous_state == final_state {
             return Ok(());
