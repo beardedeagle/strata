@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 fn main() {
     if let Err(err) = strata::cli::run_strata_from_env() {
         eprintln!("strata: error: {err}");
