@@ -705,6 +705,20 @@ fn rejects_semicolons_after_braced_type_declarations() {
 }
 
 #[test]
+fn rejects_empty_braced_record_declarations() {
+    let source = HELLO.replace("record MainState;", "record MainState {}");
+
+    let err = parse_source(&source).expect_err("empty braced records should be rejected");
+
+    assert!(
+        err.to_string().contains(
+            "fieldless records use `record MainState;`; braced records must declare at least one field"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_mutable_record_field_declarations() {
     let source = HELLO.replace(
         "record MainState;",

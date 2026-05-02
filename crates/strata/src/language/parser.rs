@@ -73,17 +73,19 @@ impl Parser {
             });
         }
         if self.consume_symbol('{') {
-            let fields = self.parse_record_fields()?;
+            let fields = self.parse_record_fields(&name)?;
             self.reject_braced_type_semicolon("record")?;
             return Ok(Record { name, fields });
         }
         Err(self.error_here("expected ';' or record field body"))
     }
 
-    fn parse_record_fields(&mut self) -> Result<Vec<RecordField>> {
+    fn parse_record_fields(&mut self, record_name: &Identifier) -> Result<Vec<RecordField>> {
         let mut fields = Vec::new();
-        if self.consume_symbol('}') {
-            return Ok(fields);
+        if self.peek_symbol('}') {
+            return Err(self.error_here(format!(
+                "fieldless records use `record {record_name};`; braced records must declare at least one field"
+            )));
         }
         loop {
             if self.peek_keyword("mut") || self.peek_keyword("var") {
