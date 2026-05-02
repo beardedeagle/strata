@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
     validate_state_value_label, Error, Result, StateId, MAX_STATE_VALUES_PER_PROCESS,
@@ -96,7 +96,7 @@ impl<'module> StateSpace<'module> {
         let enum_decl = semantic_index.enum_decl(self.module, expected_type)?;
         let ValueExpr::Identifier(name) = value else {
             return Err(Error::new(format!(
-                "record value is not a variant of enum {}",
+                "expected enum variant identifier for enum {}",
                 enum_decl.name
             )));
         };
@@ -145,6 +145,11 @@ impl<'module> StateSpace<'module> {
             )));
         }
 
+        let declared_fields = record
+            .fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<BTreeSet<_>>();
         let mut provided = BTreeMap::new();
         for field in &value.fields {
             if provided.insert(field.name.as_str(), &field.value).is_some() {
@@ -153,11 +158,7 @@ impl<'module> StateSpace<'module> {
                     record.name, field.name
                 )));
             }
-            if !record
-                .fields
-                .iter()
-                .any(|declared| declared.name == field.name)
-            {
+            if !declared_fields.contains(field.name.as_str()) {
                 return Err(Error::new(format!(
                     "record value {} declares unknown field {}",
                     record.name, field.name

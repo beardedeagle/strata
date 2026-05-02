@@ -821,6 +821,15 @@ fn rejects_incomplete_or_invalid_record_values() {
                 .replace("return MainState;", "return MainState { phase: Wrong };"),
             "value Wrong is not a variant of enum Phase",
         ),
+        (
+            HELLO
+                .replace(
+                    "record MainState;",
+                    "enum Phase { Idle }\nrecord MainState { phase: Phase }",
+                )
+                .replace("return MainState;", "return MainState { phase: Phase {} };"),
+            "expected enum variant identifier for enum Phase",
+        ),
     ] {
         let err = check_source(&source).expect_err("invalid record value should be rejected");
 

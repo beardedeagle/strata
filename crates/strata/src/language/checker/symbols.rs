@@ -66,12 +66,6 @@ fn validate_record_fields(
 ) -> Result<()> {
     let mut field_names = BTreeMap::new();
     for field in &record.fields {
-        if matches!(field.name.as_str(), "mut" | "var") {
-            return Err(Error::new(format!(
-                "record {} field {} uses a reserved mutable binding keyword",
-                record.name, field.name
-            )));
-        }
         let field_symbol = symbols
             .resolve(field.name.as_str())
             .ok_or_else(|| Error::new(format!("field {} is not interned", field.name)))?;
