@@ -409,6 +409,17 @@ fn rejects_state_value_count_above_artifact_limit_during_checking() {
 }
 
 #[test]
+fn rejects_empty_state_enum_with_enum_diagnostic() {
+    let source = HELLO.replace("record MainState;", "record Marker;\nenum MainState {};");
+
+    let err = check_source(&source).expect_err("empty state enum should fail");
+
+    assert!(err
+        .to_string()
+        .contains("enum MainState must declare at least one variant"));
+}
+
+#[test]
 fn preserves_undeclared_state_type_diagnostics() {
     for (source, expected) in [
         (

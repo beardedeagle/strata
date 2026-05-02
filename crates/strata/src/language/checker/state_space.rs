@@ -6,8 +6,7 @@ use mantle_artifact::{
 
 use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
 use super::symbols::SemanticIndex;
-
-const STEP_STATE_PARAMETER_NAME: &str = "state";
+use super::STEP_STATE_PARAMETER_NAME;
 
 pub(super) struct StateSpace<'module> {
     module: &'module Module,
@@ -37,6 +36,12 @@ impl<'module> StateSpace<'module> {
         }
 
         let enum_decl = semantic_index.enum_decl(module, &process.state_type)?;
+        if enum_decl.variants.is_empty() {
+            return Err(Error::new(format!(
+                "enum {} must declare at least one variant",
+                enum_decl.name
+            )));
+        }
         let values = enum_decl.variants.iter().map(ToString::to_string).collect();
         Ok(Self {
             module,
