@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ArtifactAction, Error, MantleArtifact, Result, ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES,
+    ArtifactAction, Error, MantleArtifact, NextState, Result, ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES,
     MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
 };
 
@@ -170,9 +170,16 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
         )?;
         add_field_bytes(
             &mut encoded_len,
-            &format!("{prefix}.final_state"),
-            &process.final_state.as_u32().to_string(),
+            &format!("{prefix}.next_state"),
+            process.next_state.kind_str(),
         )?;
+        if let NextState::Value(state) = process.next_state {
+            add_field_bytes(
+                &mut encoded_len,
+                &format!("{prefix}.next_state_value"),
+                &state.as_u32().to_string(),
+            )?;
+        }
         add_field_bytes(
             &mut encoded_len,
             &format!("{prefix}.action_count"),

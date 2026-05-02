@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
-    write_artifact, ArtifactAction, ArtifactProcess, MantleArtifact, MessageId, OutputId,
-    ProcessId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION, STRATA_SOURCE_LANGUAGE,
+    write_artifact, ArtifactAction, ArtifactProcess, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
+    STRATA_SOURCE_LANGUAGE,
 };
 
 use super::*;
@@ -217,6 +218,43 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
 }
 
 #[test]
+fn in_memory_host_preserves_current_next_state() {
+    let mut artifact = valid_artifact();
+    artifact.entry_process = ProcessId::new(0);
+    artifact.entry_message = MessageId::new(0);
+    artifact.processes = vec![ArtifactProcess {
+        debug_name: "Worker".to_string(),
+        state_type: "WorkerState".to_string(),
+        state_values: vec!["Idle".to_string(), "Handled".to_string()],
+        message_type: "WorkerMsg".to_string(),
+        message_variants: vec!["Ping".to_string()],
+        mailbox_bound: 1,
+        init_state: StateId::new(1),
+        step_result: StepResult::Stop,
+        next_state: NextState::Current,
+        actions: vec![ArtifactAction::Emit {
+            output: OutputId::new(0),
+        }],
+    }];
+    let mut host = InMemoryRuntimeHost::default();
+
+    let report = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect("current next state should preserve runtime state");
+
+    assert!(report
+        .processes
+        .iter()
+        .any(|process| process.process == "Worker" && process.state == "Handled"));
+    assert!(
+        !host
+            .events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::StateUpdated { .. })),
+        "preserving current state must not emit a state update"
+    );
+}
+
+#[test]
 fn in_memory_host_rejects_trace_limit_exhaustion() {
     let artifact = valid_artifact();
     let mut host = InMemoryRuntimeHost::default();
@@ -268,7 +306,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 step_result: StepResult::Stop,
-                final_state: StateId::new(0),
+                next_state: NextState::Current,
                 actions: vec![
                     ArtifactAction::Spawn {
                         target: ProcessId::new(1),
@@ -288,7 +326,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 step_result: StepResult::Stop,
-                final_state: StateId::new(1),
+                next_state: NextState::Value(StateId::new(1)),
                 actions: vec![ArtifactAction::Emit {
                     output: OutputId::new(0),
                 }],
@@ -316,7 +354,7 @@ fn looping_artifact() -> MantleArtifact {
             mailbox_bound: 1,
             init_state: StateId::new(0),
             step_result: StepResult::Continue,
-            final_state: StateId::new(0),
+            next_state: NextState::Current,
             actions: vec![ArtifactAction::Send {
                 target: ProcessId::new(0),
                 message: MessageId::new(0),

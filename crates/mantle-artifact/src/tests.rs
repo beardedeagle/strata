@@ -11,6 +11,9 @@ fn artifact_round_trips_and_validates_magic() {
 
     assert_eq!(decoded, artifact);
     assert!(encoded.contains("entry_process=0"));
+    assert!(encoded.contains("process.0.next_state=current"));
+    assert!(encoded.contains("process.1.next_state=value"));
+    assert!(encoded.contains("process.1.next_state_value=1"));
     assert!(encoded.contains("process.0.action.0.target_process=1"));
 
     let err = MantleArtifact::decode("not-mta\n").expect_err("bad magic should fail");
@@ -106,7 +109,7 @@ fn validate_accepts_structured_state_value_labels() {
         "MainState{phase:Idle}".to_string(),
         "MainState{phase:Handled}".to_string(),
     ];
-    artifact.processes[0].final_state = StateId::new(1);
+    artifact.processes[0].next_state = NextState::Value(StateId::new(1));
 
     artifact
         .validate()
@@ -222,6 +225,20 @@ fn validate_rejects_unknown_entry_process_id() {
     assert!(err
         .to_string()
         .contains("entry process id 99 is not defined"));
+}
+
+#[test]
+fn validate_rejects_unknown_next_state_value_id() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].next_state = NextState::Value(StateId::new(99));
+
+    let err = artifact
+        .validate()
+        .expect_err("unknown next state value should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker next_state id 99 is not a valid state value"));
 }
 
 #[test]
@@ -371,7 +388,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 step_result: StepResult::Stop,
-                final_state: StateId::new(0),
+                next_state: NextState::Current,
                 actions: vec![
                     ArtifactAction::Spawn {
                         target: ProcessId::new(1),
@@ -391,7 +408,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 step_result: StepResult::Stop,
-                final_state: StateId::new(1),
+                next_state: NextState::Value(StateId::new(1)),
                 actions: vec![ArtifactAction::Emit {
                     output: OutputId::new(0),
                 }],

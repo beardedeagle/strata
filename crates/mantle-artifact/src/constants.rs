@@ -1,6 +1,6 @@
 pub const ARTIFACT_MAGIC: &str = "MTA0";
 pub const ARTIFACT_FORMAT: &str = "mantle-target-artifact";
-pub const ARTIFACT_VERSION: &str = "2";
+pub const ARTIFACT_VERSION: &str = "3";
 pub const STRATA_SOURCE_LANGUAGE: &str = "strata";
 pub const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 pub const MAX_ARTIFACT_FIELDS: usize = 16_384;

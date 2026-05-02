@@ -1,9 +1,9 @@
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
-    ArtifactAction, MessageId, OutputId, ProcessId, StateId, StepResult, MAX_ACTIONS_PER_PROCESS,
-    MAX_FIELD_VALUE_BYTES, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
-    MAX_STATE_VALUES_PER_PROCESS,
+    ArtifactAction, MessageId, NextState, OutputId, ProcessId, StateId, StepResult,
+    MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
 };
 
 const HELLO: &str = r#"
@@ -75,6 +75,7 @@ fn parses_and_checks_hello() {
     assert_eq!(checked.outputs, ["hello from Strata"]);
     assert_eq!(checked.processes.len(), 1);
     assert_eq!(checked.processes[0].step_result, StepResult::Stop);
+    assert_eq!(checked.processes[0].next_state, NextState::Current);
     assert_eq!(
         checked.processes[0].actions,
         [ArtifactAction::Emit {
@@ -147,7 +148,10 @@ proc Main mailbox bounded(1) {
 
     assert_eq!(checked.processes[0].state_values, ["ready"]);
     assert_eq!(checked.processes[0].init_state, StateId::new(0));
-    assert_eq!(checked.processes[0].final_state, StateId::new(0));
+    assert_eq!(
+        checked.processes[0].next_state,
+        NextState::Value(StateId::new(0))
+    );
 }
 
 #[test]
@@ -214,7 +218,7 @@ fn parses_and_checks_actor_ping() {
         .find(|process| process.debug_name == "Worker")
         .expect("Worker should be checked");
     assert_eq!(worker.init_state, StateId::new(0));
-    assert_eq!(worker.final_state, StateId::new(1));
+    assert_eq!(worker.next_state, NextState::Value(StateId::new(1)));
 }
 
 #[test]
@@ -670,7 +674,10 @@ proc Main mailbox bounded(1) {
         ["MainState{phase:Idle}", "MainState{phase:Handled}"]
     );
     assert_eq!(checked.processes[0].init_state, StateId::new(0));
-    assert_eq!(checked.processes[0].final_state, StateId::new(1));
+    assert_eq!(
+        checked.processes[0].next_state,
+        NextState::Value(StateId::new(1))
+    );
 }
 
 #[test]

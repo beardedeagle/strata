@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use mantle_artifact::{
     source_hash_fnv1a64, ArtifactAction, ArtifactProcess, Error, MantleArtifact, MessageId,
-    ProcessId, Result, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
+    NextState, ProcessId, Result, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
     MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
     MAX_PROCESS_COUNT, STRATA_SOURCE_LANGUAGE,
 };
@@ -134,13 +134,12 @@ fn check_process(
 
     let mut state_space = StateSpace::new(module, semantic_index, process)?;
     let init_state = check_init(semantic_index, process, &mut state_space)?;
-    let (step_result, final_state, actions) = check_step(
+    let (step_result, next_state, actions) = check_step(
         module,
         process,
         process_id,
         semantic_index,
         &mut state_space,
-        init_state,
         outputs,
     )?;
     let state_values = state_space.into_values()?;
@@ -154,7 +153,7 @@ fn check_process(
         mailbox_bound: process.mailbox_bound,
         init_state,
         step_result,
-        final_state,
+        next_state,
         actions,
     })
 }
@@ -206,9 +205,8 @@ fn check_step(
     process_id: ProcessId,
     semantic_index: &SemanticIndex,
     state_space: &mut StateSpace<'_>,
-    init_state: StateId,
     outputs: &mut OutputPool,
-) -> Result<(StepResult, StateId, Vec<ArtifactAction>)> {
+) -> Result<(StepResult, NextState, Vec<ArtifactAction>)> {
     let step = &process.step;
     if step.params.len() != 2 {
         return Err(Error::new("step must declare state and msg parameters"));
@@ -301,16 +299,16 @@ fn check_step(
             ))
         }
     };
-    let final_state = if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
+    let next_state = if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
     {
-        init_state
+        NextState::Current
     } else {
-        state_space.resolve_state_value(semantic_index, state_arg)?
+        NextState::Value(state_space.resolve_state_value(semantic_index, state_arg)?)
     };
 
     reject_unsupported_self_send(process, process_id, &actions)?;
 
-    Ok((step_result, final_state, actions))
+    Ok((step_result, next_state, actions))
 }
 
 fn validate_count(field: &str, value: usize, min: usize, max: usize) -> Result<()> {

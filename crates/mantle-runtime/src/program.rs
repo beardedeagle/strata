@@ -1,6 +1,6 @@
 use mantle_artifact::{
-    ArtifactAction, Error, MantleArtifact, MessageId, OutputId, ProcessId, Result, StateId,
-    StepResult,
+    ArtifactAction, Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId, Result,
+    StateId, StepResult,
 };
 
 #[derive(Debug, Clone)]
@@ -29,7 +29,7 @@ impl LoadedProgram {
                     mailbox_bound: process.mailbox_bound,
                     init_state: process.init_state,
                     step_result: process.step_result,
-                    final_state: process.final_state,
+                    next_state: process.next_state,
                     actions: process
                         .actions
                         .iter()
@@ -109,7 +109,7 @@ pub(crate) struct LoadedProcess {
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
     pub(crate) step_result: StepResult,
-    pub(crate) final_state: StateId,
+    pub(crate) next_state: NextState,
     pub(crate) actions: Vec<LoadedAction>,
 }
 
