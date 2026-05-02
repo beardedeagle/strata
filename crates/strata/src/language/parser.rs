@@ -404,9 +404,11 @@ impl Parser {
     }
 
     fn expect_keyword(&mut self, keyword: &str) -> Result<()> {
-        match self.next_kind() {
-            TokenKind::Ident(value) if value == keyword => Ok(()),
-            _ => Err(self.error_previous(format!("expected keyword {keyword}"))),
+        if self.peek_keyword(keyword) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(self.error_here(format!("expected keyword {keyword}")))
         }
     }
 
@@ -415,9 +417,12 @@ impl Parser {
     }
 
     fn expect_ident(&mut self) -> Result<String> {
-        match self.next_kind() {
-            TokenKind::Ident(value) => Ok(value),
-            _ => Err(self.error_previous("expected identifier")),
+        if let TokenKind::Ident(value) = self.peek_kind() {
+            let value = value.clone();
+            self.advance();
+            Ok(value)
+        } else {
+            Err(self.error_here("expected identifier"))
         }
     }
 
@@ -426,30 +431,41 @@ impl Parser {
     }
 
     fn expect_number(&mut self) -> Result<String> {
-        match self.next_kind() {
-            TokenKind::Number(value) => Ok(value),
-            _ => Err(self.error_previous("expected number")),
+        if let TokenKind::Number(value) = self.peek_kind() {
+            let value = value.clone();
+            self.advance();
+            Ok(value)
+        } else {
+            Err(self.error_here("expected number"))
         }
     }
 
     fn expect_string_literal(&mut self) -> Result<String> {
-        match self.next_kind() {
-            TokenKind::StringLiteral(value) => Ok(value),
-            _ => Err(self.error_previous("expected string literal")),
+        if let TokenKind::StringLiteral(value) = self.peek_kind() {
+            let value = value.clone();
+            self.advance();
+            Ok(value)
+        } else {
+            Err(self.error_here("expected string literal"))
         }
     }
 
     fn expect_at_ident(&mut self) -> Result<String> {
-        match self.next_kind() {
-            TokenKind::AtIdent(value) => Ok(value),
-            _ => Err(self.error_previous("expected @identifier")),
+        if let TokenKind::AtIdent(value) = self.peek_kind() {
+            let value = value.clone();
+            self.advance();
+            Ok(value)
+        } else {
+            Err(self.error_here("expected @identifier"))
         }
     }
 
     fn expect_arrow(&mut self) -> Result<()> {
-        match self.next_kind() {
-            TokenKind::Arrow => Ok(()),
-            _ => Err(self.error_previous("expected ->")),
+        if matches!(self.peek_kind(), TokenKind::Arrow) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(self.error_here("expected ->"))
         }
     }
 
@@ -470,12 +486,10 @@ impl Parser {
         }
     }
 
-    fn next_kind(&mut self) -> TokenKind {
-        let kind = self.peek_kind().clone();
-        if !matches!(kind, TokenKind::Eof) {
+    fn advance(&mut self) {
+        if !self.at_eof() {
             self.index += 1;
         }
-        kind
     }
 
     fn peek_kind(&self) -> &TokenKind {

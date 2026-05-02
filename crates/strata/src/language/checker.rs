@@ -109,12 +109,6 @@ fn check_process(
     semantic_index: &SemanticIndex,
     outputs: &mut OutputPool,
 ) -> Result<ArtifactProcess> {
-    if process.mailbox_bound == 0 {
-        return Err(Error::new(format!(
-            "process {} mailbox bound must be greater than zero",
-            process.name
-        )));
-    }
     validate_count(
         &format!("process {} mailbox_bound", process.name),
         process.mailbox_bound,

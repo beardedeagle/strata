@@ -369,6 +369,18 @@ fn rejects_mailbox_bound_above_artifact_limit_during_checking() {
 }
 
 #[test]
+fn rejects_zero_mailbox_bound_with_shared_count_diagnostic() {
+    let source = HELLO.replace("mailbox bounded(1)", "mailbox bounded(0)");
+    let module = parse_source(&source).expect("zero-mailbox-bound source should parse");
+
+    let err = check_module(module).expect_err("zero mailbox bound should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Main mailbox_bound must be greater than zero"));
+}
+
+#[test]
 fn rejects_state_value_count_above_artifact_limit_during_checking() {
     let state_values = (0..=MAX_STATE_VALUES_PER_PROCESS)
         .map(|index| format!("State{index}"))
