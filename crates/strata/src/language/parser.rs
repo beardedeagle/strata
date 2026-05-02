@@ -412,7 +412,7 @@ impl Parser {
 
     fn parse_value_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
         if depth > MAX_VALUE_NESTING {
-            return Err(Error::new(format!(
+            return Err(self.error_here(format!(
                 "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
             )));
         }

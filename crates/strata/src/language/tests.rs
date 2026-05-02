@@ -587,9 +587,12 @@ fn rejects_excessive_value_nesting_while_parsing() {
 
     let err = parse_source(&source).expect_err("excessive value nesting should fail");
 
-    assert!(err
-        .to_string()
-        .contains("value nesting exceeds maximum depth"));
+    let message = err.to_string();
+    assert!(message.contains("value nesting exceeds maximum depth"));
+    assert!(
+        message.contains(" at byte "),
+        "expected byte-offset context in diagnostic: {message}"
+    );
 }
 
 #[test]
