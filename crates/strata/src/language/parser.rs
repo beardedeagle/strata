@@ -74,7 +74,7 @@ impl Parser {
         }
         if self.consume_symbol('{') {
             let fields = self.parse_record_fields()?;
-            self.consume_symbol(';');
+            self.reject_braced_type_semicolon("record")?;
             return Ok(Record { name, fields });
         }
         Err(self.error_here("expected ';' or record field body"))
@@ -113,7 +113,7 @@ impl Parser {
         self.expect_symbol('{')?;
         let mut variants = Vec::new();
         if self.consume_symbol('}') {
-            self.expect_symbol(';')?;
+            self.reject_braced_type_semicolon("enum")?;
             return Ok(Enum { name, variants });
         }
         loop {
@@ -127,7 +127,7 @@ impl Parser {
             self.expect_symbol('}')?;
             break;
         }
-        self.expect_symbol(';')?;
+        self.reject_braced_type_semicolon("enum")?;
         Ok(Enum { name, variants })
     }
 
@@ -528,6 +528,19 @@ impl Parser {
         } else {
             false
         }
+    }
+
+    fn reject_braced_type_semicolon(&mut self, declaration_kind: &str) -> Result<()> {
+        if self.peek_symbol(';') {
+            return Err(self.error_here(format!(
+                "braced {declaration_kind} declarations are terminated by '}}', not ';'"
+            )));
+        }
+        Ok(())
+    }
+
+    fn peek_symbol(&self, symbol: char) -> bool {
+        matches!(self.peek_kind(), TokenKind::Symbol(value) if *value == symbol)
     }
 
     fn advance(&mut self) {

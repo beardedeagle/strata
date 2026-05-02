@@ -1,7 +1,9 @@
 module hello;
 
 record MainState;
-enum MainMsg { Start };
+enum MainMsg {
+    Start,
+}
 
 proc Main mailbox bounded(1) {
     type State = MainState;

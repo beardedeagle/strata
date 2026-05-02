@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use mantle_artifact::{
-    Error, Result, StateId, MAX_FIELD_VALUE_BYTES, MAX_STATE_VALUES_PER_PROCESS,
+    validate_state_value_label, Error, Result, StateId, MAX_STATE_VALUES_PER_PROCESS,
 };
 
 use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
@@ -199,23 +199,6 @@ fn reject_reserved_state_values(process_name: &Identifier, state_values: &[Strin
             "process {} state value {} conflicts with reserved step state parameter name",
             process_name, STEP_STATE_PARAMETER_NAME
         )));
-    }
-    Ok(())
-}
-
-fn validate_state_value_label(value: &str) -> Result<()> {
-    if value.is_empty() {
-        return Err(Error::new("state value must not be empty"));
-    }
-    if value.len() > MAX_FIELD_VALUE_BYTES {
-        return Err(Error::new(format!(
-            "state value exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
-        )));
-    }
-    if value.chars().any(char::is_control) {
-        return Err(Error::new(
-            "state value must not contain control characters",
-        ));
     }
     Ok(())
 }

@@ -121,6 +121,36 @@ fn validate_accepts_structured_state_value_labels() {
 }
 
 #[test]
+fn validate_state_value_label_defines_artifact_metadata_boundary() {
+    validate_state_value_label("MainState{phase:Idle}")
+        .expect("structured state labels should be valid artifact metadata");
+
+    for (value, expected) in [
+        (
+            "",
+            "state values must be non-empty and contain no control characters",
+        ),
+        (
+            "MainState\n",
+            "state values must be non-empty and contain no control characters",
+        ),
+    ] {
+        let err = validate_state_value_label(value).expect_err("invalid label should fail");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+
+    let oversized = "a".repeat(MAX_FIELD_VALUE_BYTES + 1);
+    let err = validate_state_value_label(&oversized).expect_err("oversized label should fail");
+    assert!(err
+        .to_string()
+        .contains("state value exceeds maximum length"));
+}
+
+#[test]
 fn validate_rejects_encoded_artifacts_above_size_limit() {
     let mut artifact = valid_artifact();
     let text = "a".repeat(MAX_FIELD_VALUE_BYTES);

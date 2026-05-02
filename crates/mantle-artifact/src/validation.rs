@@ -40,7 +40,7 @@ pub(crate) fn validate_unique_state_value_list(values: &[String]) -> Result<()> 
     }
     let mut seen = BTreeSet::new();
     for value in values {
-        validate_state_value(value)?;
+        validate_state_value_label(value)?;
         if !seen.insert(value.as_str()) {
             return Err(Error::new(format!("duplicate state value {value}")));
         }
@@ -48,7 +48,8 @@ pub(crate) fn validate_unique_state_value_list(values: &[String]) -> Result<()> 
     Ok(())
 }
 
-fn validate_state_value(value: &str) -> Result<()> {
+/// Validates display metadata labels used for artifact state values.
+pub fn validate_state_value_label(value: &str) -> Result<()> {
     if value.len() > MAX_FIELD_VALUE_BYTES {
         return Err(Error::new(format!(
             "state value exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
