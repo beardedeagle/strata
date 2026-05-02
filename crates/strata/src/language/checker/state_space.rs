@@ -117,14 +117,18 @@ impl<'module> StateSpace<'module> {
         value: &ValueExpr,
         depth: usize,
     ) -> Result<String> {
+        if let ValueExpr::Record(value) = value {
+            if value.fields.is_empty() {
+                return Err(Error::new(format!(
+                    "fieldless record values use `{}`; braced record values must declare at least one field",
+                    value.name
+                )));
+            }
+        }
+
         if record.fields.is_empty() {
             return match value {
                 ValueExpr::Identifier(name) if name == &record.name => Ok(record.name.to_string()),
-                ValueExpr::Record(value)
-                    if value.name == record.name && value.fields.is_empty() =>
-                {
-                    Ok(record.name.to_string())
-                }
                 _ => Err(Error::new(format!(
                     "provided value is not a value of record {}",
                     record.name
@@ -259,6 +263,28 @@ mod tests {
         assert!(err
             .to_string()
             .contains("value nesting exceeds maximum depth"));
+    }
+
+    #[test]
+    fn state_space_rejects_empty_braced_record_value_ast() {
+        let module = test_module();
+        let semantic_index =
+            SemanticIndex::build(&module).expect("test module should index successfully");
+        let process = &module.processes[0];
+        let mut state_space =
+            StateSpace::new(&module, &semantic_index, process).expect("state space should build");
+        let value = ValueExpr::Record(RecordValue {
+            name: ident("MainState"),
+            fields: Vec::new(),
+        });
+
+        let err = state_space
+            .resolve_state_value(&semantic_index, &value)
+            .expect_err("empty braced record value AST should fail");
+
+        assert!(err.to_string().contains(
+            "fieldless record values use `MainState`; braced record values must declare at least one field"
+        ));
     }
 
     fn test_module() -> Module {

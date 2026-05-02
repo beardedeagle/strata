@@ -798,16 +798,30 @@ fn rejects_assignment_syntax_in_record_values() {
 }
 
 #[test]
+fn rejects_empty_braced_record_values() {
+    let source = HELLO.replace("return MainState;", "return MainState {};");
+
+    let err = parse_source(&source).expect_err("empty braced record values should be rejected");
+
+    assert!(
+        err.to_string().contains(
+            "fieldless record values use `MainState`; braced record values must declare at least one field"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_incomplete_or_invalid_record_values() {
     for (source, expected) in [
         (
             HELLO
                 .replace(
                     "record MainState;",
-                    "enum Phase { Idle }\nrecord MainState { phase: Phase }",
+                    "enum Phase { Idle }\nenum Mode { Cold }\nrecord MainState { phase: Phase, mode: Mode }",
                 )
-                .replace("return MainState;", "return MainState {};"),
-            "record value MainState is missing field phase",
+                .replace("return MainState;", "return MainState { phase: Idle };"),
+            "record value MainState is missing field mode",
         ),
         (
             HELLO
@@ -848,7 +862,10 @@ fn rejects_incomplete_or_invalid_record_values() {
                     "record MainState;",
                     "enum Phase { Idle }\nrecord MainState { phase: Phase }",
                 )
-                .replace("return MainState;", "return MainState { phase: Phase {} };"),
+                .replace(
+                    "return MainState;",
+                    "return MainState { phase: Other { value: Idle } };",
+                ),
             "expected enum variant identifier for enum Phase",
         ),
     ] {

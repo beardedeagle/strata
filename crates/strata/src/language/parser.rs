@@ -422,14 +422,20 @@ impl Parser {
         if !self.consume_symbol('{') {
             return Ok(ValueExpr::Identifier(name));
         }
-        let fields = self.parse_record_value_fields(depth)?;
+        let fields = self.parse_record_value_fields(&name, depth)?;
         Ok(ValueExpr::Record(RecordValue { name, fields }))
     }
 
-    fn parse_record_value_fields(&mut self, depth: usize) -> Result<Vec<RecordValueField>> {
+    fn parse_record_value_fields(
+        &mut self,
+        record_name: &Identifier,
+        depth: usize,
+    ) -> Result<Vec<RecordValueField>> {
         let mut fields = Vec::new();
-        if self.consume_symbol('}') {
-            return Ok(fields);
+        if self.peek_symbol('}') {
+            return Err(self.error_here(format!(
+                "fieldless record values use `{record_name}`; braced record values must declare at least one field"
+            )));
         }
         loop {
             if self.peek_keyword("mut") || self.peek_keyword("var") {
