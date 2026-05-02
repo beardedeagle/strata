@@ -10,7 +10,8 @@ use mantle_artifact::Result;
 
 pub use ast::{
     Determinism, Effect, Enum, Function, FunctionBody, Identifier, Module, OutputLiteral, Param,
-    Process, Record, ReturnExpr, Statement, TypeRef,
+    Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
+    ValueExpr,
 };
 pub use checker::{check_module, CheckedProgram};
 pub use parser::parse_source;

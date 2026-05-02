@@ -2,7 +2,8 @@ use mantle_artifact::{Error, Result};
 
 use super::ast::{
     Determinism, Effect, Enum, Function, FunctionBody, Identifier, Module, OutputLiteral, Param,
-    Process, Record, ReturnExpr, Statement, TypeRef,
+    Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
+    ValueExpr,
 };
 use super::lexer::{Lexer, Token, TokenKind};
 use super::{MAX_SOURCE_BYTES, MAX_TYPE_NESTING};
@@ -46,7 +47,9 @@ impl Parser {
             } else if self.peek_keyword("proc") {
                 processes.push(self.parse_process()?);
             } else if self.peek_keyword("security") {
-                self.skip_statement()?;
+                return Err(self.error_here(
+                    "security declarations are not supported in this buildable source slice",
+                ));
             } else {
                 return Err(self.error_here("expected record, enum, or proc declaration"));
             }
@@ -64,14 +67,44 @@ impl Parser {
         self.expect_keyword("record")?;
         let name = self.expect_identifier()?;
         if self.consume_symbol(';') {
-            return Ok(Record { name });
+            return Ok(Record {
+                name,
+                fields: Vec::new(),
+            });
         }
         if self.consume_symbol('{') {
-            self.skip_balanced_body('{', '}')?;
-            self.expect_symbol(';')?;
-            return Ok(Record { name });
+            let fields = self.parse_record_fields()?;
+            self.consume_symbol(';');
+            return Ok(Record { name, fields });
         }
         Err(self.error_here("expected ';' or record field body"))
+    }
+
+    fn parse_record_fields(&mut self) -> Result<Vec<RecordField>> {
+        let mut fields = Vec::new();
+        if self.consume_symbol('}') {
+            return Ok(fields);
+        }
+        loop {
+            if self.peek_keyword("mut") || self.peek_keyword("var") {
+                return Err(self.error_here(
+                    "record fields are immutable; mutable field declarations are not supported",
+                ));
+            }
+            let name = self.expect_identifier()?;
+            self.expect_symbol(':')?;
+            let ty = self.parse_type()?;
+            fields.push(RecordField { name, ty });
+            if self.consume_symbol(',') {
+                if self.consume_symbol('}') {
+                    break;
+                }
+                continue;
+            }
+            self.expect_symbol('}')?;
+            break;
+        }
+        Ok(fields)
     }
 
     fn parse_enum(&mut self) -> Result<Enum> {
@@ -361,46 +394,57 @@ impl Parser {
     }
 
     fn parse_return_expr(&mut self) -> Result<ReturnExpr> {
-        let name = self.expect_identifier()?;
-        if self.consume_symbol('(') {
-            let arg = self.expect_identifier()?;
+        let value = self.parse_value_expr()?;
+        if let ValueExpr::Identifier(name) = value {
+            if !self.consume_symbol('(') {
+                return Ok(ReturnExpr::Value(ValueExpr::Identifier(name)));
+            }
+            let arg = self.parse_value_expr()?;
             self.expect_symbol(')')?;
             return Ok(ReturnExpr::Call { name, arg });
         }
-        if self.consume_symbol('{') {
-            self.skip_balanced_body('{', '}')?;
-            return Ok(ReturnExpr::Identifier(name));
-        }
-        Ok(ReturnExpr::Identifier(name))
+        Ok(ReturnExpr::Value(value))
     }
 
-    fn skip_statement(&mut self) -> Result<()> {
-        while !self.at_eof() {
-            if self.consume_symbol(';') {
-                return Ok(());
-            }
-            self.index += 1;
+    fn parse_value_expr(&mut self) -> Result<ValueExpr> {
+        let name = self.expect_identifier()?;
+        if !self.consume_symbol('{') {
+            return Ok(ValueExpr::Identifier(name));
         }
-        Err(self.error_here("expected ';'"))
+        let fields = self.parse_record_value_fields()?;
+        Ok(ValueExpr::Record(RecordValue { name, fields }))
     }
 
-    fn skip_balanced_body(&mut self, open: char, close: char) -> Result<()> {
-        let mut depth = 1usize;
-        while !self.at_eof() {
-            if self.consume_symbol(open) {
-                depth += 1;
-                continue;
+    fn parse_record_value_fields(&mut self) -> Result<Vec<RecordValueField>> {
+        let mut fields = Vec::new();
+        if self.consume_symbol('}') {
+            return Ok(fields);
+        }
+        loop {
+            if self.peek_keyword("mut") || self.peek_keyword("var") {
+                return Err(self.error_here(
+                    "record values are immutable; mutable field bindings are not supported",
+                ));
             }
-            if self.consume_symbol(close) {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(());
+            let name = self.expect_identifier()?;
+            if self.consume_symbol('=') {
+                return Err(self.error_previous(
+                    "record value fields use ':'; assignment syntax is not supported",
+                ));
+            }
+            self.expect_symbol(':')?;
+            let value = self.parse_value_expr()?;
+            fields.push(RecordValueField { name, value });
+            if self.consume_symbol(',') {
+                if self.consume_symbol('}') {
+                    break;
                 }
                 continue;
             }
-            self.index += 1;
+            self.expect_symbol('}')?;
+            break;
         }
-        Err(self.error_here("unterminated balanced body"))
+        Ok(fields)
     }
 
     fn expect_keyword(&mut self, keyword: &str) -> Result<()> {

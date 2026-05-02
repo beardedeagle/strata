@@ -1,7 +1,7 @@
 use crate::fields::ArtifactFields;
 use crate::validation::{
     validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
-    validate_source_hash, validate_unique_ident_list,
+    validate_source_hash, validate_unique_ident_list, validate_unique_state_value_list,
 };
 use crate::{
     Error, MessageId, OutputId, ProcessId, Result, StateId, ARTIFACT_FORMAT, ARTIFACT_MAGIC,
@@ -312,7 +312,7 @@ impl ArtifactProcess {
             0,
             MAX_ACTIONS_PER_PROCESS,
         )?;
-        validate_unique_ident_list("state value", &self.state_values)?;
+        validate_unique_state_value_list(&self.state_values)?;
         validate_unique_ident_list("message variant", &self.message_variants)?;
         if self.init_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(

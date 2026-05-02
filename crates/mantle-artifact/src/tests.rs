@@ -100,6 +100,27 @@ fn validate_rejects_invalid_source_language_identifier() {
 }
 
 #[test]
+fn validate_accepts_structured_state_value_labels() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].state_values = vec![
+        "MainState{phase:Idle}".to_string(),
+        "MainState{phase:Handled}".to_string(),
+    ];
+    artifact.processes[0].final_state = StateId::new(1);
+
+    artifact
+        .validate()
+        .expect("structured state labels should remain display metadata");
+
+    let decoded =
+        MantleArtifact::decode(&artifact.encode()).expect("structured labels should decode");
+    assert_eq!(
+        decoded.processes[0].state_values,
+        artifact.processes[0].state_values
+    );
+}
+
+#[test]
 fn validate_rejects_encoded_artifacts_above_size_limit() {
     let mut artifact = valid_artifact();
     let text = "a".repeat(MAX_FIELD_VALUE_BYTES);

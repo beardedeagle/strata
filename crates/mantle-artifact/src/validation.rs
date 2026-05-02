@@ -34,6 +34,34 @@ pub(crate) fn validate_unique_ident_list(label: &str, values: &[String]) -> Resu
     Ok(())
 }
 
+pub(crate) fn validate_unique_state_value_list(values: &[String]) -> Result<()> {
+    if values.is_empty() {
+        return Err(Error::new("state value list must not be empty"));
+    }
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_state_value(value)?;
+        if !seen.insert(value.as_str()) {
+            return Err(Error::new(format!("duplicate state value {value}")));
+        }
+    }
+    Ok(())
+}
+
+fn validate_state_value(value: &str) -> Result<()> {
+    if value.len() > MAX_FIELD_VALUE_BYTES {
+        return Err(Error::new(format!(
+            "state value exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
+        )));
+    }
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return Err(Error::new(
+            "state values must be non-empty and contain no control characters",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_output_text(output: &str) -> Result<()> {
     if output.len() > MAX_FIELD_VALUE_BYTES {
         return Err(Error::new(format!(

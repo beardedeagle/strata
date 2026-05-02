@@ -108,6 +108,8 @@ fn public_ast_constructors_validate_values() {
     assert_eq!(identifier_from_try.as_str(), "Worker");
     assert!(Identifier::new("1Invalid").is_err());
     assert!(Identifier::new("invalid-name").is_err());
+    assert!(Identifier::new("mut").is_err());
+    assert!(Identifier::new("var").is_err());
 
     let output = OutputLiteral::new("hello from Strata").expect("valid output should construct");
     assert_eq!(output.as_str(), "hello from Strata");
@@ -587,6 +589,160 @@ fn rejects_unknown_effect_name() {
     let err = parse_source(&source).expect_err("unknown effect should fail");
 
     assert!(err.to_string().contains("unsupported effect write"));
+}
+
+#[test]
+fn parses_and_checks_immutable_record_state_constructors() {
+    let source = r#"
+module record_state;
+
+enum Phase { Idle, Handled };
+record MainState {
+    phase: Phase,
+}
+enum MainMsg { Start };
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { phase: Idle };
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(MainState { phase: Handled });
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("immutable record state should check");
+
+    assert_eq!(
+        checked.processes[0].state_values,
+        ["MainState{phase:Idle}", "MainState{phase:Handled}"]
+    );
+    assert_eq!(checked.processes[0].init_state, StateId::new(0));
+    assert_eq!(checked.processes[0].final_state, StateId::new(1));
+}
+
+#[test]
+fn rejects_mutable_record_field_declarations() {
+    let source = HELLO.replace(
+        "record MainState;",
+        "enum Phase { Idle };\nrecord MainState { mut phase: Phase };",
+    );
+
+    let err = parse_source(&source).expect_err("mutable record fields should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("record fields are immutable; mutable field declarations are not supported"));
+}
+
+#[test]
+fn rejects_security_declarations_instead_of_erasing_source() {
+    let source = HELLO.replace(
+        "record MainState;",
+        "security mut policy;\nrecord MainState;",
+    );
+
+    let err = parse_source(&source).expect_err("security declarations should not be skipped");
+
+    assert!(err
+        .to_string()
+        .contains("security declarations are not supported"));
+}
+
+#[test]
+fn rejects_mutability_keywords_as_state_values() {
+    for keyword in ["mut", "var"] {
+        let source = r#"
+module reserved_mutability_keyword;
+
+record Marker;
+enum MainState { REPLACE_KEYWORD };
+enum MainMsg { Start };
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return REPLACE_KEYWORD;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(REPLACE_KEYWORD);
+    }
+}
+"#
+        .replace("REPLACE_KEYWORD", keyword);
+
+        let err = parse_source(&source).expect_err("mutability keyword should be reserved");
+
+        assert!(
+            err.to_string()
+                .contains(&format!("identifier {keyword:?} is reserved")),
+            "unexpected error for {keyword}: {err}"
+        );
+    }
+}
+
+#[test]
+fn rejects_assignment_syntax_in_record_values() {
+    let source = HELLO
+        .replace(
+            "record MainState;",
+            "enum Phase { Idle };\nrecord MainState { phase: Phase };",
+        )
+        .replace("return MainState;", "return MainState { phase = Idle };");
+
+    let err = parse_source(&source).expect_err("record value assignment should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("record value fields use ':'; assignment syntax is not supported"));
+}
+
+#[test]
+fn rejects_incomplete_or_invalid_record_values() {
+    for (source, expected) in [
+        (
+            HELLO
+                .replace("record MainState;", "enum Phase { Idle };\nrecord MainState { phase: Phase };")
+                .replace("return MainState;", "return MainState {};"),
+            "record value MainState is missing field phase",
+        ),
+        (
+            HELLO
+                .replace("record MainState;", "enum Phase { Idle };\nrecord MainState { phase: Phase };")
+                .replace("return MainState;", "return MainState { phase: Idle, extra: Idle };"),
+            "record value MainState declares unknown field extra",
+        ),
+        (
+            HELLO
+                .replace("record MainState;", "enum Phase { Idle };\nrecord MainState { phase: Phase };")
+                .replace("return MainState;", "return MainState { phase: Idle, phase: Idle };"),
+            "record value MainState duplicates field phase",
+        ),
+        (
+            HELLO
+                .replace(
+                    "record MainState;",
+                    "enum Phase { Idle };\nenum Other { Wrong };\nrecord MainState { phase: Phase };",
+                )
+                .replace("return MainState;", "return MainState { phase: Wrong };"),
+            "value Wrong is not a variant of enum Phase",
+        ),
+    ] {
+        let err = check_source(&source).expect_err("invalid record value should be rejected");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
 }
 
 #[test]
