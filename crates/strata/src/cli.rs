@@ -234,7 +234,9 @@ pub fn run_strata_from_env() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_SOURCE_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn read_source_file_rejects_oversized_source() {
@@ -334,12 +336,9 @@ mod tests {
     }
 
     fn unique_source_path(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after UNIX epoch")
-            .as_nanos();
+        let index = TEST_SOURCE_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
-            "strata-source-{name}-{}-{nanos}.str",
+            "strata-source-{name}-{}-{index}.str",
             std::process::id()
         ))
     }
