@@ -139,11 +139,12 @@ fn open_source_file(path: &Path) -> Result<fs::File> {
     )
 ))]
 fn open_source_file_handle(path: &Path) -> std::io::Result<fs::File> {
+    use nix::fcntl::OFlag;
     use std::os::unix::fs::OpenOptionsExt;
 
     fs::OpenOptions::new()
         .read(true)
-        .custom_flags(unix_nonblocking_open_flag())
+        .custom_flags(OFlag::O_NONBLOCK.bits())
         .open(path)
 }
 
@@ -170,23 +171,6 @@ fn open_source_file_handle(_path: &Path) -> std::io::Result<fs::File> {
         std::io::ErrorKind::Unsupported,
         "source file opening requires a nonblocking open flag for this Unix target",
     ))
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-fn unix_nonblocking_open_flag() -> i32 {
-    0o4000
-}
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly"
-))]
-fn unix_nonblocking_open_flag() -> i32 {
-    0x0004
 }
 
 fn reject_non_regular_source_path_before_open(path: &Path) -> Result<()> {
