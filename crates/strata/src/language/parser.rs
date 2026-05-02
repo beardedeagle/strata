@@ -6,7 +6,7 @@ use super::ast::{
     ValueExpr,
 };
 use super::lexer::{Lexer, Token, TokenKind};
-use super::{MAX_SOURCE_BYTES, MAX_TYPE_NESTING};
+use super::{MAX_SOURCE_BYTES, MAX_TYPE_NESTING, MAX_VALUE_NESTING};
 
 pub fn parse_source(source: &str) -> Result<Module> {
     Parser::new(source)?.parse_module()
@@ -407,15 +407,24 @@ impl Parser {
     }
 
     fn parse_value_expr(&mut self) -> Result<ValueExpr> {
+        self.parse_value_expr_with_depth(0)
+    }
+
+    fn parse_value_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
+        if depth > MAX_VALUE_NESTING {
+            return Err(Error::new(format!(
+                "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+            )));
+        }
         let name = self.expect_identifier()?;
         if !self.consume_symbol('{') {
             return Ok(ValueExpr::Identifier(name));
         }
-        let fields = self.parse_record_value_fields()?;
+        let fields = self.parse_record_value_fields(depth)?;
         Ok(ValueExpr::Record(RecordValue { name, fields }))
     }
 
-    fn parse_record_value_fields(&mut self) -> Result<Vec<RecordValueField>> {
+    fn parse_record_value_fields(&mut self, depth: usize) -> Result<Vec<RecordValueField>> {
         let mut fields = Vec::new();
         if self.consume_symbol('}') {
             return Ok(fields);
@@ -433,7 +442,7 @@ impl Parser {
                 ));
             }
             self.expect_symbol(':')?;
-            let value = self.parse_value_expr()?;
+            let value = self.parse_value_expr_with_depth(depth + 1)?;
             fields.push(RecordValueField { name, value });
             if self.consume_symbol(',') {
                 if self.consume_symbol('}') {

@@ -581,6 +581,18 @@ fn rejects_excessive_type_nesting() {
 }
 
 #[test]
+fn rejects_excessive_value_nesting_while_parsing() {
+    let value = nested_record_value_source(MAX_VALUE_NESTING + 1);
+    let source = HELLO.replacen("return MainState;", &format!("return {value};"), 1);
+
+    let err = parse_source(&source).expect_err("excessive value nesting should fail");
+
+    assert!(err
+        .to_string()
+        .contains("value nesting exceeds maximum depth"));
+}
+
+#[test]
 fn rejects_emit_without_declared_effect() {
     let source = r#"
 module hello;
@@ -978,4 +990,12 @@ fn rejects_invalid_annotation_identifier_start() {
     let err = parse_source(&source).expect_err("invalid annotation should fail lexing");
 
     assert!(err.to_string().contains("expected identifier after '@'"));
+}
+
+fn nested_record_value_source(depth: usize) -> String {
+    let mut value = "Leaf".to_string();
+    for index in (0..depth).rev() {
+        value = format!("State{index} {{ next: {value} }}");
+    }
+    value
 }

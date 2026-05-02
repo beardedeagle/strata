@@ -5,6 +5,7 @@ use mantle_artifact::{
 };
 
 use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
+use super::super::MAX_VALUE_NESTING;
 use super::symbols::SemanticIndex;
 use super::STEP_STATE_PARAMETER_NAME;
 
@@ -56,7 +57,7 @@ impl<'module> StateSpace<'module> {
         semantic_index: &SemanticIndex,
         value: &ValueExpr,
     ) -> Result<StateId> {
-        let label = self.canonical_value(semantic_index, self.state_type, value)?;
+        let label = self.canonical_value(semantic_index, self.state_type, value, 0)?;
         if let Some(index) = self.values.iter().position(|candidate| candidate == &label) {
             return StateId::from_index(index);
         }
@@ -81,15 +82,21 @@ impl<'module> StateSpace<'module> {
         semantic_index: &SemanticIndex,
         expected_type: &TypeRef,
         value: &ValueExpr,
+        depth: usize,
     ) -> Result<String> {
+        if depth > MAX_VALUE_NESTING {
+            return Err(Error::new(format!(
+                "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+            )));
+        }
         if let Ok(record) = semantic_index.record_decl(self.module, expected_type) {
-            return self.canonical_record_value(semantic_index, record, value);
+            return self.canonical_record_value(semantic_index, record, value, depth);
         }
 
         let enum_decl = semantic_index.enum_decl(self.module, expected_type)?;
         let ValueExpr::Identifier(name) = value else {
             return Err(Error::new(format!(
-                "value {value} is not a variant of enum {}",
+                "record value is not a variant of enum {}",
                 enum_decl.name
             )));
         };
@@ -108,6 +115,7 @@ impl<'module> StateSpace<'module> {
         semantic_index: &SemanticIndex,
         record: &Record,
         value: &ValueExpr,
+        depth: usize,
     ) -> Result<String> {
         if record.fields.is_empty() {
             return match value {
@@ -118,7 +126,7 @@ impl<'module> StateSpace<'module> {
                     Ok(record.name.to_string())
                 }
                 _ => Err(Error::new(format!(
-                    "value {value} is not a value of record {}",
+                    "provided value is not a value of record {}",
                     record.name
                 ))),
             };
@@ -165,7 +173,7 @@ impl<'module> StateSpace<'module> {
                     record.name, field.name
                 )));
             };
-            let field_value = self.canonical_value(semantic_index, &field.ty, value)?;
+            let field_value = self.canonical_value(semantic_index, &field.ty, value, depth + 1)?;
             parts.push(format!("{}:{field_value}", field.name));
         }
         let label = format!("{}{{{}}}", record.name, parts.join(","));
@@ -206,7 +214,8 @@ fn reject_reserved_state_values(process_name: &Identifier, state_values: &[Strin
 #[cfg(test)]
 mod tests {
     use super::super::super::ast::{
-        Determinism, Enum, Function, Identifier, Module, Process, Record, TypeRef, ValueExpr,
+        Determinism, Enum, Function, Identifier, Module, Process, Record, RecordField, RecordValue,
+        RecordValueField, TypeRef, ValueExpr,
     };
     use super::super::symbols::SemanticIndex;
     use super::*;
@@ -232,6 +241,25 @@ mod tests {
         )));
     }
 
+    #[test]
+    fn state_value_nesting_limit_rejects_programmatic_ast() {
+        let module = recursive_state_module();
+        let semantic_index =
+            SemanticIndex::build(&module).expect("recursive state module should index");
+        let process = &module.processes[0];
+        let mut state_space =
+            StateSpace::new(&module, &semantic_index, process).expect("state space should build");
+        let value = nested_record_value(MAX_VALUE_NESTING + 1);
+
+        let err = state_space
+            .resolve_state_value(&semantic_index, &value)
+            .expect_err("excessive AST value nesting should fail");
+
+        assert!(err
+            .to_string()
+            .contains("value nesting exceeds maximum depth"));
+    }
+
     fn test_module() -> Module {
         let state_type = TypeRef::Named(ident("MainState"));
         Module {
@@ -253,6 +281,46 @@ mod tests {
                 step: function("step", state_type),
             }],
         }
+    }
+
+    fn recursive_state_module() -> Module {
+        let state_type = TypeRef::Named(ident("MainState"));
+        Module {
+            name: ident("recursive_state"),
+            records: vec![Record {
+                name: ident("MainState"),
+                fields: vec![RecordField {
+                    name: ident("next"),
+                    ty: state_type.clone(),
+                }],
+            }],
+            enums: vec![Enum {
+                name: ident("MainMsg"),
+                variants: vec![ident("Start")],
+            }],
+            processes: vec![Process {
+                name: ident("Main"),
+                mailbox_bound: 1,
+                state_type: state_type.clone(),
+                msg_type: TypeRef::Named(ident("MainMsg")),
+                init: function("init", state_type.clone()),
+                step: function("step", state_type),
+            }],
+        }
+    }
+
+    fn nested_record_value(depth: usize) -> ValueExpr {
+        let mut value = ValueExpr::Identifier(ident("MainState"));
+        for _ in 0..depth {
+            value = ValueExpr::Record(RecordValue {
+                name: ident("MainState"),
+                fields: vec![RecordValueField {
+                    name: ident("next"),
+                    value,
+                }],
+            });
+        }
+        value
     }
 
     fn function(name: &str, return_type: TypeRef) -> Function {

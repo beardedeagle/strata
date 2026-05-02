@@ -20,6 +20,7 @@ const STATIC_RUNTIME_DISPATCH_LIMIT: usize = 10_000;
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const MAX_TOKEN_COUNT: usize = 128_000;
 const MAX_TYPE_NESTING: usize = 32;
+const MAX_VALUE_NESTING: usize = 32;
 const PROC_RESULT_TYPE: &str = "ProcResult";
 
 pub fn check_source(source: &str) -> Result<CheckedProgram> {
