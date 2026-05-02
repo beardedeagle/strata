@@ -7,3 +7,6 @@ license = "MIT"
 [lib]
 name = "mantle_artifact"
 path = "src/lib.rs"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31.2", default-features = false, features = ["fs"] }
