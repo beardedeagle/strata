@@ -265,11 +265,7 @@ mod tests {
     #[test]
     fn read_source_file_rejects_fifo_source_before_opening() {
         let path = unique_source_path("fifo");
-        let status = std::process::Command::new("mkfifo")
-            .arg(&path)
-            .status()
-            .expect("mkfifo should run");
-        assert!(status.success(), "mkfifo should create test fifo");
+        create_fifo(&path);
 
         let err = read_source_file(&path).expect_err("fifo source should fail");
 
@@ -291,11 +287,7 @@ mod tests {
     #[test]
     fn open_source_file_handle_does_not_block_on_fifo_source() {
         let path = unique_source_path("fifo-handle");
-        let status = std::process::Command::new("mkfifo")
-            .arg(&path)
-            .status()
-            .expect("mkfifo should run");
-        assert!(status.success(), "mkfifo should create test fifo");
+        create_fifo(&path);
 
         let file = open_source_file_handle(&path).expect("fifo open should not block");
         let metadata = file.metadata().expect("fifo metadata should be available");
@@ -303,6 +295,14 @@ mod tests {
         assert!(!metadata.is_file());
 
         fs::remove_file(path).expect("test fifo should be removed");
+    }
+
+    #[cfg(unix)]
+    fn create_fifo(path: &Path) {
+        use nix::sys::stat::Mode;
+        use nix::unistd::mkfifo;
+
+        mkfifo(path, Mode::S_IRUSR | Mode::S_IWUSR).expect("test fifo should be created");
     }
 
     #[test]
