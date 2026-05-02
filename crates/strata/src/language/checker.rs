@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use mantle_artifact::{
     source_hash_fnv1a64, ArtifactAction, ArtifactProcess, Error, MantleArtifact, MessageId,
     ProcessId, Result, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
-    MAX_FIELD_VALUE_BYTES, STRATA_SOURCE_LANGUAGE,
+    STRATA_SOURCE_LANGUAGE,
 };
 
 use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement};
@@ -260,7 +260,6 @@ fn check_step(
     for statement in &body.statements {
         match statement {
             Statement::Emit(text) => {
-                validate_emit_text(text.as_str())?;
                 used_effects.insert(Effect::Emit);
                 actions.push(ArtifactAction::Emit {
                     output: outputs.intern(text.as_str())?,
@@ -346,23 +345,6 @@ fn validate_effects(
                 "{function_name} declares effect {declared_effect} but does not use it"
             )));
         }
-    }
-    Ok(())
-}
-
-fn validate_emit_text(output: &str) -> Result<()> {
-    if output.is_empty() {
-        return Err(Error::new("emit output must not be empty"));
-    }
-    if output.len() > MAX_FIELD_VALUE_BYTES {
-        return Err(Error::new(format!(
-            "emit output exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
-        )));
-    }
-    if output.chars().any(char::is_control) {
-        return Err(Error::new(
-            "emit output must not contain control characters",
-        ));
     }
     Ok(())
 }
