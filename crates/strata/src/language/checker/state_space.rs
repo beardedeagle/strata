@@ -4,13 +4,14 @@ use mantle_artifact::{
     Error, Result, StateId, MAX_FIELD_VALUE_BYTES, MAX_STATE_VALUES_PER_PROCESS,
 };
 
-use super::super::ast::{Module, Process, Record, TypeRef, ValueExpr};
+use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
 use super::symbols::SemanticIndex;
 
 const STEP_STATE_PARAMETER_NAME: &str = "state";
 
 pub(super) struct StateSpace<'module> {
     module: &'module Module,
+    process_name: &'module Identifier,
     state_type: &'module TypeRef,
     values: Vec<String>,
 }
@@ -29,6 +30,7 @@ impl<'module> StateSpace<'module> {
             };
             return Ok(Self {
                 module,
+                process_name: &process.name,
                 state_type: &process.state_type,
                 values,
             });
@@ -38,6 +40,7 @@ impl<'module> StateSpace<'module> {
         let values = enum_decl.variants.iter().map(ToString::to_string).collect();
         Ok(Self {
             module,
+            process_name: &process.name,
             state_type: &process.state_type,
             values,
         })
@@ -54,16 +57,17 @@ impl<'module> StateSpace<'module> {
         }
         if self.values.len() >= MAX_STATE_VALUES_PER_PROCESS {
             return Err(Error::new(format!(
-                "state_value_count must be no greater than {MAX_STATE_VALUES_PER_PROCESS}"
+                "process {} state_value_count must be no greater than {MAX_STATE_VALUES_PER_PROCESS}",
+                self.process_name
             )));
         }
         self.values.push(label);
         StateId::from_index(self.values.len() - 1)
     }
 
-    pub(super) fn into_values(self, process: &Process) -> Result<Vec<String>> {
-        validate_state_value_count(process, self.values.len())?;
-        reject_reserved_state_values(process, &self.values)?;
+    pub(super) fn into_values(self) -> Result<Vec<String>> {
+        validate_state_value_count(self.process_name, self.values.len())?;
+        reject_reserved_state_values(self.process_name, &self.values)?;
         Ok(self.values)
     }
 
@@ -165,30 +169,30 @@ impl<'module> StateSpace<'module> {
     }
 }
 
-fn validate_state_value_count(process: &Process, count: usize) -> Result<()> {
+fn validate_state_value_count(process_name: &Identifier, count: usize) -> Result<()> {
     if count == 0 {
         return Err(Error::new(format!(
             "process {} state_value_count must be greater than zero",
-            process.name
+            process_name
         )));
     }
     if count > MAX_STATE_VALUES_PER_PROCESS {
         return Err(Error::new(format!(
             "process {} state_value_count must be no greater than {MAX_STATE_VALUES_PER_PROCESS}",
-            process.name
+            process_name
         )));
     }
     Ok(())
 }
 
-fn reject_reserved_state_values(process: &Process, state_values: &[String]) -> Result<()> {
+fn reject_reserved_state_values(process_name: &Identifier, state_values: &[String]) -> Result<()> {
     if state_values
         .iter()
         .any(|value| value == STEP_STATE_PARAMETER_NAME)
     {
         return Err(Error::new(format!(
             "process {} state value {} conflicts with reserved step state parameter name",
-            process.name, STEP_STATE_PARAMETER_NAME
+            process_name, STEP_STATE_PARAMETER_NAME
         )));
     }
     Ok(())
@@ -209,4 +213,73 @@ fn validate_state_value_label(value: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::ast::{
+        Determinism, Enum, Function, Identifier, Module, Process, Record, TypeRef, ValueExpr,
+    };
+    use super::super::symbols::SemanticIndex;
+    use super::*;
+
+    #[test]
+    fn state_value_limit_reports_process_context() {
+        let module = test_module();
+        let semantic_index =
+            SemanticIndex::build(&module).expect("test module should index successfully");
+        let process = &module.processes[0];
+        let mut state_space =
+            StateSpace::new(&module, &semantic_index, process).expect("state space should build");
+        state_space.values = (0..MAX_STATE_VALUES_PER_PROCESS)
+            .map(|index| format!("State{index}"))
+            .collect();
+
+        let err = state_space
+            .resolve_state_value(&semantic_index, &ValueExpr::Identifier(ident("MainState")))
+            .expect_err("state value limit should fail");
+
+        assert!(err.to_string().contains(&format!(
+            "process Main state_value_count must be no greater than {MAX_STATE_VALUES_PER_PROCESS}"
+        )));
+    }
+
+    fn test_module() -> Module {
+        let state_type = TypeRef::Named(ident("MainState"));
+        Module {
+            name: ident("limit_context"),
+            records: vec![Record {
+                name: ident("MainState"),
+                fields: Vec::new(),
+            }],
+            enums: vec![Enum {
+                name: ident("MainMsg"),
+                variants: vec![ident("Start")],
+            }],
+            processes: vec![Process {
+                name: ident("Main"),
+                mailbox_bound: 1,
+                state_type: state_type.clone(),
+                msg_type: TypeRef::Named(ident("MainMsg")),
+                init: function("init", state_type.clone()),
+                step: function("step", state_type),
+            }],
+        }
+    }
+
+    fn function(name: &str, return_type: TypeRef) -> Function {
+        Function {
+            name: ident(name),
+            params: Vec::new(),
+            return_type,
+            effects: Vec::new(),
+            may: Vec::new(),
+            determinism: Determinism::Det,
+            body: None,
+        }
+    }
+
+    fn ident(value: &str) -> Identifier {
+        Identifier::new(value).expect("test identifier should be valid")
+    }
 }

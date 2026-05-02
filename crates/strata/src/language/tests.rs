@@ -409,6 +409,27 @@ fn rejects_state_value_count_above_artifact_limit_during_checking() {
 }
 
 #[test]
+fn preserves_undeclared_state_type_diagnostics() {
+    for (source, expected) in [
+        (
+            HELLO.replace("type State = MainState;", "type State = MissingState;"),
+            "type MissingState is not declared",
+        ),
+        (
+            HELLO.replace("type State = MainState;", "type State = Box<MainState>;"),
+            "type Box<MainState> is not declared",
+        ),
+    ] {
+        let err = check_source(&source).expect_err("undeclared state type should fail");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+}
+
+#[test]
 fn rejects_message_count_above_artifact_limit_during_checking() {
     let messages = (0..=MAX_MESSAGE_VARIANTS_PER_PROCESS)
         .map(|index| format!("Msg{index}"))

@@ -279,16 +279,16 @@ impl SemanticIndex {
     }
 
     pub(super) fn enum_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Enum> {
-        match self.type_decl(ty) {
-            Ok(TypeDecl::Enum(index)) => Ok(&module.enums[index]),
-            _ => Err(Error::new(format!("type {ty} is not declared as an enum"))),
+        match self.type_decl(ty)? {
+            TypeDecl::Enum(index) => Ok(&module.enums[index]),
+            TypeDecl::Record(_) => Err(Error::new(format!("type {ty} is not declared as an enum"))),
         }
     }
 
     pub(super) fn record_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Record> {
-        match self.type_decl(ty) {
-            Ok(TypeDecl::Record(index)) => Ok(&module.records[index]),
-            _ => Err(Error::new(format!("type {ty} is not declared as a record"))),
+        match self.type_decl(ty)? {
+            TypeDecl::Record(index) => Ok(&module.records[index]),
+            TypeDecl::Enum(_) => Err(Error::new(format!("type {ty} is not declared as a record"))),
         }
     }
 

@@ -143,7 +143,7 @@ fn check_process(
         init_state,
         outputs,
     )?;
-    let state_values = state_space.into_values(process)?;
+    let state_values = state_space.into_values()?;
 
     Ok(ArtifactProcess {
         debug_name: process.name.to_string(),
