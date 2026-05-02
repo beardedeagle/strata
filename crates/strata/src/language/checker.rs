@@ -7,7 +7,8 @@ use std::collections::BTreeSet;
 use mantle_artifact::{
     source_hash_fnv1a64, ArtifactAction, ArtifactProcess, Error, MantleArtifact, MessageId,
     ProcessId, Result, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
-    STRATA_SOURCE_LANGUAGE,
+    MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS, STRATA_SOURCE_LANGUAGE,
 };
 
 use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement};
@@ -55,6 +56,12 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     if module.processes.is_empty() {
         return Err(Error::new("expected at least one process declaration"));
     }
+    validate_count(
+        "process_count",
+        module.processes.len(),
+        1,
+        MAX_PROCESS_COUNT,
+    )?;
 
     let semantic_index = SemanticIndex::build(&module)?;
     let entry_process = semantic_index
@@ -108,8 +115,20 @@ fn check_process(
             process.name
         )));
     }
+    validate_count(
+        &format!("process {} mailbox_bound", process.name),
+        process.mailbox_bound,
+        1,
+        MAX_MAILBOX_BOUND,
+    )?;
 
     let state_values = semantic_index.state_values_for_type(module, &process.state_type)?;
+    validate_count(
+        &format!("process {} state_value_count", process.name),
+        state_values.len(),
+        1,
+        MAX_STATE_VALUES_PER_PROCESS,
+    )?;
     reject_reserved_state_values(process, &state_values)?;
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
     if msg_enum.variants.is_empty() {
@@ -118,6 +137,12 @@ fn check_process(
             msg_enum.name
         )));
     }
+    validate_count(
+        &format!("process {} message_count", process.name),
+        msg_enum.variants.len(),
+        1,
+        MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    )?;
 
     let init_state = check_init(semantic_index, process, &state_values)?;
     let (step_result, final_state, actions) = check_step(
@@ -255,6 +280,12 @@ fn check_step(
         return Err(Error::new("step must have a body for buildable source"));
     };
 
+    validate_count(
+        &format!("process {} action_count", process.name),
+        body.statements.len(),
+        0,
+        MAX_ACTIONS_PER_PROCESS,
+    )?;
     let mut used_effects = BTreeSet::new();
     let mut actions = Vec::with_capacity(body.statements.len());
     for statement in &body.statements {
@@ -316,6 +347,19 @@ fn check_step(
     reject_unsupported_self_send(process, process_id, &actions)?;
 
     Ok((step_result, final_state, actions))
+}
+
+fn validate_count(field: &str, value: usize, min: usize, max: usize) -> Result<()> {
+    if value < min {
+        if min == 1 {
+            return Err(Error::new(format!("{field} must be greater than zero")));
+        }
+        return Err(Error::new(format!("{field} must be at least {min}")));
+    }
+    if value > max {
+        return Err(Error::new(format!("{field} must be no greater than {max}")));
+    }
+    Ok(())
 }
 
 fn validate_effects(

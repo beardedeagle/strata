@@ -1,6 +1,8 @@
 use super::*;
 use mantle_artifact::{
-    ArtifactAction, MessageId, OutputId, ProcessId, StateId, StepResult, MAX_FIELD_VALUE_BYTES,
+    ArtifactAction, MessageId, OutputId, ProcessId, StateId, StepResult, MAX_ACTIONS_PER_PROCESS,
+    MAX_FIELD_VALUE_BYTES, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
+    MAX_STATE_VALUES_PER_PROCESS,
 };
 
 const HELLO: &str = r#"
@@ -313,6 +315,117 @@ fn rejects_missing_main_entry_process() {
     assert!(err
         .to_string()
         .contains("entry process Main is not declared"));
+}
+
+#[test]
+fn rejects_process_count_above_artifact_limit_during_checking() {
+    let mut source = r#"
+module too_many_processes;
+record MainState;
+enum MainMsg { Start };
+"#
+    .to_string();
+    for index in 0..=MAX_PROCESS_COUNT {
+        let name = if index == 0 {
+            "Main".to_string()
+        } else {
+            format!("Proc{index}")
+        };
+        source.push_str(&format!(
+            r#"
+proc {name} mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+    fn init() -> MainState ! [] ~ [] @det {{ return MainState; }}
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+        ));
+    }
+    let module = parse_source(&source).expect("oversized process source should parse");
+
+    let err = check_module(module).expect_err("process count above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process_count must be no greater than {MAX_PROCESS_COUNT}"
+    )));
+}
+
+#[test]
+fn rejects_mailbox_bound_above_artifact_limit_during_checking() {
+    let source = HELLO.replace(
+        "mailbox bounded(1)",
+        &format!("mailbox bounded({})", MAX_MAILBOX_BOUND + 1),
+    );
+    let module = parse_source(&source).expect("mailbox-bound source should parse");
+
+    let err = check_module(module).expect_err("mailbox bound above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process Main mailbox_bound must be no greater than {MAX_MAILBOX_BOUND}"
+    )));
+}
+
+#[test]
+fn rejects_state_value_count_above_artifact_limit_during_checking() {
+    let state_values = (0..=MAX_STATE_VALUES_PER_PROCESS)
+        .map(|index| format!("State{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = HELLO
+        .replace(
+            "record MainState;",
+            &format!("enum MainState {{ {state_values} }};"),
+        )
+        .replace(
+            "enum MainMsg { Start };",
+            "record Marker;\nenum MainMsg { Start };",
+        )
+        .replace("return MainState;", "return State0;");
+    let module = parse_source(&source).expect("state-value-count source should parse");
+
+    let err = check_module(module).expect_err("state value count above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process Main state_value_count must be no greater than {MAX_STATE_VALUES_PER_PROCESS}"
+    )));
+}
+
+#[test]
+fn rejects_message_count_above_artifact_limit_during_checking() {
+    let messages = (0..=MAX_MESSAGE_VARIANTS_PER_PROCESS)
+        .map(|index| format!("Msg{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = HELLO.replace(
+        "enum MainMsg { Start };",
+        &format!("enum MainMsg {{ {messages} }};"),
+    );
+    let module = parse_source(&source).expect("message-count source should parse");
+
+    let err = check_module(module).expect_err("message count above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process Main message_count must be no greater than {MAX_MESSAGE_VARIANTS_PER_PROCESS}"
+    )));
+}
+
+#[test]
+fn rejects_action_count_above_artifact_limit_during_checking() {
+    let mut statements = String::new();
+    for _ in 0..=MAX_ACTIONS_PER_PROCESS {
+        statements.push_str("        emit \"hello from Strata\";\n");
+    }
+    let source = HELLO.replace("        emit \"hello from Strata\";\n", &statements);
+    let module = parse_source(&source).expect("action-count source should parse");
+
+    let err = check_module(module).expect_err("action count above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process Main action_count must be no greater than {MAX_ACTIONS_PER_PROCESS}"
+    )));
 }
 
 #[test]
