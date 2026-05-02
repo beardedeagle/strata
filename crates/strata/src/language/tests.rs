@@ -1,3 +1,4 @@
+use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
     ArtifactAction, MessageId, OutputId, ProcessId, StateId, StepResult, MAX_ACTIONS_PER_PROCESS,
@@ -510,6 +511,21 @@ fn rejects_excessive_token_count() {
     let err = parse_source(&source).expect_err("excessive token count should fail");
 
     assert!(err.to_string().contains("maximum token count"));
+}
+
+#[test]
+fn lexer_accepts_exact_source_token_limit_plus_eof() {
+    let source = "{}".repeat(MAX_TOKEN_COUNT / 2);
+
+    let tokens = Lexer::new(&source)
+        .tokenize()
+        .expect("exact source token limit should tokenize");
+
+    assert_eq!(tokens.len(), MAX_TOKEN_COUNT + 1);
+    assert!(matches!(
+        tokens.last().map(|token| &token.kind),
+        Some(TokenKind::Eof)
+    ));
 }
 
 #[test]

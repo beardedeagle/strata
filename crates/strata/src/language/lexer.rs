@@ -50,7 +50,7 @@ impl<'a> Lexer<'a> {
             if ch == '-' && self.peek_next_char() == Some('>') {
                 self.bump_char();
                 self.bump_char();
-                push_token(&mut tokens, TokenKind::Arrow, offset)?;
+                push_source_token(&mut tokens, TokenKind::Arrow, offset)?;
                 continue;
             }
             if ch == '@' {
@@ -64,34 +64,34 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 let ident = self.read_ident()?;
-                push_token(&mut tokens, TokenKind::AtIdent(ident), offset)?;
+                push_source_token(&mut tokens, TokenKind::AtIdent(ident), offset)?;
                 continue;
             }
             if ch == '"' {
                 let literal = self.read_string_literal(offset)?;
-                push_token(&mut tokens, TokenKind::StringLiteral(literal), offset)?;
+                push_source_token(&mut tokens, TokenKind::StringLiteral(literal), offset)?;
                 continue;
             }
             if is_ident_start(ch) {
                 let ident = self.read_ident()?;
-                push_token(&mut tokens, TokenKind::Ident(ident), offset)?;
+                push_source_token(&mut tokens, TokenKind::Ident(ident), offset)?;
                 continue;
             }
             if ch.is_ascii_digit() {
                 let number = self.read_number();
-                push_token(&mut tokens, TokenKind::Number(number), offset)?;
+                push_source_token(&mut tokens, TokenKind::Number(number), offset)?;
                 continue;
             }
             if "{}()[];:,=<>!~".contains(ch) {
                 self.bump_char();
-                push_token(&mut tokens, TokenKind::Symbol(ch), offset)?;
+                push_source_token(&mut tokens, TokenKind::Symbol(ch), offset)?;
                 continue;
             }
             return Err(Error::new(format!(
                 "unsupported character {ch:?} at byte {offset}"
             )));
         }
-        push_token(&mut tokens, TokenKind::Eof, self.source.len())?;
+        push_eof_token(&mut tokens, self.source.len());
         Ok(tokens)
     }
 
@@ -178,7 +178,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-fn push_token(tokens: &mut Vec<Token>, kind: TokenKind, offset: usize) -> Result<()> {
+fn push_source_token(tokens: &mut Vec<Token>, kind: TokenKind, offset: usize) -> Result<()> {
     if tokens.len() >= MAX_TOKEN_COUNT {
         return Err(Error::new(format!(
             "source exceeds maximum token count of {MAX_TOKEN_COUNT}"
@@ -186,6 +186,13 @@ fn push_token(tokens: &mut Vec<Token>, kind: TokenKind, offset: usize) -> Result
     }
     tokens.push(Token { kind, offset });
     Ok(())
+}
+
+fn push_eof_token(tokens: &mut Vec<Token>, offset: usize) {
+    tokens.push(Token {
+        kind: TokenKind::Eof,
+        offset,
+    });
 }
 
 fn is_ident_start(ch: char) -> bool {
