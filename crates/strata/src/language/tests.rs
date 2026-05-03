@@ -1124,7 +1124,7 @@ fn rejects_duplicate_static_spawn_target() {
 }
 
 #[test]
-fn allows_same_spawn_target_in_distinct_message_arms() {
+fn allows_same_spawn_target_in_distinct_terminal_message_arms() {
     let source = r#"
 module spawn_by_message;
 

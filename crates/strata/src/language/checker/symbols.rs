@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::super::ast::{Enum, Identifier, Module, Record, TypeRef};
+use super::super::ast::{Enum, Identifier, Module, Process, Record, TypeRef};
 use super::super::checked::{CheckedMessageId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
 use super::super::PROC_RESULT_TYPE;
@@ -48,6 +48,27 @@ impl TypeDecl {
         match self {
             Self::Record(_) => "record",
             Self::Enum(_) => "enum",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MessageResolutionContext<'a> {
+    Send { sender_process: &'a str },
+    MatchArm,
+}
+
+impl MessageResolutionContext<'_> {
+    fn not_accepted_error(self, process: &Process, message: &Identifier) -> Error {
+        match self {
+            Self::Send { sender_process } => Error::new(format!(
+                "process {} sends message {} not accepted by {}",
+                sender_process, message, process.name
+            )),
+            Self::MatchArm => Error::new(format!(
+                "process {} step match arm message {} is not accepted",
+                process.name, message
+            )),
         }
     }
 }
@@ -293,39 +314,12 @@ impl SemanticIndex {
         process_id: CheckedProcessId,
         message: &Identifier,
     ) -> Result<CheckedMessageId> {
-        let process = module.processes.get(process_id.index()).ok_or_else(|| {
-            Error::new(format!(
-                "process id {} is not declared",
-                process_id.as_u32()
-            ))
-        })?;
-        let msg_enum = self.enum_decl(module, &process.msg_type)?;
-        let message_symbol = self.symbols.resolve(message.as_str()).ok_or_else(|| {
-            Error::new(format!(
-                "process {} sends message {} not accepted by {}",
-                sender_process, message, process.name
-            ))
-        })?;
-        let enum_index = match self.type_decl(&process.msg_type)? {
-            TypeDecl::Enum(index) => index,
-            TypeDecl::Record(_) => {
-                return Err(Error::new(format!(
-                    "type {} is not declared as an enum",
-                    msg_enum.name
-                )))
-            }
-        };
-        self.enum_variants[enum_index]
-            .get(&message_symbol)
-            .copied()
-            .map(CheckedMessageId::from_index)
-            .transpose()?
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "process {} sends message {} not accepted by {}",
-                    sender_process, message, process.name
-                ))
-            })
+        self.message_id_for_process_with_context(
+            module,
+            process_id,
+            message,
+            MessageResolutionContext::Send { sender_process },
+        )
     }
 
     pub(super) fn message_id_for_match_arm(
@@ -334,38 +328,47 @@ impl SemanticIndex {
         process_id: CheckedProcessId,
         message: &Identifier,
     ) -> Result<CheckedMessageId> {
+        self.message_id_for_process_with_context(
+            module,
+            process_id,
+            message,
+            MessageResolutionContext::MatchArm,
+        )
+    }
+
+    fn message_id_for_process_with_context(
+        &self,
+        module: &Module,
+        process_id: CheckedProcessId,
+        message: &Identifier,
+        context: MessageResolutionContext<'_>,
+    ) -> Result<CheckedMessageId> {
         let process = module.processes.get(process_id.index()).ok_or_else(|| {
             Error::new(format!(
                 "process id {} is not declared",
                 process_id.as_u32()
             ))
         })?;
-        let msg_enum = self.enum_decl(module, &process.msg_type)?;
-        let message_symbol = self.symbols.resolve(message.as_str()).ok_or_else(|| {
-            Error::new(format!(
-                "process {} step match arm message {} is not accepted",
-                process.name, message
-            ))
-        })?;
+        let message_symbol = self
+            .symbols
+            .resolve(message.as_str())
+            .ok_or_else(|| context.not_accepted_error(process, message))?;
         let enum_index = match self.type_decl(&process.msg_type)? {
             TypeDecl::Enum(index) => index,
             TypeDecl::Record(_) => {
                 return Err(Error::new(format!(
                     "type {} is not declared as an enum",
-                    msg_enum.name
+                    process.msg_type
                 )))
             }
         };
-        self.enum_variants[enum_index]
+        self.enum_variants
+            .get(enum_index)
+            .ok_or_else(|| Error::new(format!("enum index {enum_index} is not declared")))?
             .get(&message_symbol)
             .copied()
             .map(CheckedMessageId::from_index)
             .transpose()?
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "process {} step match arm message {} is not accepted",
-                    process.name, message
-                ))
-            })
+            .ok_or_else(|| context.not_accepted_error(process, message))
     }
 }
