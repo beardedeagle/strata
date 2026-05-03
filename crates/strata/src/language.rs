@@ -14,10 +14,7 @@ pub use ast::{
     Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
     ValueExpr,
 };
-pub use checked::{
-    CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
-    CheckedProcessId, CheckedProgram, CheckedStateId, CheckedStepResult,
-};
+pub use checked::CheckedProgram;
 pub use checker::check_module;
 pub use diagnostic::{Error, Result};
 pub use lowering::lower_to_artifact;

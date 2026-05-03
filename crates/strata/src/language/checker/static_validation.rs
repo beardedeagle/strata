@@ -12,34 +12,34 @@ pub(super) fn validate_action_references(
     let mut spawned_targets = BTreeMap::new();
     for (process_index, process) in processes.iter().enumerate() {
         let process_id = CheckedProcessId::from_index(process_index)?;
-        for action in &process.actions {
+        for action in process.actions() {
             match action {
                 CheckedAction::Emit { .. } => {}
                 CheckedAction::Spawn { target } => {
                     if target.index() >= processes.len() {
                         return Err(Error::new(format!(
                             "process {} spawns undefined process id {}",
-                            process.debug_name,
+                            process.debug_name(),
                             target.as_u32()
                         )));
                     }
                     if target == entry_process {
                         return Err(Error::new(format!(
                             "process {} spawns entry process {}, which is already started",
-                            process.debug_name,
+                            process.debug_name(),
                             process_label(processes, *target)?
                         )));
                     }
                     if *target == process_id {
                         return Err(Error::new(format!(
                             "process {} spawns itself, which is not supported in this source slice",
-                            process.debug_name
+                            process.debug_name()
                         )));
                     }
                     if let Some(previous_process) = spawned_targets.insert(*target, process_id) {
                         return Err(Error::new(format!(
                             "process {} duplicates spawn target {} already spawned by {}",
-                            process.debug_name,
+                            process.debug_name(),
                             process_label(processes, *target)?,
                             process_label(processes, previous_process)?
                         )));
@@ -49,16 +49,16 @@ pub(super) fn validate_action_references(
                     let Some(target_process) = processes.get(target.index()) else {
                         return Err(Error::new(format!(
                             "process {} sends to undefined process id {}",
-                            process.debug_name,
+                            process.debug_name(),
                             target.as_u32()
                         )));
                     };
-                    if message.index() >= target_process.message_variants.len() {
+                    if message.index() >= target_process.message_variants().len() {
                         return Err(Error::new(format!(
                             "process {} sends message id {} not accepted by {}",
-                            process.debug_name,
+                            process.debug_name(),
                             message.as_u32(),
-                            target_process.debug_name
+                            target_process.debug_name()
                         )));
                     }
                 }
@@ -104,7 +104,7 @@ fn validate_static_runtime_order(
         let process = process_by_id(processes, process_id)?;
         instances[process_index].mailbox_depth -= 1;
 
-        for action in &process.actions {
+        for action in process.actions() {
             match action {
                 CheckedAction::Emit { .. } => {}
                 CheckedAction::Spawn { target } => {
@@ -115,7 +115,8 @@ fn validate_static_runtime_order(
                     {
                         return Err(Error::new(format!(
                             "process {} spawns process {}, which is already spawned",
-                            process.debug_name, target_process.debug_name
+                            process.debug_name(),
+                            target_process.debug_name()
                         )));
                     }
                     instances.push(StaticProcessInstance {
@@ -126,12 +127,12 @@ fn validate_static_runtime_order(
                 }
                 CheckedAction::Send { target, message } => {
                     let target_process = process_by_id(processes, *target)?;
-                    if message.index() >= target_process.message_variants.len() {
+                    if message.index() >= target_process.message_variants().len() {
                         return Err(Error::new(format!(
                             "process {} sends message id {} not accepted by {}",
-                            process.debug_name,
+                            process.debug_name(),
                             message.as_u32(),
-                            target_process.debug_name
+                            target_process.debug_name()
                         )));
                     }
 
@@ -141,22 +142,24 @@ fn validate_static_runtime_order(
                     else {
                         return Err(Error::new(format!(
                             "process {} sends to {} before it is spawned",
-                            process.debug_name, target_process.debug_name
+                            process.debug_name(),
+                            target_process.debug_name()
                         )));
                     };
 
                     if instances[target_index].status != StaticProcessStatus::Running {
                         return Err(Error::new(format!(
                             "process {} sends to {}, which is not running",
-                            process.debug_name, target_process.debug_name
+                            process.debug_name(),
+                            target_process.debug_name()
                         )));
                     }
-                    if instances[target_index].mailbox_depth >= target_process.mailbox_bound {
+                    if instances[target_index].mailbox_depth >= target_process.mailbox_bound() {
                         return Err(Error::new(format!(
                             "process {} sends to {}, but its mailbox would exceed bound {}",
-                            process.debug_name,
-                            target_process.debug_name,
-                            target_process.mailbox_bound
+                            process.debug_name(),
+                            target_process.debug_name(),
+                            target_process.mailbox_bound()
                         )));
                     }
                     instances[target_index].mailbox_depth += 1;
@@ -164,7 +167,7 @@ fn validate_static_runtime_order(
             }
         }
 
-        if process.step_result == CheckedStepResult::Stop {
+        if process.step_result() == CheckedStepResult::Stop {
             instances[process_index].status = StaticProcessStatus::Stopped;
         }
         dispatches += 1;
@@ -201,7 +204,7 @@ fn process_by_id(
 fn process_label(processes: &[CheckedProcess], process_id: CheckedProcessId) -> Result<&str> {
     processes
         .get(process_id.index())
-        .map(|process| process.debug_name.as_str())
+        .map(|process| process.debug_name().as_str())
         .ok_or_else(|| Error::new(format!("process id {} is not defined", process_id.as_u32())))
 }
 

@@ -77,15 +77,11 @@ where
             let source = read_source_file(&path)?;
             let checked = check_source(&source)?;
             let _artifact = lower_to_artifact(&checked, &source)?;
-            let entry = checked
-                .processes
-                .get(checked.entry_process.index())
-                .map(|process| process.debug_name.as_str())
-                .ok_or_else(|| Error::new("checked entry process is not defined"))?;
+            let entry = checked.entry_process_label()?;
             println!(
                 "strata: checked {} (module {}, entry {})",
                 path.display(),
-                checked.module.name,
+                checked.module_name(),
                 entry
             );
             Ok(())

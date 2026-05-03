@@ -17,11 +17,11 @@ pub fn lower_to_artifact(
         format: ARTIFACT_FORMAT.to_string(),
         format_version: ARTIFACT_VERSION.to_string(),
         source_language: STRATA_SOURCE_LANGUAGE.to_string(),
-        module: checked.module.name.to_string(),
-        entry_process: lower_process_id(checked.entry_process),
-        entry_message: lower_message_id(checked.entry_message),
-        outputs: checked.outputs.clone(),
-        processes: checked.processes.iter().map(lower_process).collect(),
+        module: checked.module().name.to_string(),
+        entry_process: lower_process_id(checked.entry_process()),
+        entry_message: lower_message_id(checked.entry_message()),
+        outputs: checked.outputs().to_vec(),
+        processes: checked.processes().iter().map(lower_process).collect(),
         source_hash_fnv1a64: source_hash_fnv1a64(source),
     };
     artifact.validate()?;
@@ -30,20 +30,20 @@ pub fn lower_to_artifact(
 
 fn lower_process(process: &CheckedProcess) -> ArtifactProcess {
     ArtifactProcess {
-        debug_name: process.debug_name.to_string(),
-        state_type: process.state_type.to_string(),
-        state_values: process.state_values.clone(),
-        message_type: process.message_type.to_string(),
+        debug_name: process.debug_name().to_string(),
+        state_type: process.state_type().to_string(),
+        state_values: process.state_values().to_vec(),
+        message_type: process.message_type().to_string(),
         message_variants: process
-            .message_variants
+            .message_variants()
             .iter()
             .map(ToString::to_string)
             .collect(),
-        mailbox_bound: process.mailbox_bound,
-        init_state: lower_state_id(process.init_state),
-        step_result: lower_step_result(process.step_result),
-        next_state: lower_next_state(process.next_state),
-        actions: process.actions.iter().map(lower_action).collect(),
+        mailbox_bound: process.mailbox_bound(),
+        init_state: lower_state_id(process.init_state()),
+        step_result: lower_step_result(process.step_result()),
+        next_state: lower_next_state(process.next_state()),
+        actions: process.actions().iter().map(lower_action).collect(),
     }
 }
 

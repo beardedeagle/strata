@@ -12,7 +12,7 @@ use mantle_artifact::{
 use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement, ValueExpr};
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
-    CheckedProgram, CheckedStateId, CheckedStepResult,
+    CheckedProcessParts, CheckedProgram, CheckedProgramParts, CheckedStateId, CheckedStepResult,
 };
 use super::diagnostic::{Error, Result};
 use super::PROC_RESULT_TYPE;
@@ -59,24 +59,24 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
 
     validate_action_references(&checked_processes, &entry_process)?;
 
-    let entry_message = CheckedMessageId::new(0);
+    let entry_message = CheckedMessageId::from_index(0)?;
     let entry_process_definition = checked_processes
         .get(entry_process.index())
         .ok_or_else(|| Error::new("entry process id is not defined"))?;
-    if entry_process_definition.message_variants.is_empty() {
+    if entry_process_definition.message_variants().is_empty() {
         return Err(Error::new(format!(
             "entry process {} has no messages",
-            entry_process_definition.debug_name
+            entry_process_definition.debug_name()
         )));
     }
 
-    Ok(CheckedProgram {
+    Ok(CheckedProgram::new(CheckedProgramParts {
         module,
         entry_process,
         entry_message,
         outputs: outputs.into_values(),
         processes: checked_processes,
-    })
+    }))
 }
 
 fn check_process(
@@ -119,7 +119,7 @@ fn check_process(
     )?;
     let state_values = state_space.into_values()?;
 
-    Ok(CheckedProcess {
+    Ok(CheckedProcess::new(CheckedProcessParts {
         debug_name: process.name.clone(),
         state_type: process.state_type.clone(),
         state_values,
@@ -130,7 +130,7 @@ fn check_process(
         step_result,
         next_state,
         actions,
-    })
+    }))
 }
 
 fn check_init(
