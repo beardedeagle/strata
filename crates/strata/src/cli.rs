@@ -276,6 +276,7 @@ pub fn run_strata_from_env() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mantle_artifact::{MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_SOURCE_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -377,10 +378,104 @@ mod tests {
         assert!(err.to_string().contains("duplicate --output argument"));
     }
 
+    #[test]
+    fn strata_check_rejects_source_that_cannot_lower_to_artifact() {
+        let path = unique_source_path("artifact-too-large-check");
+        fs::write(&path, oversized_artifact_source())
+            .expect("oversized-artifact test source should be written");
+
+        let err = strata_main([
+            "strata".to_string(),
+            "check".to_string(),
+            path.display().to_string(),
+        ])
+        .expect_err("check should fail when lowering rejects the checked source");
+
+        assert_artifact_size_error(&err);
+
+        fs::remove_file(path).expect("test source should be removed");
+    }
+
+    #[test]
+    fn strata_build_rejects_lowering_failure_before_writing_output() {
+        let source_path = unique_source_path("artifact-too-large-build");
+        let output_path = unique_artifact_path("artifact-too-large-build-output");
+        fs::write(&source_path, oversized_artifact_source())
+            .expect("oversized-artifact test source should be written");
+
+        let err = strata_main([
+            "strata".to_string(),
+            "build".to_string(),
+            source_path.display().to_string(),
+            "--output".to_string(),
+            output_path.display().to_string(),
+        ])
+        .expect_err("build should fail when lowering rejects the checked source");
+
+        assert_artifact_size_error(&err);
+        assert!(
+            !output_path.exists(),
+            "build must not write an artifact after lowering failure"
+        );
+
+        fs::remove_file(source_path).expect("test source should be removed");
+    }
+
+    fn assert_artifact_size_error(err: &Error) {
+        let Error::Artifact(artifact_err) = err else {
+            panic!("expected artifact lowering error, got {err}");
+        };
+        assert!(artifact_err
+            .to_string()
+            .contains("encoded artifact exceeds maximum size"));
+    }
+
+    fn oversized_artifact_source() -> String {
+        let state_values = (0..MAX_STATE_VALUES_PER_PROCESS)
+            .map(|index| format!("S{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut source = format!(
+            "module oversized_artifact;\nrecord Marker;\nenum MainState {{ {state_values} }}\nenum MainMsg {{ Start }}\n"
+        );
+        for process_index in 0..MAX_PROCESS_COUNT {
+            let process_name = if process_index == 0 {
+                "Main".to_string()
+            } else {
+                format!("Proc{process_index}")
+            };
+            source.push_str(&format!(
+                r#"
+proc {process_name} mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+    fn init() -> MainState ! [] ~ [] @det {{ return S0; }}
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+            ));
+        }
+        assert!(
+            source.len() <= MAX_SOURCE_BYTES,
+            "test source must stay below the source size limit"
+        );
+        source
+    }
+
     fn unique_source_path(name: &str) -> PathBuf {
         let index = TEST_SOURCE_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
             "strata-source-{name}-{}-{index}.str",
+            std::process::id()
+        ))
+    }
+
+    fn unique_artifact_path(name: &str) -> PathBuf {
+        let index = TEST_SOURCE_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "strata-artifact-{name}-{}-{index}.mta",
             std::process::id()
         ))
     }
