@@ -1,10 +1,9 @@
-use mantle_artifact::{Error, Result};
-
 use super::ast::{
     Determinism, Effect, Enum, Function, FunctionBody, Identifier, Module, OutputLiteral, Param,
     Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
     ValueExpr,
 };
+use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
 use super::{MAX_SOURCE_BYTES, MAX_TYPE_NESTING, MAX_VALUE_NESTING};
 

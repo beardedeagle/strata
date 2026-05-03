@@ -1,10 +1,13 @@
 use std::collections::BTreeMap;
 
-use mantle_artifact::{Error, OutputId, Result, MAX_OUTPUT_LITERALS};
+use mantle_artifact::MAX_OUTPUT_LITERALS;
+
+use super::super::checked::CheckedOutputId;
+use super::super::diagnostic::{Error, Result};
 
 pub(super) struct OutputPool {
     values: Vec<String>,
-    by_text: BTreeMap<String, OutputId>,
+    by_text: BTreeMap<String, CheckedOutputId>,
 }
 
 impl OutputPool {
@@ -15,7 +18,7 @@ impl OutputPool {
         }
     }
 
-    pub(super) fn intern(&mut self, value: &str) -> Result<OutputId> {
+    pub(super) fn intern(&mut self, value: &str) -> Result<CheckedOutputId> {
         if let Some(id) = self.by_text.get(value) {
             return Ok(*id);
         }
@@ -24,7 +27,7 @@ impl OutputPool {
                 "program emits more than {MAX_OUTPUT_LITERALS} distinct output literals"
             )));
         }
-        let id = OutputId::from_index(self.values.len())?;
+        let id = CheckedOutputId::from_index(self.values.len())?;
         self.values.push(value.to_string());
         self.by_text.insert(value.to_string(), id);
         Ok(id)

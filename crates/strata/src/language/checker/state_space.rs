@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{
-    validate_state_value_label, Error, Result, StateId, MAX_STATE_VALUES_PER_PROCESS,
-};
+use mantle_artifact::{validate_state_value_label, MAX_STATE_VALUES_PER_PROCESS};
 
 use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
+use super::super::checked::CheckedStateId;
+use super::super::diagnostic::{Error, Result};
 use super::super::MAX_VALUE_NESTING;
 use super::symbols::SemanticIndex;
 use super::STEP_STATE_PARAMETER_NAME;
@@ -56,10 +56,10 @@ impl<'module> StateSpace<'module> {
         &mut self,
         semantic_index: &SemanticIndex,
         value: &ValueExpr,
-    ) -> Result<StateId> {
+    ) -> Result<CheckedStateId> {
         let label = self.canonical_value(semantic_index, self.state_type, value, 0)?;
         if let Some(index) = self.values.iter().position(|candidate| candidate == &label) {
-            return StateId::from_index(index);
+            return CheckedStateId::from_index(index);
         }
         if self.values.len() >= MAX_STATE_VALUES_PER_PROCESS {
             return Err(Error::new(format!(
@@ -68,7 +68,7 @@ impl<'module> StateSpace<'module> {
             )));
         }
         self.values.push(label);
-        StateId::from_index(self.values.len() - 1)
+        CheckedStateId::from_index(self.values.len() - 1)
     }
 
     pub(super) fn into_values(self) -> Result<Vec<String>> {
@@ -182,7 +182,7 @@ impl<'module> StateSpace<'module> {
             parts.push(format!("{}:{field_value}", field.name));
         }
         let label = format!("{}{{{}}}", record.name, parts.join(","));
-        validate_state_value_label(&label)?;
+        validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
         Ok(label)
     }
 }

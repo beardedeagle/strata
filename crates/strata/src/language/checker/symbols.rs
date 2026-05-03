@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use mantle_artifact::{Error, MessageId, ProcessId, Result};
-
 use super::super::ast::{Enum, Identifier, Module, Record, TypeRef};
+use super::super::checked::{CheckedMessageId, CheckedProcessId};
+use super::super::diagnostic::{Error, Result};
 use super::super::PROC_RESULT_TYPE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -107,7 +107,7 @@ pub(super) struct SemanticIndex {
     symbols: SymbolTable,
     proc_result_type: Symbol,
     types: BTreeMap<Symbol, TypeDecl>,
-    processes: BTreeMap<Symbol, ProcessId>,
+    processes: BTreeMap<Symbol, CheckedProcessId>,
     enum_variants: Vec<BTreeMap<Symbol, usize>>,
 }
 
@@ -177,7 +177,7 @@ impl SemanticIndex {
         for (index, process) in module.processes.iter().enumerate() {
             let symbol = symbols.intern(&process.name)?;
             if processes
-                .insert(symbol, ProcessId::from_index(index)?)
+                .insert(symbol, CheckedProcessId::from_index(index)?)
                 .is_some()
             {
                 return Err(Error::new(format!(
@@ -200,11 +200,11 @@ impl SemanticIndex {
         })
     }
 
-    pub(super) fn process_id(&self, name: &Identifier) -> Result<ProcessId> {
+    pub(super) fn process_id(&self, name: &Identifier) -> Result<CheckedProcessId> {
         self.process_id_by_name(name.as_str())
     }
 
-    pub(super) fn process_id_by_name(&self, name: &str) -> Result<ProcessId> {
+    pub(super) fn process_id_by_name(&self, name: &str) -> Result<CheckedProcessId> {
         let symbol = self
             .symbols
             .resolve(name)
@@ -290,9 +290,9 @@ impl SemanticIndex {
         &self,
         module: &Module,
         sender_process: &str,
-        process_id: ProcessId,
+        process_id: CheckedProcessId,
         message: &Identifier,
-    ) -> Result<MessageId> {
+    ) -> Result<CheckedMessageId> {
         let process = module.processes.get(process_id.index()).ok_or_else(|| {
             Error::new(format!(
                 "process id {} is not declared",
@@ -318,7 +318,7 @@ impl SemanticIndex {
         self.enum_variants[enum_index]
             .get(&message_symbol)
             .copied()
-            .map(MessageId::from_index)
+            .map(CheckedMessageId::from_index)
             .transpose()?
             .ok_or_else(|| {
                 Error::new(format!(

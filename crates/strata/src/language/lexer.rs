@@ -1,5 +1,4 @@
-use mantle_artifact::{Error, Result};
-
+use super::diagnostic::{Error, Result};
 use super::MAX_TOKEN_COUNT;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
