@@ -9,16 +9,20 @@ use mantle_artifact::{
     MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
 };
 
-use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement, ValueExpr};
+use super::ast::{
+    Determinism, Effect, FunctionBlock, FunctionBody, MessageMatch, Module, Process, ReturnExpr,
+    Statement, ValueExpr,
+};
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
     CheckedProcessParts, CheckedProgram, CheckedProgramParts, CheckedStateId, CheckedStepResult,
+    CheckedTransition, CheckedTransitionParts,
 };
 use super::diagnostic::{Error, Result};
 use super::PROC_RESULT_TYPE;
 use outputs::OutputPool;
 use state_space::StateSpace;
-use static_validation::{reject_unsupported_self_send, validate_action_references};
+use static_validation::validate_action_references;
 use symbols::SemanticIndex;
 
 const STEP_STATE_PARAMETER_NAME: &str = "state";
@@ -57,9 +61,9 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         )?);
     }
 
-    validate_action_references(&checked_processes, &entry_process)?;
-
     let entry_message = CheckedMessageId::from_index(0)?;
+    validate_action_references(&checked_processes, &entry_process, &entry_message)?;
+
     let entry_process_definition = checked_processes
         .get(entry_process.index())
         .ok_or_else(|| Error::new("entry process id is not defined"))?;
@@ -109,7 +113,7 @@ fn check_process(
 
     let mut state_space = StateSpace::new(module, semantic_index, process)?;
     let init_state = check_init(semantic_index, process, &mut state_space)?;
-    let (step_result, next_state, actions) = check_step(
+    let transitions = check_step(
         module,
         process,
         process_id,
@@ -127,9 +131,7 @@ fn check_process(
         message_variants: msg_enum.variants.clone(),
         mailbox_bound: process.mailbox_bound,
         init_state,
-        step_result,
-        next_state,
-        actions,
+        transitions,
     }))
 }
 
@@ -158,6 +160,9 @@ fn check_init(
     let Some(body) = &init.body else {
         return Err(Error::new("init must have a body for buildable source"));
     };
+    let FunctionBody::Block(body) = body else {
+        return Err(Error::new("init body must not use message matching"));
+    };
     if !body.statements.is_empty() {
         return Err(Error::new(
             "init body must not perform statements in this slice",
@@ -181,7 +186,7 @@ fn check_step(
     semantic_index: &SemanticIndex,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
-) -> Result<(CheckedStepResult, CheckedNextState, Vec<CheckedAction>)> {
+) -> Result<Vec<CheckedTransition>> {
     let step = &process.step;
     if step.params.len() != 2 {
         return Err(Error::new("step must declare state and msg parameters"));
@@ -223,24 +228,133 @@ fn check_step(
         return Err(Error::new("step must have a body for buildable source"));
     };
 
+    let transitions = match body {
+        FunctionBody::Block(block) => {
+            check_simple_step_block(module, process, semantic_index, state_space, outputs, block)?
+        }
+        FunctionBody::MatchMessage(message_match) => check_message_match_step(
+            module,
+            process,
+            process_id,
+            semantic_index,
+            state_space,
+            outputs,
+            message_match,
+        )?,
+    };
+
+    let action_count = total_action_count(&transitions)?;
     validate_count(
         &format!("process {} action_count", process.name),
-        body.statements.len(),
+        action_count,
         0,
         MAX_ACTIONS_PER_PROCESS,
     )?;
-    let mut used_effects = BTreeSet::new();
-    let mut actions = Vec::with_capacity(body.statements.len());
-    for statement in &body.statements {
+    let used_effects = transitions
+        .iter()
+        .flat_map(|transition| transition.actions())
+        .fold(BTreeSet::new(), |mut effects, action| {
+            effects.insert(action.effect());
+            effects
+        });
+    validate_effects("step", &step.effects, used_effects)?;
+
+    Ok(transitions)
+}
+
+fn check_simple_step_block(
+    module: &Module,
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    state_space: &mut StateSpace<'_>,
+    outputs: &mut OutputPool,
+    block: &FunctionBlock,
+) -> Result<Vec<CheckedTransition>> {
+    let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+    if msg_enum.variants.len() != 1 {
+        return Err(Error::new(format!(
+            "process {} step with multiple messages must use match msg",
+            process.name
+        )));
+    }
+    let transition = check_step_transition(
+        module,
+        process,
+        semantic_index,
+        state_space,
+        outputs,
+        CheckedMessageId::from_index(0)?,
+        block,
+    )?;
+    Ok(vec![transition])
+}
+
+fn check_message_match_step(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    state_space: &mut StateSpace<'_>,
+    outputs: &mut OutputPool,
+    message_match: &MessageMatch,
+) -> Result<Vec<CheckedTransition>> {
+    if message_match.scrutinee.as_str() != "msg" {
+        return Err(Error::new(format!(
+            "process {} step must match msg, got {}",
+            process.name, message_match.scrutinee
+        )));
+    }
+
+    let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+    let mut seen = vec![false; msg_enum.variants.len()];
+    let mut transitions = Vec::with_capacity(message_match.arms.len());
+    for arm in &message_match.arms {
+        let message = semantic_index.message_id_for_match_arm(module, process_id, &arm.message)?;
+        if std::mem::replace(&mut seen[message.index()], true) {
+            return Err(Error::new(format!(
+                "process {} step has duplicate match arm for message {}",
+                process.name, arm.message
+            )));
+        }
+        transitions.push(check_step_transition(
+            module,
+            process,
+            semantic_index,
+            state_space,
+            outputs,
+            message,
+            &arm.body,
+        )?);
+    }
+    for (index, covered) in seen.iter().enumerate() {
+        if !covered {
+            return Err(Error::new(format!(
+                "process {} step match must cover message {}",
+                process.name, msg_enum.variants[index]
+            )));
+        }
+    }
+    Ok(transitions)
+}
+
+fn check_step_transition(
+    module: &Module,
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    state_space: &mut StateSpace<'_>,
+    outputs: &mut OutputPool,
+    message: CheckedMessageId,
+    block: &FunctionBlock,
+) -> Result<CheckedTransition> {
+    let mut actions = Vec::with_capacity(block.statements.len());
+    for statement in &block.statements {
         match statement {
             Statement::Emit(text) => {
-                used_effects.insert(Effect::Emit);
                 actions.push(CheckedAction::Emit {
                     output: outputs.intern(text.as_str())?,
                 });
             }
             Statement::Spawn(target) => {
-                used_effects.insert(Effect::Spawn);
                 actions.push(CheckedAction::Spawn {
                     target: semantic_index.process_id(target)?,
                 });
@@ -253,7 +367,6 @@ fn check_step(
                     target_id,
                     message,
                 )?;
-                used_effects.insert(Effect::Send);
                 actions.push(CheckedAction::Send {
                     target: target_id,
                     message: message_id,
@@ -261,9 +374,8 @@ fn check_step(
             }
         }
     }
-    validate_effects("step", &step.effects, used_effects)?;
 
-    let (step_result, state_arg) = match &body.returns {
+    let (step_result, state_arg) = match &block.returns {
         ReturnExpr::Call { name, arg } if name.as_str() == "Stop" => (CheckedStepResult::Stop, arg),
         ReturnExpr::Call { name, arg } if name.as_str() == "Continue" => {
             (CheckedStepResult::Continue, arg)
@@ -281,9 +393,30 @@ fn check_step(
         CheckedNextState::Value(state_space.resolve_state_value(semantic_index, state_arg)?)
     };
 
-    reject_unsupported_self_send(process, process_id, &actions)?;
+    Ok(CheckedTransition::new(CheckedTransitionParts {
+        message,
+        step_result,
+        next_state,
+        actions,
+    }))
+}
 
-    Ok((step_result, next_state, actions))
+impl CheckedAction {
+    fn effect(&self) -> Effect {
+        match self {
+            Self::Emit { .. } => Effect::Emit,
+            Self::Spawn { .. } => Effect::Spawn,
+            Self::Send { .. } => Effect::Send,
+        }
+    }
+}
+
+fn total_action_count(transitions: &[CheckedTransition]) -> Result<usize> {
+    transitions.iter().try_fold(0usize, |total, transition| {
+        total
+            .checked_add(transition.actions().len())
+            .ok_or_else(|| Error::new("process action_count overflowed"))
+    })
 }
 
 fn validate_count(field: &str, value: usize, min: usize, max: usize) -> Result<()> {

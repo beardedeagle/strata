@@ -8,7 +8,9 @@ mod ids;
 mod io;
 mod validation;
 
-pub use artifact::{ArtifactAction, ArtifactProcess, MantleArtifact, NextState, StepResult};
+pub use artifact::{
+    ArtifactAction, ArtifactProcess, ArtifactTransition, MantleArtifact, NextState, StepResult,
+};
 pub use constants::*;
 pub use error::{Error, Result};
 pub use ids::{MessageId, OutputId, ProcessId, StateId};

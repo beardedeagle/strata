@@ -11,10 +11,10 @@ fn artifact_round_trips_and_validates_magic() {
 
     assert_eq!(decoded, artifact);
     assert!(encoded.contains("entry_process=0"));
-    assert!(encoded.contains("process.0.next_state=current"));
-    assert!(encoded.contains("process.1.next_state=value"));
-    assert!(encoded.contains("process.1.next_state_value=1"));
-    assert!(encoded.contains("process.0.action.0.target_process=1"));
+    assert!(encoded.contains("process.0.transition.0.next_state=current"));
+    assert!(encoded.contains("process.1.transition.0.next_state=value"));
+    assert!(encoded.contains("process.1.transition.0.next_state_value=1"));
+    assert!(encoded.contains("process.0.transition.0.action.0.target_process=1"));
 
     let err = MantleArtifact::decode("not-mta\n").expect_err("bad magic should fail");
     assert!(err.to_string().contains("invalid Mantle artifact magic"));
@@ -37,13 +37,13 @@ fn decode_reports_duplicate_fields() {
 #[test]
 fn decode_reports_unknown_fields() {
     let mut encoded = valid_artifact().encode();
-    encoded.push_str("process.0.action.0.extra=value\n");
+    encoded.push_str("process.0.transition.0.action.0.extra=value\n");
 
     let err = MantleArtifact::decode(&encoded).expect_err("unknown field should fail");
 
     assert!(err
         .to_string()
-        .contains("unknown artifact field \"process.0.action.0.extra\""));
+        .contains("unknown artifact field \"process.0.transition.0.action.0.extra\""));
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn validate_accepts_structured_state_value_labels() {
         "MainState{phase:Idle}".to_string(),
         "MainState{phase:Handled}".to_string(),
     ];
-    artifact.processes[0].next_state = NextState::Value(StateId::new(1));
+    artifact.processes[0].transitions[0].next_state = NextState::Value(StateId::new(1));
 
     artifact
         .validate()
@@ -171,10 +171,12 @@ fn validate_rejects_encoded_artifacts_above_size_limit() {
 #[test]
 fn validate_rejects_unknown_send_message() {
     let mut artifact = valid_artifact();
-    artifact.processes[0].actions.push(ArtifactAction::Send {
-        target: ProcessId::new(1),
-        message: MessageId::new(1),
-    });
+    artifact.processes[0].transitions[0]
+        .actions
+        .push(ArtifactAction::Send {
+            target: ProcessId::new(1),
+            message: MessageId::new(1),
+        });
 
     let err = artifact
         .validate()
@@ -188,9 +190,11 @@ fn validate_rejects_unknown_send_message() {
 #[test]
 fn validate_rejects_unknown_spawn_target() {
     let mut artifact = valid_artifact();
-    artifact.processes[0].actions.push(ArtifactAction::Spawn {
-        target: ProcessId::new(99),
-    });
+    artifact.processes[0].transitions[0]
+        .actions
+        .push(ArtifactAction::Spawn {
+            target: ProcessId::new(99),
+        });
 
     let err = artifact
         .validate()
@@ -202,7 +206,7 @@ fn validate_rejects_unknown_spawn_target() {
 #[test]
 fn validate_rejects_unknown_output_id() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].actions = vec![ArtifactAction::Emit {
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::Emit {
         output: OutputId::new(99),
     }];
 
@@ -230,7 +234,7 @@ fn validate_rejects_unknown_entry_process_id() {
 #[test]
 fn validate_rejects_unknown_next_state_value_id() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].next_state = NextState::Value(StateId::new(99));
+    artifact.processes[1].transitions[0].next_state = NextState::Value(StateId::new(99));
 
     let err = artifact
         .validate()
@@ -238,7 +242,55 @@ fn validate_rejects_unknown_next_state_value_id() {
 
     assert!(err
         .to_string()
-        .contains("process Worker next_state id 99 is not a valid state value"));
+        .contains("process Worker transition next_state id 99 is not a valid state value"));
+}
+
+#[test]
+fn validate_rejects_missing_transition_for_message() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1]
+        .message_variants
+        .push("Pong".to_string());
+
+    let err = artifact
+        .validate()
+        .expect_err("missing transition should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker transition_count must equal message_count"));
+}
+
+#[test]
+fn validate_rejects_duplicate_transition_message() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1]
+        .message_variants
+        .push("Pong".to_string());
+    let duplicate = artifact.processes[1].transitions[0].clone();
+    artifact.processes[1].transitions.push(duplicate);
+
+    let err = artifact
+        .validate()
+        .expect_err("duplicate transition should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker declares duplicate transition for message id 0"));
+}
+
+#[test]
+fn validate_rejects_unknown_transition_message() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0].message = MessageId::new(1);
+
+    let err = artifact
+        .validate()
+        .expect_err("unknown transition message should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker transition message id 1 is not accepted"));
 }
 
 #[test]
@@ -387,17 +439,20 @@ fn valid_artifact() -> MantleArtifact {
                 message_variants: vec!["Start".to_string()],
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
-                step_result: StepResult::Stop,
-                next_state: NextState::Current,
-                actions: vec![
-                    ArtifactAction::Spawn {
-                        target: ProcessId::new(1),
-                    },
-                    ArtifactAction::Send {
-                        target: ProcessId::new(1),
-                        message: MessageId::new(0),
-                    },
-                ],
+                transitions: vec![ArtifactTransition {
+                    message: MessageId::new(0),
+                    step_result: StepResult::Stop,
+                    next_state: NextState::Current,
+                    actions: vec![
+                        ArtifactAction::Spawn {
+                            target: ProcessId::new(1),
+                        },
+                        ArtifactAction::Send {
+                            target: ProcessId::new(1),
+                            message: MessageId::new(0),
+                        },
+                    ],
+                }],
             },
             ArtifactProcess {
                 debug_name: "Worker".to_string(),
@@ -407,10 +462,13 @@ fn valid_artifact() -> MantleArtifact {
                 message_variants: vec!["Ping".to_string()],
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
-                step_result: StepResult::Stop,
-                next_state: NextState::Value(StateId::new(1)),
-                actions: vec![ArtifactAction::Emit {
-                    output: OutputId::new(0),
+                transitions: vec![ArtifactTransition {
+                    message: MessageId::new(0),
+                    step_result: StepResult::Stop,
+                    next_state: NextState::Value(StateId::new(1)),
+                    actions: vec![ArtifactAction::Emit {
+                        output: OutputId::new(0),
+                    }],
                 }],
             },
         ],

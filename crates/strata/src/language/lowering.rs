@@ -1,12 +1,12 @@
 use mantle_artifact::{
-    source_hash_fnv1a64, ArtifactAction, ArtifactProcess, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
-    STRATA_SOURCE_LANGUAGE,
+    source_hash_fnv1a64, ArtifactAction, ArtifactProcess, ArtifactTransition, MantleArtifact,
+    MessageId, NextState, OutputId, ProcessId, StateId, StepResult, ARTIFACT_FORMAT,
+    ARTIFACT_VERSION, STRATA_SOURCE_LANGUAGE,
 };
 
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
-    CheckedProcessId, CheckedProgram, CheckedStateId, CheckedStepResult,
+    CheckedProcessId, CheckedProgram, CheckedStateId, CheckedStepResult, CheckedTransition,
 };
 
 pub fn lower_to_artifact(
@@ -41,9 +41,16 @@ fn lower_process(process: &CheckedProcess) -> ArtifactProcess {
             .collect(),
         mailbox_bound: process.mailbox_bound(),
         init_state: lower_state_id(process.init_state()),
-        step_result: lower_step_result(process.step_result()),
-        next_state: lower_next_state(process.next_state()),
-        actions: process.actions().iter().map(lower_action).collect(),
+        transitions: process.transitions().iter().map(lower_transition).collect(),
+    }
+}
+
+fn lower_transition(transition: &CheckedTransition) -> ArtifactTransition {
+    ArtifactTransition {
+        message: lower_message_id(transition.message()),
+        step_result: lower_step_result(transition.step_result()),
+        next_state: lower_next_state(transition.next_state()),
+        actions: transition.actions().iter().map(lower_action).collect(),
     }
 }
 

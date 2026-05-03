@@ -327,4 +327,45 @@ impl SemanticIndex {
                 ))
             })
     }
+
+    pub(super) fn message_id_for_match_arm(
+        &self,
+        module: &Module,
+        process_id: CheckedProcessId,
+        message: &Identifier,
+    ) -> Result<CheckedMessageId> {
+        let process = module.processes.get(process_id.index()).ok_or_else(|| {
+            Error::new(format!(
+                "process id {} is not declared",
+                process_id.as_u32()
+            ))
+        })?;
+        let msg_enum = self.enum_decl(module, &process.msg_type)?;
+        let message_symbol = self.symbols.resolve(message.as_str()).ok_or_else(|| {
+            Error::new(format!(
+                "process {} step match arm message {} is not accepted",
+                process.name, message
+            ))
+        })?;
+        let enum_index = match self.type_decl(&process.msg_type)? {
+            TypeDecl::Enum(index) => index,
+            TypeDecl::Record(_) => {
+                return Err(Error::new(format!(
+                    "type {} is not declared as an enum",
+                    msg_enum.name
+                )))
+            }
+        };
+        self.enum_variants[enum_index]
+            .get(&message_symbol)
+            .copied()
+            .map(CheckedMessageId::from_index)
+            .transpose()?
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} step match arm message {} is not accepted",
+                    process.name, message
+                ))
+            })
+    }
 }

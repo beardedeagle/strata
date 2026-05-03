@@ -51,6 +51,24 @@ runtime trace at:
 target/strata/actor_ping.observability.jsonl
 ```
 
+Multi-step immutable actor execution is now represented by message-keyed
+process transitions:
+
+```sh
+target/debug/strata check examples/actor_sequence.str
+target/debug/strata build examples/actor_sequence.str
+target/debug/mantle run target/strata/actor_sequence.mta
+```
+
+That example sends two messages to a worker. The worker handles the first
+message, returns a whole replacement state with `Continue(...)`, then handles a
+later message and returns a whole replacement state with `Stop(...)`. Mantle
+records process, message, state, and output IDs in:
+
+```text
+target/strata/actor_sequence.observability.jsonl
+```
+
 ## What Strata Is For
 
 Strata is aimed at programs where the important behavior should be explicit:
@@ -164,4 +182,7 @@ target/debug/mantle run target/strata/hello.mta
 target/debug/strata check examples/actor_ping.str
 target/debug/strata build examples/actor_ping.str
 target/debug/mantle run target/strata/actor_ping.mta
+target/debug/strata check examples/actor_sequence.str
+target/debug/strata build examples/actor_sequence.str
+target/debug/mantle run target/strata/actor_sequence.mta
 ```

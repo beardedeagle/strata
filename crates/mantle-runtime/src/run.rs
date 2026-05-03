@@ -272,10 +272,11 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
         let step = ActiveStep::new(self.program, &self.processes[process_index], message)?;
         let definition = self.program.process(step.process_id)?;
-        let next_state = definition.next_state;
-        let step_result = definition.step_result;
+        let transition = definition.transition_for_message(message)?;
+        let next_state = transition.next_state;
+        let step_result = transition.step_result;
 
-        for &action in &definition.actions {
+        for &action in &transition.actions {
             self.execute_action(&step, action)?;
         }
 

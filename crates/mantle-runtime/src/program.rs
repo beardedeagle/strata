@@ -1,6 +1,6 @@
 use mantle_artifact::{
-    ArtifactAction, Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId, Result,
-    StateId, StepResult,
+    ArtifactAction, ArtifactTransition, Error, MantleArtifact, MessageId, NextState, OutputId,
+    ProcessId, Result, StateId, StepResult,
 };
 
 #[derive(Debug, Clone)]
@@ -28,12 +28,10 @@ impl LoadedProgram {
                     message_variants: process.message_variants.clone(),
                     mailbox_bound: process.mailbox_bound,
                     init_state: process.init_state,
-                    step_result: process.step_result,
-                    next_state: process.next_state,
-                    actions: process
-                        .actions
+                    transitions: process
+                        .transitions
                         .iter()
-                        .map(LoadedAction::from_artifact)
+                        .map(LoadedTransition::from_artifact)
                         .collect(),
                 })
             })
@@ -108,9 +106,45 @@ pub(crate) struct LoadedProcess {
     pub(crate) message_variants: Vec<String>,
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
+    pub(crate) transitions: Vec<LoadedTransition>,
+}
+
+impl LoadedProcess {
+    pub(crate) fn transition_for_message(&self, message: MessageId) -> Result<&LoadedTransition> {
+        self.transitions
+            .iter()
+            .find(|transition| transition.message == message)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} has no transition for message id {}",
+                    self.debug_name,
+                    message.as_u32()
+                ))
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LoadedTransition {
+    pub(crate) message: MessageId,
     pub(crate) step_result: StepResult,
     pub(crate) next_state: NextState,
     pub(crate) actions: Vec<LoadedAction>,
+}
+
+impl LoadedTransition {
+    fn from_artifact(transition: &ArtifactTransition) -> Self {
+        Self {
+            message: transition.message,
+            step_result: transition.step_result,
+            next_state: transition.next_state,
+            actions: transition
+                .actions
+                .iter()
+                .map(LoadedAction::from_artifact)
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
