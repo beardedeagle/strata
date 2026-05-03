@@ -1,7 +1,7 @@
 use super::ast::{
-    Determinism, Effect, Enum, Function, FunctionBody, Identifier, Module, OutputLiteral, Param,
-    Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
-    ValueExpr,
+    Determinism, Effect, Enum, Function, FunctionBlock, FunctionBody, Identifier, MessageMatch,
+    MessageMatchArm, Module, OutputLiteral, Param, Process, Record, RecordField, RecordValue,
+    RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
@@ -266,18 +266,13 @@ impl Parser {
             None
         } else {
             self.expect_symbol('{')?;
-            let mut statements = Vec::new();
-            while !self.peek_keyword("return") {
-                statements.push(self.parse_function_statement()?);
-            }
-            self.expect_keyword("return")?;
-            let returns = self.parse_return_expr()?;
-            self.expect_symbol(';')?;
+            let body = if self.peek_keyword("match") {
+                FunctionBody::MatchMessage(self.parse_message_match()?)
+            } else {
+                FunctionBody::Block(self.parse_function_block()?)
+            };
             self.expect_symbol('}')?;
-            Some(FunctionBody {
-                statements,
-                returns,
-            })
+            Some(body)
         };
 
         Ok(Function {
@@ -289,6 +284,43 @@ impl Parser {
             determinism,
             body,
         })
+    }
+
+    fn parse_function_block(&mut self) -> Result<FunctionBlock> {
+        let mut statements = Vec::new();
+        while !self.peek_keyword("return") {
+            statements.push(self.parse_function_statement()?);
+        }
+        self.expect_keyword("return")?;
+        let returns = self.parse_return_expr()?;
+        self.expect_symbol(';')?;
+        Ok(FunctionBlock {
+            statements,
+            returns,
+        })
+    }
+
+    fn parse_message_match(&mut self) -> Result<MessageMatch> {
+        self.expect_keyword("match")?;
+        let scrutinee = self.expect_identifier()?;
+        self.expect_symbol('{')?;
+        let mut arms = Vec::new();
+        if self.peek_symbol('}') {
+            return Err(self.error_here("message match must declare at least one arm"));
+        }
+        loop {
+            let message = self.expect_identifier()?;
+            self.expect_fat_arrow()?;
+            self.expect_symbol('{')?;
+            let body = self.parse_function_block()?;
+            self.expect_symbol('}')?;
+            arms.push(MessageMatchArm { message, body });
+            self.consume_symbol(',');
+            if self.consume_symbol('}') {
+                break;
+            }
+        }
+        Ok(MessageMatch { scrutinee, arms })
     }
 
     fn parse_function_statement(&mut self) -> Result<Statement> {
@@ -527,6 +559,11 @@ impl Parser {
         } else {
             Err(self.error_here("expected ->"))
         }
+    }
+
+    fn expect_fat_arrow(&mut self) -> Result<()> {
+        self.expect_symbol('=')?;
+        self.expect_symbol('>')
     }
 
     fn expect_symbol(&mut self, symbol: char) -> Result<()> {

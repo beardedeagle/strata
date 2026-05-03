@@ -1,6 +1,6 @@
 use super::checked::{
-    CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcessId,
-    CheckedStateId, CheckedStepResult,
+    CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
+    CheckedProcessId, CheckedStateId, CheckedStepResult, CheckedTransition,
 };
 use super::lexer::{Lexer, TokenKind};
 use super::*;
@@ -68,6 +68,53 @@ proc Worker mailbox bounded(1) {
 }
 "#;
 
+const ACTOR_SEQUENCE: &str = r#"
+module actor_sequence;
+
+record MainState;
+enum MainMsg { Start }
+enum WorkerState { Waiting, SawFirst, Done }
+enum WorkerMsg { First, Second }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        spawn Worker;
+        send Worker First;
+        send Worker Second;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Waiting;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            First => {
+                emit "worker handled First";
+                return Continue(SawFirst);
+            }
+            Second => {
+                emit "worker handled Second";
+                return Stop(Done);
+            }
+        }
+    }
+}
+"#;
+
 #[test]
 fn parses_and_checks_hello() {
     let checked = check_source(HELLO).expect("hello should check");
@@ -77,16 +124,12 @@ fn parses_and_checks_hello() {
     assert_eq!(checked.entry_message(), checked_message_id(0));
     assert_eq!(checked.outputs(), ["hello from Strata"]);
     assert_eq!(checked.processes().len(), 1);
+    let transition = only_transition(&checked.processes()[0]);
+    assert_eq!(transition.message(), checked_message_id(0));
+    assert_eq!(transition.step_result(), CheckedStepResult::Stop);
+    assert_eq!(transition.next_state(), CheckedNextState::Current);
     assert_eq!(
-        checked.processes()[0].step_result(),
-        CheckedStepResult::Stop
-    );
-    assert_eq!(
-        checked.processes()[0].next_state(),
-        CheckedNextState::Current
-    );
-    assert_eq!(
-        checked.processes()[0].actions(),
+        transition.actions(),
         [CheckedAction::Emit {
             output: checked_output_id(0)
         }]
@@ -158,7 +201,7 @@ proc Main mailbox bounded(1) {
     assert_eq!(checked.processes()[0].state_values(), ["ready"]);
     assert_eq!(checked.processes()[0].init_state(), checked_state_id(0));
     assert_eq!(
-        checked.processes()[0].next_state(),
+        only_transition(&checked.processes()[0]).next_state(),
         CheckedNextState::Value(checked_state_id(0))
     );
 }
@@ -208,8 +251,10 @@ fn parses_and_checks_actor_ping() {
         .iter()
         .find(|process| process.debug_name().as_str() == "Main")
         .expect("Main should be checked");
+    let main_transition = only_transition(main);
+    assert_eq!(main_transition.message(), checked_message_id(0));
     assert_eq!(
-        main.actions(),
+        main_transition.actions(),
         [
             CheckedAction::Spawn {
                 target: checked_process_id(1)
@@ -228,9 +273,149 @@ fn parses_and_checks_actor_ping() {
         .expect("Worker should be checked");
     assert_eq!(worker.init_state(), checked_state_id(0));
     assert_eq!(
-        worker.next_state(),
+        only_transition(worker).next_state(),
         CheckedNextState::Value(checked_state_id(1))
     );
+}
+
+#[test]
+fn parses_and_checks_actor_sequence_message_match() {
+    let checked = check_source(ACTOR_SEQUENCE).expect("actor sequence should check");
+
+    assert_eq!(checked.module().name.as_str(), "actor_sequence");
+    assert_eq!(
+        checked.outputs(),
+        ["worker handled First", "worker handled Second"]
+    );
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    assert_eq!(worker.state_values(), ["Waiting", "SawFirst", "Done"]);
+    assert_eq!(worker.transitions().len(), 2);
+    assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
+    assert_eq!(
+        worker.transitions()[0].step_result(),
+        CheckedStepResult::Continue
+    );
+    assert_eq!(
+        worker.transitions()[0].next_state(),
+        CheckedNextState::Value(checked_state_id(1))
+    );
+    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
+    assert_eq!(
+        worker.transitions()[1].step_result(),
+        CheckedStepResult::Stop
+    );
+    assert_eq!(
+        worker.transitions()[1].next_state(),
+        CheckedNextState::Value(checked_state_id(2))
+    );
+
+    let artifact = lower_to_artifact(&checked, ACTOR_SEQUENCE)
+        .expect("message match should lower to transition records");
+    let worker_artifact = &artifact.processes[1];
+    assert_eq!(worker_artifact.transitions.len(), 2);
+    assert_eq!(
+        worker_artifact.transitions[0].message,
+        mantle_artifact::MessageId::new(0)
+    );
+    assert_eq!(
+        worker_artifact.transitions[1].message,
+        mantle_artifact::MessageId::new(1)
+    );
+    let encoded = artifact.encode();
+    assert!(encoded.contains("process.1.transition.0.message=0"));
+    assert!(encoded.contains("process.1.transition.1.message=1"));
+    assert!(!encoded.contains("transition.0.message=First"));
+}
+
+#[test]
+fn rejects_unknown_message_match_arm() {
+    let source = ACTOR_SEQUENCE.replace("Second =>", "Unknown =>");
+
+    let err = check_source(&source).expect_err("unknown match arm should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker step match arm message Unknown is not accepted"));
+}
+
+#[test]
+fn rejects_missing_message_match_arm() {
+    let source = ACTOR_SEQUENCE.replace(
+        r#"
+            Second => {
+                emit "worker handled Second";
+                return Stop(Done);
+            }
+"#,
+        "",
+    );
+
+    let err = check_source(&source).expect_err("missing match arm should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker step match must cover message Second"));
+}
+
+#[test]
+fn rejects_duplicate_message_match_arm() {
+    let source = ACTOR_SEQUENCE.replace("Second =>", "First =>");
+
+    let err = check_source(&source).expect_err("duplicate match arm should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker step has duplicate match arm for message First"));
+}
+
+#[test]
+fn rejects_message_match_on_non_message_scrutinee() {
+    let source = ACTOR_SEQUENCE.replace("match msg", "match state");
+
+    let err = check_source(&source).expect_err("wrong match scrutinee should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker step must match msg, got state"));
+}
+
+#[test]
+fn rejects_message_match_invalid_next_state() {
+    let source = ACTOR_SEQUENCE.replace("Continue(SawFirst)", "Continue(UnknownState)");
+
+    let err = check_source(&source).expect_err("invalid next state should fail");
+
+    assert!(err
+        .to_string()
+        .contains("value UnknownState is not a variant of enum WorkerState"));
+}
+
+#[test]
+fn rejects_simple_step_body_for_multi_message_process() {
+    let source = ACTOR_SEQUENCE.replace(
+        r#"match msg {
+            First => {
+                emit "worker handled First";
+                return Continue(SawFirst);
+            }
+            Second => {
+                emit "worker handled Second";
+                return Stop(Done);
+            }
+        }"#,
+        r#"emit "worker handled First";
+        return Stop(Done);"#,
+    );
+
+    let err = check_source(&source).expect_err("multi-message simple step should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker step with multiple messages must use match msg"));
 }
 
 #[test]
@@ -282,7 +467,7 @@ proc Main mailbox bounded(1) {
     assert_eq!(checked.entry_process(), checked_process_id(1));
     assert_eq!(main.debug_name().as_str(), "Main");
     assert_eq!(
-        main.actions(),
+        only_transition(main).actions(),
         [
             CheckedAction::Spawn {
                 target: checked_process_id(0)
@@ -297,7 +482,7 @@ proc Main mailbox bounded(1) {
     let artifact = lower_to_artifact(&checked, source).expect("checked program should lower");
     let encoded = artifact.encode();
     assert!(encoded.contains("entry_process=1"));
-    assert!(encoded.contains("process.1.action.0.target_process=0"));
+    assert!(encoded.contains("process.1.transition.0.action.0.target_process=0"));
     assert!(!encoded.contains("target_process=Worker"));
 }
 
@@ -483,6 +668,47 @@ fn rejects_action_count_above_artifact_limit_during_checking() {
     let module = parse_source(&source).expect("action-count source should parse");
 
     let err = check_module(module).expect_err("action count above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process Main action_count must be no greater than {MAX_ACTIONS_PER_PROCESS}"
+    )));
+}
+
+#[test]
+fn rejects_process_action_budget_across_message_transitions_during_checking() {
+    let first_actions = repeated_emit_statements(MAX_ACTIONS_PER_PROCESS / 2, 16);
+    let second_actions = repeated_emit_statements((MAX_ACTIONS_PER_PROCESS / 2) + 1, 16);
+    let source = format!(
+        r#"
+module action_budget;
+
+record MainState;
+enum MainMsg {{ Start, Again }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {{
+        match msg {{
+            Start => {{
+{first_actions}                return Stop(state);
+            }}
+            Again => {{
+{second_actions}                return Stop(state);
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let module = parse_source(&source).expect("aggregate action-budget source should parse");
+
+    let err = check_module(module).expect_err("aggregate action budget should fail");
 
     assert!(err.to_string().contains(&format!(
         "process Main action_count must be no greater than {MAX_ACTIONS_PER_PROCESS}"
@@ -685,7 +911,7 @@ proc Main mailbox bounded(1) {
     );
     assert_eq!(checked.processes()[0].init_state(), checked_state_id(0));
     assert_eq!(
-        checked.processes()[0].next_state(),
+        only_transition(&checked.processes()[0]).next_state(),
         CheckedNextState::Value(checked_state_id(1))
     );
 }
@@ -898,6 +1124,57 @@ fn rejects_duplicate_static_spawn_target() {
 }
 
 #[test]
+fn allows_same_spawn_target_in_distinct_terminal_message_arms() {
+    let source = r#"
+module spawn_by_message;
+
+record MainState;
+enum MainMsg { Start, Restart }
+enum WorkerState { Idle }
+enum WorkerMsg { Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        match msg {
+            Start => {
+                spawn Worker;
+                send Worker Ping;
+                return Stop(state);
+            }
+            Restart => {
+                spawn Worker;
+                send Worker Ping;
+                return Stop(state);
+            }
+        }
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(Idle);
+    }
+}
+"#;
+
+    check_source(source).expect("mutually exclusive message arms may spawn the same process");
+}
+
+#[test]
 fn rejects_static_self_spawn() {
     let source = ACTOR_PING
         .replace("! [emit] ~ [] @det", "! [spawn] ~ [] @det")
@@ -960,17 +1237,17 @@ fn rejects_send_to_unknown_message() {
 }
 
 #[test]
-fn rejects_continue_after_self_send() {
+fn rejects_unbounded_self_send_loop() {
     let source = HELLO
         .replace("! [emit]", "! [send]")
         .replace(r#"emit "hello from Strata";"#, "send Main Start;")
         .replace("return Stop(state);", "return Continue(state);");
 
-    let err = check_source(&source).expect_err("self-send continuation should be rejected");
+    let err = check_source(&source).expect_err("self-send loop should be rejected");
 
     assert!(err
         .to_string()
-        .contains("sends to itself, which is not supported"));
+        .contains("static runtime validation exceeded"));
 }
 
 #[test]
@@ -1074,4 +1351,24 @@ fn checked_message_id(index: usize) -> CheckedMessageId {
 
 fn checked_output_id(index: usize) -> CheckedOutputId {
     CheckedOutputId::from_index(index).expect("valid checked output id")
+}
+
+fn repeated_emit_statements(count: usize, indent: usize) -> String {
+    let padding = " ".repeat(indent);
+    let mut statements = String::new();
+    for _ in 0..count {
+        statements.push_str(&padding);
+        statements.push_str("emit \"hello from Strata\";\n");
+    }
+    statements
+}
+
+fn only_transition(process: &CheckedProcess) -> &CheckedTransition {
+    assert_eq!(
+        process.transitions().len(),
+        1,
+        "expected exactly one checked transition for {}",
+        process.debug_name()
+    );
+    &process.transitions()[0]
 }

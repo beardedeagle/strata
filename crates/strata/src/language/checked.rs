@@ -38,6 +38,12 @@ impl CheckedMessageId {
     }
 }
 
+impl CheckedStateId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::language) enum CheckedStepResult {
     Continue,
@@ -65,6 +71,48 @@ pub(in crate::language) enum CheckedAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedTransition {
+    message: CheckedMessageId,
+    step_result: CheckedStepResult,
+    next_state: CheckedNextState,
+    actions: Vec<CheckedAction>,
+}
+
+impl CheckedTransition {
+    pub(in crate::language) fn new(parts: CheckedTransitionParts) -> Self {
+        Self {
+            message: parts.message,
+            step_result: parts.step_result,
+            next_state: parts.next_state,
+            actions: parts.actions,
+        }
+    }
+
+    pub(in crate::language) fn message(&self) -> CheckedMessageId {
+        self.message
+    }
+
+    pub(in crate::language) fn step_result(&self) -> CheckedStepResult {
+        self.step_result
+    }
+
+    pub(in crate::language) fn next_state(&self) -> CheckedNextState {
+        self.next_state
+    }
+
+    pub(in crate::language) fn actions(&self) -> &[CheckedAction] {
+        &self.actions
+    }
+}
+
+pub(in crate::language) struct CheckedTransitionParts {
+    pub message: CheckedMessageId,
+    pub step_result: CheckedStepResult,
+    pub next_state: CheckedNextState,
+    pub actions: Vec<CheckedAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) struct CheckedProcess {
     debug_name: Identifier,
     state_type: TypeRef,
@@ -73,9 +121,7 @@ pub(in crate::language) struct CheckedProcess {
     message_variants: Vec<Identifier>,
     mailbox_bound: usize,
     init_state: CheckedStateId,
-    step_result: CheckedStepResult,
-    next_state: CheckedNextState,
-    actions: Vec<CheckedAction>,
+    transitions: Vec<CheckedTransition>,
 }
 
 impl CheckedProcess {
@@ -88,9 +134,7 @@ impl CheckedProcess {
             message_variants: parts.message_variants,
             mailbox_bound: parts.mailbox_bound,
             init_state: parts.init_state,
-            step_result: parts.step_result,
-            next_state: parts.next_state,
-            actions: parts.actions,
+            transitions: parts.transitions,
         }
     }
 
@@ -122,16 +166,8 @@ impl CheckedProcess {
         self.init_state
     }
 
-    pub(in crate::language) fn step_result(&self) -> CheckedStepResult {
-        self.step_result
-    }
-
-    pub(in crate::language) fn next_state(&self) -> CheckedNextState {
-        self.next_state
-    }
-
-    pub(in crate::language) fn actions(&self) -> &[CheckedAction] {
-        &self.actions
+    pub(in crate::language) fn transitions(&self) -> &[CheckedTransition] {
+        &self.transitions
     }
 }
 
@@ -143,9 +179,7 @@ pub(in crate::language) struct CheckedProcessParts {
     pub message_variants: Vec<Identifier>,
     pub mailbox_bound: usize,
     pub init_state: CheckedStateId,
-    pub step_result: CheckedStepResult,
-    pub next_state: CheckedNextState,
-    pub actions: Vec<CheckedAction>,
+    pub transitions: Vec<CheckedTransition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

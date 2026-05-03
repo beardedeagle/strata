@@ -81,7 +81,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
     let mut encoded_len = 0usize;
     add_encoded_bytes(&mut encoded_len, ARTIFACT_MAGIC.len() + 1)?;
     add_field_bytes(&mut encoded_len, "format", &artifact.format)?;
-    add_field_bytes(&mut encoded_len, "format_version", &artifact.format_version)?;
+    add_field_bytes(&mut encoded_len, "schema_version", &artifact.schema_version)?;
     add_field_bytes(
         &mut encoded_len,
         "source_language",
@@ -165,57 +165,82 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
         )?;
         add_field_bytes(
             &mut encoded_len,
-            &format!("{prefix}.step_result"),
-            process.step_result.as_str(),
+            &format!("{prefix}.transition_count"),
+            &process.transitions.len().to_string(),
         )?;
-        add_field_bytes(
-            &mut encoded_len,
-            &format!("{prefix}.next_state"),
-            process.next_state.kind_str(),
-        )?;
-        if let NextState::Value(state) = process.next_state {
+        for (transition_index, transition) in process.transitions.iter().enumerate() {
+            let transition_prefix = format!("{prefix}.transition.{transition_index}");
             add_field_bytes(
                 &mut encoded_len,
-                &format!("{prefix}.next_state_value"),
-                &state.as_u32().to_string(),
+                &format!("{transition_prefix}.message"),
+                &transition.message.as_u32().to_string(),
             )?;
-        }
-        add_field_bytes(
-            &mut encoded_len,
-            &format!("{prefix}.action_count"),
-            &process.actions.len().to_string(),
-        )?;
-        for (action_index, action) in process.actions.iter().enumerate() {
-            let action_prefix = format!("{prefix}.action.{action_index}");
-            match action {
-                ArtifactAction::Emit { output } => {
-                    add_field_bytes(&mut encoded_len, &format!("{action_prefix}.kind"), "emit")?;
-                    add_field_bytes(
-                        &mut encoded_len,
-                        &format!("{action_prefix}.output"),
-                        &output.as_u32().to_string(),
-                    )?;
-                }
-                ArtifactAction::Spawn { target } => {
-                    add_field_bytes(&mut encoded_len, &format!("{action_prefix}.kind"), "spawn")?;
-                    add_field_bytes(
-                        &mut encoded_len,
-                        &format!("{action_prefix}.target_process"),
-                        &target.as_u32().to_string(),
-                    )?;
-                }
-                ArtifactAction::Send { target, message } => {
-                    add_field_bytes(&mut encoded_len, &format!("{action_prefix}.kind"), "send")?;
-                    add_field_bytes(
-                        &mut encoded_len,
-                        &format!("{action_prefix}.target_process"),
-                        &target.as_u32().to_string(),
-                    )?;
-                    add_field_bytes(
-                        &mut encoded_len,
-                        &format!("{action_prefix}.message"),
-                        &message.as_u32().to_string(),
-                    )?;
+            add_field_bytes(
+                &mut encoded_len,
+                &format!("{transition_prefix}.step_result"),
+                transition.step_result.as_str(),
+            )?;
+            add_field_bytes(
+                &mut encoded_len,
+                &format!("{transition_prefix}.next_state"),
+                transition.next_state.kind_str(),
+            )?;
+            if let NextState::Value(state) = transition.next_state {
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{transition_prefix}.next_state_value"),
+                    &state.as_u32().to_string(),
+                )?;
+            }
+            add_field_bytes(
+                &mut encoded_len,
+                &format!("{transition_prefix}.action_count"),
+                &transition.actions.len().to_string(),
+            )?;
+            for (action_index, action) in transition.actions.iter().enumerate() {
+                let action_prefix = format!("{transition_prefix}.action.{action_index}");
+                match action {
+                    ArtifactAction::Emit { output } => {
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.kind"),
+                            "emit",
+                        )?;
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.output"),
+                            &output.as_u32().to_string(),
+                        )?;
+                    }
+                    ArtifactAction::Spawn { target } => {
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.kind"),
+                            "spawn",
+                        )?;
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.target_process"),
+                            &target.as_u32().to_string(),
+                        )?;
+                    }
+                    ArtifactAction::Send { target, message } => {
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.kind"),
+                            "send",
+                        )?;
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.target_process"),
+                            &target.as_u32().to_string(),
+                        )?;
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.message"),
+                            &message.as_u32().to_string(),
+                        )?;
+                    }
                 }
             }
         }

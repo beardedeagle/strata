@@ -176,9 +176,27 @@ pub struct Function {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FunctionBody {
+pub enum FunctionBody {
+    Block(FunctionBlock),
+    MatchMessage(MessageMatch),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionBlock {
     pub statements: Vec<Statement>,
     pub returns: ReturnExpr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageMatch {
+    pub scrutinee: Identifier,
+    pub arms: Vec<MessageMatchArm>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageMatchArm {
+    pub message: Identifier,
+    pub body: FunctionBlock,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

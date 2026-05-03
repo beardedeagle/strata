@@ -1,12 +1,12 @@
 use mantle_artifact::{
-    ArtifactAction, Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId, Result,
-    StateId, StepResult,
+    ArtifactAction, ArtifactProcess, ArtifactTransition, Error, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, Result, StateId, StepResult,
 };
 
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedProgram {
     pub(crate) format: String,
-    pub(crate) format_version: String,
+    pub(crate) schema_version: String,
     pub(crate) source_language: String,
     pub(crate) module: String,
     pub(crate) entry_process: ProcessId,
@@ -21,27 +21,12 @@ impl LoadedProgram {
         let processes = artifact
             .processes
             .iter()
-            .map(|process| {
-                Ok(LoadedProcess {
-                    debug_name: process.debug_name.clone(),
-                    state_values: process.state_values.clone(),
-                    message_variants: process.message_variants.clone(),
-                    mailbox_bound: process.mailbox_bound,
-                    init_state: process.init_state,
-                    step_result: process.step_result,
-                    next_state: process.next_state,
-                    actions: process
-                        .actions
-                        .iter()
-                        .map(LoadedAction::from_artifact)
-                        .collect(),
-                })
-            })
+            .map(LoadedProcess::from_artifact)
             .collect::<Result<Vec<_>>>()?;
 
         Ok(Self {
             format: artifact.format.clone(),
-            format_version: artifact.format_version.clone(),
+            schema_version: artifact.schema_version.clone(),
             source_language: artifact.source_language.clone(),
             module: artifact.module.clone(),
             entry_process: artifact.entry_process,
@@ -108,9 +93,87 @@ pub(crate) struct LoadedProcess {
     pub(crate) message_variants: Vec<String>,
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
+    pub(crate) transitions: Vec<LoadedTransition>,
+}
+
+impl LoadedProcess {
+    fn from_artifact(process: &ArtifactProcess) -> Result<Self> {
+        Ok(Self {
+            debug_name: process.debug_name.clone(),
+            state_values: process.state_values.clone(),
+            message_variants: process.message_variants.clone(),
+            mailbox_bound: process.mailbox_bound,
+            init_state: process.init_state,
+            transitions: load_transitions_by_message(process)?,
+        })
+    }
+
+    pub(crate) fn transition_for_message(&self, message: MessageId) -> Result<&LoadedTransition> {
+        self.transitions.get(message.index()).ok_or_else(|| {
+            Error::new(format!(
+                "process {} has no transition for message id {}",
+                self.debug_name,
+                message.as_u32()
+            ))
+        })
+    }
+}
+
+fn load_transitions_by_message(process: &ArtifactProcess) -> Result<Vec<LoadedTransition>> {
+    let mut transitions = vec![None; process.message_variants.len()];
+    for transition in &process.transitions {
+        let Some(slot) = transitions.get_mut(transition.message.index()) else {
+            return Err(Error::new(format!(
+                "process {} transition message id {} is not loaded",
+                process.debug_name,
+                transition.message.as_u32()
+            )));
+        };
+        if slot
+            .replace(LoadedTransition::from_artifact(transition))
+            .is_some()
+        {
+            return Err(Error::new(format!(
+                "process {} declares duplicate transition for message id {}",
+                process.debug_name,
+                transition.message.as_u32()
+            )));
+        }
+    }
+
+    transitions
+        .into_iter()
+        .enumerate()
+        .map(|(message_index, transition)| {
+            transition.ok_or_else(|| {
+                Error::new(format!(
+                    "process {} has no transition for message id {}",
+                    process.debug_name, message_index
+                ))
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LoadedTransition {
     pub(crate) step_result: StepResult,
     pub(crate) next_state: NextState,
     pub(crate) actions: Vec<LoadedAction>,
+}
+
+impl LoadedTransition {
+    fn from_artifact(transition: &ArtifactTransition) -> Self {
+        Self {
+            step_result: transition.step_result,
+            next_state: transition.next_state,
+            actions: transition
+                .actions
+                .iter()
+                .map(LoadedAction::from_artifact)
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
