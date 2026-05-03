@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 
 use super::super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
@@ -12,18 +12,10 @@ pub(super) fn validate_action_references(
     entry_process: &CheckedProcessId,
     entry_message: &CheckedMessageId,
 ) -> Result<()> {
-    let mut spawned_targets = BTreeMap::new();
     for (process_index, process) in processes.iter().enumerate() {
         let process_id = CheckedProcessId::from_index(process_index)?;
         for transition in process.transitions() {
-            validate_transition(
-                processes,
-                process,
-                process_id,
-                *entry_process,
-                transition,
-                &mut spawned_targets,
-            )?;
+            validate_transition(processes, process, process_id, *entry_process, transition)?;
         }
     }
     validate_static_runtime_order(processes, *entry_process, *entry_message)?;
@@ -36,7 +28,6 @@ fn validate_transition(
     process_id: CheckedProcessId,
     entry_process: CheckedProcessId,
     transition: &CheckedTransition,
-    spawned_targets: &mut BTreeMap<CheckedProcessId, CheckedProcessId>,
 ) -> Result<()> {
     if transition.message().index() >= process.message_variants().len() {
         return Err(Error::new(format!(
@@ -46,6 +37,7 @@ fn validate_transition(
         )));
     }
     validate_next_state(process, transition.next_state())?;
+    let mut spawned_targets = BTreeSet::new();
 
     for action in transition.actions() {
         match action {
@@ -71,12 +63,12 @@ fn validate_transition(
                         process.debug_name()
                     )));
                 }
-                if let Some(previous_process) = spawned_targets.insert(*target, process_id) {
+                if !spawned_targets.insert(*target) {
                     return Err(Error::new(format!(
-                        "process {} duplicates spawn target {} already spawned by {}",
+                        "process {} duplicates spawn target {} within message transition {}",
                         process.debug_name(),
                         process_label(processes, *target)?,
-                        process_label(processes, previous_process)?
+                        transition.message().as_u32()
                     )));
                 }
             }

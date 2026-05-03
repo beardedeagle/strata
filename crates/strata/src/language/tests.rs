@@ -1083,6 +1083,57 @@ fn rejects_duplicate_static_spawn_target() {
 }
 
 #[test]
+fn allows_same_spawn_target_in_distinct_message_arms() {
+    let source = r#"
+module spawn_by_message;
+
+record MainState;
+enum MainMsg { Start, Restart }
+enum WorkerState { Idle }
+enum WorkerMsg { Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        match msg {
+            Start => {
+                spawn Worker;
+                send Worker Ping;
+                return Stop(state);
+            }
+            Restart => {
+                spawn Worker;
+                send Worker Ping;
+                return Stop(state);
+            }
+        }
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(Idle);
+    }
+}
+"#;
+
+    check_source(source).expect("mutually exclusive message arms may spawn the same process");
+}
+
+#[test]
 fn rejects_static_self_spawn() {
     let source = ACTOR_PING
         .replace("! [emit] ~ [] @det", "! [spawn] ~ [] @det")

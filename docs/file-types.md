@@ -29,7 +29,7 @@ schema_version=1
 source_language=strata
 ```
 
-The schema version identifies the currently admitted `.mta` encoding shape. It is not a Strata language release or a compatibility promise. Executable references and state transitions inside `.mta` use validated table IDs and typed transition forms. Process transition records are keyed by message IDs and contain next-state IDs plus continue/stop results. Names are retained for diagnostics, traces, and metadata, but Mantle execution must load and run resolved IDs rather than dispatching by source text.
+The schema version identifies the currently admitted `.mta` encoding shape. It is not a Strata language release or a compatibility promise. Executable references and state transitions inside `.mta` use validated table IDs and typed transition forms. Process transition records are encoded by transition index and carry a `message` ID field; validation requires one unique transition for each accepted message, and runtime selection indexes the admitted transition table by typed message ID. Names are retained for diagnostics, traces, and metadata, but Mantle execution must load and run resolved IDs rather than dispatching by source text.
 
 The first product target path is:
 

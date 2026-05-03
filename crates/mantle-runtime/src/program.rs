@@ -1,6 +1,6 @@
 use mantle_artifact::{
-    ArtifactAction, ArtifactTransition, Error, MantleArtifact, MessageId, NextState, OutputId,
-    ProcessId, Result, StateId, StepResult,
+    ArtifactAction, ArtifactProcess, ArtifactTransition, Error, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, Result, StateId, StepResult,
 };
 
 #[derive(Debug, Clone)]
@@ -21,20 +21,7 @@ impl LoadedProgram {
         let processes = artifact
             .processes
             .iter()
-            .map(|process| {
-                Ok(LoadedProcess {
-                    debug_name: process.debug_name.clone(),
-                    state_values: process.state_values.clone(),
-                    message_variants: process.message_variants.clone(),
-                    mailbox_bound: process.mailbox_bound,
-                    init_state: process.init_state,
-                    transitions: process
-                        .transitions
-                        .iter()
-                        .map(LoadedTransition::from_artifact)
-                        .collect(),
-                })
-            })
+            .map(LoadedProcess::from_artifact)
             .collect::<Result<Vec<_>>>()?;
 
         Ok(Self {
@@ -110,23 +97,66 @@ pub(crate) struct LoadedProcess {
 }
 
 impl LoadedProcess {
+    fn from_artifact(process: &ArtifactProcess) -> Result<Self> {
+        Ok(Self {
+            debug_name: process.debug_name.clone(),
+            state_values: process.state_values.clone(),
+            message_variants: process.message_variants.clone(),
+            mailbox_bound: process.mailbox_bound,
+            init_state: process.init_state,
+            transitions: load_transitions_by_message(process)?,
+        })
+    }
+
     pub(crate) fn transition_for_message(&self, message: MessageId) -> Result<&LoadedTransition> {
-        self.transitions
-            .iter()
-            .find(|transition| transition.message == message)
-            .ok_or_else(|| {
+        self.transitions.get(message.index()).ok_or_else(|| {
+            Error::new(format!(
+                "process {} has no transition for message id {}",
+                self.debug_name,
+                message.as_u32()
+            ))
+        })
+    }
+}
+
+fn load_transitions_by_message(process: &ArtifactProcess) -> Result<Vec<LoadedTransition>> {
+    let mut transitions = vec![None; process.message_variants.len()];
+    for transition in &process.transitions {
+        let Some(slot) = transitions.get_mut(transition.message.index()) else {
+            return Err(Error::new(format!(
+                "process {} transition message id {} is not loaded",
+                process.debug_name,
+                transition.message.as_u32()
+            )));
+        };
+        if slot
+            .replace(LoadedTransition::from_artifact(transition))
+            .is_some()
+        {
+            return Err(Error::new(format!(
+                "process {} declares duplicate transition for message id {}",
+                process.debug_name,
+                transition.message.as_u32()
+            )));
+        }
+    }
+
+    transitions
+        .into_iter()
+        .enumerate()
+        .map(|(message_index, transition)| {
+            transition.ok_or_else(|| {
                 Error::new(format!(
                     "process {} has no transition for message id {}",
-                    self.debug_name,
-                    message.as_u32()
+                    process.debug_name, message_index
                 ))
             })
-    }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedTransition {
-    pub(crate) message: MessageId,
     pub(crate) step_result: StepResult,
     pub(crate) next_state: NextState,
     pub(crate) actions: Vec<LoadedAction>,
@@ -135,7 +165,6 @@ pub(crate) struct LoadedTransition {
 impl LoadedTransition {
     fn from_artifact(transition: &ArtifactTransition) -> Self {
         Self {
-            message: transition.message,
             step_result: transition.step_result,
             next_state: transition.next_state,
             actions: transition

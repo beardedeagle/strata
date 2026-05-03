@@ -8,6 +8,7 @@ use mantle_artifact::{
     STRATA_SOURCE_LANGUAGE,
 };
 
+use super::program::LoadedProgram;
 use super::*;
 
 #[test]
@@ -272,6 +273,35 @@ fn in_memory_host_selects_transitions_by_message_id() {
             && *state_id == StateId::new(2)
             && state == "Done"
     )));
+}
+
+#[test]
+fn loaded_program_indexes_transitions_by_message_id() {
+    let mut artifact = sequence_artifact();
+    artifact.processes[1].transitions.swap(0, 1);
+
+    let program = LoadedProgram::from_artifact(&artifact)
+        .expect("artifact transitions should load by message id");
+    let worker = program
+        .process(ProcessId::new(1))
+        .expect("worker process should be loaded");
+
+    assert_eq!(worker.transitions[0].step_result, StepResult::Continue);
+    assert_eq!(worker.transitions[1].step_result, StepResult::Stop);
+    assert_eq!(
+        worker
+            .transition_for_message(MessageId::new(0))
+            .expect("First transition should be loaded")
+            .step_result,
+        StepResult::Continue
+    );
+    assert_eq!(
+        worker
+            .transition_for_message(MessageId::new(1))
+            .expect("Second transition should be loaded")
+            .step_result,
+        StepResult::Stop
+    );
 }
 
 #[test]
