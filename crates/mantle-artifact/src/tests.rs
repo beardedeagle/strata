@@ -187,6 +187,29 @@ fn validate_rejects_encoded_artifacts_above_size_limit() {
 }
 
 #[test]
+fn validate_rejects_aggregate_process_action_count_above_limit() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1]
+        .message_variants
+        .push("Pong".to_string());
+    artifact.processes[1].transitions[0].actions = emit_actions(MAX_ACTIONS_PER_PROCESS / 2);
+    artifact.processes[1].transitions.push(ArtifactTransition {
+        message: MessageId::new(1),
+        step_result: StepResult::Stop,
+        next_state: NextState::Current,
+        actions: emit_actions((MAX_ACTIONS_PER_PROCESS / 2) + 1),
+    });
+
+    let err = artifact
+        .validate()
+        .expect_err("aggregate process action count should be bounded");
+
+    assert!(err.to_string().contains(&format!(
+        "action_count must be no greater than {MAX_ACTIONS_PER_PROCESS}"
+    )));
+}
+
+#[test]
 fn validate_rejects_unknown_send_message() {
     let mut artifact = valid_artifact();
     artifact.processes[0].transitions[0]
@@ -492,6 +515,15 @@ fn valid_artifact() -> MantleArtifact {
         ],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }
+}
+
+fn emit_actions(count: usize) -> Vec<ArtifactAction> {
+    vec![
+        ArtifactAction::Emit {
+            output: OutputId::new(0)
+        };
+        count
+    ]
 }
 
 fn unique_test_dir(name: &str) -> PathBuf {

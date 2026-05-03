@@ -675,6 +675,47 @@ fn rejects_action_count_above_artifact_limit_during_checking() {
 }
 
 #[test]
+fn rejects_process_action_budget_across_message_transitions_during_checking() {
+    let first_actions = repeated_emit_statements(MAX_ACTIONS_PER_PROCESS / 2, 16);
+    let second_actions = repeated_emit_statements((MAX_ACTIONS_PER_PROCESS / 2) + 1, 16);
+    let source = format!(
+        r#"
+module action_budget;
+
+record MainState;
+enum MainMsg {{ Start, Again }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {{
+        match msg {{
+            Start => {{
+{first_actions}                return Stop(state);
+            }}
+            Again => {{
+{second_actions}                return Stop(state);
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let module = parse_source(&source).expect("aggregate action-budget source should parse");
+
+    let err = check_module(module).expect_err("aggregate action budget should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process Main action_count must be no greater than {MAX_ACTIONS_PER_PROCESS}"
+    )));
+}
+
+#[test]
 fn rejects_duplicate_process_members() {
     for (source, expected) in [
             (
@@ -1310,6 +1351,16 @@ fn checked_message_id(index: usize) -> CheckedMessageId {
 
 fn checked_output_id(index: usize) -> CheckedOutputId {
     CheckedOutputId::from_index(index).expect("valid checked output id")
+}
+
+fn repeated_emit_statements(count: usize, indent: usize) -> String {
+    let padding = " ".repeat(indent);
+    let mut statements = String::new();
+    for _ in 0..count {
+        statements.push_str(&padding);
+        statements.push_str("emit \"hello from Strata\";\n");
+    }
+    statements
 }
 
 fn only_transition(process: &CheckedProcess) -> &CheckedTransition {

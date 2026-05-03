@@ -203,10 +203,48 @@ fn hex_digit(value: u32) -> char {
 
 #[cfg(test)]
 mod tests {
-    use mantle_artifact::{OutputId, ProcessId};
+    use mantle_artifact::{MessageId, OutputId, ProcessId};
 
     use super::*;
     use crate::{RuntimeEvent, RuntimeOutputStream, RuntimeProcessId};
+
+    #[test]
+    fn artifact_loaded_trace_includes_entry_ids() {
+        let event = RuntimeEvent::ArtifactLoaded {
+            format: "mantle-target-artifact".to_string(),
+            schema_version: "1".to_string(),
+            source_language: "strata".to_string(),
+            module: "actor_sequence".to_string(),
+            entry_process_id: ProcessId::new(7),
+            entry_process: "Main".to_string(),
+            entry_message_id: MessageId::new(3),
+            process_count: 9,
+        };
+
+        let line = encode_json_line(&event);
+
+        assert!(line.contains(r#""event":"artifact_loaded""#));
+        assert!(line.contains(r#""entry_process_id":7"#));
+        assert!(line.contains(r#""entry_message_id":3"#));
+    }
+
+    #[test]
+    fn program_output_trace_includes_output_id() {
+        let event = RuntimeEvent::ProgramOutput {
+            pid: RuntimeProcessId::FIRST,
+            process_id: ProcessId::new(2),
+            process: "Worker".to_string(),
+            stream: RuntimeOutputStream::Stdout,
+            output_id: OutputId::new(13),
+            text: "worker handled Second".to_string(),
+        };
+
+        let line = encode_json_line(&event);
+
+        assert!(line.contains(r#""event":"program_output""#));
+        assert!(line.contains(r#""process_id":2"#));
+        assert!(line.contains(r#""output_id":13"#));
+    }
 
     #[test]
     fn trace_output_escapes_all_control_characters() {
