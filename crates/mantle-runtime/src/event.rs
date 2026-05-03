@@ -40,7 +40,7 @@ impl fmt::Display for RuntimeProcessId {
 pub enum RuntimeEvent {
     ArtifactLoaded {
         format: String,
-        format_version: String,
+        schema_version: String,
         source_language: String,
         module: String,
         entry_process_id: ProcessId,

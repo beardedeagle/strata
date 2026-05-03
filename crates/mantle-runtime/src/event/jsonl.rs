@@ -4,7 +4,7 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
     match event {
         RuntimeEvent::ArtifactLoaded {
             format,
-            format_version,
+            schema_version,
             source_language,
             module,
             entry_process_id,
@@ -12,9 +12,9 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             entry_message_id,
             process_count,
         } => format!(
-            "{{\"event\":\"artifact_loaded\",\"format\":\"{}\",\"format_version\":\"{}\",\"source_language\":\"{}\",\"module\":\"{}\",\"entry_process_id\":{},\"entry_process\":\"{}\",\"entry_message_id\":{},\"process_count\":{}}}",
+            "{{\"event\":\"artifact_loaded\",\"format\":\"{}\",\"schema_version\":\"{}\",\"source_language\":\"{}\",\"module\":\"{}\",\"entry_process_id\":{},\"entry_process\":\"{}\",\"entry_message_id\":{},\"process_count\":{}}}",
             json_escape(format),
-            json_escape(format_version),
+            json_escape(schema_version),
             json_escape(source_language),
             json_escape(module),
             entry_process_id.as_u32(),

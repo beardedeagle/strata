@@ -5,9 +5,9 @@ use crate::validation::{
 };
 use crate::{
     Error, MessageId, OutputId, ProcessId, Result, StateId, ARTIFACT_FORMAT, ARTIFACT_MAGIC,
-    ARTIFACT_VERSION, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_TRANSITIONS_PER_PROCESS,
+    ARTIFACT_SCHEMA_VERSION, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,7 +51,7 @@ impl NextState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MantleArtifact {
     pub format: String,
-    pub format_version: String,
+    pub schema_version: String,
     pub source_language: String,
     pub module: String,
     pub entry_process: ProcessId,
@@ -64,9 +64,9 @@ pub struct MantleArtifact {
 impl MantleArtifact {
     pub fn encode(&self) -> String {
         let mut encoded = format!(
-            "{ARTIFACT_MAGIC}\nformat={}\nformat_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\noutput_count={}\nprocess_count={}\n",
+            "{ARTIFACT_MAGIC}\nformat={}\nschema_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\noutput_count={}\nprocess_count={}\n",
             self.format,
-            self.format_version,
+            self.schema_version,
             self.source_language,
             self.module,
             self.entry_process.as_u32(),
@@ -137,6 +137,10 @@ impl MantleArtifact {
 
     pub fn decode(contents: &str) -> Result<Self> {
         let mut fields = ArtifactFields::parse(contents)?;
+        let format = fields.take_required("format")?;
+        let schema_version = fields.take_required("schema_version")?;
+        validate_artifact_identity(&format, &schema_version)?;
+
         let process_count = fields.take_bounded_usize("process_count", 1, MAX_PROCESS_COUNT)?;
         let output_count = fields.take_bounded_usize("output_count", 0, MAX_OUTPUT_LITERALS)?;
         let mut outputs = Vec::with_capacity(output_count);
@@ -214,8 +218,8 @@ impl MantleArtifact {
         }
 
         let artifact = Self {
-            format: fields.take_required("format")?,
-            format_version: fields.take_required("format_version")?,
+            format,
+            schema_version,
             source_language: fields.take_required("source_language")?,
             module: fields.take_required("module")?,
             entry_process: fields.take_process_id("entry_process")?,
@@ -231,18 +235,7 @@ impl MantleArtifact {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.format != ARTIFACT_FORMAT {
-            return Err(Error::new(format!(
-                "unsupported artifact format {}; expected {}",
-                self.format, ARTIFACT_FORMAT
-            )));
-        }
-        if self.format_version != ARTIFACT_VERSION {
-            return Err(Error::new(format!(
-                "unsupported artifact version {}; expected {}",
-                self.format_version, ARTIFACT_VERSION
-            )));
-        }
+        validate_artifact_identity(&self.format, &self.schema_version)?;
         validate_ident_field("source_language", &self.source_language)?;
         validate_ident_field("module", &self.module)?;
         validate_source_hash(&self.source_hash_fnv1a64)?;
@@ -284,6 +277,20 @@ impl MantleArtifact {
 
         Ok(())
     }
+}
+
+fn validate_artifact_identity(format: &str, schema_version: &str) -> Result<()> {
+    if format != ARTIFACT_FORMAT {
+        return Err(Error::new(format!(
+            "unsupported artifact format {format}; expected {ARTIFACT_FORMAT}"
+        )));
+    }
+    if schema_version != ARTIFACT_SCHEMA_VERSION {
+        return Err(Error::new(format!(
+            "unsupported artifact schema version {schema_version}; expected {ARTIFACT_SCHEMA_VERSION}"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

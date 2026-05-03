@@ -36,7 +36,7 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
     );
     run.record_event(RuntimeEvent::ArtifactLoaded {
         format: program.format.clone(),
-        format_version: program.format_version.clone(),
+        schema_version: program.schema_version.clone(),
         source_language: program.source_language.clone(),
         module: program.module.clone(),
         entry_process_id: program.entry_process,

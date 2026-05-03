@@ -25,11 +25,11 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-format_version=4
+schema_version=1
 source_language=strata
 ```
 
-Executable references and state transitions inside `.mta` use validated table IDs and typed transition forms. Process transition records are keyed by message IDs and contain next-state IDs plus continue/stop results. Names are retained for diagnostics, traces, and metadata, but Mantle execution must load and run resolved IDs rather than dispatching by source text.
+The schema version identifies the currently admitted `.mta` encoding shape. It is not a Strata language release or a compatibility promise. Executable references and state transitions inside `.mta` use validated table IDs and typed transition forms. Process transition records are keyed by message IDs and contain next-state IDs plus continue/stop results. Names are retained for diagnostics, traces, and metadata, but Mantle execution must load and run resolved IDs rather than dispatching by source text.
 
 The first product target path is:
 

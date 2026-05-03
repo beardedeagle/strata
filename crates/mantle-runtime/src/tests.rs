@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
     write_artifact, ArtifactAction, ArtifactProcess, ArtifactTransition, MantleArtifact, MessageId,
-    NextState, OutputId, ProcessId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
+    NextState, OutputId, ProcessId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
     STRATA_SOURCE_LANGUAGE,
 };
 
@@ -56,6 +56,7 @@ fn run_artifact_path_writes_trace_for_current_directory_artifact() {
     assert!(trace_path.exists(), "runtime trace should be written");
     let trace = fs::read_to_string(&trace_path).expect("runtime trace should be readable");
     assert!(trace.contains(r#""event":"artifact_loaded""#));
+    assert!(trace.contains(r#""schema_version":"1""#));
     assert!(trace.contains(r#""event":"process_stopped""#));
 
     fs::remove_file(artifact_path).expect("test artifact should be removed");
@@ -349,7 +350,7 @@ fn runtime_process_id_rejects_zero() {
 fn valid_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
-        format_version: ARTIFACT_VERSION.to_string(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
         source_language: STRATA_SOURCE_LANGUAGE.to_string(),
         module: "actor_ping".to_string(),
         entry_process: ProcessId::new(0),
@@ -404,7 +405,7 @@ fn valid_artifact() -> MantleArtifact {
 fn looping_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
-        format_version: ARTIFACT_VERSION.to_string(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
         source_language: STRATA_SOURCE_LANGUAGE.to_string(),
         module: "looping".to_string(),
         entry_process: ProcessId::new(0),
@@ -435,7 +436,7 @@ fn looping_artifact() -> MantleArtifact {
 fn sequence_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
-        format_version: ARTIFACT_VERSION.to_string(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
         source_language: STRATA_SOURCE_LANGUAGE.to_string(),
         module: "actor_sequence".to_string(),
         entry_process: ProcessId::new(0),

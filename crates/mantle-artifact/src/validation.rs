@@ -81,7 +81,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
     let mut encoded_len = 0usize;
     add_encoded_bytes(&mut encoded_len, ARTIFACT_MAGIC.len() + 1)?;
     add_field_bytes(&mut encoded_len, "format", &artifact.format)?;
-    add_field_bytes(&mut encoded_len, "format_version", &artifact.format_version)?;
+    add_field_bytes(&mut encoded_len, "schema_version", &artifact.schema_version)?;
     add_field_bytes(
         &mut encoded_len,
         "source_language",

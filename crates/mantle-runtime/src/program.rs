@@ -6,7 +6,7 @@ use mantle_artifact::{
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedProgram {
     pub(crate) format: String,
-    pub(crate) format_version: String,
+    pub(crate) schema_version: String,
     pub(crate) source_language: String,
     pub(crate) module: String,
     pub(crate) entry_process: ProcessId,
@@ -39,7 +39,7 @@ impl LoadedProgram {
 
         Ok(Self {
             format: artifact.format.clone(),
-            format_version: artifact.format_version.clone(),
+            schema_version: artifact.schema_version.clone(),
             source_language: artifact.source_language.clone(),
             module: artifact.module.clone(),
             entry_process: artifact.entry_process,

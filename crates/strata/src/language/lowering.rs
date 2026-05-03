@@ -1,7 +1,7 @@
 use mantle_artifact::{
     source_hash_fnv1a64, ArtifactAction, ArtifactProcess, ArtifactTransition, MantleArtifact,
     MessageId, NextState, OutputId, ProcessId, StateId, StepResult, ARTIFACT_FORMAT,
-    ARTIFACT_VERSION, STRATA_SOURCE_LANGUAGE,
+    ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
 };
 
 use super::checked::{
@@ -15,7 +15,7 @@ pub fn lower_to_artifact(
 ) -> mantle_artifact::Result<MantleArtifact> {
     let artifact = MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
-        format_version: ARTIFACT_VERSION.to_string(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
         source_language: STRATA_SOURCE_LANGUAGE.to_string(),
         module: checked.module().name.to_string(),
         entry_process: lower_process_id(checked.entry_process()),

@@ -10,6 +10,7 @@ fn artifact_round_trips_and_validates_magic() {
     let decoded = MantleArtifact::decode(&encoded).expect("artifact should decode");
 
     assert_eq!(decoded, artifact);
+    assert!(encoded.contains("schema_version=1"));
     assert!(encoded.contains("entry_process=0"));
     assert!(encoded.contains("process.0.transition.0.next_state=current"));
     assert!(encoded.contains("process.1.transition.0.next_state=value"));
@@ -18,6 +19,20 @@ fn artifact_round_trips_and_validates_magic() {
 
     let err = MantleArtifact::decode("not-mta\n").expect_err("bad magic should fail");
     assert!(err.to_string().contains("invalid Mantle artifact magic"));
+}
+
+#[test]
+fn decode_rejects_unsupported_schema_before_body_fields() {
+    let encoded = format!(
+        "MTA0\nformat={ARTIFACT_FORMAT}\nschema_version=0\nprocess_count={}\n",
+        MAX_PROCESS_COUNT + 1
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unsupported schema should fail first");
+
+    assert!(err
+        .to_string()
+        .contains("unsupported artifact schema version 0; expected 1"));
 }
 
 #[test]
@@ -48,7 +63,10 @@ fn decode_reports_unknown_fields() {
 
 #[test]
 fn decode_rejects_unbounded_process_count_before_allocation() {
-    let encoded = format!("MTA0\nprocess_count={}\n", MAX_PROCESS_COUNT + 1);
+    let encoded = format!(
+        "MTA0\nformat={ARTIFACT_FORMAT}\nschema_version={ARTIFACT_SCHEMA_VERSION}\nprocess_count={}\n",
+        MAX_PROCESS_COUNT + 1
+    );
 
     let err = MantleArtifact::decode(&encoded).expect_err("process count should be bounded");
 
@@ -424,7 +442,7 @@ fn create_fifo(path: &Path) {
 fn valid_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
-        format_version: ARTIFACT_VERSION.to_string(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
         source_language: STRATA_SOURCE_LANGUAGE.to_string(),
         module: "actor_ping".to_string(),
         entry_process: ProcessId::new(0),
