@@ -1,19 +1,26 @@
 mod ast;
+mod checked;
 mod checker;
+mod diagnostic;
 mod lexer;
+mod lowering;
 mod parser;
 
 #[cfg(test)]
 mod tests;
-
-use mantle_artifact::Result;
 
 pub use ast::{
     Determinism, Effect, Enum, Function, FunctionBody, Identifier, Module, OutputLiteral, Param,
     Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
     ValueExpr,
 };
-pub use checker::{check_module, CheckedProgram};
+pub use checked::{
+    CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
+    CheckedProcessId, CheckedProgram, CheckedStateId, CheckedStepResult,
+};
+pub use checker::check_module;
+pub use diagnostic::{Error, Result};
+pub use lowering::lower_to_artifact;
 pub use parser::parse_source;
 
 const STATIC_RUNTIME_DISPATCH_LIMIT: usize = 10_000;
@@ -25,7 +32,5 @@ const PROC_RESULT_TYPE: &str = "ProcResult";
 
 pub fn check_source(source: &str) -> Result<CheckedProgram> {
     let module = parse_source(source)?;
-    let checked = check_module(module)?;
-    checked.to_artifact(source)?;
-    Ok(checked)
+    check_module(module)
 }

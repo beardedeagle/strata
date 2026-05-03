@@ -1,7 +1,6 @@
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
-    ArtifactAction, MessageId, NextState, OutputId, ProcessId, StateId, StepResult,
     MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
 };
@@ -70,16 +69,16 @@ fn parses_and_checks_hello() {
     let checked = check_source(HELLO).expect("hello should check");
 
     assert_eq!(checked.module.name.as_str(), "hello");
-    assert_eq!(checked.entry_process, ProcessId::new(0));
-    assert_eq!(checked.entry_message, MessageId::new(0));
+    assert_eq!(checked.entry_process, CheckedProcessId::new(0));
+    assert_eq!(checked.entry_message, CheckedMessageId::new(0));
     assert_eq!(checked.outputs, ["hello from Strata"]);
     assert_eq!(checked.processes.len(), 1);
-    assert_eq!(checked.processes[0].step_result, StepResult::Stop);
-    assert_eq!(checked.processes[0].next_state, NextState::Current);
+    assert_eq!(checked.processes[0].step_result, CheckedStepResult::Stop);
+    assert_eq!(checked.processes[0].next_state, CheckedNextState::Current);
     assert_eq!(
         checked.processes[0].actions,
-        [ArtifactAction::Emit {
-            output: OutputId::new(0)
+        [CheckedAction::Emit {
+            output: CheckedOutputId::new(0)
         }]
     );
 }
@@ -147,10 +146,10 @@ proc Main mailbox bounded(1) {
     let checked = check_source(source).expect("lowercase state values should check");
 
     assert_eq!(checked.processes[0].state_values, ["ready"]);
-    assert_eq!(checked.processes[0].init_state, StateId::new(0));
+    assert_eq!(checked.processes[0].init_state, CheckedStateId::new(0));
     assert_eq!(
         checked.processes[0].next_state,
-        NextState::Value(StateId::new(0))
+        CheckedNextState::Value(CheckedStateId::new(0))
     );
 }
 
@@ -189,25 +188,25 @@ fn parses_and_checks_actor_ping() {
     let checked = check_source(ACTOR_PING).expect("actor ping should check");
 
     assert_eq!(checked.module.name.as_str(), "actor_ping");
-    assert_eq!(checked.entry_process, ProcessId::new(0));
-    assert_eq!(checked.entry_message, MessageId::new(0));
+    assert_eq!(checked.entry_process, CheckedProcessId::new(0));
+    assert_eq!(checked.entry_message, CheckedMessageId::new(0));
     assert_eq!(checked.outputs, ["worker handled Ping"]);
     assert_eq!(checked.processes.len(), 2);
 
     let main = checked
         .processes
         .iter()
-        .find(|process| process.debug_name == "Main")
+        .find(|process| process.debug_name.as_str() == "Main")
         .expect("Main should be checked");
     assert_eq!(
         main.actions,
         [
-            ArtifactAction::Spawn {
-                target: ProcessId::new(1)
+            CheckedAction::Spawn {
+                target: CheckedProcessId::new(1)
             },
-            ArtifactAction::Send {
-                target: ProcessId::new(1),
-                message: MessageId::new(0)
+            CheckedAction::Send {
+                target: CheckedProcessId::new(1),
+                message: CheckedMessageId::new(0)
             }
         ]
     );
@@ -215,10 +214,13 @@ fn parses_and_checks_actor_ping() {
     let worker = checked
         .processes
         .iter()
-        .find(|process| process.debug_name == "Worker")
+        .find(|process| process.debug_name.as_str() == "Worker")
         .expect("Worker should be checked");
-    assert_eq!(worker.init_state, StateId::new(0));
-    assert_eq!(worker.next_state, NextState::Value(StateId::new(1)));
+    assert_eq!(worker.init_state, CheckedStateId::new(0));
+    assert_eq!(
+        worker.next_state,
+        CheckedNextState::Value(CheckedStateId::new(1))
+    );
 }
 
 #[test]
@@ -267,28 +269,41 @@ proc Main mailbox bounded(1) {
         .get(checked.entry_process.index())
         .expect("Main entry should be present");
 
-    assert_eq!(checked.entry_process, ProcessId::new(1));
-    assert_eq!(main.debug_name, "Main");
+    assert_eq!(checked.entry_process, CheckedProcessId::new(1));
+    assert_eq!(main.debug_name.as_str(), "Main");
     assert_eq!(
         main.actions,
         [
-            ArtifactAction::Spawn {
-                target: ProcessId::new(0)
+            CheckedAction::Spawn {
+                target: CheckedProcessId::new(0)
             },
-            ArtifactAction::Send {
-                target: ProcessId::new(0),
-                message: MessageId::new(0)
+            CheckedAction::Send {
+                target: CheckedProcessId::new(0),
+                message: CheckedMessageId::new(0)
             }
         ]
     );
 
-    let artifact = checked
-        .to_artifact(source)
-        .expect("checked program should lower");
+    let artifact = lower_to_artifact(&checked, source).expect("checked program should lower");
     let encoded = artifact.encode();
     assert!(encoded.contains("entry_process=1"));
     assert!(encoded.contains("process.1.action.0.target_process=0"));
     assert!(!encoded.contains("target_process=Worker"));
+}
+
+#[test]
+fn lowering_rejects_invalid_checked_ir_references() {
+    let mut checked = check_source(HELLO).expect("hello should check");
+    checked.processes[0].actions = vec![CheckedAction::Spawn {
+        target: CheckedProcessId::new(99),
+    }];
+
+    let err = lower_to_artifact(&checked, HELLO)
+        .expect_err("lowering should validate checked IR before producing artifacts");
+
+    assert!(err
+        .to_string()
+        .contains("process Main spawns undefined process id 99"));
 }
 
 #[test]
@@ -673,10 +688,10 @@ proc Main mailbox bounded(1) {
         checked.processes[0].state_values,
         ["MainState{phase:Idle}", "MainState{phase:Handled}"]
     );
-    assert_eq!(checked.processes[0].init_state, StateId::new(0));
+    assert_eq!(checked.processes[0].init_state, CheckedStateId::new(0));
     assert_eq!(
         checked.processes[0].next_state,
-        NextState::Value(StateId::new(1))
+        CheckedNextState::Value(CheckedStateId::new(1))
     );
 }
 

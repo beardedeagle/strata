@@ -1,6 +1,8 @@
 use std::fmt;
 
-use mantle_artifact::{Error, Result, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES};
+use mantle_artifact::{MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES};
+
+use super::diagnostic::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Identifier(String);

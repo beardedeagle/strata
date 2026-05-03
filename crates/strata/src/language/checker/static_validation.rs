@@ -1,21 +1,21 @@
 use std::collections::BTreeMap;
 
-use mantle_artifact::{ArtifactAction, ArtifactProcess, Error, ProcessId, Result, StepResult};
-
 use super::super::ast::Process;
+use super::super::checked::{CheckedAction, CheckedProcess, CheckedProcessId, CheckedStepResult};
+use super::super::diagnostic::{Error, Result};
 use super::super::STATIC_RUNTIME_DISPATCH_LIMIT;
 
 pub(super) fn validate_action_references(
-    processes: &[ArtifactProcess],
-    entry_process: &ProcessId,
+    processes: &[CheckedProcess],
+    entry_process: &CheckedProcessId,
 ) -> Result<()> {
     let mut spawned_targets = BTreeMap::new();
     for (process_index, process) in processes.iter().enumerate() {
-        let process_id = ProcessId::from_index(process_index)?;
+        let process_id = CheckedProcessId::from_index(process_index)?;
         for action in &process.actions {
             match action {
-                ArtifactAction::Emit { .. } => {}
-                ArtifactAction::Spawn { target } => {
+                CheckedAction::Emit { .. } => {}
+                CheckedAction::Spawn { target } => {
                     if target.index() >= processes.len() {
                         return Err(Error::new(format!(
                             "process {} spawns undefined process id {}",
@@ -45,7 +45,7 @@ pub(super) fn validate_action_references(
                         )));
                     }
                 }
-                ArtifactAction::Send { target, message } => {
+                CheckedAction::Send { target, message } => {
                     let Some(target_process) = processes.get(target.index()) else {
                         return Err(Error::new(format!(
                             "process {} sends to undefined process id {}",
@@ -77,14 +77,14 @@ enum StaticProcessStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StaticProcessInstance {
-    process_id: ProcessId,
+    process_id: CheckedProcessId,
     status: StaticProcessStatus,
     mailbox_depth: usize,
 }
 
 fn validate_static_runtime_order(
-    processes: &[ArtifactProcess],
-    entry_process: ProcessId,
+    processes: &[CheckedProcess],
+    entry_process: CheckedProcessId,
 ) -> Result<()> {
     let mut instances = vec![StaticProcessInstance {
         process_id: entry_process,
@@ -106,8 +106,8 @@ fn validate_static_runtime_order(
 
         for action in &process.actions {
             match action {
-                ArtifactAction::Emit { .. } => {}
-                ArtifactAction::Spawn { target } => {
+                CheckedAction::Emit { .. } => {}
+                CheckedAction::Spawn { target } => {
                     let target_process = process_by_id(processes, *target)?;
                     if instances
                         .iter()
@@ -124,7 +124,7 @@ fn validate_static_runtime_order(
                         mailbox_depth: 0,
                     });
                 }
-                ArtifactAction::Send { target, message } => {
+                CheckedAction::Send { target, message } => {
                     let target_process = process_by_id(processes, *target)?;
                     if message.index() >= target_process.message_variants.len() {
                         return Err(Error::new(format!(
@@ -164,7 +164,7 @@ fn validate_static_runtime_order(
             }
         }
 
-        if process.step_result == StepResult::Stop {
+        if process.step_result == CheckedStepResult::Stop {
             instances[process_index].status = StaticProcessStatus::Stopped;
         }
         dispatches += 1;
@@ -189,13 +189,16 @@ fn next_static_runnable(instances: &[StaticProcessInstance]) -> Option<usize> {
     })
 }
 
-fn process_by_id(processes: &[ArtifactProcess], process_id: ProcessId) -> Result<&ArtifactProcess> {
+fn process_by_id(
+    processes: &[CheckedProcess],
+    process_id: CheckedProcessId,
+) -> Result<&CheckedProcess> {
     processes
         .get(process_id.index())
         .ok_or_else(|| Error::new(format!("process id {} is not defined", process_id.as_u32())))
 }
 
-fn process_label(processes: &[ArtifactProcess], process_id: ProcessId) -> Result<&str> {
+fn process_label(processes: &[CheckedProcess], process_id: CheckedProcessId) -> Result<&str> {
     processes
         .get(process_id.index())
         .map(|process| process.debug_name.as_str())
@@ -204,13 +207,13 @@ fn process_label(processes: &[ArtifactProcess], process_id: ProcessId) -> Result
 
 pub(super) fn reject_unsupported_self_send(
     process: &Process,
-    process_id: ProcessId,
-    actions: &[ArtifactAction],
+    process_id: CheckedProcessId,
+    actions: &[CheckedAction],
 ) -> Result<()> {
     if actions.iter().any(|action| {
         matches!(
             action,
-            ArtifactAction::Send { target, .. } if *target == process_id
+            CheckedAction::Send { target, .. } if *target == process_id
         )
     }) {
         return Err(Error::new(format!(

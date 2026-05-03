@@ -1,11 +1,68 @@
 use std::env;
+use std::fmt;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use mantle_artifact::{default_artifact_path, write_artifact, Error, Result};
+use mantle_artifact::{default_artifact_path, write_artifact};
 
-use crate::language::{check_source, MAX_SOURCE_BYTES};
+use crate::language::{check_source, lower_to_artifact, MAX_SOURCE_BYTES};
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
+pub enum Error {
+    Message(String),
+    Language(crate::language::Error),
+    Artifact(mantle_artifact::Error),
+    Io(std::io::Error),
+}
+
+impl Error {
+    fn new(message: impl Into<String>) -> Self {
+        Self::Message(message.into())
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Message(message) => f.write_str(message),
+            Self::Language(err) => write!(f, "{err}"),
+            Self::Artifact(err) => write!(f, "{err}"),
+            Self::Io(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Message(_) => None,
+            Self::Language(err) => Some(err),
+            Self::Artifact(err) => Some(err),
+            Self::Io(err) => Some(err),
+        }
+    }
+}
+
+impl From<crate::language::Error> for Error {
+    fn from(value: crate::language::Error) -> Self {
+        Self::Language(value)
+    }
+}
+
+impl From<mantle_artifact::Error> for Error {
+    fn from(value: mantle_artifact::Error) -> Self {
+        Self::Artifact(value)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value)
+    }
+}
 
 pub fn strata_main<I>(args: I) -> Result<()>
 where
@@ -19,6 +76,7 @@ where
             ensure_no_extra_args(args)?;
             let source = read_source_file(&path)?;
             let checked = check_source(&source)?;
+            let _artifact = lower_to_artifact(&checked, &source)?;
             let entry = checked
                 .processes
                 .get(checked.entry_process.index())
@@ -51,7 +109,7 @@ where
             }
             let source = read_source_file(&path)?;
             let checked = check_source(&source)?;
-            let artifact = checked.to_artifact(&source)?;
+            let artifact = lower_to_artifact(&checked, &source)?;
             let artifact_path = output.unwrap_or(default_artifact_path(&path)?);
             write_artifact(&artifact_path, &artifact)?;
             println!(

@@ -6,13 +6,15 @@ mod symbols;
 use std::collections::BTreeSet;
 
 use mantle_artifact::{
-    source_hash_fnv1a64, ArtifactAction, ArtifactProcess, Error, MantleArtifact, MessageId,
-    NextState, ProcessId, Result, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_VERSION,
-    MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_PROCESS_COUNT, STRATA_SOURCE_LANGUAGE,
+    MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
 };
 
 use super::ast::{Determinism, Effect, Module, Process, ReturnExpr, Statement, ValueExpr};
+use super::checked::{
+    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
+    CheckedProgram, CheckedStateId, CheckedStepResult,
+};
+use super::diagnostic::{Error, Result};
 use super::PROC_RESULT_TYPE;
 use outputs::OutputPool;
 use state_space::StateSpace;
@@ -20,33 +22,6 @@ use static_validation::{reject_unsupported_self_send, validate_action_references
 use symbols::SemanticIndex;
 
 const STEP_STATE_PARAMETER_NAME: &str = "state";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CheckedProgram {
-    pub module: Module,
-    pub entry_process: ProcessId,
-    pub entry_message: MessageId,
-    pub outputs: Vec<String>,
-    pub processes: Vec<ArtifactProcess>,
-}
-
-impl CheckedProgram {
-    pub fn to_artifact(&self, source: &str) -> Result<MantleArtifact> {
-        let artifact = MantleArtifact {
-            format: ARTIFACT_FORMAT.to_string(),
-            format_version: ARTIFACT_VERSION.to_string(),
-            source_language: STRATA_SOURCE_LANGUAGE.to_string(),
-            module: self.module.name.to_string(),
-            entry_process: self.entry_process,
-            entry_message: self.entry_message,
-            outputs: self.outputs.clone(),
-            processes: self.processes.clone(),
-            source_hash_fnv1a64: source_hash_fnv1a64(source),
-        };
-        artifact.validate()?;
-        Ok(artifact)
-    }
-}
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
     if module.records.is_empty() {
@@ -72,7 +47,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     let mut outputs = OutputPool::new();
     let mut checked_processes = Vec::with_capacity(module.processes.len());
     for (index, process) in module.processes.iter().enumerate() {
-        let process_id = ProcessId::from_index(index)?;
+        let process_id = CheckedProcessId::from_index(index)?;
         checked_processes.push(check_process(
             &module,
             process,
@@ -84,7 +59,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
 
     validate_action_references(&checked_processes, &entry_process)?;
 
-    let entry_message = MessageId::new(0);
+    let entry_message = CheckedMessageId::new(0);
     let entry_process_definition = checked_processes
         .get(entry_process.index())
         .ok_or_else(|| Error::new("entry process id is not defined"))?;
@@ -107,10 +82,10 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
 fn check_process(
     module: &Module,
     process: &Process,
-    process_id: ProcessId,
+    process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     outputs: &mut OutputPool,
-) -> Result<ArtifactProcess> {
+) -> Result<CheckedProcess> {
     validate_count(
         &format!("process {} mailbox_bound", process.name),
         process.mailbox_bound,
@@ -144,12 +119,12 @@ fn check_process(
     )?;
     let state_values = state_space.into_values()?;
 
-    Ok(ArtifactProcess {
-        debug_name: process.name.to_string(),
-        state_type: process.state_type.to_string(),
+    Ok(CheckedProcess {
+        debug_name: process.name.clone(),
+        state_type: process.state_type.clone(),
         state_values,
-        message_type: process.msg_type.to_string(),
-        message_variants: msg_enum.variants.iter().map(ToString::to_string).collect(),
+        message_type: process.msg_type.clone(),
+        message_variants: msg_enum.variants.clone(),
         mailbox_bound: process.mailbox_bound,
         init_state,
         step_result,
@@ -162,7 +137,7 @@ fn check_init(
     semantic_index: &SemanticIndex,
     process: &Process,
     state_space: &mut StateSpace<'_>,
-) -> Result<StateId> {
+) -> Result<CheckedStateId> {
     let init = &process.init;
     if !init.params.is_empty() {
         return Err(Error::new("init must declare no parameters"));
@@ -202,11 +177,11 @@ fn check_init(
 fn check_step(
     module: &Module,
     process: &Process,
-    process_id: ProcessId,
+    process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
-) -> Result<(StepResult, NextState, Vec<ArtifactAction>)> {
+) -> Result<(CheckedStepResult, CheckedNextState, Vec<CheckedAction>)> {
     let step = &process.step;
     if step.params.len() != 2 {
         return Err(Error::new("step must declare state and msg parameters"));
@@ -260,13 +235,13 @@ fn check_step(
         match statement {
             Statement::Emit(text) => {
                 used_effects.insert(Effect::Emit);
-                actions.push(ArtifactAction::Emit {
+                actions.push(CheckedAction::Emit {
                     output: outputs.intern(text.as_str())?,
                 });
             }
             Statement::Spawn(target) => {
                 used_effects.insert(Effect::Spawn);
-                actions.push(ArtifactAction::Spawn {
+                actions.push(CheckedAction::Spawn {
                     target: semantic_index.process_id(target)?,
                 });
             }
@@ -279,7 +254,7 @@ fn check_step(
                     message,
                 )?;
                 used_effects.insert(Effect::Send);
-                actions.push(ArtifactAction::Send {
+                actions.push(CheckedAction::Send {
                     target: target_id,
                     message: message_id,
                 });
@@ -289,9 +264,9 @@ fn check_step(
     validate_effects("step", &step.effects, used_effects)?;
 
     let (step_result, state_arg) = match &body.returns {
-        ReturnExpr::Call { name, arg } if name.as_str() == "Stop" => (StepResult::Stop, arg),
+        ReturnExpr::Call { name, arg } if name.as_str() == "Stop" => (CheckedStepResult::Stop, arg),
         ReturnExpr::Call { name, arg } if name.as_str() == "Continue" => {
-            (StepResult::Continue, arg)
+            (CheckedStepResult::Continue, arg)
         }
         _ => {
             return Err(Error::new(
@@ -301,9 +276,9 @@ fn check_step(
     };
     let next_state = if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
     {
-        NextState::Current
+        CheckedNextState::Current
     } else {
-        NextState::Value(state_space.resolve_state_value(semantic_index, state_arg)?)
+        CheckedNextState::Value(state_space.resolve_state_value(semantic_index, state_arg)?)
     };
 
     reject_unsupported_self_send(process, process_id, &actions)?;
