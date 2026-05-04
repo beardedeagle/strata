@@ -192,6 +192,35 @@ fn resolve_static_process_handle(
     })
 }
 
+fn static_process_index_for_pid(
+    instances: &[StaticProcessInstance],
+    pid: StaticProcessId,
+) -> Result<usize> {
+    let raw_index = pid
+        .as_u32()
+        .checked_sub(1)
+        .ok_or_else(|| Error::new("static runtime process id index underflowed"))?;
+    let process_index = usize::try_from(raw_index).map_err(|_| {
+        Error::new(format!(
+            "static runtime process id {} cannot be indexed on this platform",
+            pid.as_u32()
+        ))
+    })?;
+    let instance = instances.get(process_index).ok_or_else(|| {
+        Error::new(format!(
+            "static runtime process id {} is not spawned",
+            pid.as_u32()
+        ))
+    })?;
+    if instance.pid != pid {
+        return Err(Error::new(format!(
+            "static runtime process index for pid {} is inconsistent",
+            pid.as_u32()
+        )));
+    }
+    Ok(process_index)
+}
+
 fn validate_static_runtime_order(
     processes: &[CheckedProcess],
     entry_process: CheckedProcessId,
@@ -250,17 +279,14 @@ fn validate_static_runtime_order(
                             .map_err(|err| {
                                 Error::new(format!("process {} {err}", process.debug_name()))
                             })?;
-                    let Some(target_index) = instances
-                        .iter()
-                        .position(|instance| instance.pid == target_pid)
-                    else {
-                        return Err(Error::new(format!(
-                            "process {} sends through process handle id {} to missing runtime process id {}",
-                            process.debug_name(),
-                            target.as_u32(),
-                            target_pid.as_u32()
-                        )));
-                    };
+                    let target_index = static_process_index_for_pid(&instances, target_pid)
+                        .map_err(|err| {
+                            Error::new(format!(
+                                "process {} sends through process handle id {} to {err}",
+                                process.debug_name(),
+                                target.as_u32()
+                            ))
+                        })?;
                     let target_process =
                         process_by_id(processes, instances[target_index].process_id)?;
                     if message.index() >= target_process.message_variants().len() {
@@ -385,6 +411,60 @@ mod tests {
         assert!(err
             .to_string()
             .contains("sends to unbound process handle id 0"));
+    }
+
+    #[test]
+    fn static_process_lookup_indexes_by_pid() {
+        let instances = vec![
+            StaticProcessInstance {
+                pid: StaticProcessId::FIRST,
+                process_id: checked_process_id(0),
+                status: StaticProcessStatus::Running,
+                handles: BTreeMap::new(),
+                mailbox: VecDeque::new(),
+            },
+            StaticProcessInstance {
+                pid: StaticProcessId::FIRST
+                    .checked_next()
+                    .expect("next static pid should exist"),
+                process_id: checked_process_id(1),
+                status: StaticProcessStatus::Running,
+                handles: BTreeMap::new(),
+                mailbox: VecDeque::new(),
+            },
+        ];
+
+        assert_eq!(
+            static_process_index_for_pid(&instances, StaticProcessId::FIRST)
+                .expect("first static pid should resolve"),
+            0
+        );
+        assert_eq!(
+            static_process_index_for_pid(&instances, instances[1].pid)
+                .expect("second static pid should resolve"),
+            1
+        );
+    }
+
+    #[test]
+    fn static_process_lookup_rejects_unspawned_pid() {
+        let instances = vec![StaticProcessInstance {
+            pid: StaticProcessId::FIRST,
+            process_id: checked_process_id(0),
+            status: StaticProcessStatus::Running,
+            handles: BTreeMap::new(),
+            mailbox: VecDeque::new(),
+        }];
+        let missing_pid = StaticProcessId::FIRST
+            .checked_next()
+            .expect("next static pid should exist");
+
+        let err = static_process_index_for_pid(&instances, missing_pid)
+            .expect_err("unspawned static pid should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("static runtime process id 2 is not spawned"));
     }
 
     fn checked_process_with_declared_handles(handle_count: usize) -> CheckedProcess {
