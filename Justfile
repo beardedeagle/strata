@@ -104,12 +104,16 @@ ci-local:
 # CI setup and entry points
 # =============================================================================
 
-install-ci-tools-linux:
+install-ci-tools-linux: install-linux-metadata-tools install-docs-tools
+
+install-linux-metadata-tools:
     #!/usr/bin/env bash
     set -euo pipefail
 
     sudo apt-get update
     sudo apt-get install -y jq libxml2-utils
+
+install-docs-tools:
     cargo install mdbook --version 0.5.2 --locked --target-dir target/cargo-install
 
 install-fuzz-tools:
