@@ -1,0 +1,38 @@
+[package]
+name = "strata-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mantle-artifact = { path = "../crates/mantle-artifact" }
+mantle-runtime = { path = "../crates/mantle-runtime" }
+strata = { path = "../crates/strata" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "strata_parse_check_lower"
+path = "fuzz_targets/strata_parse_check_lower.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mantle_artifact_decode"
+path = "fuzz_targets/mantle_artifact_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mantle_runtime_from_source"
+path = "fuzz_targets/mantle_runtime_from_source.rs"
+test = false
+doc = false
+bench = false
