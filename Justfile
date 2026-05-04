@@ -110,6 +110,9 @@ install-ci-tools-linux:
 
     sudo apt-get update
     sudo apt-get install -y jq libxml2-utils
+    just install-docs-tools
+
+install-docs-tools:
     cargo install mdbook --version 0.5.2 --locked --target-dir target/cargo-install
 
 install-fuzz-tools:
