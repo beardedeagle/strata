@@ -16,6 +16,7 @@ permissions:
 jobs:
   build:
     name: Build mdBook
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -75,6 +76,7 @@ jobs:
   deploy:
     name: Deploy mdBook
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write
