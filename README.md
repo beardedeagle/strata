@@ -188,6 +188,9 @@ just quality
 Install local hooks:
 
 ```sh
+brew install lefthook
+# or: winget install -e --id evilmartians.lefthook
+# or: go install github.com/evilmartians/lefthook@latest
 lefthook install
 ```
 

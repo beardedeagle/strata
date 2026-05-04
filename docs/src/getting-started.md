@@ -12,14 +12,27 @@ Useful local tools:
 
 ```sh
 cargo install just --version 1.50.0 --locked
+cargo install mdbook --version 0.5.2 --locked
 ```
 
-Linux documentation and metadata checks also use `jq`, `xmllint`, and `mdbook`.
-The CI setup recipe installs those for Ubuntu-based jobs:
+The standard `just quality` gate runs documentation and metadata checks on every
+local platform. Install `jq`, `xmllint`, and `mdbook` before using that bundle.
+Ubuntu-based environments can install the metadata tools with:
 
 ```sh
-just install-ci-tools-linux
+sudo apt-get install jq libxml2-utils
 ```
+
+macOS systems with Homebrew can install the metadata tools with:
+
+```sh
+brew install jq libxml2
+```
+
+Windows systems should install `jq` and an `xmllint` provider such as libxml2
+with their package manager, or run the full `just quality` bundle in a WSL
+Ubuntu environment. Confirm the tools are on `PATH` with `jq --version`,
+`xmllint --version`, and `mdbook --version`.
 
 ## Build The Binaries
 

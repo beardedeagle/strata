@@ -59,7 +59,9 @@ jobs:
           rustup override set nightly
 
       - name: Install just
-        run: cargo install just --version 1.50.0 --locked --target-dir target/cargo-install
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable install just --version 1.50.0 --locked --target-dir target/cargo-install
 
       - name: Install cargo-fuzz
         run: just install-fuzz-tools
@@ -108,7 +110,9 @@ jobs:
           rustup override set nightly
 
       - name: Install just
-        run: cargo install just --version 1.50.0 --locked --target-dir target/cargo-install
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable install just --version 1.50.0 --locked --target-dir target/cargo-install
 
       - name: Run Miri gate
         run: just miri-ci
