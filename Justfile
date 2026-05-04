@@ -98,6 +98,7 @@ install-ci-tools-linux:
 
 install-fuzz-tools:
     rustup toolchain install stable --profile minimal
+    rustup toolchain install nightly --profile minimal --component clippy
     cargo +stable install cargo-fuzz --version 0.13.1 --locked --target-dir target/cargo-install
 
 ci-rust: check test build
