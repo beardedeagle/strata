@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use super::super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessHandleId,
@@ -158,30 +158,18 @@ struct StaticProcessInstance {
     pid: StaticProcessId,
     process_id: CheckedProcessId,
     status: StaticProcessStatus,
-    handles: Vec<Option<StaticProcessId>>,
+    handles: BTreeMap<CheckedProcessHandleId, StaticProcessId>,
     mailbox: VecDeque<CheckedMessageId>,
 }
 
-fn process_handles_for_static_instance(
-    processes: &[CheckedProcess],
-    process_id: CheckedProcessId,
-) -> Result<Vec<Option<StaticProcessId>>> {
-    let process = process_by_id(processes, process_id)?;
-    Ok(vec![None; process.process_handles().len()])
-}
-
 fn bind_static_process_handle(
+    process: &CheckedProcess,
     instance: &mut StaticProcessInstance,
     handle: CheckedProcessHandleId,
     pid: StaticProcessId,
 ) -> Result<()> {
-    let slot = instance.handles.get_mut(handle.index()).ok_or_else(|| {
-        Error::new(format!(
-            "references undefined process handle id {}",
-            handle.as_u32()
-        ))
-    })?;
-    if slot.replace(pid).is_some() {
+    process_handle_target(process, handle)?;
+    if instance.handles.insert(handle, pid).is_some() {
         return Err(Error::new(format!(
             "rebinds process handle id {}",
             handle.as_u32()
@@ -191,25 +179,17 @@ fn bind_static_process_handle(
 }
 
 fn resolve_static_process_handle(
+    process: &CheckedProcess,
     instance: &StaticProcessInstance,
     handle: CheckedProcessHandleId,
 ) -> Result<StaticProcessId> {
-    instance
-        .handles
-        .get(handle.index())
-        .copied()
-        .ok_or_else(|| {
-            Error::new(format!(
-                "references undefined process handle id {}",
-                handle.as_u32()
-            ))
-        })?
-        .ok_or_else(|| {
-            Error::new(format!(
-                "sends to unbound process handle id {}",
-                handle.as_u32()
-            ))
-        })
+    process_handle_target(process, handle)?;
+    instance.handles.get(&handle).copied().ok_or_else(|| {
+        Error::new(format!(
+            "sends to unbound process handle id {}",
+            handle.as_u32()
+        ))
+    })
 }
 
 fn validate_static_runtime_order(
@@ -221,7 +201,7 @@ fn validate_static_runtime_order(
         pid: StaticProcessId::FIRST,
         process_id: entry_process,
         status: StaticProcessStatus::Running,
-        handles: process_handles_for_static_instance(processes, entry_process)?,
+        handles: BTreeMap::new(),
         mailbox: VecDeque::from([entry_message]),
     }];
     let mut next_pid = StaticProcessId::FIRST.checked_next()?;
@@ -249,23 +229,27 @@ fn validate_static_runtime_order(
                     process_by_id(processes, *target)?;
                     let spawned_pid = next_pid;
                     next_pid = next_pid.checked_next()?;
-                    bind_static_process_handle(&mut instances[process_index], *handle, spawned_pid)
-                        .map_err(|err| {
-                            Error::new(format!("process {} {err}", process.debug_name()))
-                        })?;
+                    bind_static_process_handle(
+                        process,
+                        &mut instances[process_index],
+                        *handle,
+                        spawned_pid,
+                    )
+                    .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
                     instances.push(StaticProcessInstance {
                         pid: spawned_pid,
                         process_id: *target,
                         status: StaticProcessStatus::Running,
-                        handles: process_handles_for_static_instance(processes, *target)?,
+                        handles: BTreeMap::new(),
                         mailbox: VecDeque::new(),
                     });
                 }
                 CheckedAction::Send { target, message } => {
                     let target_pid =
-                        resolve_static_process_handle(&instances[process_index], *target).map_err(
-                            |err| Error::new(format!("process {} {err}", process.debug_name())),
-                        )?;
+                        resolve_static_process_handle(process, &instances[process_index], *target)
+                            .map_err(|err| {
+                                Error::new(format!("process {} {err}", process.debug_name()))
+                            })?;
                     let Some(target_index) = instances
                         .iter()
                         .position(|instance| instance.pid == target_pid)
@@ -364,4 +348,75 @@ fn process_label(processes: &[CheckedProcess], process_id: CheckedProcessId) -> 
         .get(process_id.index())
         .map(|process| process.debug_name().as_str())
         .ok_or_else(|| Error::new(format!("process id {} is not defined", process_id.as_u32())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::language::ast::{Identifier, TypeRef};
+    use crate::language::checked::{CheckedProcessHandle, CheckedProcessParts, CheckedStateId};
+
+    #[test]
+    fn static_process_instances_store_handle_bindings_sparsely() {
+        let process = checked_process_with_declared_handles(2);
+        let mut instance = StaticProcessInstance {
+            pid: StaticProcessId::FIRST,
+            process_id: checked_process_id(0),
+            status: StaticProcessStatus::Running,
+            handles: BTreeMap::new(),
+            mailbox: VecDeque::new(),
+        };
+        let handle = checked_process_handle_id(1);
+        let pid = StaticProcessId::FIRST
+            .checked_next()
+            .expect("next static pid should exist");
+
+        bind_static_process_handle(&process, &mut instance, handle, pid)
+            .expect("declared process handle should bind");
+
+        assert_eq!(instance.handles.len(), 1);
+        assert_eq!(
+            resolve_static_process_handle(&process, &instance, handle)
+                .expect("bound sparse handle should resolve"),
+            pid
+        );
+        let err = resolve_static_process_handle(&process, &instance, checked_process_handle_id(0))
+            .expect_err("declared but unbound sparse handle should fail");
+        assert!(err
+            .to_string()
+            .contains("sends to unbound process handle id 0"));
+    }
+
+    fn checked_process_with_declared_handles(handle_count: usize) -> CheckedProcess {
+        CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_variants: vec![ident("Start")],
+            process_handles: (0..handle_count)
+                .map(|index| {
+                    CheckedProcessHandle::new(
+                        ident(&format!("worker_{index}")),
+                        checked_process_id(1),
+                    )
+                })
+                .collect(),
+            mailbox_bound: 1,
+            init_state: CheckedStateId::from_index(0).expect("valid checked state id"),
+            transitions: Vec::new(),
+        })
+    }
+
+    fn ident(value: &str) -> Identifier {
+        Identifier::new(value).expect("test identifier should be valid")
+    }
+
+    fn checked_process_id(index: usize) -> CheckedProcessId {
+        CheckedProcessId::from_index(index).expect("valid checked process id")
+    }
+
+    fn checked_process_handle_id(index: usize) -> CheckedProcessHandleId {
+        CheckedProcessHandleId::from_index(index).expect("valid checked process handle id")
+    }
 }
