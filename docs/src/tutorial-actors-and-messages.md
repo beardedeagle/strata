@@ -116,13 +116,13 @@ The runtime trace records both steps with message IDs and state IDs.
 ```sh
 cargo build
 
-target/debug/strata check examples/actor_ping.str
-target/debug/strata build examples/actor_ping.str
-target/debug/mantle run target/strata/actor_ping.mta
+cargo run -p strata --bin strata -- check examples/actor_ping.str
+cargo run -p strata --bin strata -- build examples/actor_ping.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
 
-target/debug/strata check examples/actor_sequence.str
-target/debug/strata build examples/actor_sequence.str
-target/debug/mantle run target/strata/actor_sequence.mta
+cargo run -p strata --bin strata -- check examples/actor_sequence.str
+cargo run -p strata --bin strata -- build examples/actor_sequence.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 ```
 
 For `actor_sequence`, the trace should show `Worker` dequeuing `First`, stepping

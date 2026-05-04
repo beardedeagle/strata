@@ -19,9 +19,9 @@ The first runnable product gate is in place:
 
 ```sh
 cargo build
-target/debug/strata check examples/hello.str
-target/debug/strata build examples/hello.str
-target/debug/mantle run target/strata/hello.mta
+cargo run -p strata --bin strata -- check examples/hello.str
+cargo run -p strata --bin strata -- build examples/hello.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
 ```
 
 The example program emits `hello from Strata` through an explicit `emit` effect.
@@ -38,9 +38,9 @@ and executed by Mantle.
 The first actor/runtime gate is also in place:
 
 ```sh
-target/debug/strata check examples/actor_ping.str
-target/debug/strata build examples/actor_ping.str
-target/debug/mantle run target/strata/actor_ping.mta
+cargo run -p strata --bin strata -- check examples/actor_ping.str
+cargo run -p strata --bin strata -- build examples/actor_ping.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
 ```
 
 That example spawns a worker process, sends it a message, handles the message,
@@ -55,9 +55,9 @@ Multi-step immutable actor execution is now represented by message-keyed
 process transitions:
 
 ```sh
-target/debug/strata check examples/actor_sequence.str
-target/debug/strata build examples/actor_sequence.str
-target/debug/mantle run target/strata/actor_sequence.mta
+cargo run -p strata --bin strata -- check examples/actor_sequence.str
+cargo run -p strata --bin strata -- build examples/actor_sequence.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 ```
 
 That example sends two messages to a worker. The worker handles the first

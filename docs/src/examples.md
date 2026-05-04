@@ -15,9 +15,9 @@ builds, runs, emits `hello from Strata`, and records an observability trace.
 
 ```sh
 cargo build
-target/debug/strata check examples/hello.str
-target/debug/strata build examples/hello.str
-target/debug/mantle run target/strata/hello.mta
+cargo run -p strata --bin strata -- check examples/hello.str
+cargo run -p strata --bin strata -- build examples/hello.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
 ```
 
 Key source ideas:
@@ -34,9 +34,9 @@ sends a message, handles that message, updates state, terminates normally, and
 records the runtime trace.
 
 ```sh
-target/debug/strata check examples/actor_ping.str
-target/debug/strata build examples/actor_ping.str
-target/debug/mantle run target/strata/actor_ping.mta
+cargo run -p strata --bin strata -- check examples/actor_ping.str
+cargo run -p strata --bin strata -- build examples/actor_ping.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
 ```
 
 Key source ideas:
@@ -53,9 +53,9 @@ worker handles `First`, returns a whole replacement state with `Continue(...)`,
 then handles `Second` and returns a whole replacement state with `Stop(...)`.
 
 ```sh
-target/debug/strata check examples/actor_sequence.str
-target/debug/strata build examples/actor_sequence.str
-target/debug/mantle run target/strata/actor_sequence.mta
+cargo run -p strata --bin strata -- check examples/actor_sequence.str
+cargo run -p strata --bin strata -- build examples/actor_sequence.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 ```
 
 Key source ideas:

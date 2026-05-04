@@ -6,7 +6,7 @@ event.
 By default, running:
 
 ```sh
-target/debug/mantle run target/strata/actor_sequence.mta
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 ```
 
 writes:

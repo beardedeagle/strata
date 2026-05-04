@@ -106,12 +106,12 @@ The current runnable examples are:
 - `examples/actor_sequence.str`.
 
 The integration tests in `crates/mantle-runtime/tests/product_gates.rs` mirror
-the commands a user runs:
+the same source check, artifact build, and runtime execution sequence:
 
 ```sh
-target/debug/strata check examples/hello.str
-target/debug/strata build examples/hello.str
-target/debug/mantle run target/strata/hello.mta
+cargo run -p strata --bin strata -- check examples/hello.str
+cargo run -p strata --bin strata -- build examples/hello.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
 ```
 
 The same pattern applies to the actor examples.

@@ -15,24 +15,24 @@ The current product gates are:
 ```sh
 cargo build
 
-target/debug/strata check examples/hello.str
-target/debug/strata build examples/hello.str
-target/debug/mantle run target/strata/hello.mta
+cargo run -p strata --bin strata -- check examples/hello.str
+cargo run -p strata --bin strata -- build examples/hello.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
 
-target/debug/strata check examples/actor_ping.str
-target/debug/strata build examples/actor_ping.str
-target/debug/mantle run target/strata/actor_ping.mta
+cargo run -p strata --bin strata -- check examples/actor_ping.str
+cargo run -p strata --bin strata -- build examples/actor_ping.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
 
-target/debug/strata check examples/actor_sequence.str
-target/debug/strata build examples/actor_sequence.str
-target/debug/mantle run target/strata/actor_sequence.mta
+cargo run -p strata --bin strata -- check examples/actor_sequence.str
+cargo run -p strata --bin strata -- build examples/actor_sequence.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 ```
 
 Each `mantle run` command must admit the generated `.mta`, execute it, and emit
 an observability trace under `target/strata/`.
 
 The product-gate integration tests in
-`crates/mantle-runtime/tests/product_gates.rs` mirror these user-facing commands
+`crates/mantle-runtime/tests/product_gates.rs` mirror this user-facing sequence
 and should stay aligned with the examples.
 
 When adding a new user-visible language or runtime behavior, add or update an

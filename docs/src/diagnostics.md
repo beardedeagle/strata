@@ -9,7 +9,7 @@ describe semantic rules. Runtime errors describe admitted execution failures.
 Run:
 
 ```sh
-target/debug/strata check examples/hello.str
+cargo run -p strata --bin strata -- check examples/hello.str
 ```
 
 If checking fails, fix the first reported error first. Later errors may be a
@@ -71,14 +71,14 @@ size exhaustion, and dispatch budget exhaustion.
 Use the source gate first:
 
 ```sh
-target/debug/strata check path/to/program.str
-target/debug/strata build path/to/program.str
+cargo run -p strata --bin strata -- check path/to/program.str
+cargo run -p strata --bin strata -- build path/to/program.str
 ```
 
 Then run Mantle:
 
 ```sh
-target/debug/mantle run target/strata/program.mta
+cargo run -p mantle-runtime --bin mantle -- run target/strata/program.mta
 ```
 
 If source checking passes but Mantle rejects an artifact, inspect the artifact

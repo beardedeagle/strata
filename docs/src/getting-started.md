@@ -29,10 +29,9 @@ From the repository root:
 cargo build
 ```
 
-This produces:
-
-- `target/debug/strata`, the Strata CLI;
-- `target/debug/mantle`, the Mantle runtime CLI.
+This builds the Strata CLI and Mantle runtime CLI. The executable filenames are
+platform-specific, so the commands below use Cargo to run the right binary on
+the current platform.
 
 ## Check A Strata Program
 
@@ -40,7 +39,7 @@ This produces:
 artifact.
 
 ```sh
-target/debug/strata check examples/hello.str
+cargo run -p strata --bin strata -- check examples/hello.str
 ```
 
 Expected result:
@@ -55,7 +54,7 @@ strata: checked examples/hello.str (module hello, entry Main)
 `target/strata/` by default.
 
 ```sh
-target/debug/strata build examples/hello.str
+cargo run -p strata --bin strata -- build examples/hello.str
 ```
 
 Expected result:
@@ -69,7 +68,7 @@ strata: built examples/hello.str -> target/strata/hello.mta
 Mantle admits and executes the generated artifact:
 
 ```sh
-target/debug/mantle run target/strata/hello.mta
+cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
 ```
 
 Expected output includes:
