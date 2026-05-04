@@ -29,6 +29,7 @@ macro_rules! define_id {
 }
 
 define_id!(ProcessId);
+define_id!(ProcessHandleId);
 define_id!(StateId);
 define_id!(MessageId);
 define_id!(OutputId);

@@ -1,13 +1,15 @@
+use std::collections::BTreeSet;
+
 use crate::fields::ArtifactFields;
 use crate::validation::{
     validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
     validate_source_hash, validate_unique_ident_list, validate_unique_state_value_list,
 };
 use crate::{
-    Error, MessageId, OutputId, ProcessId, Result, StateId, ARTIFACT_FORMAT, ARTIFACT_MAGIC,
-    ARTIFACT_SCHEMA_VERSION, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND,
+    Error, MessageId, OutputId, ProcessHandleId, ProcessId, Result, StateId, ARTIFACT_FORMAT,
+    ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
+    MAX_PROCESS_HANDLES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +100,17 @@ impl MantleArtifact {
                 encoded.push_str(&format!("{prefix}.message.{message_index}={message}\n"));
             }
             encoded.push_str(&format!(
+                "{prefix}.handle_count={}\n",
+                process.process_handles.len()
+            ));
+            for (handle_index, handle) in process.process_handles.iter().enumerate() {
+                encoded.push_str(&format!(
+                    "{prefix}.handle.{handle_index}.debug_name={}\n{prefix}.handle.{handle_index}.target_process={}\n",
+                    handle.debug_name,
+                    handle.target.as_u32()
+                ));
+            }
+            encoded.push_str(&format!(
                 "{prefix}.mailbox_bound={}\n{prefix}.init_state={}\n{prefix}.transition_count={}\n",
                 process.mailbox_bound,
                 process.init_state.as_u32(),
@@ -173,6 +186,20 @@ impl MantleArtifact {
                     .push(fields.take_required(&format!("{prefix}.message.{message_index}"))?);
             }
 
+            let handle_count = fields.take_bounded_usize(
+                &format!("{prefix}.handle_count"),
+                0,
+                MAX_PROCESS_HANDLES_PER_PROCESS,
+            )?;
+            let mut process_handles = Vec::with_capacity(handle_count);
+            for handle_index in 0..handle_count {
+                let handle_prefix = format!("{prefix}.handle.{handle_index}");
+                process_handles.push(ArtifactProcessHandle {
+                    debug_name: fields.take_required(&format!("{handle_prefix}.debug_name"))?,
+                    target: fields.take_process_id(&format!("{handle_prefix}.target_process"))?,
+                });
+            }
+
             let transition_count = fields.take_bounded_usize(
                 &format!("{prefix}.transition_count"),
                 1,
@@ -207,6 +234,7 @@ impl MantleArtifact {
                 state_values,
                 message_type: fields.take_required(&format!("{prefix}.message_type"))?,
                 message_variants,
+                process_handles,
                 mailbox_bound: fields.take_bounded_usize(
                     &format!("{prefix}.mailbox_bound"),
                     1,
@@ -245,7 +273,7 @@ impl MantleArtifact {
             validate_output_text(output)?;
         }
 
-        let mut process_debug_names = std::collections::BTreeSet::new();
+        let mut process_debug_names = BTreeSet::new();
         for process in &self.processes {
             process.validate_identity()?;
             if !process_debug_names.insert(process.debug_name.as_str()) {
@@ -270,8 +298,8 @@ impl MantleArtifact {
             )));
         }
 
-        for process in &self.processes {
-            process.validate_references(self)?;
+        for (process_index, process) in self.processes.iter().enumerate() {
+            process.validate_references(self, ProcessId::from_index(process_index)?)?;
         }
         validate_encoded_artifact_size(self)?;
 
@@ -293,6 +321,20 @@ fn validate_artifact_identity(format: &str, schema_version: &str) -> Result<()> 
     Ok(())
 }
 
+fn validate_unique_process_handle_list(handles: &[ArtifactProcessHandle]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for handle in handles {
+        validate_ident_field("process handle", &handle.debug_name)?;
+        if !seen.insert(handle.debug_name.as_str()) {
+            return Err(Error::new(format!(
+                "duplicate process handle {}",
+                handle.debug_name
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactProcess {
     pub debug_name: String,
@@ -300,6 +342,7 @@ pub struct ArtifactProcess {
     pub state_values: Vec<String>,
     pub message_type: String,
     pub message_variants: Vec<String>,
+    pub process_handles: Vec<ArtifactProcessHandle>,
     pub mailbox_bound: usize,
     pub init_state: StateId,
     pub transitions: Vec<ArtifactTransition>,
@@ -324,6 +367,12 @@ impl ArtifactProcess {
             MAX_MESSAGE_VARIANTS_PER_PROCESS,
         )?;
         validate_count(
+            "handle_count",
+            self.process_handles.len(),
+            0,
+            MAX_PROCESS_HANDLES_PER_PROCESS,
+        )?;
+        validate_count(
             "transition_count",
             self.transitions.len(),
             1,
@@ -331,6 +380,7 @@ impl ArtifactProcess {
         )?;
         validate_unique_state_value_list(&self.state_values)?;
         validate_unique_ident_list("message variant", &self.message_variants)?;
+        validate_unique_process_handle_list(&self.process_handles)?;
         if self.init_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(
                 "process {} init_state id {} is not a valid state value",
@@ -344,7 +394,7 @@ impl ArtifactProcess {
                 self.debug_name
             )));
         }
-        let mut transition_messages = std::collections::BTreeSet::new();
+        let mut transition_messages = BTreeSet::new();
         let mut action_count = 0usize;
         for transition in &self.transitions {
             if !transition_messages.insert(transition.message.as_u32()) {
@@ -386,10 +436,35 @@ impl ArtifactProcess {
         Ok(())
     }
 
-    fn validate_references(&self, artifact: &MantleArtifact) -> Result<()> {
+    fn validate_references(&self, artifact: &MantleArtifact, process_id: ProcessId) -> Result<()> {
+        for handle in &self.process_handles {
+            if handle.target.index() >= artifact.processes.len() {
+                return Err(Error::new(format!(
+                    "process {} handle {} targets undefined process id {}",
+                    self.debug_name,
+                    handle.debug_name,
+                    handle.target.as_u32()
+                )));
+            }
+            if handle.target == artifact.entry_process {
+                return Err(Error::new(format!(
+                    "process {} handle {} targets entry process id {}",
+                    self.debug_name,
+                    handle.debug_name,
+                    handle.target.as_u32()
+                )));
+            }
+            if handle.target == process_id {
+                return Err(Error::new(format!(
+                    "process {} handle {} targets itself, which is not supported",
+                    self.debug_name, handle.debug_name
+                )));
+            }
+        }
         for transition in &self.transitions {
+            let mut spawned_handles = BTreeSet::new();
             for action in &transition.actions {
-                self.validate_action_reference(artifact, action)?;
+                self.validate_action_reference(artifact, &mut spawned_handles, action)?;
             }
         }
         Ok(())
@@ -398,6 +473,7 @@ impl ArtifactProcess {
     fn validate_action_reference(
         &self,
         artifact: &MantleArtifact,
+        spawned_handles: &mut BTreeSet<ProcessHandleId>,
         action: &ArtifactAction,
     ) -> Result<()> {
         match action {
@@ -410,35 +486,68 @@ impl ArtifactProcess {
                     )));
                 }
             }
-            ArtifactAction::Spawn { target } => {
-                if target.index() >= artifact.processes.len() {
+            ArtifactAction::Spawn { target, handle } => {
+                let declared_target = self.process_handle_target(*handle)?;
+                if declared_target != *target {
                     return Err(Error::new(format!(
-                        "process {} spawns undefined process id {}",
+                        "process {} spawn handle id {} targets process id {}, expected {}",
                         self.debug_name,
-                        target.as_u32()
+                        handle.as_u32(),
+                        target.as_u32(),
+                        declared_target.as_u32()
+                    )));
+                }
+                if !spawned_handles.insert(*handle) {
+                    return Err(Error::new(format!(
+                        "process {} declares duplicate process handle id {}",
+                        self.debug_name,
+                        handle.as_u32()
                     )));
                 }
             }
             ArtifactAction::Send { target, message } => {
-                let Some(target_process) = artifact.processes.get(target.index()) else {
-                    return Err(Error::new(format!(
-                        "process {} sends to undefined process id {}",
-                        self.debug_name,
-                        target.as_u32()
-                    )));
-                };
+                let target_process_id = self.process_handle_target(*target)?;
+                let target_process = artifact
+                    .processes
+                    .get(target_process_id.index())
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} sends to undefined process id {}",
+                            self.debug_name,
+                            target_process_id.as_u32()
+                        ))
+                    })?;
                 if message.index() >= target_process.message_variants.len() {
                     return Err(Error::new(format!(
                         "process {} sends message id {} not accepted by process id {}",
                         self.debug_name,
                         message.as_u32(),
-                        target.as_u32()
+                        target_process_id.as_u32()
                     )));
                 }
             }
         }
         Ok(())
     }
+
+    fn process_handle_target(&self, handle: ProcessHandleId) -> Result<ProcessId> {
+        self.process_handles
+            .get(handle.index())
+            .map(|process_handle| process_handle.target)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} references undefined process handle id {}",
+                    self.debug_name,
+                    handle.as_u32()
+                ))
+            })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactProcessHandle {
+    pub debug_name: String,
+    pub target: ProcessId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -456,9 +565,10 @@ pub enum ArtifactAction {
     },
     Spawn {
         target: ProcessId,
+        handle: ProcessHandleId,
     },
     Send {
-        target: ProcessId,
+        target: ProcessHandleId,
         message: MessageId,
     },
 }
@@ -471,15 +581,16 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
                 output.as_u32()
             ));
         }
-        ArtifactAction::Spawn { target } => {
+        ArtifactAction::Spawn { target, handle } => {
             encoded.push_str(&format!(
-                "{action_prefix}.kind=spawn\n{action_prefix}.target_process={}\n",
-                target.as_u32()
+                "{action_prefix}.kind=spawn\n{action_prefix}.target_process={}\n{action_prefix}.handle={}\n",
+                target.as_u32(),
+                handle.as_u32()
             ));
         }
         ArtifactAction::Send { target, message } => {
             encoded.push_str(&format!(
-                "{action_prefix}.kind=send\n{action_prefix}.target_process={}\n{action_prefix}.message={}\n",
+                "{action_prefix}.kind=send\n{action_prefix}.target_handle={}\n{action_prefix}.message={}\n",
                 target.as_u32(),
                 message.as_u32()
             ));
@@ -495,9 +606,10 @@ fn decode_action(fields: &mut ArtifactFields, action_prefix: &str) -> Result<Art
         }),
         "spawn" => Ok(ArtifactAction::Spawn {
             target: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
+            handle: fields.take_process_handle_id(&format!("{action_prefix}.handle"))?,
         }),
         "send" => Ok(ArtifactAction::Send {
-            target: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
+            target: fields.take_process_handle_id(&format!("{action_prefix}.target_handle"))?,
             message: fields.take_message_id(&format!("{action_prefix}.message"))?,
         }),
         _ => Err(Error::new(format!("invalid artifact action kind {kind:?}"))),

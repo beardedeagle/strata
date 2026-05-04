@@ -333,8 +333,10 @@ impl Parser {
         if self.peek_keyword("spawn") {
             self.expect_keyword("spawn")?;
             let target = self.expect_identifier()?;
+            self.expect_keyword("as")?;
+            let handle = self.expect_identifier()?;
             self.expect_symbol(';')?;
-            return Ok(Statement::Spawn(target));
+            return Ok(Statement::Spawn { target, handle });
         }
         if self.peek_keyword("send") {
             self.expect_keyword("send")?;

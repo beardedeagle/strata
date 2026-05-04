@@ -22,6 +22,7 @@ macro_rules! define_checked_id {
 }
 
 define_checked_id!(CheckedProcessId);
+define_checked_id!(CheckedProcessHandleId);
 define_checked_id!(CheckedStateId);
 define_checked_id!(CheckedMessageId);
 define_checked_id!(CheckedOutputId);
@@ -33,6 +34,12 @@ impl CheckedProcessId {
 }
 
 impl CheckedMessageId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl CheckedProcessHandleId {
     pub(in crate::language) fn index(self) -> usize {
         self.0 as usize
     }
@@ -57,15 +64,36 @@ pub(in crate::language) enum CheckedNextState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedProcessHandle {
+    debug_name: Identifier,
+    target: CheckedProcessId,
+}
+
+impl CheckedProcessHandle {
+    pub(in crate::language) fn new(debug_name: Identifier, target: CheckedProcessId) -> Self {
+        Self { debug_name, target }
+    }
+
+    pub(in crate::language) fn debug_name(&self) -> &Identifier {
+        &self.debug_name
+    }
+
+    pub(in crate::language) fn target(&self) -> CheckedProcessId {
+        self.target
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) enum CheckedAction {
     Emit {
         output: CheckedOutputId,
     },
     Spawn {
         target: CheckedProcessId,
+        handle: CheckedProcessHandleId,
     },
     Send {
-        target: CheckedProcessId,
+        target: CheckedProcessHandleId,
         message: CheckedMessageId,
     },
 }
@@ -119,6 +147,7 @@ pub(in crate::language) struct CheckedProcess {
     state_values: Vec<String>,
     message_type: TypeRef,
     message_variants: Vec<Identifier>,
+    process_handles: Vec<CheckedProcessHandle>,
     mailbox_bound: usize,
     init_state: CheckedStateId,
     transitions: Vec<CheckedTransition>,
@@ -132,6 +161,7 @@ impl CheckedProcess {
             state_values: parts.state_values,
             message_type: parts.message_type,
             message_variants: parts.message_variants,
+            process_handles: parts.process_handles,
             mailbox_bound: parts.mailbox_bound,
             init_state: parts.init_state,
             transitions: parts.transitions,
@@ -158,6 +188,10 @@ impl CheckedProcess {
         &self.message_variants
     }
 
+    pub(in crate::language) fn process_handles(&self) -> &[CheckedProcessHandle] {
+        &self.process_handles
+    }
+
     pub(in crate::language) fn mailbox_bound(&self) -> usize {
         self.mailbox_bound
     }
@@ -177,6 +211,7 @@ pub(in crate::language) struct CheckedProcessParts {
     pub state_values: Vec<String>,
     pub message_type: TypeRef,
     pub message_variants: Vec<Identifier>,
+    pub process_handles: Vec<CheckedProcessHandle>,
     pub mailbox_bound: usize,
     pub init_state: CheckedStateId,
     pub transitions: Vec<CheckedTransition>,

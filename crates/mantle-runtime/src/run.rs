@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 
 use mantle_artifact::{
-    Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId, Result, StateId, StepResult,
+    Error, MantleArtifact, MessageId, NextState, OutputId, ProcessHandleId, ProcessId, Result,
+    StateId, StepResult,
 };
 
 use crate::event::{
@@ -31,6 +32,7 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
     let mut run = RuntimeRun::new(
         program,
         host,
+        limits.max_runtime_processes,
         limits.max_trace_bytes,
         limits.max_emitted_output_bytes,
     );
@@ -44,8 +46,8 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
         entry_message_id: program.entry_message,
         process_count: program.processes.len(),
     })?;
-    run.spawn_process(program.entry_process, None)?;
-    run.send_message(program.entry_process, program.entry_message, None)?;
+    let entry_pid = run.spawn_process(program.entry_process, None)?;
+    run.send_message(entry_pid, program.entry_message, None)?;
     run.drain_mailboxes(limits.max_dispatches)?;
     run.reject_unhandled_messages()?;
     run.flush_host()?;
@@ -82,6 +84,7 @@ struct RuntimeRun<'program, 'host, H: RuntimeHost> {
     host: &'host mut H,
     processes: Vec<ProcessInstance>,
     next_pid: RuntimeProcessId,
+    max_runtime_processes: usize,
     trace_bytes: usize,
     max_trace_bytes: usize,
     emitted_output_bytes: usize,
@@ -95,6 +98,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     fn new(
         program: &'program LoadedProgram,
         host: &'host mut H,
+        max_runtime_processes: usize,
         max_trace_bytes: usize,
         max_emitted_output_bytes: usize,
     ) -> Self {
@@ -103,6 +107,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             host,
             processes: Vec::new(),
             next_pid: RuntimeProcessId::FIRST,
+            max_runtime_processes,
             trace_bytes: 0,
             max_trace_bytes,
             emitted_output_bytes: 0,
@@ -135,19 +140,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &mut self,
         process_id: ProcessId,
         spawned_by_pid: Option<RuntimeProcessId>,
-    ) -> Result<()> {
-        let definition = self.program.process(process_id)?;
-        if self
-            .processes
-            .iter()
-            .any(|process| process.process_id == process_id)
-        {
+    ) -> Result<RuntimeProcessId> {
+        if self.processes.len() >= self.max_runtime_processes {
             return Err(Error::new(format!(
-                "process {} is already spawned",
-                definition.debug_name
+                "runtime process instance limit exceeded at {} process instance(s)",
+                self.max_runtime_processes
             )));
         }
-
+        let definition = self.program.process(process_id)?;
         let pid = self.next_pid;
         self.next_pid = self.next_pid.checked_next()?;
         let process = ProcessInstance {
@@ -155,6 +155,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             process_id,
             state: definition.init_state,
             status: ProcessStatus::Running,
+            handles: vec![None; definition.process_handles.len()],
             mailbox_bound: definition.mailbox_bound,
             mailbox: VecDeque::new(),
         };
@@ -176,25 +177,27 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             process: definition.debug_name.clone(),
         });
         self.processes.push(process);
-        Ok(())
+        Ok(pid)
     }
 
     fn send_message(
         &mut self,
-        target: ProcessId,
+        target: RuntimeProcessId,
         message: MessageId,
         sender_pid: Option<RuntimeProcessId>,
     ) -> Result<()> {
-        let target_process = self.program.process(target)?;
-        let message_label = self.program.message_label(target, message)?.to_string();
-        let process_label = target_process.debug_name.clone();
-
         let process_index = self
             .processes
             .iter()
-            .position(|process| process.process_id == target)
-            .ok_or_else(|| Error::new(format!("process {process_label} is not spawned")))?;
+            .position(|process| process.pid == target)
+            .ok_or_else(|| Error::new(format!("runtime process {target} is not spawned")))?;
         let process = &self.processes[process_index];
+        let target_process = self.program.process(process.process_id)?;
+        let message_label = self
+            .program
+            .message_label(process.process_id, message)?
+            .to_string();
+        let process_label = target_process.debug_name.clone();
         if process.status != ProcessStatus::Running {
             return Err(Error::new(format!(
                 "send to process {} failed because it is not running",
@@ -212,7 +215,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
         self.record_event(RuntimeEvent::MessageAccepted {
             pid,
-            process_id: target,
+            process_id: process.process_id,
             process: process_label.clone(),
             message_id: message,
             message: message_label.clone(),
@@ -277,21 +280,133 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let step_result = transition.step_result;
 
         for &action in &transition.actions {
-            self.execute_action(&step, action)?;
+            self.execute_action(process_index, &step, action)?;
         }
 
         self.apply_next_state(process_index, &step, next_state)?;
         self.record_step_completion(process_index, &step, step_result)
     }
 
-    fn execute_action(&mut self, step: &ActiveStep, action: LoadedAction) -> Result<()> {
+    fn execute_action(
+        &mut self,
+        process_index: usize,
+        step: &ActiveStep,
+        action: LoadedAction,
+    ) -> Result<()> {
         match action {
             LoadedAction::Emit { output } => self.emit_output(step, output),
-            LoadedAction::Spawn { target } => self.spawn_process(target, Some(step.pid)),
+            LoadedAction::Spawn { target, handle } => {
+                let declared_target = self
+                    .program
+                    .process(step.process_id)?
+                    .process_handles
+                    .get(handle.index())
+                    .map(|process_handle| process_handle.target)
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} references undefined process handle id {}",
+                            step.process_name,
+                            handle.as_u32()
+                        ))
+                    })?;
+                if declared_target != target {
+                    return Err(Error::new(format!(
+                        "process {} spawn handle id {} targets process id {}, expected {}",
+                        step.process_name,
+                        handle.as_u32(),
+                        target.as_u32(),
+                        declared_target.as_u32()
+                    )));
+                }
+                self.ensure_process_handle_unbound(process_index, step, handle)?;
+                let pid = self.spawn_process(target, Some(step.pid))?;
+                self.bind_process_handle(process_index, step, handle, pid)?;
+                Ok(())
+            }
             LoadedAction::Send { target, message } => {
-                self.send_message(target, message, Some(step.pid))
+                let pid = self.resolve_process_handle(process_index, step, target)?;
+                self.send_message(pid, message, Some(step.pid))
             }
         }
+    }
+
+    fn ensure_process_handle_unbound(
+        &self,
+        process_index: usize,
+        step: &ActiveStep,
+        handle: ProcessHandleId,
+    ) -> Result<()> {
+        let slot = self.processes[process_index]
+            .handles
+            .get(handle.index())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} references undefined process handle id {}",
+                    step.process_name,
+                    handle.as_u32()
+                ))
+            })?;
+        if slot.is_some() {
+            return Err(Error::new(format!(
+                "process {} rebinds process handle id {}",
+                step.process_name,
+                handle.as_u32()
+            )));
+        }
+        Ok(())
+    }
+
+    fn bind_process_handle(
+        &mut self,
+        process_index: usize,
+        step: &ActiveStep,
+        handle: ProcessHandleId,
+        pid: RuntimeProcessId,
+    ) -> Result<()> {
+        let slot = self.processes[process_index]
+            .handles
+            .get_mut(handle.index())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} references undefined process handle id {}",
+                    step.process_name,
+                    handle.as_u32()
+                ))
+            })?;
+        if slot.replace(pid).is_some() {
+            return Err(Error::new(format!(
+                "process {} rebinds process handle id {}",
+                step.process_name,
+                handle.as_u32()
+            )));
+        }
+        Ok(())
+    }
+
+    fn resolve_process_handle(
+        &self,
+        process_index: usize,
+        step: &ActiveStep,
+        handle: ProcessHandleId,
+    ) -> Result<RuntimeProcessId> {
+        self.processes[process_index]
+            .handles
+            .get(handle.index())
+            .copied()
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} references undefined process handle id {}",
+                    step.process_name,
+                    handle.as_u32()
+                ))
+            })?
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} sends to unbound process handle id {}",
+                    step.process_name,
+                    handle.as_u32()
+                ))
+            })
     }
 
     fn emit_output(&mut self, step: &ActiveStep, output: OutputId) -> Result<()> {
@@ -401,6 +516,7 @@ struct ProcessInstance {
     process_id: ProcessId,
     state: StateId,
     status: ProcessStatus,
+    handles: Vec<Option<RuntimeProcessId>>,
     mailbox_bound: usize,
     mailbox: VecDeque<MessageId>,
 }

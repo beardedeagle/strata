@@ -5,6 +5,7 @@ use mantle_runtime::{run_artifact_with_host, InMemoryRuntimeHost, RunLimits};
 
 const FUZZ_RUN_LIMITS: RunLimits = RunLimits {
     max_dispatches: 128,
+    max_runtime_processes: 512,
     max_trace_bytes: 256 * 1024,
     max_emitted_output_bytes: 64 * 1024,
 };

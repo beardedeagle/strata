@@ -1,6 +1,7 @@
 use mantle_artifact::{
-    ArtifactAction, ArtifactProcess, ArtifactTransition, Error, MantleArtifact, MessageId,
-    NextState, OutputId, ProcessId, Result, StateId, StepResult,
+    ArtifactAction, ArtifactProcess, ArtifactProcessHandle, ArtifactTransition, Error,
+    MantleArtifact, MessageId, NextState, OutputId, ProcessHandleId, ProcessId, Result, StateId,
+    StepResult,
 };
 
 #[derive(Debug, Clone)]
@@ -91,6 +92,7 @@ pub(crate) struct LoadedProcess {
     pub(crate) debug_name: String,
     pub(crate) state_values: Vec<String>,
     pub(crate) message_variants: Vec<String>,
+    pub(crate) process_handles: Vec<LoadedProcessHandle>,
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
     pub(crate) transitions: Vec<LoadedTransition>,
@@ -102,6 +104,11 @@ impl LoadedProcess {
             debug_name: process.debug_name.clone(),
             state_values: process.state_values.clone(),
             message_variants: process.message_variants.clone(),
+            process_handles: process
+                .process_handles
+                .iter()
+                .map(LoadedProcessHandle::from_artifact)
+                .collect(),
             mailbox_bound: process.mailbox_bound,
             init_state: process.init_state,
             transitions: load_transitions_by_message(process)?,
@@ -116,6 +123,19 @@ impl LoadedProcess {
                 message.as_u32()
             ))
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LoadedProcessHandle {
+    pub(crate) target: ProcessId,
+}
+
+impl LoadedProcessHandle {
+    fn from_artifact(handle: &ArtifactProcessHandle) -> Self {
+        Self {
+            target: handle.target,
+        }
     }
 }
 
@@ -183,9 +203,10 @@ pub(crate) enum LoadedAction {
     },
     Spawn {
         target: ProcessId,
+        handle: ProcessHandleId,
     },
     Send {
-        target: ProcessId,
+        target: ProcessHandleId,
         message: MessageId,
     },
 }
@@ -194,7 +215,10 @@ impl LoadedAction {
     fn from_artifact(action: &ArtifactAction) -> Self {
         match action {
             ArtifactAction::Emit { output } => Self::Emit { output: *output },
-            ArtifactAction::Spawn { target } => Self::Spawn { target: *target },
+            ArtifactAction::Spawn { target, handle } => Self::Spawn {
+                target: *target,
+                handle: *handle,
+            },
             ArtifactAction::Send { target, message } => Self::Send {
                 target: *target,
                 message: *message,

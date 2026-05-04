@@ -69,6 +69,19 @@ records process, message, state, and output IDs in:
 target/strata/actor_sequence.observability.jsonl
 ```
 
+Process handles now support multiple runtime instances of one process
+definition:
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_instances.str
+cargo run -p strata --bin strata -- build examples/actor_instances.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
+```
+
+That example spawns two `Worker` instances through distinct handles and sends
+`Ping` to both. Mantle records different runtime `pid` values for the two
+workers while retaining the same loaded process definition ID.
+
 ## What Strata Is For
 
 Strata is aimed at programs where the important behavior should be explicit:
@@ -130,7 +143,7 @@ usable MVP:
 
 - richer `.str` parsing and diagnostics;
 - richer actors/processes with typed mailboxes;
-- broader message send and receive behavior;
+- broader process handles plus message send and receive behavior;
 - broader process state transitions;
 - normal termination and failure reporting;
 - explicit effect checking beyond the current `emit`, `spawn`, and `send` slice;

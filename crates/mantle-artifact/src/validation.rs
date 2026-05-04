@@ -155,6 +155,24 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
         }
         add_field_bytes(
             &mut encoded_len,
+            &format!("{prefix}.handle_count"),
+            &process.process_handles.len().to_string(),
+        )?;
+        for (handle_index, handle) in process.process_handles.iter().enumerate() {
+            let handle_prefix = format!("{prefix}.handle.{handle_index}");
+            add_field_bytes(
+                &mut encoded_len,
+                &format!("{handle_prefix}.debug_name"),
+                &handle.debug_name,
+            )?;
+            add_field_bytes(
+                &mut encoded_len,
+                &format!("{handle_prefix}.target_process"),
+                &handle.target.as_u32().to_string(),
+            )?;
+        }
+        add_field_bytes(
+            &mut encoded_len,
             &format!("{prefix}.mailbox_bound"),
             &process.mailbox_bound.to_string(),
         )?;
@@ -212,7 +230,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                             &output.as_u32().to_string(),
                         )?;
                     }
-                    ArtifactAction::Spawn { target } => {
+                    ArtifactAction::Spawn { target, handle } => {
                         add_field_bytes(
                             &mut encoded_len,
                             &format!("{action_prefix}.kind"),
@@ -223,6 +241,11 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                             &format!("{action_prefix}.target_process"),
                             &target.as_u32().to_string(),
                         )?;
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.handle"),
+                            &handle.as_u32().to_string(),
+                        )?;
                     }
                     ArtifactAction::Send { target, message } => {
                         add_field_bytes(
@@ -232,7 +255,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                         )?;
                         add_field_bytes(
                             &mut encoded_len,
-                            &format!("{action_prefix}.target_process"),
+                            &format!("{action_prefix}.target_handle"),
                             &target.as_u32().to_string(),
                         )?;
                         add_field_bytes(

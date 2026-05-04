@@ -28,13 +28,14 @@ This says `Worker` accepts one message: `Ping`.
 `Main` can send that message after spawning `Worker`:
 
 ```strata
-spawn Worker;
-send Worker Ping;
+spawn Worker as worker;
+send worker Ping;
 return Stop(state);
 ```
 
-The order matters in this source surface. Sending to a process before it is
-spawned is rejected.
+`worker` is a process handle for the spawned runtime instance. The order
+matters in this source surface. Sending through a handle before it is bound is
+rejected.
 
 ## Worker State Type
 
@@ -111,6 +112,22 @@ rejected.
 
 The runtime trace records both steps with message IDs and state IDs.
 
+## Multiple Instances
+
+`examples/actor_instances.str` spawns two runtime instances of the same process
+definition:
+
+```strata
+spawn Worker as first;
+spawn Worker as second;
+send first Ping;
+send second Ping;
+```
+
+`first` and `second` are separate handles. Mantle assigns each spawned worker a
+different runtime `pid`, and the trace records both messages and both worker
+steps with the same process definition ID but different process instance IDs.
+
 ## Run The Actor Examples
 
 ```sh
@@ -123,6 +140,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
 cargo run -p strata --bin strata -- check examples/actor_sequence.str
 cargo run -p strata --bin strata -- build examples/actor_sequence.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
+
+cargo run -p strata --bin strata -- check examples/actor_instances.str
+cargo run -p strata --bin strata -- build examples/actor_instances.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
 ```
 
 For `actor_sequence`, the trace should show `Worker` dequeuing `First`, stepping

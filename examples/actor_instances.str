@@ -1,17 +1,15 @@
-module actor_sequence;
+module actor_instances;
 
 record MainState;
 enum MainMsg {
     Start,
 }
 enum WorkerState {
-    Waiting,
-    SawFirst,
-    Done,
+    Idle,
+    Handled,
 }
 enum WorkerMsg {
-    First,
-    Second,
+    Ping,
 }
 
 proc Main mailbox bounded(1) {
@@ -23,31 +21,24 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker as worker;
-        send worker First;
-        send worker Second;
+        spawn Worker as first;
+        spawn Worker as second;
+        send first Ping;
+        send second Ping;
         return Stop(state);
     }
 }
 
-proc Worker mailbox bounded(2) {
+proc Worker mailbox bounded(1) {
     type State = WorkerState;
     type Msg = WorkerMsg;
 
     fn init() -> WorkerState ! [] ~ [] @det {
-        return Waiting;
+        return Idle;
     }
 
     fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-        match msg {
-            First => {
-                emit "worker handled First";
-                return Continue(SawFirst);
-            }
-            Second => {
-                emit "worker handled Second";
-                return Stop(Done);
-            }
-        }
+        emit "worker instance handled Ping";
+        return Stop(Handled);
     }
 }
