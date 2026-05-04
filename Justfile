@@ -28,6 +28,21 @@ build:
     cargo build
 
 metadata-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "Error: jq is required for metadata-check." >&2
+        echo "Install jq and retry. On macOS: brew install jq. On Ubuntu: sudo apt-get install jq." >&2
+        exit 1
+    fi
+
+    if ! command -v xmllint >/dev/null 2>&1; then
+        echo "Error: xmllint is required for metadata-check." >&2
+        echo "Install xmllint and retry. On macOS: install libxml2. On Ubuntu: sudo apt-get install libxml2-utils." >&2
+        exit 1
+    fi
+
     jq empty tools/vscode-strata/package.json
     xmllint --noout tools/mime/strata.xml
 
@@ -45,9 +60,9 @@ product-gates: build
     set -euo pipefail
 
     for example in hello actor_ping actor_sequence; do
-        target/debug/strata check "examples/${example}.str"
-        target/debug/strata build "examples/${example}.str"
-        target/debug/mantle run "target/strata/${example}.mta"
+        cargo run -p strata --bin strata -- check "examples/${example}.str"
+        cargo run -p strata --bin strata -- build "examples/${example}.str"
+        cargo run -p mantle-runtime --bin mantle -- run "target/strata/${example}.mta"
     done
 
 quality: fmt-check check test lint metadata-check docs product-gates diff-check

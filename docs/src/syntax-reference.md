@@ -120,7 +120,7 @@ block_body =
     statement* return_statement
 
 message_match_body =
-    "match" ident "{" message_match_arm+ "}"
+    "match" "msg" "{" message_match_arm+ "}"
 
 message_match_arm =
     ident "=>" "{" block_body "}" ","?
