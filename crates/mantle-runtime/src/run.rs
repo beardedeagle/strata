@@ -186,11 +186,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         message: MessageId,
         sender_pid: Option<RuntimeProcessId>,
     ) -> Result<()> {
-        let process_index = self
-            .processes
-            .iter()
-            .position(|process| process.pid == target)
-            .ok_or_else(|| Error::new(format!("runtime process {target} is not spawned")))?;
+        let process_index = self.process_index_for_pid(target)?;
         let process = &self.processes[process_index];
         let target_process = self.program.process(process.process_id)?;
         let message_label = self
@@ -229,6 +225,28 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             message: message_label,
         });
         Ok(())
+    }
+
+    fn process_index_for_pid(&self, pid: RuntimeProcessId) -> Result<usize> {
+        let raw_index = pid
+            .as_u64()
+            .checked_sub(1)
+            .ok_or_else(|| Error::new("runtime process id index underflowed"))?;
+        let process_index = usize::try_from(raw_index).map_err(|_| {
+            Error::new(format!(
+                "runtime process {pid} cannot be indexed on this platform"
+            ))
+        })?;
+        let process = self
+            .processes
+            .get(process_index)
+            .ok_or_else(|| Error::new(format!("runtime process {pid} is not spawned")))?;
+        if process.pid != pid {
+            return Err(Error::new(format!(
+                "runtime process index for pid {pid} is inconsistent"
+            )));
+        }
+        Ok(process_index)
     }
 
     fn drain_mailboxes(&mut self, max_dispatches: usize) -> Result<()> {
@@ -620,6 +638,59 @@ mod tests {
             MAX_PROCESS_HANDLES_PER_PROCESS
         );
         assert!(run.processes[0].handles.is_empty());
+    }
+
+    #[test]
+    fn runtime_process_lookup_indexes_by_pid() {
+        let artifact = artifact_with_large_unbound_handle_table();
+        let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        let mut host = InMemoryRuntimeHost::default();
+        let mut run = RuntimeRun::new(
+            &program,
+            &mut host,
+            DEFAULT_MAX_RUNTIME_PROCESSES,
+            DEFAULT_MAX_TRACE_BYTES,
+            DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
+        );
+        let main_pid = run
+            .spawn_process(ProcessId::new(0), None)
+            .expect("entry process should spawn");
+        let worker_pid = run
+            .spawn_process(ProcessId::new(1), Some(main_pid))
+            .expect("worker process should spawn");
+
+        assert_eq!(run.process_index_for_pid(main_pid).expect("main pid"), 0);
+        assert_eq!(
+            run.process_index_for_pid(worker_pid).expect("worker pid"),
+            1
+        );
+
+        run.send_message(worker_pid, MessageId::new(0), Some(main_pid))
+            .expect("send should address worker by pid index");
+        assert_eq!(run.processes[1].mailbox.len(), 1);
+    }
+
+    #[test]
+    fn runtime_process_lookup_rejects_unspawned_pid() {
+        let artifact = artifact_with_large_unbound_handle_table();
+        let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        let mut host = InMemoryRuntimeHost::default();
+        let mut run = RuntimeRun::new(
+            &program,
+            &mut host,
+            DEFAULT_MAX_RUNTIME_PROCESSES,
+            DEFAULT_MAX_TRACE_BYTES,
+            DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
+        );
+        run.spawn_process(ProcessId::new(0), None)
+            .expect("entry process should spawn");
+        let missing_pid = RuntimeProcessId::from_u64(2).expect("valid pid should construct");
+
+        let err = run
+            .process_index_for_pid(missing_pid)
+            .expect_err("unspawned pid should be rejected");
+
+        assert!(err.to_string().contains("runtime process 2 is not spawned"));
     }
 
     fn artifact_with_large_unbound_handle_table() -> MantleArtifact {
