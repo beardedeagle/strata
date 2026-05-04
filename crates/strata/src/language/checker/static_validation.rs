@@ -5,7 +5,7 @@ use super::super::checked::{
     CheckedProcessId, CheckedStepResult, CheckedTransition,
 };
 use super::super::diagnostic::{Error, Result};
-use super::super::STATIC_RUNTIME_DISPATCH_LIMIT;
+use super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
 
 pub(super) fn validate_action_references(
     processes: &[CheckedProcess],
@@ -221,6 +221,15 @@ fn static_process_index_for_pid(
     Ok(process_index)
 }
 
+fn ensure_static_process_capacity(instance_count: usize) -> Result<()> {
+    if instance_count >= STATIC_RUNTIME_PROCESS_LIMIT {
+        return Err(Error::new(format!(
+            "static runtime process instance limit exceeded at {STATIC_RUNTIME_PROCESS_LIMIT} process instance(s)"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_static_runtime_order(
     processes: &[CheckedProcess],
     entry_process: CheckedProcessId,
@@ -256,6 +265,7 @@ fn validate_static_runtime_order(
                 CheckedAction::Emit { .. } => {}
                 CheckedAction::Spawn { target, handle } => {
                     process_by_id(processes, *target)?;
+                    ensure_static_process_capacity(instances.len())?;
                     let spawned_pid = next_pid;
                     next_pid = next_pid.checked_next()?;
                     bind_static_process_handle(
@@ -465,6 +475,19 @@ mod tests {
         assert!(err
             .to_string()
             .contains("static runtime process id 2 is not spawned"));
+    }
+
+    #[test]
+    fn static_process_capacity_rejects_instance_limit() {
+        ensure_static_process_capacity(STATIC_RUNTIME_PROCESS_LIMIT - 1)
+            .expect("capacity should allow the final process slot");
+
+        let err = ensure_static_process_capacity(STATIC_RUNTIME_PROCESS_LIMIT)
+            .expect_err("capacity should reject a new process beyond the limit");
+
+        assert!(err.to_string().contains(
+            "static runtime process instance limit exceeded at 10000 process instance(s)"
+        ));
     }
 
     fn checked_process_with_declared_handles(handle_count: usize) -> CheckedProcess {

@@ -1457,7 +1457,7 @@ proc Helper mailbox bounded(1) {
 
     assert!(err
         .to_string()
-        .contains("static runtime validation exceeded"));
+        .contains("static runtime process instance limit exceeded"));
 }
 
 #[test]
