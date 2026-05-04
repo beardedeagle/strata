@@ -1228,6 +1228,26 @@ fn allows_multiple_handles_for_same_process_definition() {
 }
 
 #[test]
+fn rejects_spawn_without_process_handle() {
+    let source = ACTOR_PING.replace("spawn Worker as worker;", "spawn Worker;");
+
+    let err = parse_source(&source).expect_err("spawn without handle should be rejected");
+
+    assert!(err.to_string().contains("expected keyword as"));
+}
+
+#[test]
+fn rejects_send_to_process_definition_name() {
+    let source = ACTOR_PING.replace("send worker Ping;", "send Worker Ping;");
+
+    let err = check_source(&source).expect_err("send to process definition should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("process Main sends to undeclared process handle Worker"));
+}
+
+#[test]
 fn rejects_process_handle_named_like_step_parameter() {
     let source = ACTOR_PING.replace("spawn Worker as worker;", "spawn Worker as state;");
 
