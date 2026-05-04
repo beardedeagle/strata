@@ -199,5 +199,6 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`mut`, `var`, and `ProcResult` are reserved in the current accepted source
-surface.
+`mut` and `var` are reserved everywhere identifiers are accepted.
+`ProcResult` is reserved as a type name because it names the built-in process
+transition result type.

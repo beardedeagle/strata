@@ -77,7 +77,8 @@ Invalid examples:
 worker-name
 ```
 
-`mut` and `var` are reserved. `ProcResult` is reserved as the built-in process
+`mut` and `var` are reserved everywhere identifiers are accepted.
+`ProcResult` is reserved as a type name because it names the built-in process
 transition result type.
 
 ## Records

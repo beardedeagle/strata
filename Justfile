@@ -40,11 +40,9 @@ docs-serve:
 diff-check:
     git diff --check
 
-product-gates:
+product-gates: build
     #!/usr/bin/env bash
     set -euo pipefail
-
-    cargo build
 
     for example in hello actor_ping actor_sequence; do
         target/debug/strata check "examples/${example}.str"
@@ -52,7 +50,7 @@ product-gates:
         target/debug/mantle run "target/strata/${example}.mta"
     done
 
-quality: fmt-check check test lint build metadata-check docs product-gates diff-check
+quality: fmt-check check test lint metadata-check docs product-gates diff-check
 
 ci-native: quality
 
@@ -99,7 +97,8 @@ install-ci-tools-linux:
     cargo install mdbook --version 0.5.2 --locked --target-dir target/cargo-install
 
 install-fuzz-tools:
-    cargo install cargo-fuzz --version 0.13.1 --locked --target-dir target/cargo-install
+    rustup toolchain install stable --profile minimal
+    cargo +stable install cargo-fuzz --version 0.13.1 --locked --target-dir target/cargo-install
 
 ci-rust: check test build
 
