@@ -147,6 +147,10 @@ impl StaticProcessId {
             .map(Self)
             .ok_or_else(|| Error::new("static runtime process id overflowed"))
     }
+
+    fn as_u32(self) -> u32 {
+        self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -267,9 +271,10 @@ fn validate_static_runtime_order(
                         .position(|instance| instance.pid == target_pid)
                     else {
                         return Err(Error::new(format!(
-                            "process {} sends to missing runtime process handle id {}",
+                            "process {} sends through process handle id {} to missing runtime process id {}",
                             process.debug_name(),
-                            target.as_u32()
+                            target.as_u32(),
+                            target_pid.as_u32()
                         )));
                     };
                     let target_process =

@@ -464,7 +464,7 @@ impl ArtifactProcess {
         for transition in &self.transitions {
             let mut spawned_handles = BTreeSet::new();
             for action in &transition.actions {
-                self.validate_action_reference(artifact, &mut spawned_handles, action)?;
+                self.validate_action_reference(artifact, transition, &mut spawned_handles, action)?;
             }
         }
         Ok(())
@@ -473,6 +473,7 @@ impl ArtifactProcess {
     fn validate_action_reference(
         &self,
         artifact: &MantleArtifact,
+        transition: &ArtifactTransition,
         spawned_handles: &mut BTreeSet<ProcessHandleId>,
         action: &ArtifactAction,
     ) -> Result<()> {
@@ -499,9 +500,10 @@ impl ArtifactProcess {
                 }
                 if !spawned_handles.insert(*handle) {
                     return Err(Error::new(format!(
-                        "process {} declares duplicate process handle id {}",
+                        "process {} duplicates process handle id {} within message transition {}",
                         self.debug_name,
-                        handle.as_u32()
+                        handle.as_u32(),
+                        transition.message.as_u32()
                     )));
                 }
             }

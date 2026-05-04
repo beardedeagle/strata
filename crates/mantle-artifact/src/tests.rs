@@ -319,6 +319,25 @@ fn validate_rejects_spawn_handle_target_mismatch() {
 }
 
 #[test]
+fn validate_rejects_duplicate_spawn_handle_with_transition_context() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0]
+        .actions
+        .push(ArtifactAction::Spawn {
+            target: ProcessId::new(1),
+            handle: ProcessHandleId::new(0),
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("duplicate spawn handle should fail");
+
+    assert!(err
+        .to_string()
+        .contains("duplicates process handle id 0 within message transition 0"));
+}
+
+#[test]
 fn validate_rejects_unknown_spawn_target() {
     let mut artifact = valid_artifact();
     artifact.processes[0].process_handles[0].target = ProcessId::new(99);
