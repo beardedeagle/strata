@@ -11,5 +11,6 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
 
-    let _ = strata::language::lower_to_artifact(&checked, source);
+    strata::language::lower_to_artifact(&checked, source)
+        .expect("checked source should lower to a valid artifact");
 });

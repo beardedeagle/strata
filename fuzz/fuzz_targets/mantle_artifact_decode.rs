@@ -13,5 +13,7 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let encoded = artifact.encode();
-    let _ = MantleArtifact::decode(&encoded);
+    let decoded =
+        MantleArtifact::decode(&encoded).expect("encoded artifact should decode successfully");
+    assert_eq!(decoded, artifact);
 });

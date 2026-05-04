@@ -56,14 +56,15 @@ diff-check:
     git diff --check
 
 product-gates: build
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    for example in hello actor_ping actor_sequence; do
-        cargo run -p strata --bin strata -- check "examples/${example}.str"
-        cargo run -p strata --bin strata -- build "examples/${example}.str"
-        cargo run -p mantle-runtime --bin mantle -- run "target/strata/${example}.mta"
-    done
+    cargo run -p strata --bin strata -- check examples/hello.str
+    cargo run -p strata --bin strata -- build examples/hello.str
+    cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+    cargo run -p strata --bin strata -- check examples/actor_ping.str
+    cargo run -p strata --bin strata -- build examples/actor_ping.str
+    cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
+    cargo run -p strata --bin strata -- check examples/actor_sequence.str
+    cargo run -p strata --bin strata -- build examples/actor_sequence.str
+    cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 
 quality: fmt-check check test lint metadata-check docs product-gates diff-check
 

@@ -18,9 +18,8 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
 
-    let Ok(artifact) = strata::language::lower_to_artifact(&checked, source) else {
-        return;
-    };
+    let artifact = strata::language::lower_to_artifact(&checked, source)
+        .expect("checked source should lower to a valid artifact");
 
     let mut host = InMemoryRuntimeHost::default();
     let _ = run_artifact_with_host(&artifact, &mut host, FUZZ_RUN_LIMITS);
