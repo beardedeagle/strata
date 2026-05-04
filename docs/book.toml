@@ -1,0 +1,15 @@
+[book]
+title = "Strata And Mantle"
+description = "Product documentation for Strata source programs and Mantle runtime artifacts."
+src = "src"
+language = "en"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[rust]
+edition = "2021"
+
+[output.html]
+git-repository-url = "https://github.com/beardedeagle/strata"

@@ -19,9 +19,9 @@ The first runnable product gate is in place:
 
 ```sh
 cargo build
-target/debug/strata check examples/hello.str
-target/debug/strata build examples/hello.str
-target/debug/mantle run target/strata/hello.mta
+cargo run -p strata --bin strata -- check examples/hello.str
+cargo run -p strata --bin strata -- build examples/hello.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
 ```
 
 The example program emits `hello from Strata` through an explicit `emit` effect.
@@ -38,9 +38,9 @@ and executed by Mantle.
 The first actor/runtime gate is also in place:
 
 ```sh
-target/debug/strata check examples/actor_ping.str
-target/debug/strata build examples/actor_ping.str
-target/debug/mantle run target/strata/actor_ping.mta
+cargo run -p strata --bin strata -- check examples/actor_ping.str
+cargo run -p strata --bin strata -- build examples/actor_ping.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
 ```
 
 That example spawns a worker process, sends it a message, handles the message,
@@ -55,9 +55,9 @@ Multi-step immutable actor execution is now represented by message-keyed
 process transitions:
 
 ```sh
-target/debug/strata check examples/actor_sequence.str
-target/debug/strata build examples/actor_sequence.str
-target/debug/mantle run target/strata/actor_sequence.mta
+cargo run -p strata --bin strata -- check examples/actor_sequence.str
+cargo run -p strata --bin strata -- build examples/actor_sequence.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 ```
 
 That example sends two messages to a worker. The worker handles the first
@@ -146,8 +146,8 @@ coordination, and reproducible publication.
 - `.str` files are Strata source files.
 - `.mta` files are Mantle Target Artifacts.
 
-See [docs/file-types.md](docs/file-types.md) for the source/artifact boundary,
-MIME identifiers, and tooling notes.
+See [docs/src/file-types.md](docs/src/file-types.md) for the source/artifact
+boundary, MIME identifiers, and tooling notes.
 
 ## Repository Layout
 
@@ -163,26 +163,68 @@ tools/                     editor and MIME metadata
 
 ## Development
 
+Repository automation is centralized in `Justfile`. GitHub Actions and
+lefthook delegate to the same recipes used locally.
+
+CI caches Cargo registry/git data and per-job target directories using
+GitHub-owned, SHA-pinned actions.
+
+The mdBook under `docs/` is the primary project documentation. Start with
+`docs/src/getting-started.md` for first use, then `docs/src/language-reference.md`
+and `docs/src/syntax-reference.md` for the accepted source surface.
+
+List available commands:
+
+```sh
+just --list
+```
+
 Run the current verification bundle:
 
 ```sh
-cargo fmt --all --check
-cargo check --workspace --all-targets
-cargo test --workspace --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
+just quality
+```
+
+Install local hooks:
+
+```sh
+brew install lefthook
+# or: winget install -e --id evilmartians.lefthook
+# or: go install github.com/evilmartians/lefthook@latest
+lefthook install
+```
+
+Run native checks plus the Linux quality job through `act`:
+
+```sh
+just ci-local
+```
+
+The underlying stable gate recipes are:
+
+```sh
+just fmt-check
+just check
+just test
+just lint
+just build
+just metadata-check
+just docs
+just diff-check
 ```
 
 Run the product gate manually:
 
 ```sh
-cargo build
-target/debug/strata check examples/hello.str
-target/debug/strata build examples/hello.str
-target/debug/mantle run target/strata/hello.mta
-target/debug/strata check examples/actor_ping.str
-target/debug/strata build examples/actor_ping.str
-target/debug/mantle run target/strata/actor_ping.mta
-target/debug/strata check examples/actor_sequence.str
-target/debug/strata build examples/actor_sequence.str
-target/debug/mantle run target/strata/actor_sequence.mta
+just product-gates
+```
+
+Nightly-only validation is also available for fuzz and Miri smoke coverage:
+
+```sh
+rustup toolchain install nightly --component miri
+rustup override set nightly
+just install-fuzz-tools
+just fuzz-ci
+just miri-ci
 ```
