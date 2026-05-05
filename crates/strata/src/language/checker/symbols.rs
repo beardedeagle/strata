@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use super::super::ast::{Enum, Identifier, Module, Process, Record, TypeRef};
 use super::super::checked::{CheckedMessageId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
-use super::super::PROC_RESULT_TYPE;
+use super::super::{PROCESS_REF_TYPE, PROC_RESULT_TYPE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Symbol(u32);
@@ -143,10 +143,12 @@ impl SemanticIndex {
 
         let _module_symbol = symbols.intern(&module.name)?;
         let proc_result_type = symbols.intern(&Identifier::new(PROC_RESULT_TYPE)?)?;
+        let process_ref_type = symbols.intern(&Identifier::new(PROCESS_REF_TYPE)?)?;
 
         for (index, record) in module.records.iter().enumerate() {
             let symbol = symbols.intern(&record.name)?;
             reject_reserved_type_name(record.name.as_str(), symbol, proc_result_type)?;
+            reject_reserved_type_name(record.name.as_str(), symbol, process_ref_type)?;
             if records.insert(symbol, index).is_some() {
                 return Err(Error::new(format!(
                     "duplicate record declaration {}",
@@ -168,6 +170,7 @@ impl SemanticIndex {
         for (index, item) in module.enums.iter().enumerate() {
             let symbol = symbols.intern(&item.name)?;
             reject_reserved_type_name(item.name.as_str(), symbol, proc_result_type)?;
+            reject_reserved_type_name(item.name.as_str(), symbol, process_ref_type)?;
             if enums.insert(symbol, index).is_some() {
                 return Err(Error::new(format!(
                     "duplicate enum declaration {}",

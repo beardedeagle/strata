@@ -42,10 +42,11 @@ transition index and carry a `message` ID field. Validation requires one unique
 transition for each accepted message, and runtime selection indexes the admitted
 transition table by typed message ID.
 
-Process handles are encoded as per-process handle tables. A spawn action binds
-a handle ID to a new runtime process instance, and a send action targets a
-handle ID plus a message ID. Handle debug names remain metadata; runtime
-delivery uses admitted IDs and runtime process instance IDs.
+Process references are encoded as per-process reference tables. A spawn action
+binds a process-reference ID to a new runtime process instance for the current
+transition, and a send action targets a process-reference ID plus a message ID.
+Reference debug names remain metadata; runtime delivery uses admitted IDs and
+runtime process instance IDs.
 
 Each transition's `action_count` is bounded during decode before allocation.
 Validation also caps the aggregate action count across all transitions for a

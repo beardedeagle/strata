@@ -134,14 +134,17 @@ Buildable source requires bodies. `init` uses a block body. A multi-message
 ```text
 statement =
     emit_statement
-  | spawn_statement
+  | process_ref_statement
   | send_statement
 
 emit_statement =
     "emit" string_literal ";"
 
-spawn_statement =
-    "spawn" ident "as" ident ";"
+process_ref_statement =
+    "let" ident ":" process_ref_type "=" "spawn" ident ";"
+
+process_ref_type =
+    "ProcessRef" "<" ident ">"
 
 send_statement =
     "send" ident ident ";"
@@ -150,10 +153,11 @@ return_statement =
     "return" return_expr ";"
 ```
 
-The first identifier in `spawn` is the process definition name. The second
-identifier is the process handle bound to that spawned runtime instance.
+The identifier after `let` names an immutable process reference value. The
+identifier after `spawn` is the process definition name. The `ProcessRef<T>`
+annotation must name the same process definition.
 
-The first identifier in `send` is a process handle. The second identifier is
+The first identifier in `send` is a process reference. The second identifier is
 the message variant to send.
 
 ## Types
@@ -164,8 +168,9 @@ type_ref =
   | ident "<" type_ref ("," type_ref)* ","? ">"
 ```
 
-The only built-in generic type currently accepted by checking is
-`ProcResult<StateType>` as a `step` return type.
+The built-in generic types currently accepted by checking are
+`ProcResult<StateType>` as a `step` return type and
+`ProcessRef<ProcessName>` in spawn bindings.
 
 ## Values
 
@@ -202,6 +207,6 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`as`, `mut`, and `var` are reserved everywhere identifiers are accepted.
-`ProcResult` is reserved as a type name because it names the built-in process
-transition result type.
+`as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
+`ProcResult` and `ProcessRef` are reserved type names because they name built-in
+transition and process-reference types.

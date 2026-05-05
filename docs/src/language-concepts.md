@@ -23,7 +23,7 @@ Strata source is where author-visible meaning lives:
 Mantle runtime is where admitted execution lives:
 
 - process instances;
-- process handles;
+- process references;
 - mailboxes;
 - loaded typed IDs;
 - transition tables;
@@ -46,15 +46,15 @@ A Strata program is organized around processes. A process declares:
 The entry process is named `Main`. Mantle starts `Main` and delivers its first
 message variant as the entry message.
 
-Spawning a process creates a runtime process instance and binds it to a process
-handle:
+Spawning a process creates a runtime process instance and binds it to an
+immutable typed process reference value:
 
 ```strata
-spawn Worker as worker;
+let worker: ProcessRef<Worker> = spawn Worker;
 ```
 
-The handle names that instance for the process that spawned it. Multiple
-handles may target the same process definition, which creates multiple runtime
+The reference is local to the transition that spawned it. Multiple references
+may target the same process definition, which creates multiple runtime
 instances.
 
 ## Messages
@@ -74,7 +74,7 @@ Sends are statically checked against the target process message enum:
 send worker Ping;
 ```
 
-The current source form sends message variants through process handles only.
+The current source form sends message variants through process references only.
 Message payloads are not available yet.
 
 ## State
@@ -106,7 +106,7 @@ The declared effect list must exactly match the effects used by `step`.
 
 ```strata
 fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-    spawn Worker as worker;
+    let worker: ProcessRef<Worker> = spawn Worker;
     send worker Ping;
     return Stop(state);
 }

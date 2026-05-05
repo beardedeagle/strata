@@ -29,8 +29,8 @@ source text
 
 The parser accepts source shape. The checker assigns source-visible meaning,
 resolves names, validates process/message/state rules, and produces checked IR.
-It also resolves process handle names to typed handle IDs. Lowering converts
-checked IR into Mantle artifact tables.
+It also resolves process reference names to typed reference IDs. Lowering
+converts checked IR into Mantle artifact tables.
 
 ## Runtime Path
 
@@ -42,7 +42,7 @@ artifact text
   -> spawn Main
   -> deliver entry message
   -> dispatch by message ID
-  -> execute actions by typed process handles and IDs
+  -> execute actions by typed process references and IDs
   -> write JSONL trace
 ```
 

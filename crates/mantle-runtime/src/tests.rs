@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
-    write_artifact, ArtifactAction, ArtifactProcess, ArtifactProcessHandle, ArtifactTransition,
-    MantleArtifact, MessageId, NextState, OutputId, ProcessHandleId, ProcessId, StateId,
-    StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
+    write_artifact, ArtifactAction, ArtifactProcess, ArtifactProcessRef, ArtifactTransition,
+    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
 };
 
 use super::program::LoadedProgram;
@@ -57,7 +57,7 @@ fn run_artifact_path_writes_trace_for_current_directory_artifact() {
     assert!(trace_path.exists(), "runtime trace should be written");
     let trace = fs::read_to_string(&trace_path).expect("runtime trace should be readable");
     assert!(trace.contains(r#""event":"artifact_loaded""#));
-    assert!(trace.contains(r#""schema_version":"1""#));
+    assert!(trace.contains(&format!(r#""schema_version":"{ARTIFACT_SCHEMA_VERSION}""#)));
     assert!(trace.contains(r#""event":"process_stopped""#));
 
     fs::remove_file(artifact_path).expect("test artifact should be removed");
@@ -260,33 +260,6 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
 }
 
 #[test]
-fn runtime_rejects_process_handle_rebind_before_spawning_child() {
-    let artifact = handle_rebind_artifact();
-    let mut host = InMemoryRuntimeHost::default();
-
-    let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
-        .expect_err("runtime should reject process handle rebinds");
-
-    assert!(err
-        .to_string()
-        .contains("process Worker rebinds process handle id 0"));
-    let helper_spawns = host
-        .events()
-        .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                RuntimeEvent::ProcessSpawned { process, .. } if process == "Helper"
-            )
-        })
-        .count();
-    assert_eq!(
-        helper_spawns, 1,
-        "runtime must reject the rebind before spawning a second Helper"
-    );
-}
-
-#[test]
 fn in_memory_host_selects_transitions_by_message_id() {
     let artifact = sequence_artifact();
     let mut host = InMemoryRuntimeHost::default();
@@ -382,7 +355,7 @@ fn in_memory_host_preserves_current_next_state() {
         state_values: vec!["Idle".to_string(), "Handled".to_string()],
         message_type: "WorkerMsg".to_string(),
         message_variants: vec!["Ping".to_string()],
-        process_handles: Vec::new(),
+        process_refs: Vec::new(),
         mailbox_bound: 1,
         init_state: StateId::new(1),
         transitions: vec![ArtifactTransition {
@@ -461,7 +434,7 @@ fn valid_artifact() -> MantleArtifact {
                 state_values: vec!["MainState".to_string()],
                 message_type: "MainMsg".to_string(),
                 message_variants: vec!["Start".to_string()],
-                process_handles: vec![ArtifactProcessHandle {
+                process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
                 }],
@@ -474,10 +447,10 @@ fn valid_artifact() -> MantleArtifact {
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
-                            handle: ProcessHandleId::new(0),
+                            process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
+                            target: ProcessRefId::new(0),
                             message: MessageId::new(0),
                         },
                     ],
@@ -489,7 +462,7 @@ fn valid_artifact() -> MantleArtifact {
                 state_values: vec!["Idle".to_string(), "Handled".to_string()],
                 message_type: "WorkerMsg".to_string(),
                 message_variants: vec!["Ping".to_string()],
-                process_handles: Vec::new(),
+                process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
@@ -522,7 +495,7 @@ fn looping_artifact() -> MantleArtifact {
                 state_values: vec!["MainState".to_string()],
                 message_type: "MainMsg".to_string(),
                 message_variants: vec!["Start".to_string()],
-                process_handles: vec![ArtifactProcessHandle {
+                process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
                 }],
@@ -535,10 +508,10 @@ fn looping_artifact() -> MantleArtifact {
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
-                            handle: ProcessHandleId::new(0),
+                            process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
+                            target: ProcessRefId::new(0),
                             message: MessageId::new(0),
                         },
                     ],
@@ -550,7 +523,7 @@ fn looping_artifact() -> MantleArtifact {
                 state_values: vec!["WorkerState".to_string()],
                 message_type: "WorkerMsg".to_string(),
                 message_variants: vec!["Ping".to_string()],
-                process_handles: vec![ArtifactProcessHandle {
+                process_refs: vec![ArtifactProcessRef {
                     debug_name: "helper".to_string(),
                     target: ProcessId::new(2),
                 }],
@@ -563,10 +536,10 @@ fn looping_artifact() -> MantleArtifact {
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(2),
-                            handle: ProcessHandleId::new(0),
+                            process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
+                            target: ProcessRefId::new(0),
                             message: MessageId::new(0),
                         },
                     ],
@@ -578,7 +551,7 @@ fn looping_artifact() -> MantleArtifact {
                 state_values: vec!["HelperState".to_string()],
                 message_type: "HelperMsg".to_string(),
                 message_variants: vec!["Ping".to_string()],
-                process_handles: vec![ArtifactProcessHandle {
+                process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
                 }],
@@ -591,109 +564,13 @@ fn looping_artifact() -> MantleArtifact {
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
-                            handle: ProcessHandleId::new(0),
+                            process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
+                            target: ProcessRefId::new(0),
                             message: MessageId::new(0),
                         },
                     ],
-                }],
-            },
-        ],
-        source_hash_fnv1a64: "0000000000000000".to_string(),
-    }
-}
-
-fn handle_rebind_artifact() -> MantleArtifact {
-    MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: STRATA_SOURCE_LANGUAGE.to_string(),
-        module: "handle_rebind".to_string(),
-        entry_process: ProcessId::new(0),
-        entry_message: MessageId::new(0),
-        outputs: Vec::new(),
-        processes: vec![
-            ArtifactProcess {
-                debug_name: "Main".to_string(),
-                state_type: "MainState".to_string(),
-                state_values: vec!["MainState".to_string()],
-                message_type: "MainMsg".to_string(),
-                message_variants: vec!["Start".to_string()],
-                process_handles: vec![ArtifactProcessHandle {
-                    debug_name: "worker".to_string(),
-                    target: ProcessId::new(1),
-                }],
-                mailbox_bound: 1,
-                init_state: StateId::new(0),
-                transitions: vec![ArtifactTransition {
-                    message: MessageId::new(0),
-                    step_result: StepResult::Stop,
-                    next_state: NextState::Current,
-                    actions: vec![
-                        ArtifactAction::Spawn {
-                            target: ProcessId::new(1),
-                            handle: ProcessHandleId::new(0),
-                        },
-                        ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
-                            message: MessageId::new(0),
-                        },
-                        ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
-                            message: MessageId::new(1),
-                        },
-                    ],
-                }],
-            },
-            ArtifactProcess {
-                debug_name: "Worker".to_string(),
-                state_type: "WorkerState".to_string(),
-                state_values: vec!["WorkerState".to_string()],
-                message_type: "WorkerMsg".to_string(),
-                message_variants: vec!["First".to_string(), "Second".to_string()],
-                process_handles: vec![ArtifactProcessHandle {
-                    debug_name: "helper".to_string(),
-                    target: ProcessId::new(2),
-                }],
-                mailbox_bound: 2,
-                init_state: StateId::new(0),
-                transitions: vec![
-                    ArtifactTransition {
-                        message: MessageId::new(0),
-                        step_result: StepResult::Continue,
-                        next_state: NextState::Current,
-                        actions: vec![ArtifactAction::Spawn {
-                            target: ProcessId::new(2),
-                            handle: ProcessHandleId::new(0),
-                        }],
-                    },
-                    ArtifactTransition {
-                        message: MessageId::new(1),
-                        step_result: StepResult::Stop,
-                        next_state: NextState::Current,
-                        actions: vec![ArtifactAction::Spawn {
-                            target: ProcessId::new(2),
-                            handle: ProcessHandleId::new(0),
-                        }],
-                    },
-                ],
-            },
-            ArtifactProcess {
-                debug_name: "Helper".to_string(),
-                state_type: "HelperState".to_string(),
-                state_values: vec!["HelperState".to_string()],
-                message_type: "HelperMsg".to_string(),
-                message_variants: vec!["Ping".to_string()],
-                process_handles: Vec::new(),
-                mailbox_bound: 1,
-                init_state: StateId::new(0),
-                transitions: vec![ArtifactTransition {
-                    message: MessageId::new(0),
-                    step_result: StepResult::Stop,
-                    next_state: NextState::Current,
-                    actions: Vec::new(),
                 }],
             },
         ],
@@ -720,7 +597,7 @@ fn sequence_artifact() -> MantleArtifact {
                 state_values: vec!["MainState".to_string()],
                 message_type: "MainMsg".to_string(),
                 message_variants: vec!["Start".to_string()],
-                process_handles: vec![ArtifactProcessHandle {
+                process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
                 }],
@@ -733,14 +610,14 @@ fn sequence_artifact() -> MantleArtifact {
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
-                            handle: ProcessHandleId::new(0),
+                            process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
+                            target: ProcessRefId::new(0),
                             message: MessageId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
+                            target: ProcessRefId::new(0),
                             message: MessageId::new(1),
                         },
                     ],
@@ -756,7 +633,7 @@ fn sequence_artifact() -> MantleArtifact {
                 ],
                 message_type: "WorkerMsg".to_string(),
                 message_variants: vec!["First".to_string(), "Second".to_string()],
-                process_handles: Vec::new(),
+                process_refs: Vec::new(),
                 mailbox_bound: 2,
                 init_state: StateId::new(0),
                 transitions: vec![

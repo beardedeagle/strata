@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use mantle_artifact::{
-    Error, MantleArtifact, MessageId, NextState, OutputId, ProcessHandleId, ProcessId, Result,
+    Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result,
     StateId, StepResult,
 };
 
@@ -155,7 +155,6 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             process_id,
             state: definition.init_state,
             status: ProcessStatus::Running,
-            handles: BTreeMap::new(),
             mailbox_bound: definition.mailbox_bound,
             mailbox: VecDeque::new(),
         };
@@ -296,9 +295,10 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let transition = definition.transition_for_message(message)?;
         let next_state = transition.next_state;
         let step_result = transition.step_result;
+        let mut local_process_refs = BTreeMap::new();
 
         for &action in &transition.actions {
-            self.execute_action(process_index, &step, action)?;
+            self.execute_action(&mut local_process_refs, &step, action)?;
         }
 
         self.apply_next_state(process_index, &step, next_state)?;
@@ -307,109 +307,107 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     fn execute_action(
         &mut self,
-        process_index: usize,
+        local_process_refs: &mut BTreeMap<ProcessRefId, RuntimeProcessId>,
         step: &ActiveStep,
         action: LoadedAction,
     ) -> Result<()> {
         match action {
             LoadedAction::Emit { output } => self.emit_output(step, output),
-            LoadedAction::Spawn { target, handle } => {
-                let declared_target = self.process_handle_target(step, handle)?;
+            LoadedAction::Spawn {
+                target,
+                process_ref,
+            } => {
+                let declared_target = self.process_ref_target(step, process_ref)?;
                 if declared_target != target {
                     return Err(Error::new(format!(
-                        "process {} spawn handle id {} targets process id {}, expected {}",
+                        "process {} spawn process reference id {} targets process id {}, expected {}",
                         step.process_name,
-                        handle.as_u32(),
+                        process_ref.as_u32(),
                         target.as_u32(),
                         declared_target.as_u32()
                     )));
                 }
-                self.ensure_process_handle_unbound(process_index, step, handle)?;
+                self.ensure_process_ref_unbound(local_process_refs, step, process_ref)?;
                 let pid = self.spawn_process(target, Some(step.pid))?;
-                self.bind_process_handle(process_index, step, handle, pid)?;
+                self.bind_process_ref(local_process_refs, step, process_ref, pid)?;
                 Ok(())
             }
             LoadedAction::Send { target, message } => {
-                let pid = self.resolve_process_handle(process_index, step, target)?;
+                let pid = self.resolve_process_ref(local_process_refs, step, target)?;
                 self.send_message(pid, message, Some(step.pid))
             }
         }
     }
 
-    fn process_handle_target(
+    fn process_ref_target(
         &self,
         step: &ActiveStep,
-        handle: ProcessHandleId,
+        process_ref: ProcessRefId,
     ) -> Result<ProcessId> {
         self.program
             .process(step.process_id)?
-            .process_handles
-            .get(handle.index())
-            .map(|process_handle| process_handle.target)
+            .process_refs
+            .get(process_ref.index())
+            .map(|process_ref| process_ref.target)
             .ok_or_else(|| {
                 Error::new(format!(
-                    "process {} references undefined process handle id {}",
+                    "process {} references undefined process reference id {}",
                     step.process_name,
-                    handle.as_u32()
+                    process_ref.as_u32()
                 ))
             })
     }
 
-    fn ensure_process_handle_unbound(
+    fn ensure_process_ref_unbound(
         &self,
-        process_index: usize,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
         step: &ActiveStep,
-        handle: ProcessHandleId,
+        process_ref: ProcessRefId,
     ) -> Result<()> {
-        self.process_handle_target(step, handle)?;
-        if self.processes[process_index].handles.contains_key(&handle) {
+        self.process_ref_target(step, process_ref)?;
+        if local_process_refs.contains_key(&process_ref) {
             return Err(Error::new(format!(
-                "process {} rebinds process handle id {}",
+                "process {} rebinds process reference id {}",
                 step.process_name,
-                handle.as_u32()
+                process_ref.as_u32()
             )));
         }
         Ok(())
     }
 
-    fn bind_process_handle(
-        &mut self,
-        process_index: usize,
+    fn bind_process_ref(
+        &self,
+        local_process_refs: &mut BTreeMap<ProcessRefId, RuntimeProcessId>,
         step: &ActiveStep,
-        handle: ProcessHandleId,
+        process_ref: ProcessRefId,
         pid: RuntimeProcessId,
     ) -> Result<()> {
-        self.process_handle_target(step, handle)?;
-        if self.processes[process_index]
-            .handles
-            .insert(handle, pid)
-            .is_some()
-        {
+        self.process_ref_target(step, process_ref)?;
+        if local_process_refs.insert(process_ref, pid).is_some() {
             return Err(Error::new(format!(
-                "process {} rebinds process handle id {}",
+                "process {} rebinds process reference id {}",
                 step.process_name,
-                handle.as_u32()
+                process_ref.as_u32()
             )));
         }
         Ok(())
     }
 
-    fn resolve_process_handle(
+    fn resolve_process_ref(
         &self,
-        process_index: usize,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
         step: &ActiveStep,
-        handle: ProcessHandleId,
+        process_ref: ProcessRefId,
     ) -> Result<RuntimeProcessId> {
-        self.process_handle_target(step, handle)?;
-        self.processes[process_index]
-            .handles
-            .get(&handle)
+        self.process_ref_target(step, process_ref)?;
+        local_process_refs
+            .get(&process_ref)
             .copied()
             .ok_or_else(|| {
                 Error::new(format!(
-                    "process {} sends to unbound process handle id {}",
+                    "process {} sends to unbound process reference id {}",
                     step.process_name,
-                    handle.as_u32()
+                    process_ref.as_u32()
                 ))
             })
     }
@@ -521,7 +519,6 @@ struct ProcessInstance {
     process_id: ProcessId,
     state: StateId,
     status: ProcessStatus,
-    handles: BTreeMap<ProcessHandleId, RuntimeProcessId>,
     mailbox_bound: usize,
     mailbox: VecDeque<MessageId>,
 }
@@ -607,13 +604,13 @@ mod tests {
         DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES,
     };
     use mantle_artifact::{
-        ArtifactProcess, ArtifactProcessHandle, ArtifactTransition, StepResult, ARTIFACT_FORMAT,
-        ARTIFACT_SCHEMA_VERSION, MAX_PROCESS_HANDLES_PER_PROCESS, STRATA_SOURCE_LANGUAGE,
+        ArtifactProcess, ArtifactProcessRef, ArtifactTransition, StepResult, ARTIFACT_FORMAT,
+        ARTIFACT_SCHEMA_VERSION, MAX_PROCESS_REFS_PER_PROCESS, STRATA_SOURCE_LANGUAGE,
     };
 
     #[test]
-    fn spawned_process_instances_store_handle_bindings_sparsely() {
-        let artifact = artifact_with_large_unbound_handle_table();
+    fn loaded_program_stores_large_process_ref_tables_without_runtime_instance_maps() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
         let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         let mut host = InMemoryRuntimeHost::default();
         let mut run = RuntimeRun::new(
@@ -633,16 +630,15 @@ mod tests {
             program
                 .process(ProcessId::new(0))
                 .expect("entry process should load")
-                .process_handles
+                .process_refs
                 .len(),
-            MAX_PROCESS_HANDLES_PER_PROCESS
+            MAX_PROCESS_REFS_PER_PROCESS
         );
-        assert!(run.processes[0].handles.is_empty());
     }
 
     #[test]
     fn runtime_process_lookup_indexes_by_pid() {
-        let artifact = artifact_with_large_unbound_handle_table();
+        let artifact = artifact_with_large_unbound_process_ref_table();
         let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         let mut host = InMemoryRuntimeHost::default();
         let mut run = RuntimeRun::new(
@@ -672,7 +668,7 @@ mod tests {
 
     #[test]
     fn runtime_process_lookup_rejects_unspawned_pid() {
-        let artifact = artifact_with_large_unbound_handle_table();
+        let artifact = artifact_with_large_unbound_process_ref_table();
         let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         let mut host = InMemoryRuntimeHost::default();
         let mut run = RuntimeRun::new(
@@ -693,12 +689,12 @@ mod tests {
         assert!(err.to_string().contains("runtime process 2 is not spawned"));
     }
 
-    fn artifact_with_large_unbound_handle_table() -> MantleArtifact {
+    fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {
         MantleArtifact {
             format: ARTIFACT_FORMAT.to_string(),
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
             source_language: STRATA_SOURCE_LANGUAGE.to_string(),
-            module: "large_handle_table".to_string(),
+            module: "large_process_ref_table".to_string(),
             entry_process: ProcessId::new(0),
             entry_message: MessageId::new(0),
             outputs: Vec::new(),
@@ -709,8 +705,8 @@ mod tests {
                     state_values: vec!["MainState".to_string()],
                     message_type: "MainMsg".to_string(),
                     message_variants: vec!["Start".to_string()],
-                    process_handles: (0..MAX_PROCESS_HANDLES_PER_PROCESS)
-                        .map(|index| ArtifactProcessHandle {
+                    process_refs: (0..MAX_PROCESS_REFS_PER_PROCESS)
+                        .map(|index| ArtifactProcessRef {
                             debug_name: format!("worker_{index}"),
                             target: ProcessId::new(1),
                         })
@@ -730,7 +726,7 @@ mod tests {
                     state_values: vec!["Idle".to_string()],
                     message_type: "WorkerMsg".to_string(),
                     message_variants: vec!["Ping".to_string()],
-                    process_handles: Vec::new(),
+                    process_refs: Vec::new(),
                     mailbox_bound: 1,
                     init_state: StateId::new(0),
                     transitions: vec![ArtifactTransition {

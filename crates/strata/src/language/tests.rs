@@ -1,6 +1,6 @@
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
-    CheckedProcessHandleId, CheckedProcessId, CheckedStateId, CheckedStepResult, CheckedTransition,
+    CheckedProcessId, CheckedProcessRefId, CheckedStateId, CheckedStepResult, CheckedTransition,
 };
 use super::lexer::{Lexer, TokenKind};
 use super::*;
@@ -47,7 +47,7 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker as worker;
+        let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Stop(state);
     }
@@ -85,7 +85,7 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker as worker;
+        let worker: ProcessRef<Worker> = spawn Worker;
         send worker First;
         send worker Second;
         return Stop(state);
@@ -132,8 +132,8 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker as first;
-        spawn Worker as second;
+        let first: ProcessRef<Worker> = spawn Worker;
+        let second: ProcessRef<Worker> = spawn Worker;
         send first Ping;
         send second Ping;
         return Stop(state);
@@ -202,6 +202,7 @@ fn public_ast_constructors_validate_values() {
     assert!(Identifier::new("1Invalid").is_err());
     assert!(Identifier::new("invalid-name").is_err());
     assert!(Identifier::new("as").is_err());
+    assert!(Identifier::new("let").is_err());
     assert!(Identifier::new("mut").is_err());
     assert!(Identifier::new("var").is_err());
 
@@ -299,10 +300,10 @@ fn parses_and_checks_actor_ping() {
         [
             CheckedAction::Spawn {
                 target: checked_process_id(1),
-                handle: checked_process_handle_id(0)
+                process_ref: checked_process_ref_id(0)
             },
             CheckedAction::Send {
-                target: checked_process_handle_id(0),
+                target: checked_process_ref_id(0),
                 message: checked_message_id(0)
             }
         ]
@@ -374,7 +375,7 @@ fn parses_and_checks_actor_sequence_message_match() {
 }
 
 #[test]
-fn parses_and_checks_actor_instances_with_distinct_handles() {
+fn parses_and_checks_actor_instances_with_distinct_process_refs() {
     let checked = check_source(ACTOR_INSTANCES).expect("actor instances should check");
     let main = checked
         .processes()
@@ -382,28 +383,28 @@ fn parses_and_checks_actor_instances_with_distinct_handles() {
         .find(|process| process.debug_name().as_str() == "Main")
         .expect("Main should be checked");
 
-    assert_eq!(main.process_handles().len(), 2);
-    assert_eq!(main.process_handles()[0].debug_name().as_str(), "first");
-    assert_eq!(main.process_handles()[0].target(), checked_process_id(1));
-    assert_eq!(main.process_handles()[1].debug_name().as_str(), "second");
-    assert_eq!(main.process_handles()[1].target(), checked_process_id(1));
+    assert_eq!(main.process_refs().len(), 2);
+    assert_eq!(main.process_refs()[0].debug_name().as_str(), "first");
+    assert_eq!(main.process_refs()[0].target(), checked_process_id(1));
+    assert_eq!(main.process_refs()[1].debug_name().as_str(), "second");
+    assert_eq!(main.process_refs()[1].target(), checked_process_id(1));
     assert_eq!(
         only_transition(main).actions(),
         [
             CheckedAction::Spawn {
                 target: checked_process_id(1),
-                handle: checked_process_handle_id(0)
+                process_ref: checked_process_ref_id(0)
             },
             CheckedAction::Spawn {
                 target: checked_process_id(1),
-                handle: checked_process_handle_id(1)
+                process_ref: checked_process_ref_id(1)
             },
             CheckedAction::Send {
-                target: checked_process_handle_id(0),
+                target: checked_process_ref_id(0),
                 message: checked_message_id(0)
             },
             CheckedAction::Send {
-                target: checked_process_handle_id(1),
+                target: checked_process_ref_id(1),
                 message: checked_message_id(0)
             }
         ]
@@ -412,11 +413,11 @@ fn parses_and_checks_actor_instances_with_distinct_handles() {
     let artifact =
         lower_to_artifact(&checked, ACTOR_INSTANCES).expect("actor instances should lower");
     let encoded = artifact.encode();
-    assert!(encoded.contains("process.0.handle_count=2"));
-    assert!(encoded.contains("process.0.handle.0.target_process=1"));
-    assert!(encoded.contains("process.0.handle.1.target_process=1"));
-    assert!(encoded.contains("process.0.transition.0.action.2.target_handle=0"));
-    assert!(encoded.contains("process.0.transition.0.action.3.target_handle=1"));
+    assert!(encoded.contains("process.0.process_ref_count=2"));
+    assert!(encoded.contains("process.0.process_ref.0.target_process=1"));
+    assert!(encoded.contains("process.0.process_ref.1.target_process=1"));
+    assert!(encoded.contains("process.0.transition.0.action.2.target_process_ref=0"));
+    assert!(encoded.contains("process.0.transition.0.action.3.target_process_ref=1"));
 }
 
 #[test]
@@ -539,7 +540,7 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker as worker;
+        let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Stop(state);
     }
@@ -559,10 +560,10 @@ proc Main mailbox bounded(1) {
         [
             CheckedAction::Spawn {
                 target: checked_process_id(0),
-                handle: checked_process_handle_id(0)
+                process_ref: checked_process_ref_id(0)
             },
             CheckedAction::Send {
-                target: checked_process_handle_id(0),
+                target: checked_process_ref_id(0),
                 message: checked_message_id(0)
             }
         ]
@@ -572,8 +573,8 @@ proc Main mailbox bounded(1) {
     let encoded = artifact.encode();
     assert!(encoded.contains("entry_process=1"));
     assert!(encoded.contains("process.1.transition.0.action.0.target_process=0"));
-    assert!(encoded.contains("process.1.transition.0.action.0.handle=0"));
-    assert!(encoded.contains("process.1.transition.0.action.1.target_handle=0"));
+    assert!(encoded.contains("process.1.transition.0.action.0.process_ref=0"));
+    assert!(encoded.contains("process.1.transition.0.action.1.target_process_ref=0"));
     assert!(!encoded.contains("target_process=Worker"));
 }
 
@@ -1206,34 +1207,41 @@ fn rejects_incomplete_or_invalid_record_values() {
 }
 
 #[test]
-fn rejects_duplicate_process_handle_on_same_path() {
+fn rejects_duplicate_process_ref_on_same_path() {
     let source = ACTOR_PING.replace(
-        "spawn Worker as worker;",
-        "spawn Worker as worker;\n        spawn Worker as worker;",
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "let worker: ProcessRef<Worker> = spawn Worker;\n        let worker: ProcessRef<Worker> = spawn Worker;",
     );
 
-    let err = check_source(&source).expect_err("duplicate process handle should be rejected");
+    let err = check_source(&source).expect_err("duplicate process reference should be rejected");
 
-    assert!(err.to_string().contains("duplicates process handle id 0"));
+    assert!(err
+        .to_string()
+        .contains("duplicates process reference id 0"));
 }
 
 #[test]
-fn allows_multiple_handles_for_same_process_definition() {
+fn allows_multiple_process_refs_for_same_process_definition() {
     let source = ACTOR_PING.replace(
-        "spawn Worker as worker;\n        send worker Ping;",
-        "spawn Worker as first;\n        spawn Worker as second;\n        send first Ping;\n        send second Ping;",
+        "let worker: ProcessRef<Worker> = spawn Worker;\n        send worker Ping;",
+        "let first: ProcessRef<Worker> = spawn Worker;\n        let second: ProcessRef<Worker> = spawn Worker;\n        send first Ping;\n        send second Ping;",
     );
 
-    check_source(&source).expect("distinct handles may target the same process definition");
+    check_source(&source).expect("distinct process refs may target the same process definition");
 }
 
 #[test]
-fn rejects_spawn_without_process_handle() {
-    let source = ACTOR_PING.replace("spawn Worker as worker;", "spawn Worker;");
+fn rejects_spawn_without_process_ref() {
+    let source = ACTOR_PING.replace(
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "spawn Worker;",
+    );
 
-    let err = parse_source(&source).expect_err("spawn without handle should be rejected");
+    let err = parse_source(&source).expect_err("standalone spawn should be rejected");
 
-    assert!(err.to_string().contains("expected keyword as"));
+    assert!(err
+        .to_string()
+        .contains("expected emit, let, send, or return statement"));
 }
 
 #[test]
@@ -1244,30 +1252,37 @@ fn rejects_send_to_process_definition_name() {
 
     assert!(err
         .to_string()
-        .contains("process Main sends to undeclared process handle Worker"));
+        .contains("process Main sends to undeclared process reference Worker"));
 }
 
 #[test]
-fn rejects_process_handle_named_like_step_parameter() {
-    let source = ACTOR_PING.replace("spawn Worker as worker;", "spawn Worker as state;");
+fn rejects_process_ref_named_like_step_parameter() {
+    let source = ACTOR_PING.replace(
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "let state: ProcessRef<Worker> = spawn Worker;",
+    );
 
-    let err = check_source(&source).expect_err("step parameter handle name should be rejected");
+    let err = check_source(&source)
+        .expect_err("step parameter process reference name should be rejected");
 
     assert!(err
         .to_string()
-        .contains("process Main handle state conflicts with a step parameter name"));
+        .contains("process Main process reference state conflicts with a step parameter name"));
 }
 
 #[test]
-fn rejects_process_handle_named_like_process_declaration() {
-    let source = ACTOR_PING.replace("spawn Worker as worker;", "spawn Worker as Worker;");
+fn rejects_process_ref_named_like_process_declaration() {
+    let source = ACTOR_PING.replace(
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "let Worker: ProcessRef<Worker> = spawn Worker;",
+    );
 
-    let err =
-        check_source(&source).expect_err("process declaration handle name should be rejected");
+    let err = check_source(&source)
+        .expect_err("process declaration process reference name should be rejected");
 
     assert!(err
         .to_string()
-        .contains("process Main handle Worker conflicts with a process declaration"));
+        .contains("process Main process reference Worker conflicts with a process declaration"));
 }
 
 #[test]
@@ -1291,12 +1306,12 @@ proc Main mailbox bounded(1) {
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         match msg {
             Start => {
-                spawn Worker as worker;
+                let worker: ProcessRef<Worker> = spawn Worker;
                 send worker Ping;
                 return Stop(state);
             }
             Restart => {
-                spawn Worker as worker;
+                let worker: ProcessRef<Worker> = spawn Worker;
                 send worker Ping;
                 return Stop(state);
             }
@@ -1325,7 +1340,10 @@ proc Worker mailbox bounded(1) {
 fn rejects_static_self_spawn() {
     let source = ACTOR_PING
         .replace("! [emit] ~ [] @det", "! [spawn] ~ [] @det")
-        .replace(r#"emit "worker handled Ping";"#, "spawn Worker as child;");
+        .replace(
+            r#"emit "worker handled Ping";"#,
+            "let child: ProcessRef<Worker> = spawn Worker;",
+        );
 
     let err = check_source(&source).expect_err("self-spawn should be rejected");
 
@@ -1335,32 +1353,173 @@ fn rejects_static_self_spawn() {
 #[test]
 fn rejects_send_before_static_spawn() {
     let source = ACTOR_PING.replace(
-        "spawn Worker as worker;\n        send worker Ping;",
-        "send worker Ping;\n        spawn Worker as worker;",
+        "let worker: ProcessRef<Worker> = spawn Worker;\n        send worker Ping;",
+        "send worker Ping;\n        let worker: ProcessRef<Worker> = spawn Worker;",
     );
 
     let err = check_source(&source).expect_err("send before spawn should be rejected");
 
     assert!(err
         .to_string()
-        .contains("sends to unbound process handle id 0"));
+        .contains("sends through unbound process reference id 0 within message transition 0"));
+}
+
+#[test]
+fn rejects_process_ref_type_that_does_not_match_spawn_target() {
+    let source = ACTOR_PING
+        .replace(
+            "enum WorkerMsg { Ping }",
+            "enum WorkerMsg { Ping }\nenum HelperState { Idle }\nenum HelperMsg { Ping }",
+        )
+        .replace(
+            "let worker: ProcessRef<Worker> = spawn Worker;",
+            "let worker: ProcessRef<Helper> = spawn Worker;",
+        )
+        .replace(
+            r#"
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }
+}
+"#,
+            r#"
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }
+}
+
+proc Helper mailbox bounded(1) {
+    type State = HelperState;
+    type Msg = HelperMsg;
+
+    fn init() -> HelperState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: HelperState, msg: HelperMsg) -> ProcResult<HelperState> ! [] ~ [] @det {
+        return Stop(Idle);
+    }
+}
+"#,
+        );
+
+    let err = check_source(&source).expect_err("mismatched process ref type should be rejected");
+
+    assert!(err.to_string().contains(
+        "process Main process reference worker has type ProcessRef<Helper> but spawns Worker"
+    ));
+}
+
+#[test]
+fn rejects_process_ref_binding_with_non_process_ref_type() {
+    let source = ACTOR_PING.replace(
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "let worker: WorkerState = spawn Worker;",
+    );
+
+    let err =
+        check_source(&source).expect_err("non-ProcessRef spawn binding type should be rejected");
+
+    assert!(err.to_string().contains(
+        "process Main process reference worker must be typed as ProcessRef<ProcessName>"
+    ));
+}
+
+#[test]
+fn rejects_process_ref_binding_with_wrong_type_constructor() {
+    let source = ACTOR_PING.replace(
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "let worker: WorkerRef<Worker> = spawn Worker;",
+    );
+
+    let err =
+        check_source(&source).expect_err("wrong process reference constructor should be rejected");
+
+    assert!(err.to_string().contains(
+        "process Main process reference worker must be typed as ProcessRef<ProcessName>"
+    ));
+}
+
+#[test]
+fn rejects_process_ref_binding_with_wrong_type_arity() {
+    let source = ACTOR_PING.replace(
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "let worker: ProcessRef<Worker, Worker> = spawn Worker;",
+    );
+
+    let err =
+        check_source(&source).expect_err("wrong process reference type arity should be rejected");
+
+    assert!(err.to_string().contains(
+        "process Main process reference worker must be typed as ProcessRef<ProcessName>"
+    ));
+}
+
+#[test]
+fn rejects_process_ref_binding_with_nested_target_type() {
+    let source = ACTOR_PING.replace(
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "let worker: ProcessRef<ProcessRef<Worker>> = spawn Worker;",
+    );
+
+    let err =
+        check_source(&source).expect_err("nested process reference target should be rejected");
+
+    assert!(err.to_string().contains(
+        "process Main process reference worker has nested process reference target type ProcessRef<Worker>"
+    ));
+}
+
+#[test]
+fn rejects_process_ref_type_with_undeclared_process_target() {
+    let source = ACTOR_PING.replace(
+        "let worker: ProcessRef<Worker> = spawn Worker;",
+        "let worker: ProcessRef<Unknown> = spawn Worker;",
+    );
+
+    let err = check_source(&source).expect_err("undeclared process ref target should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("process Main process reference worker targets undeclared process Unknown"));
 }
 
 #[test]
 fn rejects_send_without_static_spawn() {
     let source = ACTOR_PING
         .replace("! [spawn, send] ~ [] @det", "! [send] ~ [] @det")
-        .replace("        spawn Worker as worker;\n", "");
+        .replace(
+            "        let worker: ProcessRef<Worker> = spawn Worker;\n",
+            "",
+        );
 
     let err = check_source(&source).expect_err("send without spawn should be rejected");
 
     assert!(err
         .to_string()
-        .contains("sends to undeclared process handle worker"));
+        .contains("sends to undeclared process reference worker"));
 }
 
 #[test]
-fn rejects_mailbox_overflow_through_process_handle() {
+fn rejects_mailbox_overflow_through_process_ref() {
     let source = ACTOR_PING.replace(
         "send worker Ping;",
         "send worker Ping;\n        send worker Ping;",
@@ -1374,7 +1533,7 @@ fn rejects_mailbox_overflow_through_process_handle() {
 }
 
 #[test]
-fn rejects_unhandled_message_after_handle_target_stops() {
+fn rejects_unhandled_message_after_process_ref_target_stops() {
     let source = ACTOR_SEQUENCE.replace("return Continue(SawFirst);", "return Stop(SawFirst);");
 
     let err = check_source(&source).expect_err("message left after stop should be rejected");
@@ -1416,7 +1575,7 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker as worker;
+        let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Stop(state);
     }
@@ -1431,7 +1590,7 @@ proc Worker mailbox bounded(1) {
     }
 
     fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
-        spawn Helper as helper;
+        let helper: ProcessRef<Helper> = spawn Helper;
         send helper Ping;
         return Continue(Idle);
     }
@@ -1446,7 +1605,7 @@ proc Helper mailbox bounded(1) {
     }
 
     fn step(state: HelperState, msg: HelperMsg) -> ProcResult<HelperState> ! [spawn, send] ~ [] @det {
-        spawn Worker as worker;
+        let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Continue(Idle);
     }
@@ -1551,8 +1710,8 @@ fn checked_process_id(index: usize) -> CheckedProcessId {
     CheckedProcessId::from_index(index).expect("valid checked process id")
 }
 
-fn checked_process_handle_id(index: usize) -> CheckedProcessHandleId {
-    CheckedProcessHandleId::from_index(index).expect("valid checked process handle id")
+fn checked_process_ref_id(index: usize) -> CheckedProcessRefId {
+    CheckedProcessRefId::from_index(index).expect("valid checked process reference id")
 }
 
 fn checked_state_id(index: usize) -> CheckedStateId {
