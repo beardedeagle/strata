@@ -17,7 +17,7 @@ Mantle artifact internals.
 | Imports | Not available. |
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
-| Process handles | `spawn ProcessName as handle;` and `send handle MessageName;`. |
+| Process references | `let worker: ProcessRef<Worker> = spawn Worker;` and `send worker Ping;`. |
 | Transition result | `ProcResult<T>` with `Stop(value)` and `Continue(value)`. |
 
 The current `module` declaration names a source unit. It does not create an
@@ -78,9 +78,9 @@ Invalid examples:
 worker-name
 ```
 
-`as`, `mut`, and `var` are reserved everywhere identifiers are accepted.
-`ProcResult` is reserved as a type name because it names the built-in process
-transition result type.
+`as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
+`ProcResult` and `ProcessRef` are reserved type names because they name built-in
+transition and process-reference types.
 
 ## Records
 
@@ -185,8 +185,8 @@ The accepted statements are:
 
 ```strata
 emit "text";
-spawn ProcessName as handle;
-send handle MessageName;
+let worker: ProcessRef<Worker> = spawn Worker;
+send worker Ping;
 return Stop(state);
 return Continue(next_state);
 ```
@@ -195,16 +195,16 @@ return Continue(next_state);
 must not contain control characters, and do not support string escapes in this
 slice.
 
-`spawn` starts another declared process and binds the new runtime process
-instance to a process handle. Process handles are immutable bindings for the
-process instance that created them. A handle can be used by later transitions in
-that same process instance after it has been bound.
+`spawn` starts another declared process and returns an immutable typed process
+reference. The reference binding is local to the current transition and must be
+typed as `ProcessRef<TargetProcess>`.
 
-`send` queues a message through a previously spawned process handle. The
-message must be accepted by the handle target's process message enum. Static
+`send` queues a message through a previously spawned process reference. The
+message must be accepted by the reference target's process message enum. Static
 validation rejects self-spawn, spawning the already-started entry process,
-handle rebinding on an executable path, sends before a handle is bound, mailbox
-overflow, and messages left unhandled after a target stops.
+duplicate process-reference binding in one transition, sends before the
+reference is bound, mailbox overflow, and messages left unhandled after a target
+stops.
 
 ## Effects
 
@@ -214,8 +214,8 @@ Missing effects and unused declared effects are both rejected.
 | Effect | Statement |
 | --- | --- |
 | `emit` | `emit "text";` |
-| `spawn` | `spawn ProcessName as handle;` |
-| `send` | `send handle MessageName;` |
+| `spawn` | `let worker: ProcessRef<Worker> = spawn Worker;` |
+| `send` | `send worker Ping;` |
 
 `init` cannot perform statements in the current buildable slice and therefore
 uses an empty effect list.
@@ -293,7 +293,7 @@ The buildable source slice enforces bounded sizes:
 | Processes | 256 |
 | State values per process | 1024 |
 | Message variants per process | 1024 |
-| Process handles per process | 4096 |
+| Process references per process | 4096 |
 | Distinct output literals | 4096 |
 | Actions per process | 4096 |
 | Mailbox bound | 65,536 |

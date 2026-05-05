@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use crate::artifact::{NextState, StepResult};
 use crate::validation::validate_count;
 use crate::{
-    Error, MessageId, OutputId, ProcessHandleId, ProcessId, Result, StateId, ARTIFACT_MAGIC,
+    Error, MessageId, OutputId, ProcessId, ProcessRefId, Result, StateId, ARTIFACT_MAGIC,
     MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FIELDS, MAX_FIELD_VALUE_BYTES,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_HANDLES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
 };
 
 pub(crate) struct ArtifactFields {
@@ -75,11 +75,11 @@ impl ArtifactFields {
         ProcessId::from_index(self.take_bounded_usize(key, 0, MAX_PROCESS_COUNT - 1)?)
     }
 
-    pub(crate) fn take_process_handle_id(&mut self, key: &str) -> Result<ProcessHandleId> {
-        ProcessHandleId::from_index(self.take_bounded_usize(
+    pub(crate) fn take_process_ref_id(&mut self, key: &str) -> Result<ProcessRefId> {
+        ProcessRefId::from_index(self.take_bounded_usize(
             key,
             0,
-            MAX_PROCESS_HANDLES_PER_PROCESS - 1,
+            MAX_PROCESS_REFS_PER_PROCESS - 1,
         )?)
     }
 

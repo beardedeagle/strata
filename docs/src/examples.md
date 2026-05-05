@@ -43,7 +43,7 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
 
 Key source ideas:
 
-- `Main` uses `spawn Worker as worker;` before `send worker Ping;`.
+- `Main` uses `let worker: ProcessRef<Worker> = spawn Worker;` before `send worker Ping;`.
 - `WorkerMsg.Ping` is checked against `Worker`'s message type.
 - `Worker` replaces `Idle` with `Handled`.
 - Both processes stop normally.
@@ -73,9 +73,9 @@ bindings.
 
 ## Actor Instances
 
-`examples/actor_instances.str` proves process handles and instance-aware sends.
+`examples/actor_instances.str` proves process references and instance-aware sends.
 `Main` spawns the `Worker` process definition twice, binds each runtime instance
-to a different handle, and sends `Ping` through both handles.
+to a different process reference, and sends `Ping` through both references.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/actor_instances.str
@@ -85,9 +85,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mt
 
 Key source ideas:
 
-- `spawn Worker as first;` and `spawn Worker as second;` create two runtime
-  worker instances.
-- `send first Ping;` and `send second Ping;` dispatch by handle, not by process
+- `let first: ProcessRef<Worker> = spawn Worker;` and
+  `let second: ProcessRef<Worker> = spawn Worker;` create two runtime worker
+  instances.
+- `send first Ping;` and `send second Ping;` dispatch by reference, not by process
   definition label.
 - The runtime trace records two different `pid` values with the same
   `process_id` for `Worker`.

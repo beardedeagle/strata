@@ -1,7 +1,6 @@
 use mantle_artifact::{
-    ArtifactAction, ArtifactProcess, ArtifactProcessHandle, ArtifactTransition, Error,
-    MantleArtifact, MessageId, NextState, OutputId, ProcessHandleId, ProcessId, Result, StateId,
-    StepResult,
+    ArtifactAction, ArtifactProcess, ArtifactProcessRef, ArtifactTransition, Error, MantleArtifact,
+    MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
 };
 
 #[derive(Debug, Clone)]
@@ -92,7 +91,7 @@ pub(crate) struct LoadedProcess {
     pub(crate) debug_name: String,
     pub(crate) state_values: Vec<String>,
     pub(crate) message_variants: Vec<String>,
-    pub(crate) process_handles: Vec<LoadedProcessHandle>,
+    pub(crate) process_refs: Vec<LoadedProcessRef>,
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
     pub(crate) transitions: Vec<LoadedTransition>,
@@ -104,10 +103,10 @@ impl LoadedProcess {
             debug_name: process.debug_name.clone(),
             state_values: process.state_values.clone(),
             message_variants: process.message_variants.clone(),
-            process_handles: process
-                .process_handles
+            process_refs: process
+                .process_refs
                 .iter()
-                .map(LoadedProcessHandle::from_artifact)
+                .map(LoadedProcessRef::from_artifact)
                 .collect(),
             mailbox_bound: process.mailbox_bound,
             init_state: process.init_state,
@@ -127,14 +126,14 @@ impl LoadedProcess {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LoadedProcessHandle {
+pub(crate) struct LoadedProcessRef {
     pub(crate) target: ProcessId,
 }
 
-impl LoadedProcessHandle {
-    fn from_artifact(handle: &ArtifactProcessHandle) -> Self {
+impl LoadedProcessRef {
+    fn from_artifact(process_ref: &ArtifactProcessRef) -> Self {
         Self {
-            target: handle.target,
+            target: process_ref.target,
         }
     }
 }
@@ -203,10 +202,10 @@ pub(crate) enum LoadedAction {
     },
     Spawn {
         target: ProcessId,
-        handle: ProcessHandleId,
+        process_ref: ProcessRefId,
     },
     Send {
-        target: ProcessHandleId,
+        target: ProcessRefId,
         message: MessageId,
     },
 }
@@ -215,9 +214,12 @@ impl LoadedAction {
     fn from_artifact(action: &ArtifactAction) -> Self {
         match action {
             ArtifactAction::Emit { output } => Self::Emit { output: *output },
-            ArtifactAction::Spawn { target, handle } => Self::Spawn {
+            ArtifactAction::Spawn {
+                target,
+                process_ref,
+            } => Self::Spawn {
                 target: *target,
-                handle: *handle,
+                process_ref: *process_ref,
             },
             ArtifactAction::Send { target, message } => Self::Send {
                 target: *target,

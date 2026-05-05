@@ -18,9 +18,9 @@ execution, the artifact decoder and validator check:
 - bounded process, message, state, output, transition, and action counts;
 - unique process debug names;
 - unique state values per process;
-- unique process handle names per process;
+- unique process reference names per process;
 - exactly one transition per accepted message;
-- transition references to known messages, state values, process handles,
+- transition references to known messages, state values, process references,
   outputs, and process IDs.
 
 Decode-time bounds must happen before allocation when counts come from the
@@ -35,11 +35,11 @@ transition as a whole-value state replacement and executes admitted actions.
 The current action set covers:
 
 - emitting declared output;
-- spawning a declared process through a process handle;
-- sending a declared message through a bound process handle.
+- spawning a declared process through a process reference;
+- sending a declared message through a bound process reference.
 
-The runtime fails closed on invalid sends, unbound process handles, process
-handle rebinding, mailbox exhaustion, runtime process instance budget
+The runtime fails closed on invalid sends, unbound process references, duplicate
+process-reference bindings, mailbox exhaustion, runtime process instance budget
 exhaustion, dispatch budget exhaustion, emitted-output budget exhaustion, and
 trace budget exhaustion.
 

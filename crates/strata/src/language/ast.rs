@@ -108,7 +108,7 @@ fn is_identifier(value: &str) -> bool {
 }
 
 fn is_reserved_identifier(value: &str) -> bool {
-    matches!(value, "as" | "mut" | "var")
+    matches!(value, "as" | "let" | "mut" | "var")
 }
 
 fn validate_output_literal(value: &str) -> Result<()> {
@@ -202,9 +202,10 @@ pub struct MessageMatchArm {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Emit(OutputLiteral),
-    Spawn {
+    LetProcessRef {
+        name: Identifier,
+        ty: TypeRef,
         target: Identifier,
-        handle: Identifier,
     },
     Send {
         target: Identifier,

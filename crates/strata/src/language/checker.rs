@@ -11,16 +11,16 @@ use mantle_artifact::{
 
 use super::ast::{
     Determinism, Effect, FunctionBlock, FunctionBody, Identifier, MessageMatch, Module, Process,
-    ReturnExpr, Statement, ValueExpr,
+    ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
-    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessHandle,
-    CheckedProcessHandleId, CheckedProcessId, CheckedProcessParts, CheckedProgram,
+    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
+    CheckedProcessParts, CheckedProcessRef, CheckedProcessRefId, CheckedProgram,
     CheckedProgramParts, CheckedStateId, CheckedStepResult, CheckedTransition,
     CheckedTransitionParts,
 };
 use super::diagnostic::{Error, Result};
-use super::PROC_RESULT_TYPE;
+use super::{PROCESS_REF_TYPE, PROC_RESULT_TYPE};
 use outputs::OutputPool;
 use state_space::StateSpace;
 use static_validation::validate_action_references;
@@ -30,8 +30,8 @@ const STEP_STATE_PARAMETER_NAME: &str = "state";
 const STEP_MESSAGE_PARAMETER_NAME: &str = "msg";
 
 #[derive(Debug, Clone, Copy)]
-struct ProcessHandleBinding {
-    id: CheckedProcessHandleId,
+struct ProcessRefBinding {
+    id: CheckedProcessRefId,
     target: CheckedProcessId,
 }
 
@@ -39,7 +39,7 @@ struct StepCheckContext<'a> {
     module: &'a Module,
     process: &'a Process,
     semantic_index: &'a SemanticIndex,
-    handle_index: &'a BTreeMap<Identifier, ProcessHandleBinding>,
+    process_ref_index: &'a BTreeMap<Identifier, ProcessRefBinding>,
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -130,7 +130,7 @@ fn check_process(
 
     let mut state_space = StateSpace::new(module, semantic_index, process)?;
     let init_state = check_init(semantic_index, process, &mut state_space)?;
-    let (process_handles, transitions) = check_step(
+    let (process_refs, transitions) = check_step(
         module,
         process,
         process_id,
@@ -147,7 +147,7 @@ fn check_process(
         state_values,
         message_type: process.msg_type.clone(),
         message_variants: msg_enum.variants.clone(),
-        process_handles,
+        process_refs,
         mailbox_bound: process.mailbox_bound,
         init_state,
         transitions,
@@ -206,7 +206,7 @@ fn check_step(
     semantic_index: &SemanticIndex,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
-) -> Result<(Vec<CheckedProcessHandle>, Vec<CheckedTransition>)> {
+) -> Result<(Vec<CheckedProcessRef>, Vec<CheckedTransition>)> {
     let step = &process.step;
     if step.params.len() != 2 {
         return Err(Error::new("step must declare state and msg parameters"));
@@ -247,13 +247,13 @@ fn check_step(
     let Some(body) = &step.body else {
         return Err(Error::new("step must have a body for buildable source"));
     };
-    let (process_handles, handle_index) =
-        collect_process_handles(process, process_id, entry_process, semantic_index, body)?;
+    let (process_refs, process_ref_index) =
+        collect_process_refs(process, process_id, entry_process, semantic_index, body)?;
     let step_context = StepCheckContext {
         module,
         process,
         semantic_index,
-        handle_index: &handle_index,
+        process_ref_index: &process_ref_index,
     };
 
     let transitions = match body {
@@ -285,63 +285,70 @@ fn check_step(
         });
     validate_effects("step", &step.effects, used_effects)?;
 
-    Ok((process_handles, transitions))
+    Ok((process_refs, transitions))
 }
 
-fn collect_process_handles(
+fn collect_process_refs(
     process: &Process,
     process_id: CheckedProcessId,
     entry_process: CheckedProcessId,
     semantic_index: &SemanticIndex,
     body: &FunctionBody,
 ) -> Result<(
-    Vec<CheckedProcessHandle>,
-    BTreeMap<Identifier, ProcessHandleBinding>,
+    Vec<CheckedProcessRef>,
+    BTreeMap<Identifier, ProcessRefBinding>,
 )> {
-    let mut handles = Vec::new();
-    let mut handle_index = BTreeMap::new();
+    let mut process_refs = Vec::new();
+    let mut process_ref_index = BTreeMap::new();
     match body {
-        FunctionBody::Block(block) => collect_process_handles_from_block(
+        FunctionBody::Block(block) => collect_process_refs_from_block(
             process,
             process_id,
             entry_process,
             semantic_index,
             block,
-            &mut handles,
-            &mut handle_index,
+            &mut process_refs,
+            &mut process_ref_index,
         )?,
         FunctionBody::MatchMessage(message_match) => {
             for arm in &message_match.arms {
-                collect_process_handles_from_block(
+                collect_process_refs_from_block(
                     process,
                     process_id,
                     entry_process,
                     semantic_index,
                     &arm.body,
-                    &mut handles,
-                    &mut handle_index,
+                    &mut process_refs,
+                    &mut process_ref_index,
                 )?;
             }
         }
     }
-    Ok((handles, handle_index))
+    Ok((process_refs, process_ref_index))
 }
 
-fn collect_process_handles_from_block(
+fn collect_process_refs_from_block(
     process: &Process,
     process_id: CheckedProcessId,
     entry_process: CheckedProcessId,
     semantic_index: &SemanticIndex,
     block: &FunctionBlock,
-    handles: &mut Vec<CheckedProcessHandle>,
-    handle_index: &mut BTreeMap<Identifier, ProcessHandleBinding>,
+    process_refs: &mut Vec<CheckedProcessRef>,
+    process_ref_index: &mut BTreeMap<Identifier, ProcessRefBinding>,
 ) -> Result<()> {
     for statement in &block.statements {
-        let Statement::Spawn { target, handle } = statement else {
+        let Statement::LetProcessRef { name, ty, target } = statement else {
             continue;
         };
-        validate_process_handle_name(process, semantic_index, handle)?;
+        validate_process_ref_name(process, semantic_index, name)?;
+        let annotated_target = process_ref_type_target(process, semantic_index, name, ty)?;
         let target_id = semantic_index.process_id(target)?;
+        if annotated_target != target_id {
+            return Err(Error::new(format!(
+                "process {} process reference {} has type {ty} but spawns {}",
+                process.name, name, target
+            )));
+        }
         if target_id == entry_process {
             return Err(Error::new(format!(
                 "process {} spawns entry process {}, which is already started",
@@ -354,21 +361,21 @@ fn collect_process_handles_from_block(
                 process.name
             )));
         }
-        if let Some(existing) = handle_index.get(handle) {
+        if let Some(existing) = process_ref_index.get(name) {
             if existing.target != target_id {
                 return Err(Error::new(format!(
-                    "process {} handle {} is bound to multiple process definitions",
-                    process.name, handle
+                    "process {} process reference {} is bound to multiple process definitions",
+                    process.name, name
                 )));
             }
             continue;
         }
-        let handle_id = CheckedProcessHandleId::from_index(handles.len())?;
-        handles.push(CheckedProcessHandle::new(handle.clone(), target_id));
-        handle_index.insert(
-            handle.clone(),
-            ProcessHandleBinding {
-                id: handle_id,
+        let process_ref_id = CheckedProcessRefId::from_index(process_refs.len())?;
+        process_refs.push(CheckedProcessRef::new(name.clone(), target_id));
+        process_ref_index.insert(
+            name.clone(),
+            ProcessRefBinding {
+                id: process_ref_id,
                 target: target_id,
             },
         );
@@ -466,22 +473,22 @@ fn check_step_transition(
                     output: outputs.intern(text.as_str())?,
                 });
             }
-            Statement::Spawn { target, handle } => {
-                let binding = context.handle_index.get(handle).ok_or_else(|| {
+            Statement::LetProcessRef { name, target, .. } => {
+                let binding = context.process_ref_index.get(name).ok_or_else(|| {
                     Error::new(format!(
-                        "process {} spawn handle {} was not resolved",
-                        context.process.name, handle
+                        "process {} process reference {} was not resolved",
+                        context.process.name, name
                     ))
                 })?;
                 actions.push(CheckedAction::Spawn {
                     target: context.semantic_index.process_id(target)?,
-                    handle: binding.id,
+                    process_ref: binding.id,
                 });
             }
             Statement::Send { target, message } => {
-                let binding = context.handle_index.get(target).ok_or_else(|| {
+                let binding = context.process_ref_index.get(target).ok_or_else(|| {
                     Error::new(format!(
-                        "process {} sends to undeclared process handle {}",
+                        "process {} sends to undeclared process reference {}",
                         context.process.name, target
                     ))
                 })?;
@@ -525,27 +532,59 @@ fn check_step_transition(
     }))
 }
 
-fn validate_process_handle_name(
+fn validate_process_ref_name(
     process: &Process,
     semantic_index: &SemanticIndex,
-    handle: &Identifier,
+    process_ref: &Identifier,
 ) -> Result<()> {
     if matches!(
-        handle.as_str(),
+        process_ref.as_str(),
         STEP_STATE_PARAMETER_NAME | STEP_MESSAGE_PARAMETER_NAME
     ) {
         return Err(Error::new(format!(
-            "process {} handle {} conflicts with a step parameter name",
-            process.name, handle
+            "process {} process reference {} conflicts with a step parameter name",
+            process.name, process_ref
         )));
     }
-    if semantic_index.process_id(handle).is_ok() {
+    if semantic_index.process_id(process_ref).is_ok() {
         return Err(Error::new(format!(
-            "process {} handle {} conflicts with a process declaration",
-            process.name, handle
+            "process {} process reference {} conflicts with a process declaration",
+            process.name, process_ref
         )));
     }
     Ok(())
+}
+
+fn process_ref_type_target(
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    process_ref: &Identifier,
+    ty: &TypeRef,
+) -> Result<CheckedProcessId> {
+    let TypeRef::Applied { constructor, args } = ty else {
+        return Err(Error::new(format!(
+            "process {} process reference {} must be typed as {PROCESS_REF_TYPE}<ProcessName>",
+            process.name, process_ref
+        )));
+    };
+    if constructor.as_str() != PROCESS_REF_TYPE || args.len() != 1 {
+        return Err(Error::new(format!(
+            "process {} process reference {} must be typed as {PROCESS_REF_TYPE}<ProcessName>",
+            process.name, process_ref
+        )));
+    }
+    let TypeRef::Named(target) = &args[0] else {
+        return Err(Error::new(format!(
+            "process {} process reference {} has nested process reference target type {}",
+            process.name, process_ref, args[0]
+        )));
+    };
+    semantic_index.process_id(target).map_err(|_| {
+        Error::new(format!(
+            "process {} process reference {} targets undeclared process {}",
+            process.name, process_ref, target
+        ))
+    })
 }
 
 impl CheckedAction {

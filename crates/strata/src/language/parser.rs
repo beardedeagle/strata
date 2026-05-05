@@ -330,13 +330,16 @@ impl Parser {
             self.expect_symbol(';')?;
             return Ok(Statement::Emit(OutputLiteral::new(text)?));
         }
-        if self.peek_keyword("spawn") {
+        if self.peek_keyword("let") {
+            self.expect_keyword("let")?;
+            let name = self.expect_identifier()?;
+            self.expect_symbol(':')?;
+            let ty = self.parse_type()?;
+            self.expect_symbol('=')?;
             self.expect_keyword("spawn")?;
             let target = self.expect_identifier()?;
-            self.expect_keyword("as")?;
-            let handle = self.expect_identifier()?;
             self.expect_symbol(';')?;
-            return Ok(Statement::Spawn { target, handle });
+            return Ok(Statement::LetProcessRef { name, ty, target });
         }
         if self.peek_keyword("send") {
             self.expect_keyword("send")?;
@@ -345,7 +348,7 @@ impl Parser {
             self.expect_symbol(';')?;
             return Ok(Statement::Send { target, message });
         }
-        Err(self.error_here("expected emit, spawn, send, or return statement"))
+        Err(self.error_here("expected emit, let, send, or return statement"))
     }
 
     fn parse_type(&mut self) -> Result<TypeRef> {

@@ -28,13 +28,14 @@ This says `Worker` accepts one message: `Ping`.
 `Main` can send that message after spawning `Worker`:
 
 ```strata
-spawn Worker as worker;
+let worker: ProcessRef<Worker> = spawn Worker;
 send worker Ping;
 return Stop(state);
 ```
 
-`worker` is a process handle for the spawned runtime instance. The order
-matters in this source surface. Sending through a handle before it is bound is
+`worker` is an immutable process reference for the spawned runtime instance. The
+order matters in this source surface. Sending through a reference before it is
+bound is
 rejected.
 
 ## Worker State Type
@@ -118,15 +119,16 @@ The runtime trace records both steps with message IDs and state IDs.
 definition:
 
 ```strata
-spawn Worker as first;
-spawn Worker as second;
+let first: ProcessRef<Worker> = spawn Worker;
+let second: ProcessRef<Worker> = spawn Worker;
 send first Ping;
 send second Ping;
 ```
 
-`first` and `second` are separate handles. Mantle assigns each spawned worker a
-different runtime `pid`, and the trace records both messages and both worker
-steps with the same process definition ID but different process instance IDs.
+`first` and `second` are separate process references. Mantle assigns each
+spawned worker a different runtime `pid`, and the trace records both messages
+and both worker steps with the same process definition ID but different process
+instance IDs.
 
 ## Run The Actor Examples
 

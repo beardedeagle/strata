@@ -10,15 +10,15 @@ fn artifact_round_trips_and_validates_magic() {
     let decoded = MantleArtifact::decode(&encoded).expect("artifact should decode");
 
     assert_eq!(decoded, artifact);
-    assert!(encoded.contains("schema_version=1"));
+    assert!(encoded.contains(&format!("schema_version={ARTIFACT_SCHEMA_VERSION}")));
     assert!(encoded.contains("entry_process=0"));
     assert!(encoded.contains("process.0.transition.0.next_state=current"));
     assert!(encoded.contains("process.1.transition.0.next_state=value"));
     assert!(encoded.contains("process.1.transition.0.next_state_value=1"));
-    assert!(encoded.contains("process.0.handle.0.target_process=1"));
+    assert!(encoded.contains("process.0.process_ref.0.target_process=1"));
     assert!(encoded.contains("process.0.transition.0.action.0.target_process=1"));
-    assert!(encoded.contains("process.0.transition.0.action.0.handle=0"));
-    assert!(encoded.contains("process.0.transition.0.action.1.target_handle=0"));
+    assert!(encoded.contains("process.0.transition.0.action.0.process_ref=0"));
+    assert!(encoded.contains("process.0.transition.0.action.1.target_process_ref=0"));
 
     let err = MantleArtifact::decode("not-mta\n").expect_err("bad magic should fail");
     assert!(err.to_string().contains("invalid Mantle artifact magic"));
@@ -33,9 +33,9 @@ fn decode_rejects_unsupported_schema_before_body_fields() {
 
     let err = MantleArtifact::decode(&encoded).expect_err("unsupported schema should fail first");
 
-    assert!(err
-        .to_string()
-        .contains("unsupported artifact schema version 0; expected 1"));
+    assert!(err.to_string().contains(&format!(
+        "unsupported artifact schema version 0; expected {ARTIFACT_SCHEMA_VERSION}"
+    )));
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn validate_rejects_unknown_send_message() {
     artifact.processes[0].transitions[0]
         .actions
         .push(ArtifactAction::Send {
-            target: ProcessHandleId::new(0),
+            target: ProcessRefId::new(0),
             message: MessageId::new(1),
         });
 
@@ -232,115 +232,129 @@ fn validate_rejects_unknown_send_message() {
 }
 
 #[test]
-fn validate_rejects_unknown_send_handle() {
+fn validate_rejects_unknown_send_process_ref() {
     let mut artifact = valid_artifact();
     artifact.processes[0].transitions[0]
         .actions
         .push(ArtifactAction::Send {
-            target: ProcessHandleId::new(99),
+            target: ProcessRefId::new(99),
             message: MessageId::new(0),
         });
 
     let err = artifact
         .validate()
-        .expect_err("unknown send handle should fail");
+        .expect_err("unknown send process ref should fail");
 
     assert!(err
         .to_string()
-        .contains("references undefined process handle id 99"));
+        .contains("references undefined process reference id 99"));
 }
 
 #[test]
-fn validate_rejects_duplicate_process_handle_name() {
+fn validate_rejects_duplicate_process_ref_name() {
     let mut artifact = valid_artifact();
-    artifact.processes[0]
-        .process_handles
-        .push(ArtifactProcessHandle {
-            debug_name: "worker".to_string(),
-            target: ProcessId::new(1),
-        });
+    artifact.processes[0].process_refs.push(ArtifactProcessRef {
+        debug_name: "worker".to_string(),
+        target: ProcessId::new(1),
+    });
 
     let err = artifact
         .validate()
-        .expect_err("duplicate process handle name should fail");
+        .expect_err("duplicate process reference name should fail");
 
-    assert!(err.to_string().contains("duplicate process handle worker"));
+    assert!(err
+        .to_string()
+        .contains("duplicate process reference worker"));
 }
 
 #[test]
-fn validate_rejects_process_handle_targeting_entry_process() {
+fn validate_rejects_process_ref_targeting_entry_process() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].process_handles = vec![ArtifactProcessHandle {
+    artifact.processes[1].process_refs = vec![ArtifactProcessRef {
         debug_name: "main".to_string(),
         target: ProcessId::new(0),
     }];
 
     let err = artifact
         .validate()
-        .expect_err("process handle targeting entry process should fail");
+        .expect_err("process reference targeting entry process should fail");
 
     assert!(err
         .to_string()
-        .contains("process Worker handle main targets entry process id 0"));
+        .contains("process Worker process reference main targets entry process id 0"));
 }
 
 #[test]
-fn validate_rejects_process_handle_targeting_same_process() {
+fn validate_rejects_process_ref_targeting_same_process() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].process_handles = vec![ArtifactProcessHandle {
-        debug_name: "self_handle".to_string(),
+    artifact.processes[1].process_refs = vec![ArtifactProcessRef {
+        debug_name: "self_ref".to_string(),
         target: ProcessId::new(1),
     }];
 
     let err = artifact
         .validate()
-        .expect_err("process handle targeting same process should fail");
+        .expect_err("process reference targeting same process should fail");
 
     assert!(err
         .to_string()
-        .contains("process Worker handle self_handle targets itself"));
+        .contains("process Worker process reference self_ref targets itself"));
 }
 
 #[test]
-fn validate_rejects_spawn_handle_target_mismatch() {
+fn validate_rejects_spawn_process_ref_target_mismatch() {
     let mut artifact = valid_artifact();
     artifact.processes[0].transitions[0].actions[0] = ArtifactAction::Spawn {
         target: ProcessId::new(0),
-        handle: ProcessHandleId::new(0),
+        process_ref: ProcessRefId::new(0),
     };
 
     let err = artifact
         .validate()
-        .expect_err("spawn handle target mismatch should fail");
+        .expect_err("spawn process reference target mismatch should fail");
 
     assert!(err
         .to_string()
-        .contains("spawn handle id 0 targets process id 0, expected 1"));
+        .contains("spawn process reference id 0 targets process id 0, expected 1"));
 }
 
 #[test]
-fn validate_rejects_duplicate_spawn_handle_with_transition_context() {
+fn validate_rejects_duplicate_spawn_process_ref_with_transition_context() {
     let mut artifact = valid_artifact();
     artifact.processes[0].transitions[0]
         .actions
         .push(ArtifactAction::Spawn {
             target: ProcessId::new(1),
-            handle: ProcessHandleId::new(0),
+            process_ref: ProcessRefId::new(0),
         });
 
     let err = artifact
         .validate()
-        .expect_err("duplicate spawn handle should fail");
+        .expect_err("duplicate spawn process reference should fail");
 
     assert!(err
         .to_string()
-        .contains("duplicates process handle id 0 within message transition 0"));
+        .contains("duplicates process reference id 0 within message transition 0"));
+}
+
+#[test]
+fn validate_rejects_send_before_process_ref_spawn_with_transition_context() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].actions.reverse();
+
+    let err = artifact
+        .validate()
+        .expect_err("send before process reference spawn should fail");
+
+    assert!(err.to_string().contains(
+        "process Main sends through unbound process reference id 0 within message transition 0"
+    ));
 }
 
 #[test]
 fn validate_rejects_unknown_spawn_target() {
     let mut artifact = valid_artifact();
-    artifact.processes[0].process_handles[0].target = ProcessId::new(99);
+    artifact.processes[0].process_refs[0].target = ProcessId::new(99);
 
     let err = artifact
         .validate()
@@ -348,7 +362,7 @@ fn validate_rejects_unknown_spawn_target() {
 
     assert!(err
         .to_string()
-        .contains("handle worker targets undefined process id 99"));
+        .contains("process reference worker targets undefined process id 99"));
 }
 
 #[test]
@@ -585,7 +599,7 @@ fn valid_artifact() -> MantleArtifact {
                 state_values: vec!["MainState".to_string()],
                 message_type: "MainMsg".to_string(),
                 message_variants: vec!["Start".to_string()],
-                process_handles: vec![ArtifactProcessHandle {
+                process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
                 }],
@@ -598,10 +612,10 @@ fn valid_artifact() -> MantleArtifact {
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
-                            handle: ProcessHandleId::new(0),
+                            process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessHandleId::new(0),
+                            target: ProcessRefId::new(0),
                             message: MessageId::new(0),
                         },
                     ],
@@ -613,7 +627,7 @@ fn valid_artifact() -> MantleArtifact {
                 state_values: vec!["Idle".to_string(), "Handled".to_string()],
                 message_type: "WorkerMsg".to_string(),
                 message_variants: vec!["Ping".to_string()],
-                process_handles: Vec::new(),
+                process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {

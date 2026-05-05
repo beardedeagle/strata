@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use super::super::checked::{
-    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessHandleId,
-    CheckedProcessId, CheckedStepResult, CheckedTransition,
+    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
+    CheckedProcessRefId, CheckedStepResult, CheckedTransition,
 };
 use super::super::diagnostic::{Error, Result};
 use super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
@@ -37,12 +37,15 @@ fn validate_transition(
         )));
     }
     validate_next_state(process, transition.next_state())?;
-    let mut spawned_handles = BTreeSet::new();
+    let mut spawned_refs = BTreeSet::new();
 
     for action in transition.actions() {
         match action {
             CheckedAction::Emit { .. } => {}
-            CheckedAction::Spawn { target, handle } => {
+            CheckedAction::Spawn {
+                target,
+                process_ref,
+            } => {
                 if target.index() >= processes.len() {
                     return Err(Error::new(format!(
                         "process {} spawns undefined process id {}",
@@ -63,27 +66,35 @@ fn validate_transition(
                         process.debug_name()
                     )));
                 }
-                let declared_target = process_handle_target(process, *handle)?;
+                let declared_target = process_ref_target(process, *process_ref)?;
                 if declared_target != *target {
                     return Err(Error::new(format!(
-                        "process {} spawn handle id {} targets process id {}, expected {}",
+                        "process {} spawn process reference id {} targets process id {}, expected {}",
                         process.debug_name(),
-                        handle.as_u32(),
+                        process_ref.as_u32(),
                         target.as_u32(),
                         declared_target.as_u32()
                     )));
                 }
-                if !spawned_handles.insert(*handle) {
+                if !spawned_refs.insert(*process_ref) {
                     return Err(Error::new(format!(
-                        "process {} duplicates process handle id {} within message transition {}",
+                        "process {} duplicates process reference id {} within message transition {}",
                         process.debug_name(),
-                        handle.as_u32(),
+                        process_ref.as_u32(),
                         transition.message().as_u32()
                     )));
                 }
             }
             CheckedAction::Send { target, message } => {
-                let target_process_id = process_handle_target(process, *target)?;
+                let target_process_id = process_ref_target(process, *target)?;
+                if !spawned_refs.contains(target) {
+                    return Err(Error::new(format!(
+                        "process {} sends through unbound process reference id {} within message transition {}",
+                        process.debug_name(),
+                        target.as_u32(),
+                        transition.message().as_u32()
+                    )));
+                }
                 let target_process = process_by_id(processes, target_process_id)?;
                 if message.index() >= target_process.message_variants().len() {
                     return Err(Error::new(format!(
@@ -112,19 +123,19 @@ fn validate_next_state(process: &CheckedProcess, next_state: CheckedNextState) -
     Ok(())
 }
 
-fn process_handle_target(
+fn process_ref_target(
     process: &CheckedProcess,
-    handle: CheckedProcessHandleId,
+    process_ref: CheckedProcessRefId,
 ) -> Result<CheckedProcessId> {
     process
-        .process_handles()
-        .get(handle.index())
-        .map(|process_handle| process_handle.target())
+        .process_refs()
+        .get(process_ref.index())
+        .map(|process_ref| process_ref.target())
         .ok_or_else(|| {
             Error::new(format!(
-                "process {} references undefined process handle id {}",
+                "process {} references undefined process reference id {}",
                 process.debug_name(),
-                handle.as_u32()
+                process_ref.as_u32()
             ))
         })
 }
@@ -158,36 +169,35 @@ struct StaticProcessInstance {
     pid: StaticProcessId,
     process_id: CheckedProcessId,
     status: StaticProcessStatus,
-    handles: BTreeMap<CheckedProcessHandleId, StaticProcessId>,
     mailbox: VecDeque<CheckedMessageId>,
 }
 
-fn bind_static_process_handle(
+fn bind_static_process_ref(
     process: &CheckedProcess,
-    instance: &mut StaticProcessInstance,
-    handle: CheckedProcessHandleId,
+    process_refs: &mut BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    process_ref: CheckedProcessRefId,
     pid: StaticProcessId,
 ) -> Result<()> {
-    process_handle_target(process, handle)?;
-    if instance.handles.insert(handle, pid).is_some() {
+    process_ref_target(process, process_ref)?;
+    if process_refs.insert(process_ref, pid).is_some() {
         return Err(Error::new(format!(
-            "rebinds process handle id {}",
-            handle.as_u32()
+            "rebinds process reference id {}",
+            process_ref.as_u32()
         )));
     }
     Ok(())
 }
 
-fn resolve_static_process_handle(
+fn resolve_static_process_ref(
     process: &CheckedProcess,
-    instance: &StaticProcessInstance,
-    handle: CheckedProcessHandleId,
+    process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    process_ref: CheckedProcessRefId,
 ) -> Result<StaticProcessId> {
-    process_handle_target(process, handle)?;
-    instance.handles.get(&handle).copied().ok_or_else(|| {
+    process_ref_target(process, process_ref)?;
+    process_refs.get(&process_ref).copied().ok_or_else(|| {
         Error::new(format!(
-            "sends to unbound process handle id {}",
-            handle.as_u32()
+            "sends to unbound process reference id {}",
+            process_ref.as_u32()
         ))
     })
 }
@@ -239,7 +249,6 @@ fn validate_static_runtime_order(
         pid: StaticProcessId::FIRST,
         process_id: entry_process,
         status: StaticProcessStatus::Running,
-        handles: BTreeMap::new(),
         mailbox: VecDeque::from([entry_message]),
     }];
     let mut next_pid = StaticProcessId::FIRST.checked_next()?;
@@ -259,19 +268,23 @@ fn validate_static_runtime_order(
             .pop_front()
             .ok_or_else(|| Error::new("static runtime mailbox changed during dequeue"))?;
         let transition = transition_for_message(process, message)?;
+        let mut local_process_refs = BTreeMap::new();
 
         for action in transition.actions() {
             match action {
                 CheckedAction::Emit { .. } => {}
-                CheckedAction::Spawn { target, handle } => {
+                CheckedAction::Spawn {
+                    target,
+                    process_ref,
+                } => {
                     process_by_id(processes, *target)?;
                     ensure_static_process_capacity(instances.len())?;
                     let spawned_pid = next_pid;
                     next_pid = next_pid.checked_next()?;
-                    bind_static_process_handle(
+                    bind_static_process_ref(
                         process,
-                        &mut instances[process_index],
-                        *handle,
+                        &mut local_process_refs,
+                        *process_ref,
                         spawned_pid,
                     )
                     .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
@@ -279,20 +292,18 @@ fn validate_static_runtime_order(
                         pid: spawned_pid,
                         process_id: *target,
                         status: StaticProcessStatus::Running,
-                        handles: BTreeMap::new(),
                         mailbox: VecDeque::new(),
                     });
                 }
                 CheckedAction::Send { target, message } => {
                     let target_pid =
-                        resolve_static_process_handle(process, &instances[process_index], *target)
-                            .map_err(|err| {
-                                Error::new(format!("process {} {err}", process.debug_name()))
-                            })?;
+                        resolve_static_process_ref(process, &local_process_refs, *target).map_err(
+                            |err| Error::new(format!("process {} {err}", process.debug_name())),
+                        )?;
                     let target_index = static_process_index_for_pid(&instances, target_pid)
                         .map_err(|err| {
                             Error::new(format!(
-                                "process {} sends through process handle id {} to {err}",
+                                "process {} sends through process reference id {} to {err}",
                                 process.debug_name(),
                                 target.as_u32()
                             ))
@@ -390,37 +401,31 @@ fn process_label(processes: &[CheckedProcess], process_id: CheckedProcessId) -> 
 mod tests {
     use super::*;
     use crate::language::ast::{Identifier, TypeRef};
-    use crate::language::checked::{CheckedProcessHandle, CheckedProcessParts, CheckedStateId};
+    use crate::language::checked::{CheckedProcessParts, CheckedProcessRef, CheckedStateId};
 
     #[test]
-    fn static_process_instances_store_handle_bindings_sparsely() {
-        let process = checked_process_with_declared_handles(2);
-        let mut instance = StaticProcessInstance {
-            pid: StaticProcessId::FIRST,
-            process_id: checked_process_id(0),
-            status: StaticProcessStatus::Running,
-            handles: BTreeMap::new(),
-            mailbox: VecDeque::new(),
-        };
-        let handle = checked_process_handle_id(1);
+    fn static_process_refs_bind_sparsely_within_transition_scope() {
+        let process = checked_process_with_declared_refs(2);
+        let mut process_refs = BTreeMap::new();
+        let process_ref = checked_process_ref_id(1);
         let pid = StaticProcessId::FIRST
             .checked_next()
             .expect("next static pid should exist");
 
-        bind_static_process_handle(&process, &mut instance, handle, pid)
-            .expect("declared process handle should bind");
+        bind_static_process_ref(&process, &mut process_refs, process_ref, pid)
+            .expect("declared process reference should bind");
 
-        assert_eq!(instance.handles.len(), 1);
+        assert_eq!(process_refs.len(), 1);
         assert_eq!(
-            resolve_static_process_handle(&process, &instance, handle)
-                .expect("bound sparse handle should resolve"),
+            resolve_static_process_ref(&process, &process_refs, process_ref)
+                .expect("bound sparse process reference should resolve"),
             pid
         );
-        let err = resolve_static_process_handle(&process, &instance, checked_process_handle_id(0))
-            .expect_err("declared but unbound sparse handle should fail");
+        let err = resolve_static_process_ref(&process, &process_refs, checked_process_ref_id(0))
+            .expect_err("declared but unbound sparse process reference should fail");
         assert!(err
             .to_string()
-            .contains("sends to unbound process handle id 0"));
+            .contains("sends to unbound process reference id 0"));
     }
 
     #[test]
@@ -430,7 +435,6 @@ mod tests {
                 pid: StaticProcessId::FIRST,
                 process_id: checked_process_id(0),
                 status: StaticProcessStatus::Running,
-                handles: BTreeMap::new(),
                 mailbox: VecDeque::new(),
             },
             StaticProcessInstance {
@@ -439,7 +443,6 @@ mod tests {
                     .expect("next static pid should exist"),
                 process_id: checked_process_id(1),
                 status: StaticProcessStatus::Running,
-                handles: BTreeMap::new(),
                 mailbox: VecDeque::new(),
             },
         ];
@@ -462,7 +465,6 @@ mod tests {
             pid: StaticProcessId::FIRST,
             process_id: checked_process_id(0),
             status: StaticProcessStatus::Running,
-            handles: BTreeMap::new(),
             mailbox: VecDeque::new(),
         }];
         let missing_pid = StaticProcessId::FIRST
@@ -490,19 +492,16 @@ mod tests {
         ));
     }
 
-    fn checked_process_with_declared_handles(handle_count: usize) -> CheckedProcess {
+    fn checked_process_with_declared_refs(process_ref_count: usize) -> CheckedProcess {
         CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
             state_values: vec!["MainState".to_string()],
             message_type: TypeRef::Named(ident("MainMsg")),
             message_variants: vec![ident("Start")],
-            process_handles: (0..handle_count)
+            process_refs: (0..process_ref_count)
                 .map(|index| {
-                    CheckedProcessHandle::new(
-                        ident(&format!("worker_{index}")),
-                        checked_process_id(1),
-                    )
+                    CheckedProcessRef::new(ident(&format!("worker_{index}")), checked_process_id(1))
                 })
                 .collect(),
             mailbox_bound: 1,
@@ -519,7 +518,7 @@ mod tests {
         CheckedProcessId::from_index(index).expect("valid checked process id")
     }
 
-    fn checked_process_handle_id(index: usize) -> CheckedProcessHandleId {
-        CheckedProcessHandleId::from_index(index).expect("valid checked process handle id")
+    fn checked_process_ref_id(index: usize) -> CheckedProcessRefId {
+        CheckedProcessRefId::from_index(index).expect("valid checked process reference id")
     }
 }

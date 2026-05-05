@@ -21,8 +21,8 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker as first;
-        spawn Worker as second;
+        let first: ProcessRef<Worker> = spawn Worker;
+        let second: ProcessRef<Worker> = spawn Worker;
         send first Ping;
         send second Ping;
         return Stop(state);

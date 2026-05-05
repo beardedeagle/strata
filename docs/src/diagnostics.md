@@ -57,10 +57,10 @@ result of the first invalid shape.
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
 | `spawns itself` | A process tries to spawn itself. | Spawn another declared process. |
-| `conflicts with a process declaration` | A process handle uses the same name as a process definition. | Use a distinct handle name. |
-| `undeclared process handle` | A send references a handle that is never spawned by that process. | Add a matching `spawn Process as handle;` statement. |
-| `unbound process handle` | A runnable path sends through a handle before it is bound. | Spawn the handle before sending on that path. |
-| `duplicates process handle id` | A transition tries to bind the same handle twice. | Use two distinct handles or bind once. |
+| `conflicts with a process declaration` | A process reference uses the same name as a process definition. | Use a distinct reference name. |
+| `undeclared process reference` | A send references a name that is never spawned in the process. | Add a matching `let worker: ProcessRef<Worker> = spawn Worker;` statement. |
+| `unbound process reference` | A transition sends through a reference before it is bound. | Spawn the reference before sending through it. |
+| `duplicates process reference id` | A transition binds the same reference twice. | Use two distinct references or bind once. |
 | `mailbox would exceed bound` | A send would overflow the target mailbox. | Increase the mailbox bound or send fewer messages before the target runs. |
 | `would retain ... unhandled message` | A process can stop while messages remain in its mailbox. | Continue until queued messages are handled or avoid queuing them. |
 | `mailbox_bound must be no greater than` | The mailbox bound exceeds the admitted limit. | Lower the bound. |

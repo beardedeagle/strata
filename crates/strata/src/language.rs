@@ -27,6 +27,7 @@ const MAX_TOKEN_COUNT: usize = 128_000;
 const MAX_TYPE_NESTING: usize = 32;
 const MAX_VALUE_NESTING: usize = 32;
 const PROC_RESULT_TYPE: &str = "ProcResult";
+const PROCESS_REF_TYPE: &str = "ProcessRef";
 
 pub fn check_source(source: &str) -> Result<CheckedProgram> {
     let module = parse_source(source)?;
