@@ -40,6 +40,10 @@ IDs are for stable runtime identity:
 Do not treat labels as runtime dispatch keys. Runtime execution uses admitted
 typed IDs.
 
+When multiple runtime instances are spawned from one process definition, the
+instances share `process_id` and label metadata but have different `pid` values.
+`examples/actor_instances.str` exercises that shape.
+
 ## Event Types
 
 | Event | Meaning |

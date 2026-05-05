@@ -19,7 +19,8 @@ pub use event::{
 };
 pub use host::{InMemoryRuntimeHost, RuntimeHost};
 pub use limits::{
-    RunLimits, DEFAULT_MAX_DISPATCHES, DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_TRACE_BYTES,
+    RunLimits, DEFAULT_MAX_DISPATCHES, DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
+    DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES,
 };
 pub use report::{
     MessageDelivery, ProcessReport, ProcessStatus, RunReport, RuntimeReport, SpawnReport,

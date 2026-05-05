@@ -84,9 +84,9 @@ fn validate_identifier(value: &str) -> Result<()> {
             "identifier exceeds maximum length of {MAX_IDENTIFIER_BYTES} bytes"
         )));
     }
-    if is_mutability_keyword(value) {
+    if is_reserved_identifier(value) {
         return Err(Error::new(format!(
-            "identifier {value:?} is reserved for immutable Strata semantics"
+            "identifier {value:?} is reserved for Strata syntax"
         )));
     }
     if is_identifier(value) {
@@ -107,8 +107,8 @@ fn is_identifier(value: &str) -> bool {
         && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
-fn is_mutability_keyword(value: &str) -> bool {
-    matches!(value, "mut" | "var")
+fn is_reserved_identifier(value: &str) -> bool {
+    matches!(value, "as" | "mut" | "var")
 }
 
 fn validate_output_literal(value: &str) -> Result<()> {
@@ -202,7 +202,10 @@ pub struct MessageMatchArm {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Emit(OutputLiteral),
-    Spawn(Identifier),
+    Spawn {
+        target: Identifier,
+        handle: Identifier,
+    },
     Send {
         target: Identifier,
         message: Identifier,

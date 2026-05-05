@@ -284,3 +284,69 @@ fn actor_sequence_checks_builds_and_runs_on_mantle() {
     assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":1,"from":"SawFirst","to_state_id":2,"to":"Done""#));
     assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":1,"message":"Second","result":"Stop","state_id":2,"state":"Done""#));
 }
+
+#[test]
+fn actor_instances_checks_builds_and_runs_on_mantle() {
+    let root = workspace_root();
+    ensure_workspace_binaries(&root);
+    let strata = binary_path(&root, "strata");
+    let mantle = binary_path(&root, "mantle");
+
+    let check = Command::new(&strata)
+        .args(["check", "examples/actor_instances.str"])
+        .current_dir(&root)
+        .output()
+        .expect("strata check should run");
+    assert!(
+        check.status.success(),
+        "strata check failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let build = Command::new(&strata)
+        .args(["build", "examples/actor_instances.str"])
+        .current_dir(&root)
+        .output()
+        .expect("strata build should run");
+    assert!(
+        build.status.success(),
+        "strata build failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let artifact_path = root.join("target/strata/actor_instances.mta");
+    assert!(
+        artifact_path.exists(),
+        "expected {}",
+        artifact_path.display()
+    );
+
+    let run = Command::new(&mantle)
+        .args(["run", "target/strata/actor_instances.mta"])
+        .current_dir(&root)
+        .output()
+        .expect("mantle run should run");
+    assert!(
+        run.status.success(),
+        "mantle run failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: spawned Main pid=1"));
+    assert!(stdout.contains("mantle: spawned Worker pid=2"));
+    assert!(stdout.contains("mantle: spawned Worker pid=3"));
+    assert_eq!(stdout.matches("worker instance handled Ping").count(), 2);
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let trace_path = root.join("target/strata/actor_instances.observability.jsonl");
+    let trace = std::fs::read_to_string(&trace_path)
+        .unwrap_or_else(|err| panic!("expected trace {}: {err}", trace_path.display()));
+    assert!(trace.contains(r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","queue_depth":1,"sender_pid":1"#));
+    assert!(trace.contains(r#""event":"message_accepted","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","queue_depth":1,"sender_pid":1"#));
+    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","result":"Stop","state_id":1,"state":"Handled""#));
+    assert!(trace.contains(r#""event":"process_stepped","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","result":"Stop","state_id":1,"state":"Handled""#));
+}

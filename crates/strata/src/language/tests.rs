@@ -1,6 +1,6 @@
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
-    CheckedProcessId, CheckedStateId, CheckedStepResult, CheckedTransition,
+    CheckedProcessHandleId, CheckedProcessId, CheckedStateId, CheckedStepResult, CheckedTransition,
 };
 use super::lexer::{Lexer, TokenKind};
 use super::*;
@@ -47,8 +47,8 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker;
-        send Worker Ping;
+        spawn Worker as worker;
+        send worker Ping;
         return Stop(state);
     }
 }
@@ -85,9 +85,9 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker;
-        send Worker First;
-        send Worker Second;
+        spawn Worker as worker;
+        send worker First;
+        send worker Second;
         return Stop(state);
     }
 }
@@ -111,6 +111,46 @@ proc Worker mailbox bounded(2) {
                 return Stop(Done);
             }
         }
+    }
+}
+"#;
+
+const ACTOR_INSTANCES: &str = r#"
+module actor_instances;
+
+record MainState;
+enum MainMsg { Start }
+enum WorkerState { Idle, Handled }
+enum WorkerMsg { Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        spawn Worker as first;
+        spawn Worker as second;
+        send first Ping;
+        send second Ping;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker instance handled Ping";
+        return Stop(Handled);
     }
 }
 "#;
@@ -161,6 +201,7 @@ fn public_ast_constructors_validate_values() {
     assert_eq!(identifier_from_try.as_str(), "Worker");
     assert!(Identifier::new("1Invalid").is_err());
     assert!(Identifier::new("invalid-name").is_err());
+    assert!(Identifier::new("as").is_err());
     assert!(Identifier::new("mut").is_err());
     assert!(Identifier::new("var").is_err());
 
@@ -257,10 +298,11 @@ fn parses_and_checks_actor_ping() {
         main_transition.actions(),
         [
             CheckedAction::Spawn {
-                target: checked_process_id(1)
+                target: checked_process_id(1),
+                handle: checked_process_handle_id(0)
             },
             CheckedAction::Send {
-                target: checked_process_id(1),
+                target: checked_process_handle_id(0),
                 message: checked_message_id(0)
             }
         ]
@@ -329,6 +371,52 @@ fn parses_and_checks_actor_sequence_message_match() {
     assert!(encoded.contains("process.1.transition.0.message=0"));
     assert!(encoded.contains("process.1.transition.1.message=1"));
     assert!(!encoded.contains("transition.0.message=First"));
+}
+
+#[test]
+fn parses_and_checks_actor_instances_with_distinct_handles() {
+    let checked = check_source(ACTOR_INSTANCES).expect("actor instances should check");
+    let main = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Main")
+        .expect("Main should be checked");
+
+    assert_eq!(main.process_handles().len(), 2);
+    assert_eq!(main.process_handles()[0].debug_name().as_str(), "first");
+    assert_eq!(main.process_handles()[0].target(), checked_process_id(1));
+    assert_eq!(main.process_handles()[1].debug_name().as_str(), "second");
+    assert_eq!(main.process_handles()[1].target(), checked_process_id(1));
+    assert_eq!(
+        only_transition(main).actions(),
+        [
+            CheckedAction::Spawn {
+                target: checked_process_id(1),
+                handle: checked_process_handle_id(0)
+            },
+            CheckedAction::Spawn {
+                target: checked_process_id(1),
+                handle: checked_process_handle_id(1)
+            },
+            CheckedAction::Send {
+                target: checked_process_handle_id(0),
+                message: checked_message_id(0)
+            },
+            CheckedAction::Send {
+                target: checked_process_handle_id(1),
+                message: checked_message_id(0)
+            }
+        ]
+    );
+
+    let artifact =
+        lower_to_artifact(&checked, ACTOR_INSTANCES).expect("actor instances should lower");
+    let encoded = artifact.encode();
+    assert!(encoded.contains("process.0.handle_count=2"));
+    assert!(encoded.contains("process.0.handle.0.target_process=1"));
+    assert!(encoded.contains("process.0.handle.1.target_process=1"));
+    assert!(encoded.contains("process.0.transition.0.action.2.target_handle=0"));
+    assert!(encoded.contains("process.0.transition.0.action.3.target_handle=1"));
 }
 
 #[test]
@@ -451,8 +539,8 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        spawn Worker;
-        send Worker Ping;
+        spawn Worker as worker;
+        send worker Ping;
         return Stop(state);
     }
 }
@@ -470,10 +558,11 @@ proc Main mailbox bounded(1) {
         only_transition(main).actions(),
         [
             CheckedAction::Spawn {
-                target: checked_process_id(0)
+                target: checked_process_id(0),
+                handle: checked_process_handle_id(0)
             },
             CheckedAction::Send {
-                target: checked_process_id(0),
+                target: checked_process_handle_id(0),
                 message: checked_message_id(0)
             }
         ]
@@ -483,6 +572,8 @@ proc Main mailbox bounded(1) {
     let encoded = artifact.encode();
     assert!(encoded.contains("entry_process=1"));
     assert!(encoded.contains("process.1.transition.0.action.0.target_process=0"));
+    assert!(encoded.contains("process.1.transition.0.action.0.handle=0"));
+    assert!(encoded.contains("process.1.transition.0.action.1.target_handle=0"));
     assert!(!encoded.contains("target_process=Worker"));
 }
 
@@ -984,7 +1075,7 @@ fn rejects_security_declarations_instead_of_erasing_source() {
 
 #[test]
 fn rejects_mutability_keywords_as_state_values() {
-    for keyword in ["mut", "var"] {
+    for keyword in ["as", "mut", "var"] {
         let source = r#"
 module reserved_mutability_keyword;
 
@@ -1115,12 +1206,68 @@ fn rejects_incomplete_or_invalid_record_values() {
 }
 
 #[test]
-fn rejects_duplicate_static_spawn_target() {
-    let source = ACTOR_PING.replace("spawn Worker;", "spawn Worker;\n        spawn Worker;");
+fn rejects_duplicate_process_handle_on_same_path() {
+    let source = ACTOR_PING.replace(
+        "spawn Worker as worker;",
+        "spawn Worker as worker;\n        spawn Worker as worker;",
+    );
 
-    let err = check_source(&source).expect_err("duplicate spawn should be rejected");
+    let err = check_source(&source).expect_err("duplicate process handle should be rejected");
 
-    assert!(err.to_string().contains("duplicates spawn target Worker"));
+    assert!(err.to_string().contains("duplicates process handle id 0"));
+}
+
+#[test]
+fn allows_multiple_handles_for_same_process_definition() {
+    let source = ACTOR_PING.replace(
+        "spawn Worker as worker;\n        send worker Ping;",
+        "spawn Worker as first;\n        spawn Worker as second;\n        send first Ping;\n        send second Ping;",
+    );
+
+    check_source(&source).expect("distinct handles may target the same process definition");
+}
+
+#[test]
+fn rejects_spawn_without_process_handle() {
+    let source = ACTOR_PING.replace("spawn Worker as worker;", "spawn Worker;");
+
+    let err = parse_source(&source).expect_err("spawn without handle should be rejected");
+
+    assert!(err.to_string().contains("expected keyword as"));
+}
+
+#[test]
+fn rejects_send_to_process_definition_name() {
+    let source = ACTOR_PING.replace("send worker Ping;", "send Worker Ping;");
+
+    let err = check_source(&source).expect_err("send to process definition should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("process Main sends to undeclared process handle Worker"));
+}
+
+#[test]
+fn rejects_process_handle_named_like_step_parameter() {
+    let source = ACTOR_PING.replace("spawn Worker as worker;", "spawn Worker as state;");
+
+    let err = check_source(&source).expect_err("step parameter handle name should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("process Main handle state conflicts with a step parameter name"));
+}
+
+#[test]
+fn rejects_process_handle_named_like_process_declaration() {
+    let source = ACTOR_PING.replace("spawn Worker as worker;", "spawn Worker as Worker;");
+
+    let err =
+        check_source(&source).expect_err("process declaration handle name should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("process Main handle Worker conflicts with a process declaration"));
 }
 
 #[test]
@@ -1144,13 +1291,13 @@ proc Main mailbox bounded(1) {
     fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         match msg {
             Start => {
-                spawn Worker;
-                send Worker Ping;
+                spawn Worker as worker;
+                send worker Ping;
                 return Stop(state);
             }
             Restart => {
-                spawn Worker;
-                send Worker Ping;
+                spawn Worker as worker;
+                send worker Ping;
                 return Stop(state);
             }
         }
@@ -1178,7 +1325,7 @@ proc Worker mailbox bounded(1) {
 fn rejects_static_self_spawn() {
     let source = ACTOR_PING
         .replace("! [emit] ~ [] @det", "! [spawn] ~ [] @det")
-        .replace(r#"emit "worker handled Ping";"#, "spawn Worker;");
+        .replace(r#"emit "worker handled Ping";"#, "spawn Worker as child;");
 
     let err = check_source(&source).expect_err("self-spawn should be rejected");
 
@@ -1188,46 +1335,58 @@ fn rejects_static_self_spawn() {
 #[test]
 fn rejects_send_before_static_spawn() {
     let source = ACTOR_PING.replace(
-        "spawn Worker;\n        send Worker Ping;",
-        "send Worker Ping;\n        spawn Worker;",
+        "spawn Worker as worker;\n        send worker Ping;",
+        "send worker Ping;\n        spawn Worker as worker;",
     );
 
     let err = check_source(&source).expect_err("send before spawn should be rejected");
 
     assert!(err
         .to_string()
-        .contains("sends to Worker before it is spawned"));
+        .contains("sends to unbound process handle id 0"));
 }
 
 #[test]
 fn rejects_send_without_static_spawn() {
     let source = ACTOR_PING
         .replace("! [spawn, send] ~ [] @det", "! [send] ~ [] @det")
-        .replace("        spawn Worker;\n", "");
+        .replace("        spawn Worker as worker;\n", "");
 
     let err = check_source(&source).expect_err("send without spawn should be rejected");
 
     assert!(err
         .to_string()
-        .contains("sends to Worker before it is spawned"));
+        .contains("sends to undeclared process handle worker"));
 }
 
 #[test]
-fn rejects_send_to_stopped_process() {
-    let source = ACTOR_PING
-        .replace("! [emit] ~ [] @det", "! [send] ~ [] @det")
-        .replace(r#"emit "worker handled Ping";"#, "send Main Start;");
+fn rejects_mailbox_overflow_through_process_handle() {
+    let source = ACTOR_PING.replace(
+        "send worker Ping;",
+        "send worker Ping;\n        send worker Ping;",
+    );
 
-    let err = check_source(&source).expect_err("send to stopped process should be rejected");
+    let err = check_source(&source).expect_err("mailbox overflow should be rejected");
 
     assert!(err
         .to_string()
-        .contains("sends to Main, which is not running"));
+        .contains("sends to Worker, but its mailbox would exceed bound 1"));
+}
+
+#[test]
+fn rejects_unhandled_message_after_handle_target_stops() {
+    let source = ACTOR_SEQUENCE.replace("return Continue(SawFirst);", "return Stop(SawFirst);");
+
+    let err = check_source(&source).expect_err("message left after stop should be rejected");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker would retain 1 unhandled message(s)"));
 }
 
 #[test]
 fn rejects_send_to_unknown_message() {
-    let source = ACTOR_PING.replace("send Worker Ping;", "send Worker Unknown;");
+    let source = ACTOR_PING.replace("send worker Ping;", "send worker Unknown;");
 
     let err = check_source(&source).expect_err("unknown message should be rejected");
 
@@ -1237,17 +1396,68 @@ fn rejects_send_to_unknown_message() {
 }
 
 #[test]
-fn rejects_unbounded_self_send_loop() {
-    let source = HELLO
-        .replace("! [emit]", "! [send]")
-        .replace(r#"emit "hello from Strata";"#, "send Main Start;")
-        .replace("return Stop(state);", "return Continue(state);");
+fn rejects_unbounded_cross_spawn_loop() {
+    let source = r#"
+module spawn_loop;
 
-    let err = check_source(&source).expect_err("self-send loop should be rejected");
+record MainState;
+enum MainMsg { Start }
+enum WorkerState { Idle }
+enum WorkerMsg { Ping }
+enum HelperState { Idle }
+enum HelperMsg { Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        spawn Worker as worker;
+        send worker Ping;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+        spawn Helper as helper;
+        send helper Ping;
+        return Continue(Idle);
+    }
+}
+
+proc Helper mailbox bounded(1) {
+    type State = HelperState;
+    type Msg = HelperMsg;
+
+    fn init() -> HelperState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: HelperState, msg: HelperMsg) -> ProcResult<HelperState> ! [spawn, send] ~ [] @det {
+        spawn Worker as worker;
+        send worker Ping;
+        return Continue(Idle);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("spawn loop should be rejected");
 
     assert!(err
         .to_string()
-        .contains("static runtime validation exceeded"));
+        .contains("static runtime process instance limit exceeded"));
 }
 
 #[test]
@@ -1339,6 +1549,10 @@ fn nested_record_value_source(depth: usize) -> String {
 
 fn checked_process_id(index: usize) -> CheckedProcessId {
     CheckedProcessId::from_index(index).expect("valid checked process id")
+}
+
+fn checked_process_handle_id(index: usize) -> CheckedProcessHandleId {
+    CheckedProcessHandleId::from_index(index).expect("valid checked process handle id")
 }
 
 fn checked_state_id(index: usize) -> CheckedStateId {

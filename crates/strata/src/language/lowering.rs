@@ -1,12 +1,13 @@
 use mantle_artifact::{
-    source_hash_fnv1a64, ArtifactAction, ArtifactProcess, ArtifactTransition, MantleArtifact,
-    MessageId, NextState, OutputId, ProcessId, StateId, StepResult, ARTIFACT_FORMAT,
-    ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
+    source_hash_fnv1a64, ArtifactAction, ArtifactProcess, ArtifactProcessHandle,
+    ArtifactTransition, MantleArtifact, MessageId, NextState, OutputId, ProcessHandleId, ProcessId,
+    StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
 };
 
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
-    CheckedProcessId, CheckedProgram, CheckedStateId, CheckedStepResult, CheckedTransition,
+    CheckedProcessHandleId, CheckedProcessId, CheckedProgram, CheckedStateId, CheckedStepResult,
+    CheckedTransition,
 };
 
 pub fn lower_to_artifact(
@@ -39,6 +40,14 @@ fn lower_process(process: &CheckedProcess) -> ArtifactProcess {
             .iter()
             .map(ToString::to_string)
             .collect(),
+        process_handles: process
+            .process_handles()
+            .iter()
+            .map(|handle| ArtifactProcessHandle {
+                debug_name: handle.debug_name().to_string(),
+                target: lower_process_id(handle.target()),
+            })
+            .collect(),
         mailbox_bound: process.mailbox_bound(),
         init_state: lower_state_id(process.init_state()),
         transitions: process.transitions().iter().map(lower_transition).collect(),
@@ -59,11 +68,12 @@ fn lower_action(action: &CheckedAction) -> ArtifactAction {
         CheckedAction::Emit { output } => ArtifactAction::Emit {
             output: lower_output_id(*output),
         },
-        CheckedAction::Spawn { target } => ArtifactAction::Spawn {
+        CheckedAction::Spawn { target, handle } => ArtifactAction::Spawn {
             target: lower_process_id(*target),
+            handle: lower_process_handle_id(*handle),
         },
         CheckedAction::Send { target, message } => ArtifactAction::Send {
-            target: lower_process_id(*target),
+            target: lower_process_handle_id(*target),
             message: lower_message_id(*message),
         },
     }
@@ -85,6 +95,10 @@ fn lower_step_result(step_result: CheckedStepResult) -> StepResult {
 
 fn lower_process_id(id: CheckedProcessId) -> ProcessId {
     ProcessId::new(id.as_u32())
+}
+
+fn lower_process_handle_id(id: CheckedProcessHandleId) -> ProcessHandleId {
+    ProcessHandleId::new(id.as_u32())
 }
 
 fn lower_state_id(id: CheckedStateId) -> StateId {

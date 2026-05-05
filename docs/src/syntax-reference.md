@@ -141,7 +141,7 @@ emit_statement =
     "emit" string_literal ";"
 
 spawn_statement =
-    "spawn" ident ";"
+    "spawn" ident "as" ident ";"
 
 send_statement =
     "send" ident ident ";"
@@ -150,8 +150,11 @@ return_statement =
     "return" return_expr ";"
 ```
 
-The first identifier in `send` is the target process name. The second
-identifier is the message variant to send.
+The first identifier in `spawn` is the process definition name. The second
+identifier is the process handle bound to that spawned runtime instance.
+
+The first identifier in `send` is a process handle. The second identifier is
+the message variant to send.
 
 ## Types
 
@@ -199,6 +202,6 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`mut` and `var` are reserved everywhere identifiers are accepted.
+`as`, `mut`, and `var` are reserved everywhere identifiers are accepted.
 `ProcResult` is reserved as a type name because it names the built-in process
 transition result type.

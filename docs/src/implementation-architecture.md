@@ -29,7 +29,8 @@ source text
 
 The parser accepts source shape. The checker assigns source-visible meaning,
 resolves names, validates process/message/state rules, and produces checked IR.
-Lowering converts checked IR into Mantle artifact tables.
+It also resolves process handle names to typed handle IDs. Lowering converts
+checked IR into Mantle artifact tables.
 
 ## Runtime Path
 
@@ -41,7 +42,7 @@ artifact text
   -> spawn Main
   -> deliver entry message
   -> dispatch by message ID
-  -> execute actions
+  -> execute actions by typed process handles and IDs
   -> write JSONL trace
 ```
 
@@ -103,7 +104,8 @@ The current runnable examples are:
 
 - `examples/hello.str`;
 - `examples/actor_ping.str`;
-- `examples/actor_sequence.str`.
+- `examples/actor_sequence.str`;
+- `examples/actor_instances.str`.
 
 The integration tests in `crates/mantle-runtime/tests/product_gates.rs` mirror
 the same source check, artifact build, and runtime execution sequence:

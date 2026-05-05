@@ -21,6 +21,7 @@ pub use lowering::lower_to_artifact;
 pub use parser::parse_source;
 
 const STATIC_RUNTIME_DISPATCH_LIMIT: usize = 10_000;
+const STATIC_RUNTIME_PROCESS_LIMIT: usize = 10_000;
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const MAX_TOKEN_COUNT: usize = 128_000;
 const MAX_TYPE_NESTING: usize = 32;

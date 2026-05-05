@@ -3,20 +3,21 @@ mod state_space;
 mod static_validation;
 mod symbols;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
     MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
 };
 
 use super::ast::{
-    Determinism, Effect, FunctionBlock, FunctionBody, MessageMatch, Module, Process, ReturnExpr,
-    Statement, ValueExpr,
+    Determinism, Effect, FunctionBlock, FunctionBody, Identifier, MessageMatch, Module, Process,
+    ReturnExpr, Statement, ValueExpr,
 };
 use super::checked::{
-    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
-    CheckedProcessParts, CheckedProgram, CheckedProgramParts, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedTransitionParts,
+    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessHandle,
+    CheckedProcessHandleId, CheckedProcessId, CheckedProcessParts, CheckedProgram,
+    CheckedProgramParts, CheckedStateId, CheckedStepResult, CheckedTransition,
+    CheckedTransitionParts,
 };
 use super::diagnostic::{Error, Result};
 use super::PROC_RESULT_TYPE;
@@ -26,6 +27,20 @@ use static_validation::validate_action_references;
 use symbols::SemanticIndex;
 
 const STEP_STATE_PARAMETER_NAME: &str = "state";
+const STEP_MESSAGE_PARAMETER_NAME: &str = "msg";
+
+#[derive(Debug, Clone, Copy)]
+struct ProcessHandleBinding {
+    id: CheckedProcessHandleId,
+    target: CheckedProcessId,
+}
+
+struct StepCheckContext<'a> {
+    module: &'a Module,
+    process: &'a Process,
+    semantic_index: &'a SemanticIndex,
+    handle_index: &'a BTreeMap<Identifier, ProcessHandleBinding>,
+}
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
     if module.records.is_empty() {
@@ -56,6 +71,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
             &module,
             process,
             process_id,
+            entry_process,
             &semantic_index,
             &mut outputs,
         )?);
@@ -87,6 +103,7 @@ fn check_process(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
+    entry_process: CheckedProcessId,
     semantic_index: &SemanticIndex,
     outputs: &mut OutputPool,
 ) -> Result<CheckedProcess> {
@@ -113,10 +130,11 @@ fn check_process(
 
     let mut state_space = StateSpace::new(module, semantic_index, process)?;
     let init_state = check_init(semantic_index, process, &mut state_space)?;
-    let transitions = check_step(
+    let (process_handles, transitions) = check_step(
         module,
         process,
         process_id,
+        entry_process,
         semantic_index,
         &mut state_space,
         outputs,
@@ -129,6 +147,7 @@ fn check_process(
         state_values,
         message_type: process.msg_type.clone(),
         message_variants: msg_enum.variants.clone(),
+        process_handles,
         mailbox_bound: process.mailbox_bound,
         init_state,
         transitions,
@@ -183,10 +202,11 @@ fn check_step(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
+    entry_process: CheckedProcessId,
     semantic_index: &SemanticIndex,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
-) -> Result<Vec<CheckedTransition>> {
+) -> Result<(Vec<CheckedProcessHandle>, Vec<CheckedTransition>)> {
     let step = &process.step;
     if step.params.len() != 2 {
         return Err(Error::new("step must declare state and msg parameters"));
@@ -201,7 +221,7 @@ fn check_step(
             process.state_type
         )));
     }
-    if msg_param.name.as_str() != "msg"
+    if msg_param.name.as_str() != STEP_MESSAGE_PARAMETER_NAME
         || !semantic_index.same_type(&msg_param.ty, &process.msg_type)
     {
         return Err(Error::new(format!(
@@ -227,16 +247,22 @@ fn check_step(
     let Some(body) = &step.body else {
         return Err(Error::new("step must have a body for buildable source"));
     };
+    let (process_handles, handle_index) =
+        collect_process_handles(process, process_id, entry_process, semantic_index, body)?;
+    let step_context = StepCheckContext {
+        module,
+        process,
+        semantic_index,
+        handle_index: &handle_index,
+    };
 
     let transitions = match body {
         FunctionBody::Block(block) => {
-            check_simple_step_block(module, process, semantic_index, state_space, outputs, block)?
+            check_simple_step_block(&step_context, state_space, outputs, block)?
         }
         FunctionBody::MatchMessage(message_match) => check_message_match_step(
-            module,
-            process,
+            &step_context,
             process_id,
-            semantic_index,
             state_space,
             outputs,
             message_match,
@@ -259,28 +285,114 @@ fn check_step(
         });
     validate_effects("step", &step.effects, used_effects)?;
 
-    Ok(transitions)
+    Ok((process_handles, transitions))
+}
+
+fn collect_process_handles(
+    process: &Process,
+    process_id: CheckedProcessId,
+    entry_process: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    body: &FunctionBody,
+) -> Result<(
+    Vec<CheckedProcessHandle>,
+    BTreeMap<Identifier, ProcessHandleBinding>,
+)> {
+    let mut handles = Vec::new();
+    let mut handle_index = BTreeMap::new();
+    match body {
+        FunctionBody::Block(block) => collect_process_handles_from_block(
+            process,
+            process_id,
+            entry_process,
+            semantic_index,
+            block,
+            &mut handles,
+            &mut handle_index,
+        )?,
+        FunctionBody::MatchMessage(message_match) => {
+            for arm in &message_match.arms {
+                collect_process_handles_from_block(
+                    process,
+                    process_id,
+                    entry_process,
+                    semantic_index,
+                    &arm.body,
+                    &mut handles,
+                    &mut handle_index,
+                )?;
+            }
+        }
+    }
+    Ok((handles, handle_index))
+}
+
+fn collect_process_handles_from_block(
+    process: &Process,
+    process_id: CheckedProcessId,
+    entry_process: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    block: &FunctionBlock,
+    handles: &mut Vec<CheckedProcessHandle>,
+    handle_index: &mut BTreeMap<Identifier, ProcessHandleBinding>,
+) -> Result<()> {
+    for statement in &block.statements {
+        let Statement::Spawn { target, handle } = statement else {
+            continue;
+        };
+        validate_process_handle_name(process, semantic_index, handle)?;
+        let target_id = semantic_index.process_id(target)?;
+        if target_id == entry_process {
+            return Err(Error::new(format!(
+                "process {} spawns entry process {}, which is already started",
+                process.name, target
+            )));
+        }
+        if target_id == process_id {
+            return Err(Error::new(format!(
+                "process {} spawns itself, which is not supported",
+                process.name
+            )));
+        }
+        if let Some(existing) = handle_index.get(handle) {
+            if existing.target != target_id {
+                return Err(Error::new(format!(
+                    "process {} handle {} is bound to multiple process definitions",
+                    process.name, handle
+                )));
+            }
+            continue;
+        }
+        let handle_id = CheckedProcessHandleId::from_index(handles.len())?;
+        handles.push(CheckedProcessHandle::new(handle.clone(), target_id));
+        handle_index.insert(
+            handle.clone(),
+            ProcessHandleBinding {
+                id: handle_id,
+                target: target_id,
+            },
+        );
+    }
+    Ok(())
 }
 
 fn check_simple_step_block(
-    module: &Module,
-    process: &Process,
-    semantic_index: &SemanticIndex,
+    context: &StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     block: &FunctionBlock,
 ) -> Result<Vec<CheckedTransition>> {
-    let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+    let msg_enum = context
+        .semantic_index
+        .enum_decl(context.module, &context.process.msg_type)?;
     if msg_enum.variants.len() != 1 {
         return Err(Error::new(format!(
             "process {} step with multiple messages must use match msg",
-            process.name
+            context.process.name
         )));
     }
     let transition = check_step_transition(
-        module,
-        process,
-        semantic_index,
+        context,
         state_space,
         outputs,
         CheckedMessageId::from_index(0)?,
@@ -290,10 +402,8 @@ fn check_simple_step_block(
 }
 
 fn check_message_match_step(
-    module: &Module,
-    process: &Process,
+    context: &StepCheckContext<'_>,
     process_id: CheckedProcessId,
-    semantic_index: &SemanticIndex,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     message_match: &MessageMatch,
@@ -301,25 +411,29 @@ fn check_message_match_step(
     if message_match.scrutinee.as_str() != "msg" {
         return Err(Error::new(format!(
             "process {} step must match msg, got {}",
-            process.name, message_match.scrutinee
+            context.process.name, message_match.scrutinee
         )));
     }
 
-    let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+    let msg_enum = context
+        .semantic_index
+        .enum_decl(context.module, &context.process.msg_type)?;
     let mut seen = vec![false; msg_enum.variants.len()];
     let mut transitions = Vec::with_capacity(message_match.arms.len());
     for arm in &message_match.arms {
-        let message = semantic_index.message_id_for_match_arm(module, process_id, &arm.message)?;
+        let message = context.semantic_index.message_id_for_match_arm(
+            context.module,
+            process_id,
+            &arm.message,
+        )?;
         if std::mem::replace(&mut seen[message.index()], true) {
             return Err(Error::new(format!(
                 "process {} step has duplicate match arm for message {}",
-                process.name, arm.message
+                context.process.name, arm.message
             )));
         }
         transitions.push(check_step_transition(
-            module,
-            process,
-            semantic_index,
+            context,
             state_space,
             outputs,
             message,
@@ -330,7 +444,7 @@ fn check_message_match_step(
         if !covered {
             return Err(Error::new(format!(
                 "process {} step match must cover message {}",
-                process.name, msg_enum.variants[index]
+                context.process.name, msg_enum.variants[index]
             )));
         }
     }
@@ -338,9 +452,7 @@ fn check_message_match_step(
 }
 
 fn check_step_transition(
-    module: &Module,
-    process: &Process,
-    semantic_index: &SemanticIndex,
+    context: &StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     message: CheckedMessageId,
@@ -354,21 +466,33 @@ fn check_step_transition(
                     output: outputs.intern(text.as_str())?,
                 });
             }
-            Statement::Spawn(target) => {
+            Statement::Spawn { target, handle } => {
+                let binding = context.handle_index.get(handle).ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} spawn handle {} was not resolved",
+                        context.process.name, handle
+                    ))
+                })?;
                 actions.push(CheckedAction::Spawn {
-                    target: semantic_index.process_id(target)?,
+                    target: context.semantic_index.process_id(target)?,
+                    handle: binding.id,
                 });
             }
             Statement::Send { target, message } => {
-                let target_id = semantic_index.process_id(target)?;
-                let message_id = semantic_index.message_id_for_process(
-                    module,
-                    process.name.as_str(),
-                    target_id,
+                let binding = context.handle_index.get(target).ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} sends to undeclared process handle {}",
+                        context.process.name, target
+                    ))
+                })?;
+                let message_id = context.semantic_index.message_id_for_process(
+                    context.module,
+                    context.process.name.as_str(),
+                    binding.target,
                     message,
                 )?;
                 actions.push(CheckedAction::Send {
-                    target: target_id,
+                    target: binding.id,
                     message: message_id,
                 });
             }
@@ -390,7 +514,7 @@ fn check_step_transition(
     {
         CheckedNextState::Current
     } else {
-        CheckedNextState::Value(state_space.resolve_state_value(semantic_index, state_arg)?)
+        CheckedNextState::Value(state_space.resolve_state_value(context.semantic_index, state_arg)?)
     };
 
     Ok(CheckedTransition::new(CheckedTransitionParts {
@@ -399,6 +523,29 @@ fn check_step_transition(
         next_state,
         actions,
     }))
+}
+
+fn validate_process_handle_name(
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    handle: &Identifier,
+) -> Result<()> {
+    if matches!(
+        handle.as_str(),
+        STEP_STATE_PARAMETER_NAME | STEP_MESSAGE_PARAMETER_NAME
+    ) {
+        return Err(Error::new(format!(
+            "process {} handle {} conflicts with a step parameter name",
+            process.name, handle
+        )));
+    }
+    if semantic_index.process_id(handle).is_ok() {
+        return Err(Error::new(format!(
+            "process {} handle {} conflicts with a process declaration",
+            process.name, handle
+        )));
+    }
+    Ok(())
 }
 
 impl CheckedAction {

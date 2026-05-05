@@ -7,6 +7,8 @@ Read them in this order:
 1. `hello.str` for the minimum source-to-runtime program.
 2. `actor_ping.str` for spawning, sending, and a single worker transition.
 3. `actor_sequence.str` for multiple messages and message-keyed transitions.
+4. `actor_instances.str` for multiple runtime instances of one process
+   definition.
 
 ## Hello
 
@@ -41,7 +43,7 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
 
 Key source ideas:
 
-- `Main` uses `spawn` before `send`.
+- `Main` uses `spawn Worker as worker;` before `send worker Ping;`.
 - `WorkerMsg.Ping` is checked against `Worker`'s message type.
 - `Worker` replaces `Idle` with `Handled`.
 - Both processes stop normally.
@@ -68,3 +70,24 @@ Key source ideas:
 The runtime trace records process, message, state, and output IDs alongside
 labels so that behavior can be checked without treating labels as executable
 bindings.
+
+## Actor Instances
+
+`examples/actor_instances.str` proves process handles and instance-aware sends.
+`Main` spawns the `Worker` process definition twice, binds each runtime instance
+to a different handle, and sends `Ping` through both handles.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_instances.str
+cargo run -p strata --bin strata -- build examples/actor_instances.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
+```
+
+Key source ideas:
+
+- `spawn Worker as first;` and `spawn Worker as second;` create two runtime
+  worker instances.
+- `send first Ping;` and `send second Ping;` dispatch by handle, not by process
+  definition label.
+- The runtime trace records two different `pid` values with the same
+  `process_id` for `Worker`.
