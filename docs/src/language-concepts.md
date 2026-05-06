@@ -102,10 +102,11 @@ Effects must be visible in the function signature. The current effects are:
 - `spawn`;
 - `send`.
 
-The declared effect list must exactly match the effects used by `step`.
+The declared effect list must exactly match the effects used by each `step`
+clause.
 
 ```strata
-fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
     let worker: ProcessRef<Worker> = spawn Worker;
     send worker Ping;
     return Stop(state);

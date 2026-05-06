@@ -59,14 +59,14 @@ has no may-behaviors, and is deterministic.
 ## Step Function
 
 ```strata
-fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {
+fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
     emit "hello from Strata";
     return Stop(state);
 }
 ```
 
-`step` receives the current state and the dequeued message. Since `MainMsg` has
-one variant, the simple block form is accepted.
+`step` receives the current state and handles the `Start` message named in its
+signature pattern.
 
 The body emits text and then returns `Stop(state)`. Passing `state` keeps the
 current state while stopping normally.
@@ -103,5 +103,5 @@ That trace should contain `artifact_loaded`, `process_spawned`,
 If you remove `emit "hello from Strata";`, also change the effect list from
 `[emit]` to `[]`. Declaring an unused effect is rejected.
 
-If you add a second message variant to `MainMsg`, the simple `step` body must
-become an exhaustive `match msg` body.
+If you add a second message variant to `MainMsg`, add a second `step` clause for
+that variant. Each accepted message needs exactly one clause.

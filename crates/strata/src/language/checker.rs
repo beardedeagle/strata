@@ -10,8 +10,8 @@ use mantle_artifact::{
 };
 
 use super::ast::{
-    Determinism, Effect, FunctionBlock, FunctionBody, Identifier, MessageMatch, Module, Process,
-    ReturnExpr, Statement, TypeRef, ValueExpr,
+    Determinism, Effect, Function, FunctionBlock, FunctionParam, Identifier, Module, Process,
+    ReturnExpr, SignaturePattern, Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
@@ -27,7 +27,6 @@ use static_validation::validate_action_references;
 use symbols::SemanticIndex;
 
 const STEP_STATE_PARAMETER_NAME: &str = "state";
-const STEP_MESSAGE_PARAMETER_NAME: &str = "msg";
 
 #[derive(Debug, Clone, Copy)]
 struct ProcessRefBinding {
@@ -40,6 +39,12 @@ struct StepCheckContext<'a> {
     process: &'a Process,
     semantic_index: &'a SemanticIndex,
     process_ref_index: &'a BTreeMap<Identifier, ProcessRefBinding>,
+}
+
+struct StepClause<'a> {
+    step: &'a Function,
+    message: CheckedMessageId,
+    body: &'a FunctionBlock,
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -179,9 +184,6 @@ fn check_init(
     let Some(body) = &init.body else {
         return Err(Error::new("init must have a body for buildable source"));
     };
-    let FunctionBody::Block(body) = body else {
-        return Err(Error::new("init body must not use message matching"));
-    };
     if !body.statements.is_empty() {
         return Err(Error::new(
             "init body must not perform statements in this slice",
@@ -207,12 +209,112 @@ fn check_step(
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
 ) -> Result<(Vec<CheckedProcessRef>, Vec<CheckedTransition>)> {
-    let step = &process.step;
-    if step.params.len() != 2 {
-        return Err(Error::new("step must declare state and msg parameters"));
+    let step_clauses = check_step_clauses(module, process, process_id, semantic_index)?;
+    let (process_refs, process_ref_index) = collect_process_refs(
+        process,
+        process_id,
+        entry_process,
+        semantic_index,
+        &step_clauses,
+    )?;
+    let step_context = StepCheckContext {
+        module,
+        process,
+        semantic_index,
+        process_ref_index: &process_ref_index,
+    };
+
+    let mut transitions = Vec::with_capacity(step_clauses.len());
+    for clause in step_clauses {
+        let transition = check_step_transition(
+            &step_context,
+            state_space,
+            outputs,
+            clause.message,
+            clause.body,
+        )?;
+        let used_effects =
+            transition
+                .actions()
+                .iter()
+                .fold(BTreeSet::new(), |mut effects, action| {
+                    effects.insert(action.effect());
+                    effects
+                });
+        validate_effects("step", &clause.step.effects, used_effects)?;
+        transitions.push(transition);
     }
-    let state_param = &step.params[0];
-    let msg_param = &step.params[1];
+
+    let action_count = total_action_count(&transitions)?;
+    validate_count(
+        &format!("process {} action_count", process.name),
+        action_count,
+        0,
+        MAX_ACTIONS_PER_PROCESS,
+    )?;
+
+    Ok((process_refs, transitions))
+}
+
+fn check_step_clauses<'a>(
+    module: &Module,
+    process: &'a Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+) -> Result<Vec<StepClause<'a>>> {
+    let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+    let mut seen = vec![false; msg_enum.variants.len()];
+    let mut clauses = Vec::with_capacity(process.steps.len());
+
+    for step in &process.steps {
+        let message = check_step_signature(module, process, process_id, semantic_index, step)?;
+        if std::mem::replace(&mut seen[message.index()], true) {
+            return Err(Error::new(format!(
+                "process {} declares duplicate step pattern for message {}",
+                process.name,
+                msg_enum.variants[message.index()]
+            )));
+        }
+        let Some(body) = &step.body else {
+            return Err(Error::new("step must have a body for buildable source"));
+        };
+        clauses.push(StepClause {
+            step,
+            message,
+            body,
+        });
+    }
+
+    for (index, covered) in seen.iter().enumerate() {
+        if !covered {
+            return Err(Error::new(format!(
+                "process {} must declare step pattern for message {}",
+                process.name, msg_enum.variants[index]
+            )));
+        }
+    }
+
+    Ok(clauses)
+}
+
+fn check_step_signature(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    step: &Function,
+) -> Result<CheckedMessageId> {
+    if step.params.len() != 2 {
+        return Err(Error::new(
+            "step must declare state parameter and message pattern",
+        ));
+    }
+    let FunctionParam::Binding(state_param) = &step.params[0] else {
+        return Err(Error::new(format!(
+            "step first parameter must be state: {}",
+            process.state_type
+        )));
+    };
     if state_param.name.as_str() != STEP_STATE_PARAMETER_NAME
         || !semantic_index.same_type(&state_param.ty, &process.state_type)
     {
@@ -221,14 +323,11 @@ fn check_step(
             process.state_type
         )));
     }
-    if msg_param.name.as_str() != STEP_MESSAGE_PARAMETER_NAME
-        || !semantic_index.same_type(&msg_param.ty, &process.msg_type)
-    {
-        return Err(Error::new(format!(
-            "step second parameter must be msg: {}",
-            process.msg_type
-        )));
-    }
+    let FunctionParam::Pattern(SignaturePattern::Variant(message)) = &step.params[1] else {
+        return Err(Error::new(
+            "step second parameter must be a message variant pattern",
+        ));
+    };
 
     if !semantic_index.is_proc_result_of(&step.return_type, &process.state_type) {
         return Err(Error::new(format!(
@@ -244,48 +343,7 @@ fn check_step(
         return Err(Error::new("step must be deterministic"));
     }
 
-    let Some(body) = &step.body else {
-        return Err(Error::new("step must have a body for buildable source"));
-    };
-    let (process_refs, process_ref_index) =
-        collect_process_refs(process, process_id, entry_process, semantic_index, body)?;
-    let step_context = StepCheckContext {
-        module,
-        process,
-        semantic_index,
-        process_ref_index: &process_ref_index,
-    };
-
-    let transitions = match body {
-        FunctionBody::Block(block) => {
-            check_simple_step_block(&step_context, state_space, outputs, block)?
-        }
-        FunctionBody::MatchMessage(message_match) => check_message_match_step(
-            &step_context,
-            process_id,
-            state_space,
-            outputs,
-            message_match,
-        )?,
-    };
-
-    let action_count = total_action_count(&transitions)?;
-    validate_count(
-        &format!("process {} action_count", process.name),
-        action_count,
-        0,
-        MAX_ACTIONS_PER_PROCESS,
-    )?;
-    let used_effects = transitions
-        .iter()
-        .flat_map(|transition| transition.actions())
-        .fold(BTreeSet::new(), |mut effects, action| {
-            effects.insert(action.effect());
-            effects
-        });
-    validate_effects("step", &step.effects, used_effects)?;
-
-    Ok((process_refs, transitions))
+    semantic_index.message_id_for_step_pattern(module, process_id, message)
 }
 
 fn collect_process_refs(
@@ -293,36 +351,23 @@ fn collect_process_refs(
     process_id: CheckedProcessId,
     entry_process: CheckedProcessId,
     semantic_index: &SemanticIndex,
-    body: &FunctionBody,
+    step_clauses: &[StepClause<'_>],
 ) -> Result<(
     Vec<CheckedProcessRef>,
     BTreeMap<Identifier, ProcessRefBinding>,
 )> {
     let mut process_refs = Vec::new();
     let mut process_ref_index = BTreeMap::new();
-    match body {
-        FunctionBody::Block(block) => collect_process_refs_from_block(
+    for clause in step_clauses {
+        collect_process_refs_from_block(
             process,
             process_id,
             entry_process,
             semantic_index,
-            block,
+            clause.body,
             &mut process_refs,
             &mut process_ref_index,
-        )?,
-        FunctionBody::MatchMessage(message_match) => {
-            for arm in &message_match.arms {
-                collect_process_refs_from_block(
-                    process,
-                    process_id,
-                    entry_process,
-                    semantic_index,
-                    &arm.body,
-                    &mut process_refs,
-                    &mut process_ref_index,
-                )?;
-            }
-        }
+        )?;
     }
     Ok((process_refs, process_ref_index))
 }
@@ -381,81 +426,6 @@ fn collect_process_refs_from_block(
         );
     }
     Ok(())
-}
-
-fn check_simple_step_block(
-    context: &StepCheckContext<'_>,
-    state_space: &mut StateSpace<'_>,
-    outputs: &mut OutputPool,
-    block: &FunctionBlock,
-) -> Result<Vec<CheckedTransition>> {
-    let msg_enum = context
-        .semantic_index
-        .enum_decl(context.module, &context.process.msg_type)?;
-    if msg_enum.variants.len() != 1 {
-        return Err(Error::new(format!(
-            "process {} step with multiple messages must use match msg",
-            context.process.name
-        )));
-    }
-    let transition = check_step_transition(
-        context,
-        state_space,
-        outputs,
-        CheckedMessageId::from_index(0)?,
-        block,
-    )?;
-    Ok(vec![transition])
-}
-
-fn check_message_match_step(
-    context: &StepCheckContext<'_>,
-    process_id: CheckedProcessId,
-    state_space: &mut StateSpace<'_>,
-    outputs: &mut OutputPool,
-    message_match: &MessageMatch,
-) -> Result<Vec<CheckedTransition>> {
-    if message_match.scrutinee.as_str() != "msg" {
-        return Err(Error::new(format!(
-            "process {} step must match msg, got {}",
-            context.process.name, message_match.scrutinee
-        )));
-    }
-
-    let msg_enum = context
-        .semantic_index
-        .enum_decl(context.module, &context.process.msg_type)?;
-    let mut seen = vec![false; msg_enum.variants.len()];
-    let mut transitions = Vec::with_capacity(message_match.arms.len());
-    for arm in &message_match.arms {
-        let message = context.semantic_index.message_id_for_match_arm(
-            context.module,
-            process_id,
-            &arm.message,
-        )?;
-        if std::mem::replace(&mut seen[message.index()], true) {
-            return Err(Error::new(format!(
-                "process {} step has duplicate match arm for message {}",
-                context.process.name, arm.message
-            )));
-        }
-        transitions.push(check_step_transition(
-            context,
-            state_space,
-            outputs,
-            message,
-            &arm.body,
-        )?);
-    }
-    for (index, covered) in seen.iter().enumerate() {
-        if !covered {
-            return Err(Error::new(format!(
-                "process {} step match must cover message {}",
-                context.process.name, msg_enum.variants[index]
-            )));
-        }
-    }
-    Ok(transitions)
 }
 
 fn check_step_transition(
@@ -537,10 +507,7 @@ fn validate_process_ref_name(
     semantic_index: &SemanticIndex,
     process_ref: &Identifier,
 ) -> Result<()> {
-    if matches!(
-        process_ref.as_str(),
-        STEP_STATE_PARAMETER_NAME | STEP_MESSAGE_PARAMETER_NAME
-    ) {
+    if process_ref.as_str() == STEP_STATE_PARAMETER_NAME {
         return Err(Error::new(format!(
             "process {} process reference {} conflicts with a step parameter name",
             process.name, process_ref

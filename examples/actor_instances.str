@@ -20,7 +20,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let first: ProcessRef<Worker> = spawn Worker;
         let second: ProcessRef<Worker> = spawn Worker;
         send first Ping;
@@ -37,7 +37,7 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
         emit "worker instance handled Ping";
         return Stop(Handled);
     }

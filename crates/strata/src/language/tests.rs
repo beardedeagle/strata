@@ -23,7 +23,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
         emit "hello from Strata";
         return Stop(state);
     }
@@ -46,7 +46,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Stop(state);
@@ -61,7 +61,7 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
         emit "worker handled Ping";
         return Stop(Handled);
     }
@@ -84,7 +84,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         send worker First;
         send worker Second;
@@ -100,17 +100,14 @@ proc Worker mailbox bounded(2) {
         return Waiting;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-        match msg {
-            First => {
-                emit "worker handled First";
-                return Continue(SawFirst);
-            }
-            Second => {
-                emit "worker handled Second";
-                return Stop(Done);
-            }
-        }
+    fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled First";
+        return Continue(SawFirst);
+    }
+
+    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
     }
 }
 "#;
@@ -131,7 +128,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let first: ProcessRef<Worker> = spawn Worker;
         let second: ProcessRef<Worker> = spawn Worker;
         send first Ping;
@@ -148,7 +145,7 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
         emit "worker instance handled Ping";
         return Stop(Handled);
     }
@@ -179,16 +176,30 @@ fn parses_and_checks_hello() {
 #[test]
 fn parses_step_return_type_as_structured_type_ref() {
     let module = parse_source(HELLO).expect("hello should parse");
-    let step_return_type = &module.processes[0].step.return_type;
+    let steps = &module.processes[0].steps;
+    assert_eq!(steps.len(), 1);
+    let step = &steps[0];
 
     assert_eq!(
-        step_return_type,
+        &step.return_type,
         &TypeRef::Applied {
             constructor: Identifier::new(PROC_RESULT_TYPE).expect("ProcResult identifier"),
             args: vec![TypeRef::Named(
                 Identifier::new("MainState").expect("MainState identifier")
             )],
         }
+    );
+    assert_eq!(
+        step.params,
+        [
+            FunctionParam::Binding(Param {
+                name: Identifier::new("state").expect("state identifier"),
+                ty: TypeRef::Named(Identifier::new("MainState").expect("MainState identifier")),
+            }),
+            FunctionParam::Pattern(SignaturePattern::Variant(
+                Identifier::new("Start").expect("Start identifier")
+            )),
+        ]
     );
 }
 
@@ -232,7 +243,7 @@ proc Main mailbox bounded(1) {
         return ready;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+    fn step(state: MainState, start) -> ProcResult<MainState> ! [] ~ [] @det {
         return Stop(ready);
     }
 }
@@ -265,7 +276,7 @@ proc Main mailbox bounded(1) {
         return state;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+    fn step(state: MainState, start) -> ProcResult<MainState> ! [] ~ [] @det {
         return Stop(state);
     }
 }
@@ -322,7 +333,7 @@ fn parses_and_checks_actor_ping() {
 }
 
 #[test]
-fn parses_and_checks_actor_sequence_message_match() {
+fn parses_and_checks_actor_sequence_step_patterns() {
     let checked = check_source(ACTOR_SEQUENCE).expect("actor sequence should check");
 
     assert_eq!(checked.module().name.as_str(), "actor_sequence");
@@ -357,7 +368,7 @@ fn parses_and_checks_actor_sequence_message_match() {
     );
 
     let artifact = lower_to_artifact(&checked, ACTOR_SEQUENCE)
-        .expect("message match should lower to transition records");
+        .expect("step patterns should lower to transition records");
     let worker_artifact = &artifact.processes[1];
     assert_eq!(worker_artifact.transitions.len(), 2);
     assert_eq!(
@@ -421,59 +432,68 @@ fn parses_and_checks_actor_instances_with_distinct_process_refs() {
 }
 
 #[test]
-fn rejects_unknown_message_match_arm() {
-    let source = ACTOR_SEQUENCE.replace("Second =>", "Unknown =>");
+fn rejects_unknown_step_message_pattern() {
+    let source = ACTOR_SEQUENCE.replace(
+        "fn step(state: WorkerState, Second)",
+        "fn step(state: WorkerState, Unknown)",
+    );
 
-    let err = check_source(&source).expect_err("unknown match arm should fail");
+    let err = check_source(&source).expect_err("unknown step pattern should fail");
 
     assert!(err
         .to_string()
-        .contains("process Worker step match arm message Unknown is not accepted"));
+        .contains("process Worker step pattern message Unknown is not accepted"));
 }
 
 #[test]
-fn rejects_missing_message_match_arm() {
+fn rejects_missing_step_message_pattern() {
     let source = ACTOR_SEQUENCE.replace(
         r#"
-            Second => {
-                emit "worker handled Second";
-                return Stop(Done);
-            }
+    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
+    }
 "#,
         "",
     );
 
-    let err = check_source(&source).expect_err("missing match arm should fail");
+    let err = check_source(&source).expect_err("missing step pattern should fail");
 
     assert!(err
         .to_string()
-        .contains("process Worker step match must cover message Second"));
+        .contains("process Worker must declare step pattern for message Second"));
 }
 
 #[test]
-fn rejects_duplicate_message_match_arm() {
-    let source = ACTOR_SEQUENCE.replace("Second =>", "First =>");
+fn rejects_duplicate_step_message_pattern() {
+    let source = ACTOR_SEQUENCE.replace(
+        "fn step(state: WorkerState, Second)",
+        "fn step(state: WorkerState, First)",
+    );
 
-    let err = check_source(&source).expect_err("duplicate match arm should fail");
+    let err = check_source(&source).expect_err("duplicate step pattern should fail");
 
     assert!(err
         .to_string()
-        .contains("process Worker step has duplicate match arm for message First"));
+        .contains("process Worker declares duplicate step pattern for message First"));
 }
 
 #[test]
-fn rejects_message_match_on_non_message_scrutinee() {
-    let source = ACTOR_SEQUENCE.replace("match msg", "match state");
+fn rejects_typed_msg_step_parameter() {
+    let source = ACTOR_PING.replace(
+        "fn step(state: WorkerState, Ping)",
+        "fn step(state: WorkerState, msg: WorkerMsg)",
+    );
 
-    let err = check_source(&source).expect_err("wrong match scrutinee should fail");
+    let err = check_source(&source).expect_err("typed message parameter should fail");
 
     assert!(err
         .to_string()
-        .contains("process Worker step must match msg, got state"));
+        .contains("step second parameter must be a message variant pattern"));
 }
 
 #[test]
-fn rejects_message_match_invalid_next_state() {
+fn rejects_step_pattern_invalid_next_state() {
     let source = ACTOR_SEQUENCE.replace("Continue(SawFirst)", "Continue(UnknownState)");
 
     let err = check_source(&source).expect_err("invalid next state should fail");
@@ -484,27 +504,23 @@ fn rejects_message_match_invalid_next_state() {
 }
 
 #[test]
-fn rejects_simple_step_body_for_multi_message_process() {
-    let source = ACTOR_SEQUENCE.replace(
+fn rejects_message_match_body_syntax() {
+    let source = ACTOR_PING.replace(
+        r#"emit "worker handled Ping";
+        return Stop(Handled);"#,
         r#"match msg {
-            First => {
-                emit "worker handled First";
-                return Continue(SawFirst);
-            }
-            Second => {
-                emit "worker handled Second";
-                return Stop(Done);
+            Ping => {
+                emit "worker handled Ping";
+                return Stop(Handled);
             }
         }"#,
-        r#"emit "worker handled First";
-        return Stop(Done);"#,
     );
 
-    let err = check_source(&source).expect_err("multi-message simple step should fail");
+    let err = parse_source(&source).expect_err("message match body should fail");
 
     assert!(err
         .to_string()
-        .contains("process Worker step with multiple messages must use match msg"));
+        .contains("expected emit, let, send, or return statement"));
 }
 
 #[test]
@@ -525,7 +541,7 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
         emit "worker handled Ping";
         return Stop(Handled);
     }
@@ -539,7 +555,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Stop(state);
@@ -588,7 +604,7 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
     fn init() -> MainState ! [] ~ [] @det;
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det;
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det;
 }
 "#;
 
@@ -631,7 +647,7 @@ proc {name} mailbox bounded(1) {{
     type State = MainState;
     type Msg = MainMsg;
     fn init() -> MainState ! [] ~ [] @det {{ return MainState; }}
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {{
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {{
         return Stop(state);
     }}
 }}
@@ -785,15 +801,12 @@ proc Main mailbox bounded(1) {{
         return MainState;
     }}
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {{
-        match msg {{
-            Start => {{
-{first_actions}                return Stop(state);
-            }}
-            Again => {{
-{second_actions}                return Stop(state);
-            }}
-        }}
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {{
+{first_actions}        return Stop(state);
+    }}
+
+    fn step(state: MainState, Again) -> ProcResult<MainState> ! [emit] ~ [] @det {{
+{second_actions}        return Stop(state);
     }}
 }}
 "#
@@ -830,13 +843,6 @@ fn rejects_duplicate_process_members() {
                     "fn init() -> MainState ! [] ~ [] @det { return MainState; }\n\n    fn init() -> MainState ! [] ~ [] @det {",
                 ),
                 "process Main declares duplicate init function",
-            ),
-            (
-                HELLO.replace(
-                    "fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {",
-                    "fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det { emit \"first\"; return Stop(state); }\n\n    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {",
-                ),
-                "process Main declares duplicate step function",
             ),
         ] {
             let err = parse_source(&source).expect_err("duplicate process member should fail");
@@ -937,7 +943,7 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
     fn init() -> MainState ! [] ~ [] @det { return MainState; }
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
         emit "hello from Strata";
         return Stop(state);
     }
@@ -989,7 +995,7 @@ proc Main mailbox bounded(1) {
         return MainState { phase: Idle };
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
         return Stop(MainState { phase: Handled });
     }
 }
@@ -1092,7 +1098,7 @@ proc Main mailbox bounded(1) {
         return REPLACE_KEYWORD;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
         return Stop(REPLACE_KEYWORD);
     }
 }
@@ -1286,7 +1292,7 @@ fn rejects_process_ref_named_like_process_declaration() {
 }
 
 #[test]
-fn allows_same_spawn_target_in_distinct_terminal_message_arms() {
+fn allows_same_spawn_target_in_distinct_terminal_step_patterns() {
     let source = r#"
 module spawn_by_message;
 
@@ -1303,19 +1309,16 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
-        match msg {
-            Start => {
-                let worker: ProcessRef<Worker> = spawn Worker;
-                send worker Ping;
-                return Stop(state);
-            }
-            Restart => {
-                let worker: ProcessRef<Worker> = spawn Worker;
-                send worker Ping;
-                return Stop(state);
-            }
-        }
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Ping;
+        return Stop(state);
+    }
+
+    fn step(state: MainState, Restart) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Ping;
+        return Stop(state);
     }
 }
 
@@ -1327,13 +1330,13 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [] ~ [] @det {
         return Stop(Idle);
     }
 }
 "#;
 
-    check_source(source).expect("mutually exclusive message arms may spawn the same process");
+    check_source(source).expect("mutually exclusive step patterns may spawn the same process");
 }
 
 #[test]
@@ -1385,7 +1388,7 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
         emit "worker handled Ping";
         return Stop(Handled);
     }
@@ -1400,7 +1403,7 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
         emit "worker handled Ping";
         return Stop(Handled);
     }
@@ -1414,7 +1417,7 @@ proc Helper mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: HelperState, msg: HelperMsg) -> ProcResult<HelperState> ! [] ~ [] @det {
+    fn step(state: HelperState, Ping) -> ProcResult<HelperState> ! [] ~ [] @det {
         return Stop(Idle);
     }
 }
@@ -1574,7 +1577,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Stop(state);
@@ -1589,7 +1592,7 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
         let helper: ProcessRef<Helper> = spawn Helper;
         send helper Ping;
         return Continue(Idle);
@@ -1604,7 +1607,7 @@ proc Helper mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: HelperState, msg: HelperMsg) -> ProcResult<HelperState> ! [spawn, send] ~ [] @det {
+    fn step(state: HelperState, Ping) -> ProcResult<HelperState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Continue(Idle);

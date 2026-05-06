@@ -48,7 +48,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
         return Stop(state);
     }
 }
@@ -138,7 +138,7 @@ Duplicate variants are rejected.
 ## Processes
 
 A process declares a mailbox bound, a state type, a message type, an `init`
-function, and a `step` function:
+function, and one `step` clause for each accepted message:
 
 ```strata
 proc Worker mailbox bounded(1) {
@@ -149,7 +149,7 @@ proc Worker mailbox bounded(1) {
         return Idle;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
         emit "worker handled Ping";
         return Stop(Handled);
     }
@@ -157,7 +157,8 @@ proc Worker mailbox bounded(1) {
 ```
 
 Only the aliases `State` and `Msg` are accepted inside a process. Only the
-functions `init` and `step` are accepted inside a process.
+functions `init` and `step` are accepted inside a process. Each message variant
+must have exactly one `step` clause, selected by its signature pattern.
 
 ## Function Signatures
 
@@ -174,7 +175,7 @@ Buildable source currently requires:
 | Function | Required Shape |
 | --- | --- |
 | `init` | No parameters, returns the process state type, uses `! [] ~ [] @det`. |
-| `step` | Parameters exactly `state: StateType, msg: MsgType`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
+| `step` | Parameters exactly `state: StateType, MessageVariant`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
 
 The parser recognizes `@nondet`, but buildable source currently rejects it.
 The may-behavior list after `~` must currently be empty.
@@ -208,8 +209,8 @@ stops.
 
 ## Effects
 
-The `! [...]` effect list must exactly match the effects used by `step`.
-Missing effects and unused declared effects are both rejected.
+The `! [...]` effect list must exactly match the effects used by each `step`
+clause. Missing effects and unused declared effects are both rejected.
 
 | Effect | Statement |
 | --- | --- |
@@ -220,37 +221,35 @@ Missing effects and unused declared effects are both rejected.
 `init` cannot perform statements in the current buildable slice and therefore
 uses an empty effect list.
 
-## Step Bodies
+## Step Patterns
 
-If a process accepts exactly one message, `step` can use a simple block:
+A `step` clause handles one message variant named in its signature:
 
 ```strata
-fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {
+fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
     emit "hello from Strata";
     return Stop(state);
 }
 ```
 
-If a process accepts more than one message, `step` must use exhaustive
-`match msg`:
+If a process accepts more than one message, it must declare one `step` clause
+per message variant:
 
 ```strata
-fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-    match msg {
-        First => {
-            emit "worker handled First";
-            return Continue(SawFirst);
-        }
-        Second => {
-            emit "worker handled Second";
-            return Stop(Done);
-        }
-    }
+fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    emit "worker handled First";
+    return Continue(SawFirst);
+}
+
+fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    emit "worker handled Second";
+    return Stop(Done);
 }
 ```
 
-Each message variant must have exactly one arm. Matching on anything other than
-`msg` is rejected.
+Each message variant must have exactly one clause. The signature pattern is
+compile-time dispatch only: Mantle still dequeues one message at a time and
+dispatches by typed message ID.
 
 ## State Transitions
 
@@ -293,7 +292,7 @@ The buildable source slice enforces bounded sizes:
 | Processes | 256 |
 | State values per process | 1024 |
 | Message variants per process | 1024 |
-| Process references per process | 4096 |
+| Static process-reference bindings per process definition | 4096 |
 | Distinct output literals | 4096 |
 | Actions per process | 4096 |
 | Mailbox bound | 65,536 |

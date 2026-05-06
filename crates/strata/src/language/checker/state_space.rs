@@ -305,7 +305,7 @@ mod tests {
                 state_type: state_type.clone(),
                 msg_type: TypeRef::Named(ident("MainMsg")),
                 init: function("init", state_type.clone()),
-                step: function("step", state_type),
+                steps: vec![function("step", state_type)],
             }],
         }
     }
@@ -331,7 +331,7 @@ mod tests {
                 state_type: state_type.clone(),
                 msg_type: TypeRef::Named(ident("MainMsg")),
                 init: function("init", state_type.clone()),
-                step: function("step", state_type),
+                steps: vec![function("step", state_type)],
             }],
         }
     }

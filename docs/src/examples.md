@@ -62,8 +62,8 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 
 Key source ideas:
 
-- `WorkerMsg` has two variants, so `Worker.step` must use `match msg`.
-- The match is exhaustive.
+- `WorkerMsg` has two variants, so `Worker` declares two `step` clauses.
+- The step patterns are exhaustive.
 - `Continue(SawFirst)` keeps the worker alive for the next queued message.
 - `Stop(Done)` terminates the worker normally.
 
