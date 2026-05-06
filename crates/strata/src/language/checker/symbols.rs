@@ -220,11 +220,16 @@ impl SemanticIndex {
                         item.name, variant.name
                     )));
                 }
+            }
+            enum_variants.push(variants);
+        }
+
+        for item in &module.enums {
+            for variant in &item.variants {
                 if let Some(payload_type) = &variant.payload_type {
                     validate_message_payload_type(&symbols, &types, item, variant, payload_type)?;
                 }
             }
-            enum_variants.push(variants);
         }
 
         for (index, process) in module.processes.iter().enumerate() {

@@ -945,6 +945,59 @@ proc Worker mailbox bounded(1) {
 }
 
 #[test]
+fn accepts_payload_enum_type_declared_after_message_enum() {
+    let source = r#"
+module payload_enum_order;
+
+record MainState;
+enum MainMsg { Start }
+enum WorkerMsg { Assign(JobKind) }
+enum JobKind { Ready }
+enum WorkerState { Idle }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Ready);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(kind: JobKind)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("later enum payload type should resolve");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        worker
+            .message_cases()
+            .iter()
+            .map(|case| case.label())
+            .collect::<Vec<_>>(),
+        ["Assign(Ready)"]
+    );
+}
+
+#[test]
 fn rejects_payload_entry_message() {
     let source = r#"
 module entry_payload;
