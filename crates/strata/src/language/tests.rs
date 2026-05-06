@@ -518,9 +518,9 @@ fn rejects_message_match_body_syntax() {
 
     let err = parse_source(&source).expect_err("message match body should fail");
 
-    assert!(err
-        .to_string()
-        .contains("expected emit, let, send, or return statement"));
+    assert!(err.to_string().contains(
+        "message match bodies are not supported; declare one step clause per message variant"
+    ));
 }
 
 #[test]

@@ -300,6 +300,11 @@ impl Parser {
     }
 
     fn parse_function_statement(&mut self) -> Result<Statement> {
+        if self.peek_keyword("match") {
+            return Err(self.error_here(
+                "message match bodies are not supported; declare one step clause per message variant",
+            ));
+        }
         if self.peek_keyword("emit") {
             self.expect_keyword("emit")?;
             let text = self.expect_string_literal()?;

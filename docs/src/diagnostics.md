@@ -41,6 +41,7 @@ result of the first invalid shape.
 | `step pattern message ... is not accepted` | A `step` signature names a message variant outside the process message enum. | Use a declared message variant. |
 | `duplicate step pattern for message` | A message variant has more than one `step` clause. | Keep one clause per variant. |
 | `must declare step pattern for message` | A message variant is missing its `step` clause. | Add a `step` clause for the missing message. |
+| `message match bodies are not supported` | A function body uses `match msg`. | Declare one `step` clause per accepted message variant. |
 | `sends message ... not accepted by ...` | The target process message enum has no such variant. | Send a declared target message variant. |
 
 ## State Errors
