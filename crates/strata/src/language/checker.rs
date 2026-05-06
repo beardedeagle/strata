@@ -383,7 +383,7 @@ impl<'a> MessageCaseBuilder<'a> {
                             format!("{}({})", variant.name, payload.label()),
                             variant_id,
                             Some(payload.clone()),
-                        ));
+                        )?);
                     }
                 }
             } else {
@@ -391,7 +391,7 @@ impl<'a> MessageCaseBuilder<'a> {
                     variant.name.to_string(),
                     variant_id,
                     None,
-                ));
+                )?);
             }
         }
         Ok(cases)

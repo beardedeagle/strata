@@ -50,6 +50,7 @@ result of the first invalid shape.
 | `step pattern payload ... has type ... expected ...` | A step payload binding annotation does not match the variant payload type. | Use the declared payload type in the signature pattern. |
 | `payload binding ... conflicts` / `process reference ... conflicts with payload binding` | A local immutable binding shadows `state`, a process, a type, a value constructor, or another local binding in the same transition. | Use distinct immutable binding names. |
 | `has no concrete payload sends` | A payload message variant has no source-visible payload send in the current runnable slice. | Add a concrete send for that payload variant or remove the unused variant. |
+| `message label exceeds maximum length` | A concrete payload message label is too large after wrapping the payload as `Variant(payload)`. | Use a smaller payload value or split the message into smaller cases. |
 
 ## State Errors
 

@@ -505,7 +505,8 @@ mod tests {
                 "Start".to_string(),
                 CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
                 None,
-            )],
+            )
+            .expect("valid checked message case")],
             process_refs: (0..process_ref_count)
                 .map(|index| {
                     CheckedProcessRef::new(ident(&format!("worker_{index}")), checked_process_id(1))

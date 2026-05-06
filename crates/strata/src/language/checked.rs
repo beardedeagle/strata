@@ -1,3 +1,5 @@
+use mantle_artifact::validate_message_label;
+
 use super::ast::{Identifier, Module, TypeRef};
 use super::diagnostic::{Error, Result};
 
@@ -98,12 +100,13 @@ impl CheckedMessageCase {
         label: String,
         variant: CheckedMessageVariantId,
         payload: Option<CheckedPayloadValue>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        validate_message_label(&label).map_err(|err| Error::new(err.to_string()))?;
+        Ok(Self {
             label,
             variant,
             payload,
-        }
+        })
     }
 
     pub(in crate::language) fn label(&self) -> &str {

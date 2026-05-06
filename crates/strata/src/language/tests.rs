@@ -632,6 +632,18 @@ fn rejects_payload_for_unit_message_variant() {
 }
 
 #[test]
+fn rejects_payload_message_label_above_artifact_limit_during_checking() {
+    let source = payload_message_label_overflow_source();
+
+    let err =
+        check_source(&source).expect_err("oversized concrete message label should fail checking");
+
+    assert!(err
+        .to_string()
+        .contains("message label exceeds maximum length"));
+}
+
+#[test]
 fn rejects_wildcard_payload_binding() {
     let source = payload_source_with(
         "send worker Assign(Job { phase: Ready });",
@@ -2535,6 +2547,86 @@ proc Worker mailbox bounded(1) {{
 }}
 "#
     )
+}
+
+fn payload_message_label_overflow_source() -> String {
+    let field_names = payload_overflow_field_names();
+    let record_fields = field_names
+        .iter()
+        .map(|name| format!("    {name}: Phase,\n"))
+        .collect::<String>();
+    let payload_fields = field_names
+        .iter()
+        .map(|name| format!("            {name}: Ready,\n"))
+        .collect::<String>();
+
+    format!(
+        r#"
+module payload_label_limit;
+
+record MainState;
+record WorkerState;
+enum Phase {{ Ready }}
+record Job {{
+{record_fields}}}
+enum MainMsg {{ Start }}
+enum WorkerMsg {{ Assign(Job) }}
+
+proc Main mailbox bounded(16) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {{
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job {{
+{payload_fields}        }});
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(16) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return WorkerState;
+    }}
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+    )
+}
+
+fn payload_overflow_field_names() -> Vec<String> {
+    for field_count in 1..MAX_FIELD_VALUE_BYTES {
+        let field_names = (0..field_count)
+            .map(|index| format!("f{index}"))
+            .collect::<Vec<_>>();
+        let payload_label = payload_record_label(&field_names);
+        let message_label = format!("Assign({payload_label})");
+        if payload_label.len() <= MAX_FIELD_VALUE_BYTES
+            && message_label.len() > MAX_FIELD_VALUE_BYTES
+        {
+            return field_names;
+        }
+    }
+    panic!("test fixture should find a payload label at the wrapped message boundary");
+}
+
+fn payload_record_label(field_names: &[String]) -> String {
+    let fields = field_names
+        .iter()
+        .map(|name| format!("{name}:Ready"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("Job{{{fields}}}")
 }
 
 fn checked_process_id(index: usize) -> CheckedProcessId {

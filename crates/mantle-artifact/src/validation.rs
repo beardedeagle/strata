@@ -34,7 +34,7 @@ pub(crate) fn validate_unique_message_label_list(values: &[String]) -> Result<()
     Ok(())
 }
 
-fn validate_message_label(value: &str) -> Result<()> {
+pub fn validate_message_label(value: &str) -> Result<()> {
     if value.len() > MAX_FIELD_VALUE_BYTES {
         return Err(Error::new(format!(
             "message label exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
