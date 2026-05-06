@@ -108,7 +108,7 @@ fn is_identifier(value: &str) -> bool {
 }
 
 fn is_reserved_identifier(value: &str) -> bool {
-    matches!(value, "as" | "let" | "mut" | "var")
+    matches!(value, "_" | "as" | "let" | "mut" | "var")
 }
 
 fn validate_output_literal(value: &str) -> Result<()> {
@@ -184,6 +184,7 @@ pub enum FunctionParam {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignaturePattern {
     Variant(Identifier),
+    Wildcard,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

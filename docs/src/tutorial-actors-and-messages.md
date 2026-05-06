@@ -77,8 +77,9 @@ enum WorkerMsg {
 }
 ```
 
-When a process accepts multiple messages, it must declare one `step` clause per
-message pattern:
+When a process accepts multiple messages, each message must resolve to one
+`step` clause. Explicit patterns handle named variants, and `_` handles the
+remaining accepted variants:
 
 ```strata
 fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -86,14 +87,14 @@ fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det
     return Continue(SawFirst);
 }
 
-fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
     emit "worker handled Second";
     return Stop(Done);
 }
 ```
 
-Each message variant needs one clause. Missing clauses and duplicate clauses are
-rejected.
+Missing coverage, duplicate explicit patterns, duplicate wildcard patterns, and
+wildcards that cannot cover any remaining message are rejected.
 
 ## Continue Versus Stop
 

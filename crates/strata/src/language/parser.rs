@@ -227,17 +227,15 @@ impl Parser {
         let mut params = Vec::new();
         if !self.consume_symbol(')') {
             loop {
-                let param_name = self.expect_identifier()?;
+                let param_name = self.expect_ident()?;
                 if self.consume_symbol(':') {
                     let ty = self.parse_type()?;
                     params.push(FunctionParam::Binding(Param {
-                        name: param_name,
+                        name: Identifier::new(param_name)?,
                         ty,
                     }));
                 } else {
-                    params.push(FunctionParam::Pattern(SignaturePattern::Variant(
-                        param_name,
-                    )));
+                    params.push(FunctionParam::Pattern(Self::signature_pattern(param_name)?));
                 }
                 if self.consume_symbol(',') {
                     if self.consume_symbol(')') {
@@ -283,6 +281,14 @@ impl Parser {
             determinism,
             body,
         })
+    }
+
+    fn signature_pattern(value: String) -> Result<SignaturePattern> {
+        if value == "_" {
+            Ok(SignaturePattern::Wildcard)
+        } else {
+            Identifier::new(value).map(SignaturePattern::Variant)
+        }
     }
 
     fn parse_function_block(&mut self) -> Result<FunctionBlock> {

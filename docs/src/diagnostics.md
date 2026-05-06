@@ -26,8 +26,8 @@ result of the first invalid shape.
 | `unsupported process function` | A process declares a function other than `init` or `step`. | Move the logic into `init` or `step`; general functions are not available yet. |
 | `init must declare no parameters` | `init` has parameters. | Use `fn init() -> StateType ...`. |
 | `init body must not perform statements` | `init` uses `emit`, `spawn`, or `send`. | Return only the initial state. |
-| `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageVariant`. |
-| `step second parameter must be a message variant pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with the message variant handled by this clause. |
+| `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageVariant` or `state: StateType, _`. |
+| `step second parameter must be a message variant pattern or wildcard pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with a message variant or `_`. |
 | `step returns ..., expected ProcResult<...>` | `step` return type is wrong. | Return `ProcResult<StateType>`. |
 | `step may-behaviors must be empty` | The `~ [...]` list is not empty. | Use `~ []`. |
 | `step must be deterministic` | `step` uses `@nondet`. | Use `@det`. |
@@ -39,9 +39,11 @@ result of the first invalid shape.
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
 | `step pattern message ... is not accepted` | A `step` signature names a message variant outside the process message enum. | Use a declared message variant. |
-| `duplicate step pattern for message` | A message variant has more than one `step` clause. | Keep one clause per variant. |
-| `must declare step pattern for message` | A message variant is missing its `step` clause. | Add a `step` clause for the missing message. |
-| `message match bodies are not supported` | A function body uses `match msg`. | Declare one `step` clause per accepted message variant. |
+| `duplicate step pattern for message` | A message variant has more than one explicit `step` clause. | Keep one explicit clause per variant. |
+| `duplicate wildcard step pattern` | More than one `step` clause uses `_`. | Keep one wildcard clause. |
+| `wildcard step pattern is unreachable` | Explicit clauses already cover every accepted message variant. | Remove the wildcard clause or remove an explicit clause that it should cover. |
+| `must declare step pattern for message` | A message variant is not covered by an explicit or wildcard `step` clause. | Add a `step` clause for the missing message or add one `_` clause. |
+| `message match bodies are not supported` | A function body uses `match msg`. | Declare `step` clauses with message patterns instead. |
 | `sends message ... not accepted by ...` | The target process message enum has no such variant. | Send a declared target message variant. |
 
 ## State Errors

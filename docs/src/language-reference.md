@@ -61,7 +61,8 @@ message.
 ## Identifiers
 
 Identifiers must start with an ASCII letter or `_`, then contain only ASCII
-letters, ASCII digits, or `_`.
+letters, ASCII digits, or `_`. The single `_` token is reserved for wildcard
+patterns and cannot be used as an identifier.
 
 Valid examples:
 
@@ -76,6 +77,7 @@ Invalid examples:
 ```strata
 1Main
 worker-name
+_
 ```
 
 `as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
@@ -158,7 +160,8 @@ proc Worker mailbox bounded(1) {
 
 Only the aliases `State` and `Msg` are accepted inside a process. Only the
 functions `init` and `step` are accepted inside a process. Each message variant
-must have exactly one `step` clause, selected by its signature pattern.
+must resolve to exactly one `step` clause, selected by an explicit variant
+pattern or by one wildcard pattern.
 
 ## Function Signatures
 
@@ -232,8 +235,8 @@ fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
 }
 ```
 
-If a process accepts more than one message, it must declare one `step` clause
-per message variant:
+If a process accepts more than one message, it can declare explicit clauses for
+specific variants and one wildcard clause for the remaining variants:
 
 ```strata
 fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -241,15 +244,18 @@ fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det
     return Continue(SawFirst);
 }
 
-fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
     emit "worker handled Second";
     return Stop(Done);
 }
 ```
 
-Each message variant must have exactly one clause. The signature pattern is
-compile-time dispatch only: Mantle still dequeues one message at a time and
-dispatches by typed message ID.
+Every accepted message variant must resolve to exactly one clause. Explicit
+variant clauses handle their named variants. One wildcard clause may cover
+variants that do not have explicit clauses. Duplicate explicit clauses,
+duplicate wildcard clauses, missing coverage, and unreachable wildcard clauses
+are rejected. Signature patterns are compile-time dispatch only: Mantle still
+dequeues one message at a time and dispatches by typed message ID.
 
 ## State Transitions
 
