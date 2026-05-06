@@ -132,14 +132,15 @@ Buildable source requires bodies. `init` uses no parameters. Each `step` uses
 
 ```text
 step_function =
-    "fn" "step" "(" "state" ":" state_type "," message_variant ")"
-    "->" "ProcResult" "<" state_type ">"
+    "fn" "step" "(" "state" ":" type_ref "," ident ")"
+    "->" "ProcResult" "<" type_ref ">"
     "!" effect_list "~" "[]" "@det"
     "{" block_body "}"
 ```
 
-Signature patterns are accepted only for actor `step` message dispatch in this
-slice.
+The `type_ref` entries must name the process state type. The `ident` after the
+comma is a message variant accepted by the process message type. Signature
+patterns are accepted only for actor `step` message dispatch in this slice.
 
 ## Statements
 
