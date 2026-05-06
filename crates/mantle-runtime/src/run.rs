@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use mantle_artifact::{
-    Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result,
-    StateId, StepResult,
+    ArtifactPayload, ArtifactValueTemplate, Error, MantleArtifact, MessageId, NextState, OutputId,
+    ProcessId, ProcessRefId, Result, StateId, StepResult,
 };
 
 use crate::event::{
@@ -47,7 +47,11 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
         process_count: program.processes.len(),
     })?;
     let entry_pid = run.spawn_process(program.entry_process, None)?;
-    run.send_message(entry_pid, program.entry_message, None)?;
+    run.send_message(
+        entry_pid,
+        RuntimeMessageEnvelope::new(program.entry_message, None),
+        None,
+    )?;
     run.drain_mailboxes(limits.max_dispatches)?;
     run.reject_unhandled_messages()?;
     run.flush_host()?;
@@ -182,15 +186,16 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     fn send_message(
         &mut self,
         target: RuntimeProcessId,
-        message: MessageId,
+        envelope: RuntimeMessageEnvelope,
         sender_pid: Option<RuntimeProcessId>,
     ) -> Result<()> {
         let process_index = self.process_index_for_pid(target)?;
         let process = &self.processes[process_index];
         let target_process = self.program.process(process.process_id)?;
+        envelope.validate_for_process(self.program, process.process_id)?;
         let message_label = self
             .program
-            .message_label(process.process_id, message)?
+            .message_label(process.process_id, envelope.message)?
             .to_string();
         let process_label = target_process.debug_name.clone();
         if process.status != ProcessStatus::Running {
@@ -212,16 +217,19 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             pid,
             process_id: process.process_id,
             process: process_label.clone(),
-            message_id: message,
+            message_id: envelope.message,
             message: message_label.clone(),
+            payload: envelope.payload.clone(),
             queue_depth,
             sender_pid,
         })?;
-        self.processes[process_index].mailbox.push_back(message);
+        self.processes[process_index]
+            .mailbox
+            .push_back(envelope.clone());
         self.delivered_messages.push(MessageDelivery {
             pid,
             process: process_label,
-            message: message_label,
+            message: envelope.display_label(&message_label),
         });
         Ok(())
     }
@@ -261,14 +269,15 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 pid: dequeued.pid,
                 process_id: dequeued.process_id,
                 process: self.program.process_label(dequeued.process_id)?.to_string(),
-                message_id: dequeued.message,
+                message_id: dequeued.envelope.message,
                 message: self
                     .program
-                    .message_label(dequeued.process_id, dequeued.message)?
+                    .message_label(dequeued.process_id, dequeued.envelope.message)?
                     .to_string(),
+                payload: dequeued.envelope.payload.clone(),
                 queue_depth: dequeued.queue_depth,
             })?;
-            self.step_process(process_index, dequeued.message)?;
+            self.step_process(process_index, dequeued.envelope)?;
             dispatches += 1;
         }
         Ok(())
@@ -280,7 +289,11 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         })
     }
 
-    fn step_process(&mut self, process_index: usize, message: MessageId) -> Result<()> {
+    fn step_process(
+        &mut self,
+        process_index: usize,
+        envelope: RuntimeMessageEnvelope,
+    ) -> Result<()> {
         if self.processes[process_index].status != ProcessStatus::Running {
             let process_name = self
                 .program
@@ -290,18 +303,20 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             )));
         }
 
-        let step = ActiveStep::new(self.program, &self.processes[process_index], message)?;
+        let step = ActiveStep::new(self.program, &self.processes[process_index], envelope)?;
         let definition = self.program.process(step.process_id)?;
-        let transition = definition.transition_for_message(message)?;
-        let next_state = transition.next_state;
+        let transition = definition.transition_for_message(step.message)?;
+        let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
+        let final_state = self.resolve_next_state(process_index, &step, &next_state)?;
+        let action_payloads = prepare_action_payloads(&step, &transition.actions)?;
         let mut local_process_refs = BTreeMap::new();
 
-        for &action in &transition.actions {
-            self.execute_action(&mut local_process_refs, &step, action)?;
+        for (action, prepared_payload) in transition.actions.iter().zip(action_payloads) {
+            self.execute_action(&mut local_process_refs, &step, action, prepared_payload)?;
         }
 
-        self.apply_next_state(process_index, &step, next_state)?;
+        self.apply_next_state(process_index, &step, final_state)?;
         self.record_step_completion(process_index, &step, step_result)
     }
 
@@ -309,16 +324,17 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &mut self,
         local_process_refs: &mut BTreeMap<ProcessRefId, RuntimeProcessId>,
         step: &ActiveStep,
-        action: LoadedAction,
+        action: &LoadedAction,
+        prepared_payload: Option<ArtifactPayload>,
     ) -> Result<()> {
         match action {
-            LoadedAction::Emit { output } => self.emit_output(step, output),
+            LoadedAction::Emit { output } => self.emit_output(step, *output),
             LoadedAction::Spawn {
                 target,
                 process_ref,
             } => {
-                let declared_target = self.process_ref_target(step, process_ref)?;
-                if declared_target != target {
+                let declared_target = self.process_ref_target(step, *process_ref)?;
+                if declared_target != *target {
                     return Err(Error::new(format!(
                         "process {} spawn process reference id {} targets process id {}, expected {}",
                         step.process_name,
@@ -327,14 +343,22 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         declared_target.as_u32()
                     )));
                 }
-                self.ensure_process_ref_unbound(local_process_refs, step, process_ref)?;
-                let pid = self.spawn_process(target, Some(step.pid))?;
-                self.bind_process_ref(local_process_refs, step, process_ref, pid)?;
+                self.ensure_process_ref_unbound(local_process_refs, step, *process_ref)?;
+                let pid = self.spawn_process(*target, Some(step.pid))?;
+                self.bind_process_ref(local_process_refs, step, *process_ref, pid)?;
                 Ok(())
             }
-            LoadedAction::Send { target, message } => {
-                let pid = self.resolve_process_ref(local_process_refs, step, target)?;
-                self.send_message(pid, message, Some(step.pid))
+            LoadedAction::Send {
+                target,
+                message,
+                payload: _,
+            } => {
+                let pid = self.resolve_process_ref(local_process_refs, step, *target)?;
+                self.send_message(
+                    pid,
+                    RuntimeMessageEnvelope::new(*message, prepared_payload),
+                    Some(step.pid),
+                )
             }
         }
     }
@@ -435,16 +459,45 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         Ok(())
     }
 
+    fn resolve_template_state(
+        &self,
+        step: &ActiveStep,
+        template: &ArtifactValueTemplate,
+    ) -> Result<StateId> {
+        let value = evaluate_runtime_template(template, step.payload.as_ref())?;
+        let process = self.program.process(step.process_id)?;
+        let state_index = process
+            .state_values
+            .iter()
+            .position(|state| state == &value.value)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} next_state template produced value {} not admitted by state table",
+                    step.process_name, value.value
+                ))
+            })?;
+        StateId::from_index(state_index)
+    }
+
+    fn resolve_next_state(
+        &self,
+        process_index: usize,
+        step: &ActiveStep,
+        next_state: &NextState,
+    ) -> Result<StateId> {
+        match next_state {
+            NextState::Current => Ok(self.processes[process_index].state),
+            NextState::Value(state) => Ok(*state),
+            NextState::Template(template) => self.resolve_template_state(step, template),
+        }
+    }
+
     fn apply_next_state(
         &mut self,
         process_index: usize,
         step: &ActiveStep,
-        next_state: NextState,
+        final_state: StateId,
     ) -> Result<()> {
-        let final_state = match next_state {
-            NextState::Current => self.processes[process_index].state,
-            NextState::Value(state) => state,
-        };
         let previous_state = self.processes[process_index].state;
         if previous_state == final_state {
             return Ok(());
@@ -481,6 +534,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             process: step.process_name.clone(),
             message_id: step.message,
             message: step.message_label.clone(),
+            payload: step.payload.clone(),
             result: RuntimeStepResult::from(step_result),
             state_id: self.processes[process_index].state,
             state: self
@@ -520,7 +574,7 @@ struct ProcessInstance {
     state: StateId,
     status: ProcessStatus,
     mailbox_bound: usize,
-    mailbox: VecDeque<MessageId>,
+    mailbox: VecDeque<RuntimeMessageEnvelope>,
 }
 
 impl ProcessInstance {
@@ -545,7 +599,7 @@ impl ProcessInstance {
         Ok(DequeuedMessage {
             pid: self.pid,
             process_id: self.process_id,
-            message: removed,
+            envelope: removed,
             queue_depth,
         })
     }
@@ -554,8 +608,56 @@ impl ProcessInstance {
 struct DequeuedMessage {
     pid: RuntimeProcessId,
     process_id: ProcessId,
-    message: MessageId,
+    envelope: RuntimeMessageEnvelope,
     queue_depth: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeMessageEnvelope {
+    message: MessageId,
+    payload: Option<ArtifactPayload>,
+}
+
+impl RuntimeMessageEnvelope {
+    fn new(message: MessageId, payload: Option<ArtifactPayload>) -> Self {
+        Self { message, payload }
+    }
+
+    fn validate_for_process(&self, program: &LoadedProgram, process_id: ProcessId) -> Result<()> {
+        let payload_type = program.message_payload_type(process_id, self.message)?;
+        match (payload_type, &self.payload) {
+            (None, None) => Ok(()),
+            (None, Some(_)) => Err(Error::new(format!(
+                "message id {} for process id {} does not accept a payload",
+                self.message.as_u32(),
+                process_id.as_u32()
+            ))),
+            (Some(_), None) => Err(Error::new(format!(
+                "message id {} for process id {} requires a payload",
+                self.message.as_u32(),
+                process_id.as_u32()
+            ))),
+            (Some(expected_type), Some(payload)) => {
+                if payload.ty != expected_type {
+                    return Err(Error::new(format!(
+                        "message id {} for process id {} payload has type {}, expected {}",
+                        self.message.as_u32(),
+                        process_id.as_u32(),
+                        payload.ty,
+                        expected_type
+                    )));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn display_label(&self, message_label: &str) -> String {
+        match &self.payload {
+            Some(payload) => format!("{message_label}({})", payload.value),
+            None => message_label.to_string(),
+        }
+    }
 }
 
 struct ActiveStep {
@@ -564,20 +666,49 @@ struct ActiveStep {
     process_name: String,
     message: MessageId,
     message_label: String,
+    payload: Option<ArtifactPayload>,
 }
 
 impl ActiveStep {
-    fn new(program: &LoadedProgram, process: &ProcessInstance, message: MessageId) -> Result<Self> {
+    fn new(
+        program: &LoadedProgram,
+        process: &ProcessInstance,
+        envelope: RuntimeMessageEnvelope,
+    ) -> Result<Self> {
         Ok(Self {
             pid: process.pid,
             process_id: process.process_id,
             process_name: program.process_label(process.process_id)?.to_string(),
-            message,
+            message: envelope.message,
             message_label: program
-                .message_label(process.process_id, message)?
+                .message_label(process.process_id, envelope.message)?
                 .to_string(),
+            payload: envelope.payload,
         })
     }
+}
+
+fn evaluate_runtime_template(
+    template: &ArtifactValueTemplate,
+    received_payload: Option<&ArtifactPayload>,
+) -> Result<ArtifactPayload> {
+    template.evaluate(received_payload)
+}
+
+fn prepare_action_payloads(
+    step: &ActiveStep,
+    actions: &[LoadedAction],
+) -> Result<Vec<Option<ArtifactPayload>>> {
+    actions
+        .iter()
+        .map(|action| match action {
+            LoadedAction::Send { payload, .. } => payload
+                .as_ref()
+                .map(|payload| evaluate_runtime_template(payload, step.payload.as_ref()))
+                .transpose(),
+            _ => Ok(None),
+        })
+        .collect()
 }
 
 fn checked_trace_event_bytes(current: usize, event: &RuntimeEventRecord) -> Result<usize> {
@@ -604,8 +735,9 @@ mod tests {
         DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES,
     };
     use mantle_artifact::{
-        ArtifactProcess, ArtifactProcessRef, ArtifactTransition, StepResult, ARTIFACT_FORMAT,
-        ARTIFACT_SCHEMA_VERSION, MAX_PROCESS_REFS_PER_PROCESS, STRATA_SOURCE_LANGUAGE,
+        ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactTransition,
+        StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, MAX_PROCESS_REFS_PER_PROCESS,
+        STRATA_SOURCE_LANGUAGE,
     };
 
     #[test]
@@ -661,8 +793,12 @@ mod tests {
             1
         );
 
-        run.send_message(worker_pid, MessageId::new(0), Some(main_pid))
-            .expect("send should address worker by pid index");
+        run.send_message(
+            worker_pid,
+            RuntimeMessageEnvelope::new(MessageId::new(0), None),
+            Some(main_pid),
+        )
+        .expect("send should address worker by pid index");
         assert_eq!(run.processes[1].mailbox.len(), 1);
     }
 
@@ -704,7 +840,7 @@ mod tests {
                     state_type: "MainState".to_string(),
                     state_values: vec!["MainState".to_string()],
                     message_type: "MainMsg".to_string(),
-                    message_variants: vec!["Start".to_string()],
+                    message_variants: vec![ArtifactMessageVariant::unit("Start")],
                     process_refs: (0..MAX_PROCESS_REFS_PER_PROCESS)
                         .map(|index| ArtifactProcessRef {
                             debug_name: format!("worker_{index}"),
@@ -725,7 +861,7 @@ mod tests {
                     state_type: "WorkerState".to_string(),
                     state_values: vec!["Idle".to_string()],
                     message_type: "WorkerMsg".to_string(),
-                    message_variants: vec!["Ping".to_string()],
+                    message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                     process_refs: Vec::new(),
                     mailbox_bound: 1,
                     init_state: StateId::new(0),

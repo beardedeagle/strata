@@ -9,7 +9,8 @@ mod io;
 mod validation;
 
 pub use artifact::{
-    ArtifactAction, ArtifactProcess, ArtifactProcessRef, ArtifactTransition, MantleArtifact,
+    ArtifactAction, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
+    ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact,
     NextState, StepResult,
 };
 pub use constants::*;

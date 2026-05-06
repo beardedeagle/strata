@@ -147,18 +147,104 @@ fn validate_accepts_structured_state_value_labels() {
 #[test]
 fn validate_accepts_structured_message_labels() {
     let mut artifact = valid_artifact();
-    artifact.processes[0].message_variants = vec!["Assign(Job{phase:Ready})".to_string()];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ProcessRefId::new(0),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: "Job".to_string(),
+            value: "Job{phase:Ready}".to_string(),
+        }),
+    };
 
     artifact
         .validate()
-        .expect("structured message labels should remain display metadata");
+        .expect("payload message labels should remain separate from typed payloads");
 
     let decoded =
-        MantleArtifact::decode(&artifact.encode()).expect("structured labels should decode");
+        MantleArtifact::decode(&artifact.encode()).expect("payload metadata should decode");
     assert_eq!(
-        decoded.processes[0].message_variants,
-        artifact.processes[0].message_variants
+        decoded.processes[1].message_variants,
+        artifact.processes[1].message_variants
     );
+}
+
+#[test]
+fn validate_rejects_missing_required_send_payload() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+
+    let err = artifact
+        .validate()
+        .expect_err("missing send payload should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Main sends process id 1 message id 0 without required payload"));
+}
+
+#[test]
+fn validate_rejects_payload_for_unit_message_variant() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ProcessRefId::new(0),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: "Job".to_string(),
+            value: "Job{phase:Ready}".to_string(),
+        }),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("payload sent to unit message should fail");
+
+    assert!(err.to_string().contains(
+        "process Main sends payload to process id 1 message id 0, which does not accept one"
+    ));
+}
+
+#[test]
+fn validate_rejects_send_payload_type_mismatch() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ProcessRefId::new(0),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: "OtherJob".to_string(),
+            value: "OtherJob{phase:Ready}".to_string(),
+        }),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("wrong payload type should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Main transition 0 send payload has type OtherJob, expected Job"));
+}
+
+#[test]
+fn validate_rejects_received_payload_template_without_payload_message() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ProcessRefId::new(0),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::ReceivedPayload {
+            ty: "Job".to_string(),
+        }),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("received payload template from unit transition should fail");
+
+    assert!(err.to_string().contains(
+        "process Main transition 0 send payload requires a payload-bearing transition message"
+    ));
 }
 
 #[test]
@@ -211,7 +297,7 @@ fn validate_rejects_aggregate_process_action_count_above_limit() {
     let mut artifact = valid_artifact();
     artifact.processes[1]
         .message_variants
-        .push("Pong".to_string());
+        .push(ArtifactMessageVariant::unit("Pong"));
     artifact.processes[1].transitions[0].actions = emit_actions(MAX_ACTIONS_PER_PROCESS / 2);
     artifact.processes[1].transitions.push(ArtifactTransition {
         message: MessageId::new(1),
@@ -237,6 +323,7 @@ fn validate_rejects_unknown_send_message() {
         .push(ArtifactAction::Send {
             target: ProcessRefId::new(0),
             message: MessageId::new(1),
+            payload: None,
         });
 
     let err = artifact
@@ -256,6 +343,7 @@ fn validate_rejects_unknown_send_process_ref() {
         .push(ArtifactAction::Send {
             target: ProcessRefId::new(99),
             message: MessageId::new(0),
+            payload: None,
         });
 
     let err = artifact
@@ -411,6 +499,21 @@ fn validate_rejects_unknown_entry_process_id() {
 }
 
 #[test]
+fn validate_rejects_payload_bearing_entry_message() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].message_variants[0] =
+        ArtifactMessageVariant::payload("Start", "MainPayload");
+
+    let err = artifact
+        .validate()
+        .expect_err("entry payload message should fail");
+
+    assert!(err
+        .to_string()
+        .contains("entry message id 0 must not require a payload"));
+}
+
+#[test]
 fn validate_rejects_unknown_next_state_value_id() {
     let mut artifact = valid_artifact();
     artifact.processes[1].transitions[0].next_state = NextState::Value(StateId::new(99));
@@ -425,11 +528,29 @@ fn validate_rejects_unknown_next_state_value_id() {
 }
 
 #[test]
+fn validate_rejects_static_next_state_template_outside_state_table() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Literal {
+            ty: "WorkerState".to_string(),
+            value: "Missing".to_string(),
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("static next-state template outside state table should fail");
+
+    assert!(err.to_string().contains(
+        "process Worker transition 0 next_state_template produced value Missing not admitted by state table"
+    ));
+}
+
+#[test]
 fn validate_rejects_missing_transition_for_message() {
     let mut artifact = valid_artifact();
     artifact.processes[1]
         .message_variants
-        .push("Pong".to_string());
+        .push(ArtifactMessageVariant::unit("Pong"));
 
     let err = artifact
         .validate()
@@ -445,7 +566,7 @@ fn validate_rejects_duplicate_transition_message() {
     let mut artifact = valid_artifact();
     artifact.processes[1]
         .message_variants
-        .push("Pong".to_string());
+        .push(ArtifactMessageVariant::unit("Pong"));
     let duplicate = artifact.processes[1].transitions[0].clone();
     artifact.processes[1].transitions.push(duplicate);
 
@@ -615,7 +736,7 @@ fn valid_artifact() -> MantleArtifact {
                 state_type: "MainState".to_string(),
                 state_values: vec!["MainState".to_string()],
                 message_type: "MainMsg".to_string(),
-                message_variants: vec!["Start".to_string()],
+                message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -634,6 +755,7 @@ fn valid_artifact() -> MantleArtifact {
                         ArtifactAction::Send {
                             target: ProcessRefId::new(0),
                             message: MessageId::new(0),
+                            payload: None,
                         },
                     ],
                 }],
@@ -643,7 +765,7 @@ fn valid_artifact() -> MantleArtifact {
                 state_type: "WorkerState".to_string(),
                 state_values: vec!["Idle".to_string(), "Handled".to_string()],
                 message_type: "WorkerMsg".to_string(),
-                message_variants: vec!["Ping".to_string()],
+                message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),

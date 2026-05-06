@@ -5,8 +5,9 @@ use super::checked::{
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
-    MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
+    ArtifactMessageVariant, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS,
 };
 
 const HELLO: &str = r#"
@@ -386,7 +387,7 @@ proc Worker mailbox bounded(1) {
             .iter()
             .map(|case| case.label())
             .collect::<Vec<_>>(),
-        ["Assign(Job{phase:Ready})"]
+        ["Assign"]
     );
     assert_eq!(
         worker.state_values(),
@@ -395,15 +396,15 @@ proc Worker mailbox bounded(1) {
             "WorkerState{job:Job{phase:Ready}}"
         ]
     );
-    assert_eq!(
+    assert!(matches!(
         only_transition(worker).next_state(),
-        CheckedNextState::Value(checked_state_id(1))
-    );
+        CheckedNextState::Template(_)
+    ));
 
     let artifact = lower_to_artifact(&checked, source).expect("payload source should lower");
     assert_eq!(
         artifact.processes[1].message_variants,
-        ["Assign(Job{phase:Ready})"]
+        [ArtifactMessageVariant::payload("Assign", "Job")]
     );
     assert_eq!(
         artifact.processes[1].state_values,
@@ -415,7 +416,7 @@ proc Worker mailbox bounded(1) {
 }
 
 #[test]
-fn expands_one_payload_step_pattern_to_multiple_concrete_messages() {
+fn uses_one_payload_message_case_for_multiple_payload_values() {
     let source = r#"
 module actor_payload_cases;
 
@@ -456,7 +457,7 @@ proc Worker mailbox bounded(2) {
 }
 "#;
 
-    let checked = check_source(source).expect("multiple payload cases should check");
+    let checked = check_source(source).expect("multiple payload sends should check");
     let worker = &checked.processes()[1];
 
     assert_eq!(
@@ -465,11 +466,16 @@ proc Worker mailbox bounded(2) {
             .iter()
             .map(|case| case.label())
             .collect::<Vec<_>>(),
-        ["Assign(Job{phase:Done})", "Assign(Job{phase:Ready})"]
+        ["Assign"]
     );
-    assert_eq!(worker.transitions().len(), 2);
+    assert_eq!(
+        worker.message_cases()[0]
+            .payload_type()
+            .map(ToString::to_string),
+        Some("Job".to_string())
+    );
+    assert_eq!(worker.transitions().len(), 1);
     assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
-    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
 }
 
 #[test]
@@ -523,11 +529,16 @@ proc Worker mailbox bounded(2) {
             .iter()
             .map(|case| case.label())
             .collect::<Vec<_>>(),
-        ["Assign(Job{phase:Done})", "Assign(Job{phase:Ready})"]
+        ["Assign"]
     );
-    assert_eq!(worker.transitions().len(), 2);
+    assert_eq!(
+        worker.message_cases()[0]
+            .payload_type()
+            .map(ToString::to_string),
+        Some("Job".to_string())
+    );
+    assert_eq!(worker.transitions().len(), 1);
     assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
-    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
 }
 
 #[test]
@@ -596,13 +607,13 @@ proc Sink mailbox bounded(1) {
             .iter()
             .map(|case| case.label())
             .collect::<Vec<_>>(),
-        ["Assign(Job{phase:Ready})"]
+        ["Assign"]
     );
 
     let artifact = lower_to_artifact(&checked, source).expect("forwarded payload should lower");
     assert_eq!(
         artifact.processes[2].message_variants,
-        ["Assign(Job{phase:Ready})"]
+        [ArtifactMessageVariant::payload("Assign", "Job")]
     );
 }
 
@@ -632,15 +643,20 @@ fn rejects_payload_for_unit_message_variant() {
 }
 
 #[test]
-fn rejects_payload_message_label_above_artifact_limit_during_checking() {
+fn accepts_payload_value_near_label_limit_without_wrapping_message_label() {
     let source = payload_message_label_overflow_source();
 
-    let err =
-        check_source(&source).expect_err("oversized concrete message label should fail checking");
+    let checked = check_source(&source).expect("payload value near label limit should check");
+    let worker = &checked.processes()[1];
 
-    assert!(err
-        .to_string()
-        .contains("message label exceeds maximum length"));
+    assert_eq!(worker.message_cases()[0].label(), "Assign");
+    assert_eq!(
+        worker.message_cases()[0]
+            .payload_type()
+            .map(ToString::to_string),
+        Some("Job".to_string())
+    );
+    lower_to_artifact(&checked, &source).expect("near-limit payload should lower to artifact");
 }
 
 #[test]
@@ -817,21 +833,64 @@ proc Sink mailbox bounded(1) {
 }
 
 #[test]
-fn rejects_payload_message_without_concrete_send_case() {
-    let source = payload_source_with(
-        "send worker Ping;",
-        "fn step(state: WorkerState, Assign(job: Job))",
-    )
-    .replace(
-        "enum WorkerMsg { Assign(Job) }",
-        "enum WorkerMsg { Assign(Job), Ping }",
+fn accepts_payload_message_without_concrete_send_case() {
+    let source = r#"
+module unsent_payload_case;
+
+record MainState;
+record Job { phase: JobPhase }
+record WorkerState { job: Job }
+enum MainMsg { Start }
+enum JobPhase { Ready, Done }
+enum WorkerMsg { Assign(Job), Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Ping;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { job: Job { phase: Done } };
+    }
+
+    fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("unsent payload message should check");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        worker
+            .message_cases()
+            .iter()
+            .map(|case| case.label())
+            .collect::<Vec<_>>(),
+        ["Assign", "Ping"]
     );
-
-    let err = check_source(&source).expect_err("unsent payload message should fail");
-
-    assert!(err
-        .to_string()
-        .contains("message Assign has no concrete payload sends"));
+    assert_eq!(
+        worker.message_cases()[0]
+            .payload_type()
+            .map(ToString::to_string),
+        Some("Job".to_string())
+    );
+    assert_eq!(worker.message_cases()[1].payload_type(), None);
 }
 
 #[test]
@@ -993,7 +1052,13 @@ proc Worker mailbox bounded(1) {
             .iter()
             .map(|case| case.label())
             .collect::<Vec<_>>(),
-        ["Assign(Ready)"]
+        ["Assign"]
+    );
+    assert_eq!(
+        worker.message_cases()[0]
+            .payload_type()
+            .map(ToString::to_string),
+        Some("JobKind".to_string())
     );
 }
 
@@ -1170,7 +1235,8 @@ fn parses_and_checks_actor_ping() {
             },
             CheckedAction::Send {
                 target: checked_process_ref_id(0),
-                message: checked_message_id(0)
+                message: checked_message_id(0),
+                payload: None
             }
         ]
     );
@@ -1267,11 +1333,13 @@ fn parses_and_checks_actor_instances_with_distinct_process_refs() {
             },
             CheckedAction::Send {
                 target: checked_process_ref_id(0),
-                message: checked_message_id(0)
+                message: checked_message_id(0),
+                payload: None
             },
             CheckedAction::Send {
                 target: checked_process_ref_id(1),
-                message: checked_message_id(0)
+                message: checked_message_id(0),
+                payload: None
             }
         ]
     );
@@ -1482,7 +1550,8 @@ proc Main mailbox bounded(1) {
             },
             CheckedAction::Send {
                 target: checked_process_ref_id(0),
-                message: checked_message_id(0)
+                message: checked_message_id(0),
+                payload: None
             }
         ]
     );
@@ -1669,7 +1738,7 @@ fn rejects_message_count_above_artifact_limit_during_checking() {
 }
 
 #[test]
-fn rejects_concrete_payload_message_count_above_artifact_limit_during_checking() {
+fn accepts_payload_send_count_above_message_variant_limit_without_case_expansion() {
     let phases = (0..=MAX_MESSAGE_VARIANTS_PER_PROCESS)
         .map(|index| format!("P{index}"))
         .collect::<Vec<_>>()
@@ -1717,13 +1786,19 @@ proc Worker mailbox bounded({mailbox_bound}) {{
 }}
 "#
     );
-    let module = parse_source(&source).expect("concrete-message-count source should parse");
+    let module = parse_source(&source).expect("payload-send-count source should parse");
 
-    let err = check_module(module).expect_err("concrete message count above limit should fail");
+    let checked = check_module(module).expect("payload sends should not expand message variants");
+    let worker = &checked.processes()[1];
 
-    assert!(err.to_string().contains(&format!(
-        "process Worker concrete_message_count must be no greater than {MAX_MESSAGE_VARIANTS_PER_PROCESS}"
-    )));
+    assert_eq!(worker.message_cases().len(), 1);
+    assert_eq!(worker.message_cases()[0].label(), "Assign");
+    assert_eq!(
+        worker.message_cases()[0]
+            .payload_type()
+            .map(ToString::to_string),
+        Some("Job".to_string())
+    );
 }
 
 #[test]
@@ -2768,19 +2843,28 @@ proc Worker mailbox bounded(16) {{
 }
 
 fn payload_overflow_field_names() -> Vec<String> {
-    for field_count in 1..MAX_FIELD_VALUE_BYTES {
-        let field_names = (0..field_count)
-            .map(|index| format!("f{index}"))
-            .collect::<Vec<_>>();
-        let payload_label = payload_record_label(&field_names);
-        let message_label = format!("Assign({payload_label})");
-        if payload_label.len() <= MAX_FIELD_VALUE_BYTES
-            && message_label.len() > MAX_FIELD_VALUE_BYTES
-        {
-            return field_names;
+    let mut field_names = (0..MAX_VALUE_TEMPLATE_FIELDS)
+        .map(|index| format!("f{index}"))
+        .collect::<Vec<_>>();
+    let target_payload_len = MAX_FIELD_VALUE_BYTES - "Assign()".len() + 1;
+    let mut payload_len = payload_record_label(&field_names).len();
+
+    for field_name in &mut field_names {
+        while payload_len < target_payload_len && field_name.len() < MAX_IDENTIFIER_BYTES {
+            field_name.push('x');
+            payload_len += 1;
+        }
+        if payload_len == target_payload_len {
+            break;
         }
     }
-    panic!("test fixture should find a payload label at the wrapped message boundary");
+
+    let payload_label = payload_record_label(&field_names);
+    let message_label = format!("Assign({payload_label})");
+    assert!(payload_label.len() <= MAX_FIELD_VALUE_BYTES);
+    assert!(message_label.len() > MAX_FIELD_VALUE_BYTES);
+
+    field_names
 }
 
 fn payload_record_label(field_names: &[String]) -> String {

@@ -50,8 +50,8 @@ result of the first invalid shape.
 | `payload type ... must be a named record or enum type` | A payload variant uses an applied/generic type. | Declare a named record or enum type and use that as the payload. |
 | `step pattern payload ... has type ... expected ...` | A step payload binding annotation does not match the variant payload type. | Use the declared payload type in the signature pattern. |
 | `payload binding ... conflicts` / `process reference ... conflicts with payload binding` | A local immutable binding shadows `state`, a process, a type, a value constructor, or another local binding in the same transition. | Use distinct immutable binding names. |
-| `has no concrete payload sends` | A payload message variant has no source-visible payload send in the current runnable slice. | Add a concrete send for that payload variant or remove the unused variant. |
-| `message label exceeds maximum length` | A concrete payload message label is too large after wrapping the payload as `Variant(payload)`. | Use a smaller payload value or split the message into smaller cases. |
+| `payload has type ..., expected ...` | A runtime envelope or artifact payload template carries the wrong value type. | Match the payload value type to the target message variant. |
+| `payload ... exceeds maximum length` | A payload value label is too large for the artifact or runtime trace boundary. | Use a smaller payload value or split the payload into smaller fields/messages. |
 
 ## State Errors
 

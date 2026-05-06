@@ -1,7 +1,9 @@
 use std::fmt;
 use std::num::NonZeroU64;
 
-use mantle_artifact::{Error, MessageId, OutputId, ProcessId, Result, StateId, StepResult};
+use mantle_artifact::{
+    ArtifactPayload, Error, MessageId, OutputId, ProcessId, Result, StateId, StepResult,
+};
 
 mod jsonl;
 
@@ -63,6 +65,7 @@ pub enum RuntimeEvent {
         process: String,
         message_id: MessageId,
         message: String,
+        payload: Option<ArtifactPayload>,
         queue_depth: usize,
         sender_pid: Option<RuntimeProcessId>,
     },
@@ -72,6 +75,7 @@ pub enum RuntimeEvent {
         process: String,
         message_id: MessageId,
         message: String,
+        payload: Option<ArtifactPayload>,
         queue_depth: usize,
     },
     ProgramOutput {
@@ -97,6 +101,7 @@ pub enum RuntimeEvent {
         process: String,
         message_id: MessageId,
         message: String,
+        payload: Option<ArtifactPayload>,
         result: RuntimeStepResult,
         state_id: StateId,
         state: String,

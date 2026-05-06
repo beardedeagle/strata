@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use mantle_artifact::validate_state_value_label;
+
 use super::super::checked::{
-    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
-    CheckedProcessRefId, CheckedStepResult, CheckedTransition,
+    CheckedAction, CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess,
+    CheckedProcessId, CheckedProcessRefId, CheckedStateId, CheckedStepResult, CheckedTransition,
+    CheckedValueTemplate,
 };
 use super::super::diagnostic::{Error, Result};
 use super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
@@ -36,7 +39,7 @@ fn validate_transition(
             transition.message().as_u32()
         )));
     }
-    validate_next_state(process, transition.next_state())?;
+    validate_next_state(process, transition.message(), transition.next_state())?;
     let mut spawned_refs = BTreeSet::new();
 
     for action in transition.actions() {
@@ -85,7 +88,11 @@ fn validate_transition(
                     )));
                 }
             }
-            CheckedAction::Send { target, message } => {
+            CheckedAction::Send {
+                target,
+                message,
+                payload,
+            } => {
                 let target_process_id = process_ref_target(process, *target)?;
                 if !spawned_refs.contains(target) {
                     return Err(Error::new(format!(
@@ -104,23 +111,214 @@ fn validate_transition(
                         target_process.debug_name()
                     )));
                 }
+                validate_send_payload_shape(
+                    process,
+                    transition.message(),
+                    target_process,
+                    *message,
+                    payload.as_ref(),
+                )?;
             }
         }
     }
     Ok(())
 }
 
-fn validate_next_state(process: &CheckedProcess, next_state: CheckedNextState) -> Result<()> {
-    if let CheckedNextState::Value(state) = next_state {
-        if state.index() >= process.state_values().len() {
-            return Err(Error::new(format!(
-                "process {} next_state id {} is not a valid state value",
-                process.debug_name(),
-                state.as_u32()
-            )));
+fn validate_send_payload_shape(
+    process: &CheckedProcess,
+    current_message: CheckedMessageId,
+    target_process: &CheckedProcess,
+    target_message: CheckedMessageId,
+    payload: Option<&CheckedValueTemplate>,
+) -> Result<()> {
+    let current_payload_type = message_payload_type(process, current_message)?;
+    let target_payload_type = message_payload_type(target_process, target_message)?;
+    match (target_payload_type, payload) {
+        (None, None) => Ok(()),
+        (None, Some(_)) => Err(Error::new(format!(
+            "process {} sends payload to message id {}, which does not accept one",
+            process.debug_name(),
+            target_message.as_u32()
+        ))),
+        (Some(_), None) => Err(Error::new(format!(
+            "process {} sends message id {} without required payload",
+            process.debug_name(),
+            target_message.as_u32()
+        ))),
+        (Some(expected_type), Some(payload)) => {
+            validate_value_template_received_type(payload, current_payload_type)?;
+            if payload.result_type() != expected_type {
+                return Err(Error::new(format!(
+                    "process {} sends payload of type {}, expected {}",
+                    process.debug_name(),
+                    payload.result_type(),
+                    expected_type
+                )));
+            }
+            Ok(())
         }
     }
-    Ok(())
+}
+
+fn validate_next_state(
+    process: &CheckedProcess,
+    current_message: CheckedMessageId,
+    next_state: CheckedNextState,
+) -> Result<()> {
+    match next_state {
+        CheckedNextState::Current => Ok(()),
+        CheckedNextState::Value(state) => {
+            if state.index() >= process.state_values().len() {
+                return Err(Error::new(format!(
+                    "process {} next_state id {} is not a valid state value",
+                    process.debug_name(),
+                    state.as_u32()
+                )));
+            }
+            Ok(())
+        }
+        CheckedNextState::Template(template) => {
+            if template.result_type() != process.state_type() {
+                return Err(Error::new(format!(
+                    "process {} next_state template has type {}, expected {}",
+                    process.debug_name(),
+                    template.result_type(),
+                    process.state_type()
+                )));
+            }
+            validate_value_template_received_type(
+                &template,
+                message_payload_type(process, current_message)?,
+            )?;
+            if !checked_template_depends_on_received_payload(&template) {
+                resolve_checked_template_state(process, &template, None)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn message_payload_type(
+    process: &CheckedProcess,
+    message: CheckedMessageId,
+) -> Result<Option<&super::super::ast::TypeRef>> {
+    process
+        .message_cases()
+        .get(message.index())
+        .map(|message| message.payload_type())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} message id {} is not accepted",
+                process.debug_name(),
+                message.as_u32()
+            ))
+        })
+}
+
+fn validate_value_template_received_type(
+    template: &CheckedValueTemplate,
+    received_payload_type: Option<&super::super::ast::TypeRef>,
+) -> Result<()> {
+    match template {
+        CheckedValueTemplate::Literal(_) => Ok(()),
+        CheckedValueTemplate::ReceivedPayload { ty } => {
+            let Some(received_payload_type) = received_payload_type else {
+                return Err(Error::new(
+                    "received payload template requires a payload-bearing message",
+                ));
+            };
+            if ty != received_payload_type {
+                return Err(Error::new(format!(
+                    "received payload template has type {}, expected {}",
+                    ty, received_payload_type
+                )));
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::Record { fields, .. } => {
+            for field in fields {
+                validate_value_template_received_type(field.value(), received_payload_type)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate) -> bool {
+    match template {
+        CheckedValueTemplate::Literal(_) => false,
+        CheckedValueTemplate::ReceivedPayload { .. } => true,
+        CheckedValueTemplate::Record { fields, .. } => fields
+            .iter()
+            .any(|field| checked_template_depends_on_received_payload(field.value())),
+    }
+}
+
+fn evaluate_checked_template(
+    template: &CheckedValueTemplate,
+    received_payload: Option<&CheckedPayloadValue>,
+) -> Result<CheckedPayloadValue> {
+    match template {
+        CheckedValueTemplate::Literal(value) => Ok(value.clone()),
+        CheckedValueTemplate::ReceivedPayload { ty } => {
+            let payload = received_payload.ok_or_else(|| {
+                Error::new("received payload template requires a payload-bearing message")
+            })?;
+            if payload.ty() != ty {
+                return Err(Error::new(format!(
+                    "received payload has type {}, expected {}",
+                    payload.ty(),
+                    ty
+                )));
+            }
+            Ok(payload.clone())
+        }
+        CheckedValueTemplate::Record { ty, fields } => {
+            let mut parts = Vec::with_capacity(fields.len());
+            for field in fields {
+                let value = evaluate_checked_template(field.value(), received_payload)?;
+                parts.push(format!("{}:{}", field.name(), value.label()));
+            }
+            let label = format!("{ty}{{{}}}", parts.join(","));
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
+        }
+    }
+}
+
+fn resolve_checked_template_state(
+    process: &CheckedProcess,
+    template: &CheckedValueTemplate,
+    received_payload: Option<&CheckedPayloadValue>,
+) -> Result<CheckedStateId> {
+    let value = evaluate_checked_template(template, received_payload)?;
+    let state_index = process
+        .state_values()
+        .iter()
+        .position(|state| state == value.label())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} next_state template produced value {} not admitted by state table",
+                process.debug_name(),
+                value.label()
+            ))
+        })?;
+    CheckedStateId::from_index(state_index)
+}
+
+fn resolve_checked_next_state(
+    process: &CheckedProcess,
+    current_state: CheckedStateId,
+    next_state: CheckedNextState,
+    received_payload: Option<&CheckedPayloadValue>,
+) -> Result<CheckedStateId> {
+    match next_state {
+        CheckedNextState::Current => Ok(current_state),
+        CheckedNextState::Value(state) => Ok(state),
+        CheckedNextState::Template(template) => {
+            resolve_checked_template_state(process, &template, received_payload)
+        }
+    }
 }
 
 fn process_ref_target(
@@ -168,8 +366,21 @@ impl StaticProcessId {
 struct StaticProcessInstance {
     pid: StaticProcessId,
     process_id: CheckedProcessId,
+    state: CheckedStateId,
     status: StaticProcessStatus,
-    mailbox: VecDeque<CheckedMessageId>,
+    mailbox: VecDeque<StaticMessageEnvelope>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StaticMessageEnvelope {
+    message: CheckedMessageId,
+    payload: Option<CheckedPayloadValue>,
+}
+
+impl StaticMessageEnvelope {
+    fn new(message: CheckedMessageId, payload: Option<CheckedPayloadValue>) -> Self {
+        Self { message, payload }
+    }
 }
 
 fn bind_static_process_ref(
@@ -245,11 +456,13 @@ fn validate_static_runtime_order(
     entry_process: CheckedProcessId,
     entry_message: CheckedMessageId,
 ) -> Result<()> {
+    let entry_definition = process_by_id(processes, entry_process)?;
     let mut instances = vec![StaticProcessInstance {
         pid: StaticProcessId::FIRST,
         process_id: entry_process,
+        state: entry_definition.init_state(),
         status: StaticProcessStatus::Running,
-        mailbox: VecDeque::from([entry_message]),
+        mailbox: VecDeque::from([StaticMessageEnvelope::new(entry_message, None)]),
     }];
     let mut next_pid = StaticProcessId::FIRST.checked_next()?;
     let mut dispatches = 0usize;
@@ -263,11 +476,17 @@ fn validate_static_runtime_order(
 
         let process_id = instances[process_index].process_id;
         let process = process_by_id(processes, process_id)?;
-        let message = instances[process_index]
+        let envelope = instances[process_index]
             .mailbox
             .pop_front()
             .ok_or_else(|| Error::new("static runtime mailbox changed during dequeue"))?;
-        let transition = transition_for_message(process, message)?;
+        let transition = transition_for_message(process, envelope.message)?;
+        let final_state = resolve_checked_next_state(
+            process,
+            instances[process_index].state,
+            transition.next_state(),
+            envelope.payload.as_ref(),
+        )?;
         let mut local_process_refs = BTreeMap::new();
 
         for action in transition.actions() {
@@ -277,7 +496,7 @@ fn validate_static_runtime_order(
                     target,
                     process_ref,
                 } => {
-                    process_by_id(processes, *target)?;
+                    let target_process = process_by_id(processes, *target)?;
                     ensure_static_process_capacity(instances.len())?;
                     let spawned_pid = next_pid;
                     next_pid = next_pid.checked_next()?;
@@ -291,11 +510,16 @@ fn validate_static_runtime_order(
                     instances.push(StaticProcessInstance {
                         pid: spawned_pid,
                         process_id: *target,
+                        state: target_process.init_state(),
                         status: StaticProcessStatus::Running,
                         mailbox: VecDeque::new(),
                     });
                 }
-                CheckedAction::Send { target, message } => {
+                CheckedAction::Send {
+                    target,
+                    message,
+                    payload,
+                } => {
                     let target_pid =
                         resolve_static_process_ref(process, &local_process_refs, *target).map_err(
                             |err| Error::new(format!("process {} {err}", process.debug_name())),
@@ -334,11 +558,21 @@ fn validate_static_runtime_order(
                             target_process.mailbox_bound()
                         )));
                     }
-                    instances[target_index].mailbox.push_back(*message);
+                    let payload = match payload {
+                        Some(payload) => Some(evaluate_checked_template(
+                            payload,
+                            envelope.payload.as_ref(),
+                        )?),
+                        None => None,
+                    };
+                    instances[target_index]
+                        .mailbox
+                        .push_back(StaticMessageEnvelope::new(*message, payload));
                 }
             }
         }
 
+        instances[process_index].state = final_state;
         if transition.step_result() == CheckedStepResult::Stop {
             instances[process_index].status = StaticProcessStatus::Stopped;
         }
@@ -403,7 +637,7 @@ mod tests {
     use crate::language::ast::{Identifier, TypeRef};
     use crate::language::checked::{
         CheckedMessageCase, CheckedMessageVariantId, CheckedProcessParts, CheckedProcessRef,
-        CheckedStateId,
+        CheckedStateId, CheckedTransitionParts, CheckedValueTemplateField,
     };
 
     #[test]
@@ -437,6 +671,7 @@ mod tests {
             StaticProcessInstance {
                 pid: StaticProcessId::FIRST,
                 process_id: checked_process_id(0),
+                state: checked_state_id(0),
                 status: StaticProcessStatus::Running,
                 mailbox: VecDeque::new(),
             },
@@ -445,6 +680,7 @@ mod tests {
                     .checked_next()
                     .expect("next static pid should exist"),
                 process_id: checked_process_id(1),
+                state: checked_state_id(0),
                 status: StaticProcessStatus::Running,
                 mailbox: VecDeque::new(),
             },
@@ -467,6 +703,7 @@ mod tests {
         let instances = vec![StaticProcessInstance {
             pid: StaticProcessId::FIRST,
             process_id: checked_process_id(0),
+            state: checked_state_id(0),
             status: StaticProcessStatus::Running,
             mailbox: VecDeque::new(),
         }];
@@ -492,6 +729,160 @@ mod tests {
 
         assert!(err.to_string().contains(
             "static runtime process instance limit exceeded at 10000 process instance(s)"
+        ));
+    }
+
+    #[test]
+    fn static_validation_rejects_next_state_received_payload_template_for_unit_message() {
+        let process = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: CheckedStateId::from_index(0).expect("valid checked state id"),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Template(CheckedValueTemplate::ReceivedPayload {
+                    ty: TypeRef::Named(ident("MainState")),
+                }),
+                actions: Vec::new(),
+            })],
+        });
+
+        let err =
+            validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+                .expect_err("received payload template on unit message should fail");
+
+        assert!(err
+            .to_string()
+            .contains("received payload template requires a payload-bearing message"));
+    }
+
+    #[test]
+    fn static_validation_rejects_static_next_state_template_outside_state_table() {
+        let process = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Template(CheckedValueTemplate::Literal(
+                    CheckedPayloadValue::new(
+                        TypeRef::Named(ident("MainState")),
+                        "UnadmittedState".to_string(),
+                    ),
+                )),
+                actions: Vec::new(),
+            })],
+        });
+
+        let err =
+            validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+                .expect_err("unadmitted static template state should fail");
+
+        assert!(err.to_string().contains(
+            "process Main next_state template produced value UnadmittedState not admitted by state table"
+        ));
+    }
+
+    #[test]
+    fn static_validation_rejects_payload_template_next_state_outside_state_table() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: vec![CheckedProcessRef::new(
+                ident("worker"),
+                checked_process_id(1),
+            )],
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: vec![
+                    CheckedAction::Spawn {
+                        target: checked_process_id(1),
+                        process_ref: checked_process_ref_id(0),
+                    },
+                    CheckedAction::Send {
+                        target: checked_process_ref_id(0),
+                        message: checked_message_id(0),
+                        payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+                            TypeRef::Named(ident("Job")),
+                            "Job{phase:Ready}".to_string(),
+                        ))),
+                    },
+                ],
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: TypeRef::Named(ident("WorkerState")),
+            state_values: vec!["WorkerState{active:Job{phase:Done}}".to_string()],
+            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Assign".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                Some(TypeRef::Named(ident("Job"))),
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Template(CheckedValueTemplate::Record {
+                    ty: TypeRef::Named(ident("WorkerState")),
+                    fields: vec![CheckedValueTemplateField::new(
+                        ident("active"),
+                        CheckedValueTemplate::ReceivedPayload {
+                            ty: TypeRef::Named(ident("Job")),
+                        },
+                    )],
+                }),
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("unadmitted payload-derived template state should fail");
+
+        assert!(err.to_string().contains(
+            "process Worker next_state template produced value WorkerState{active:Job{phase:Ready}} not admitted by state table"
         ));
     }
 
@@ -528,5 +919,13 @@ mod tests {
 
     fn checked_process_ref_id(index: usize) -> CheckedProcessRefId {
         CheckedProcessRefId::from_index(index).expect("valid checked process reference id")
+    }
+
+    fn checked_state_id(index: usize) -> CheckedStateId {
+        CheckedStateId::from_index(index).expect("valid checked state id")
+    }
+
+    fn checked_message_id(index: usize) -> CheckedMessageId {
+        CheckedMessageId::from_index(index).expect("valid checked message id")
     }
 }

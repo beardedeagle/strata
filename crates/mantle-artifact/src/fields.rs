@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::artifact::{NextState, StepResult};
+use crate::artifact::StepResult;
 use crate::validation::validate_count;
 use crate::{
     Error, MessageId, OutputId, ProcessId, ProcessRefId, Result, StateId, ARTIFACT_MAGIC,
@@ -60,6 +60,10 @@ impl ArtifactFields {
             .ok_or_else(|| Error::new(format!("missing artifact field {key}")))
     }
 
+    pub(crate) fn take_optional(&mut self, key: &str) -> Option<String> {
+        self.fields.remove(key)
+    }
+
     pub(crate) fn take_bounded_usize(
         &mut self,
         key: &str,
@@ -101,19 +105,6 @@ impl ArtifactFields {
 
     pub(crate) fn take_step_result(&mut self, key: &str) -> Result<StepResult> {
         StepResult::parse(&self.take_required(key)?)
-    }
-
-    pub(crate) fn take_next_state(&mut self, prefix: &str) -> Result<NextState> {
-        let key = format!("{prefix}.next_state");
-        match self.take_required(&key)?.as_str() {
-            "current" => Ok(NextState::Current),
-            "value" => Ok(NextState::Value(
-                self.take_state_id(&format!("{prefix}.next_state_value"))?,
-            )),
-            value => Err(Error::new(format!(
-                "invalid {key} value {value:?}; expected \"current\" or \"value\""
-            ))),
-        }
     }
 
     pub(crate) fn finish(self) -> Result<()> {

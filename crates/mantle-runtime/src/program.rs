@@ -1,6 +1,7 @@
 use mantle_artifact::{
-    ArtifactAction, ArtifactProcess, ArtifactProcessRef, ArtifactTransition, Error, MantleArtifact,
-    MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
+    ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
+    ArtifactTransition, ArtifactValueTemplate, Error, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
 };
 
 #[derive(Debug, Clone)]
@@ -68,7 +69,25 @@ impl LoadedProgram {
         self.process(process_id)?
             .message_variants
             .get(message_id.index())
-            .map(String::as_str)
+            .map(|message| message.label.as_str())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "message id {} is not loaded for process id {}",
+                    message_id.as_u32(),
+                    process_id.as_u32()
+                ))
+            })
+    }
+
+    pub(crate) fn message_payload_type(
+        &self,
+        process_id: ProcessId,
+        message_id: MessageId,
+    ) -> Result<Option<&str>> {
+        self.process(process_id)?
+            .message_variants
+            .get(message_id.index())
+            .map(|message| message.payload_type.as_deref())
             .ok_or_else(|| {
                 Error::new(format!(
                     "message id {} is not loaded for process id {}",
@@ -90,7 +109,7 @@ impl LoadedProgram {
 pub(crate) struct LoadedProcess {
     pub(crate) debug_name: String,
     pub(crate) state_values: Vec<String>,
-    pub(crate) message_variants: Vec<String>,
+    pub(crate) message_variants: Vec<LoadedMessageVariant>,
     pub(crate) process_refs: Vec<LoadedProcessRef>,
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
@@ -102,7 +121,11 @@ impl LoadedProcess {
         Ok(Self {
             debug_name: process.debug_name.clone(),
             state_values: process.state_values.clone(),
-            message_variants: process.message_variants.clone(),
+            message_variants: process
+                .message_variants
+                .iter()
+                .map(LoadedMessageVariant::from_artifact)
+                .collect(),
             process_refs: process
                 .process_refs
                 .iter()
@@ -122,6 +145,21 @@ impl LoadedProcess {
                 message.as_u32()
             ))
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedMessageVariant {
+    pub(crate) label: String,
+    pub(crate) payload_type: Option<String>,
+}
+
+impl LoadedMessageVariant {
+    fn from_artifact(message: &ArtifactMessageVariant) -> Self {
+        Self {
+            label: message.label.clone(),
+            payload_type: message.payload_type.clone(),
+        }
     }
 }
 
@@ -185,7 +223,7 @@ impl LoadedTransition {
     fn from_artifact(transition: &ArtifactTransition) -> Self {
         Self {
             step_result: transition.step_result,
-            next_state: transition.next_state,
+            next_state: transition.next_state.clone(),
             actions: transition
                 .actions
                 .iter()
@@ -195,7 +233,7 @@ impl LoadedTransition {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LoadedAction {
     Emit {
         output: OutputId,
@@ -207,6 +245,7 @@ pub(crate) enum LoadedAction {
     Send {
         target: ProcessRefId,
         message: MessageId,
+        payload: Option<ArtifactValueTemplate>,
     },
 }
 
@@ -221,9 +260,14 @@ impl LoadedAction {
                 target: *target,
                 process_ref: *process_ref,
             },
-            ArtifactAction::Send { target, message } => Self::Send {
+            ArtifactAction::Send {
+                target,
+                message,
+                payload,
+            } => Self::Send {
                 target: *target,
                 message: *message,
+                payload: payload.clone(),
             },
         }
     }

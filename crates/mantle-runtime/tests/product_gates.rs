@@ -409,7 +409,7 @@ fn actor_payloads_checks_builds_and_runs_on_mantle() {
     let trace_path = root.join("target/strata/actor_payloads.observability.jsonl");
     let trace = std::fs::read_to_string(&trace_path)
         .unwrap_or_else(|err| panic!("expected trace {}: {err}", trace_path.display()));
-    assert!(trace.contains(r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign(Job{phase:Ready})""#));
+    assert!(trace.contains(r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type":"Job","payload":"Job{phase:Ready}""#));
     assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"WorkerState{job:Job{phase:Done}}","to_state_id":1,"to":"WorkerState{job:Job{phase:Ready}}""#));
-    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign(Job{phase:Ready})","result":"Stop","state_id":1,"state":"WorkerState{job:Job{phase:Ready}}""#));
+    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type":"Job","payload":"Job{phase:Ready}","result":"Stop","state_id":1,"state":"WorkerState{job:Job{phase:Ready}}""#));
 }
