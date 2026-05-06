@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use mantle_artifact::validate_state_value_label;
+use mantle_artifact::{validate_payload_value_label, validate_state_value_label};
 
 use super::super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess,
@@ -147,6 +147,7 @@ fn validate_send_payload_shape(
         ))),
         (Some(expected_type), Some(payload)) => {
             validate_value_template_received_type(payload, current_payload_type)?;
+            validate_value_template_payload_labels(payload)?;
             if payload.result_type() != expected_type {
                 return Err(Error::new(format!(
                     "process {} sends payload of type {}, expected {}",
@@ -190,6 +191,7 @@ fn validate_next_state(
                 &template,
                 message_payload_type(process, current_message)?,
             )?;
+            validate_value_template_payload_labels(&template)?;
             if !checked_template_depends_on_received_payload(&template) {
                 resolve_checked_template_state(process, &template, None)?;
             }
@@ -238,6 +240,21 @@ fn validate_value_template_received_type(
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 validate_value_template_received_type(field.value(), received_payload_type)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_value_template_payload_labels(template: &CheckedValueTemplate) -> Result<()> {
+    match template {
+        CheckedValueTemplate::Literal(value) => {
+            validate_payload_value_label(value.label()).map_err(|err| Error::new(err.to_string()))
+        }
+        CheckedValueTemplate::ReceivedPayload { .. } => Ok(()),
+        CheckedValueTemplate::Record { fields, .. } => {
+            for field in fields {
+                validate_value_template_payload_labels(field.value())?;
             }
             Ok(())
         }
@@ -803,6 +820,79 @@ mod tests {
         assert!(err.to_string().contains(
             "process Main next_state template produced value UnadmittedState not admitted by state table"
         ));
+    }
+
+    #[test]
+    fn static_validation_rejects_literal_send_payload_with_invalid_label() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: vec![CheckedProcessRef::new(
+                ident("worker"),
+                checked_process_id(1),
+            )],
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: vec![
+                    CheckedAction::Spawn {
+                        target: checked_process_id(1),
+                        process_ref: checked_process_ref_id(0),
+                    },
+                    CheckedAction::Send {
+                        target: checked_process_ref_id(0),
+                        message: checked_message_id(0),
+                        payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+                            TypeRef::Named(ident("Job")),
+                            "Job\n".to_string(),
+                        ))),
+                    },
+                ],
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: TypeRef::Named(ident("WorkerState")),
+            state_values: vec!["WorkerState".to_string()],
+            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Assign".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                Some(TypeRef::Named(ident("Job"))),
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("invalid literal payload label should fail");
+
+        assert!(err
+            .to_string()
+            .contains("payload value must be non-empty and contain no control characters"));
     }
 
     #[test]

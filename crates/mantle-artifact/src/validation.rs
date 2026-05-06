@@ -114,6 +114,10 @@ pub(crate) fn validate_value_label(field: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn validate_payload_value_label(value: &str) -> Result<()> {
+    validate_value_label("payload value", value)
+}
+
 pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
     let mut encoded_len = 0usize;
     add_encoded_bytes(&mut encoded_len, ARTIFACT_MAGIC.len() + 1)?;

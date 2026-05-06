@@ -145,7 +145,7 @@ fn validate_accepts_structured_state_value_labels() {
 }
 
 #[test]
-fn validate_accepts_structured_message_labels() {
+fn validate_accepts_payload_message_metadata() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
@@ -275,6 +275,36 @@ fn validate_state_value_label_defines_artifact_metadata_boundary() {
     assert!(err
         .to_string()
         .contains("state value exceeds maximum length"));
+}
+
+#[test]
+fn validate_payload_value_label_defines_artifact_metadata_boundary() {
+    validate_payload_value_label("Job{phase:Ready}")
+        .expect("structured payload labels should be valid artifact metadata");
+
+    for (value, expected) in [
+        (
+            "",
+            "payload value must be non-empty and contain no control characters",
+        ),
+        (
+            "Job\n",
+            "payload value must be non-empty and contain no control characters",
+        ),
+    ] {
+        let err = validate_payload_value_label(value).expect_err("invalid label should fail");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+
+    let oversized = "a".repeat(MAX_FIELD_VALUE_BYTES + 1);
+    let err = validate_payload_value_label(&oversized).expect_err("oversized label should fail");
+    assert!(err
+        .to_string()
+        .contains("payload value exceeds maximum length"));
 }
 
 #[test]
