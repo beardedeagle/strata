@@ -269,8 +269,8 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let target_process = self.program.process(process_ref.target_process)?;
         if target_process.debug_name != expected_target {
             return Err(Error::new(format!(
-                "payload type {} targets {}, expected {}",
-                payload.ty, expected_target, target_process.debug_name
+                "payload process reference metadata targets {}, expected {} for type {}",
+                target_process.debug_name, expected_target, payload.ty
             )));
         }
         Ok(())
@@ -1053,7 +1053,7 @@ mod tests {
 
         assert!(err
             .to_string()
-            .contains("payload type ProcessRef<Worker> targets Worker, expected Main"));
+            .contains("payload process reference metadata targets Main, expected Worker for type ProcessRef<Worker>"));
     }
 
     fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {
