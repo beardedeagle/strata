@@ -494,7 +494,7 @@ fn validate_process_declarations_before_message_cases(
     module: &Module,
     semantic_index: &SemanticIndex,
 ) -> Result<()> {
-    for process in &module.processes {
+    for (process_index, process) in module.processes.iter().enumerate() {
         validate_count(
             &format!("process {} mailbox_bound", process.name),
             process.mailbox_bound,
@@ -515,6 +515,10 @@ fn validate_process_declarations_before_message_cases(
             MAX_MESSAGE_VARIANTS_PER_PROCESS,
         )?;
         let _ = StateSpace::new(module, semantic_index, process)?;
+        let process_id = CheckedProcessId::from_index(process_index)?;
+        for step in &process.steps {
+            check_step_signature(module, process, process_id, semantic_index, step)?;
+        }
     }
     Ok(())
 }

@@ -47,6 +47,7 @@ result of the first invalid shape.
 | `sends message ... not accepted by ...` | The target process message enum has no such variant. | Send a declared target message variant. |
 | `message ... requires a payload` | A send omits the payload for a payload variant. | Pass one value with `send worker Variant(value);`. |
 | `message ... does not accept a payload` | A send passes a payload to a unit variant. | Remove the payload argument or send a payload variant. |
+| `payload type ... must be a named record or enum type` | A payload variant uses an applied/generic type. | Declare a named record or enum type and use that as the payload. |
 | `step pattern payload ... has type ... expected ...` | A step payload binding annotation does not match the variant payload type. | Use the declared payload type in the signature pattern. |
 | `payload binding ... conflicts` / `process reference ... conflicts with payload binding` | A local immutable binding shadows `state`, a process, a type, a value constructor, or another local binding in the same transition. | Use distinct immutable binding names. |
 | `has no concrete payload sends` | A payload message variant has no source-visible payload send in the current runnable slice. | Add a concrete send for that payload variant or remove the unused variant. |

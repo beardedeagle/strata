@@ -106,6 +106,32 @@ fn validate_record_fields(
     Ok(())
 }
 
+fn validate_message_payload_type(
+    symbols: &SymbolTable,
+    types: &BTreeMap<Symbol, TypeDecl>,
+    enum_decl: &Enum,
+    variant: &EnumVariant,
+    payload_type: &TypeRef,
+) -> Result<()> {
+    match payload_type {
+        TypeRef::Named(_) => {
+            type_decl_from_tables(symbols, types, payload_type).map_err(|_| {
+                Error::new(format!(
+                    "enum {} variant {} uses undeclared payload type {}",
+                    enum_decl.name, variant.name, payload_type
+                ))
+            })?;
+        }
+        TypeRef::Applied { .. } => {
+            return Err(Error::new(format!(
+                "enum {} variant {} payload type {} must be a named record or enum type",
+                enum_decl.name, variant.name, payload_type
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn type_decl_from_tables(
     symbols: &SymbolTable,
     types: &BTreeMap<Symbol, TypeDecl>,
@@ -195,12 +221,7 @@ impl SemanticIndex {
                     )));
                 }
                 if let Some(payload_type) = &variant.payload_type {
-                    type_decl_from_tables(&symbols, &types, payload_type).map_err(|_| {
-                        Error::new(format!(
-                            "enum {} variant {} uses undeclared payload type {}",
-                            item.name, variant.name, payload_type
-                        ))
-                    })?;
+                    validate_message_payload_type(&symbols, &types, item, variant, payload_type)?;
                 }
             }
             enum_variants.push(variants);
