@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
-    write_artifact, ArtifactAction, ArtifactProcess, ArtifactProcessRef, ArtifactTransition,
+    write_artifact, ArtifactAction, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
+    ArtifactProcessRef, ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField,
     MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
 };
@@ -260,6 +261,88 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
 }
 
 #[test]
+fn in_memory_host_delivers_payload_envelopes_and_template_state() {
+    let artifact = payload_artifact();
+    let expected_payload = ArtifactPayload {
+        ty: "Job".to_string(),
+        value: "Job{phase:Ready}".to_string(),
+    };
+    let mut host = InMemoryRuntimeHost::default();
+
+    let report = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect("payload artifact should run through in-memory host");
+
+    assert_eq!(report.emitted_outputs, ["worker assigned job"]);
+    assert!(report
+        .delivered_messages
+        .iter()
+        .any(|delivery| delivery.process == "Worker"
+            && delivery.message == "Assign(Job{phase:Ready})"));
+    assert!(report
+        .processes
+        .iter()
+        .any(|process| process.process == "Worker"
+            && process.state == "WorkerState{job:Job{phase:Ready}}"
+            && process.status == ProcessStatus::Stopped));
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::MessageAccepted {
+            process,
+            message,
+            payload: Some(payload),
+            ..
+        } if process == "Worker" && message == "Assign" && payload == &expected_payload
+    )));
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::MessageDequeued {
+            process,
+            message,
+            payload: Some(payload),
+            ..
+        } if process == "Worker" && message == "Assign" && payload == &expected_payload
+    )));
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::ProcessStepped {
+            process,
+            message,
+            payload: Some(payload),
+            state,
+            ..
+        } if process == "Worker"
+            && message == "Assign"
+            && payload == &expected_payload
+            && state == "WorkerState{job:Job{phase:Ready}}"
+    )));
+}
+
+#[test]
+fn runtime_preflights_template_state_before_process_outputs() {
+    let mut artifact = payload_artifact();
+    artifact.processes[1].state_values = vec!["WorkerState{job:Job{phase:Done}}".to_string()];
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect_err("unadmitted dynamic template state should fail");
+
+    assert!(err.to_string().contains(
+        "process Worker next_state template produced value WorkerState{job:Job{phase:Ready}} not admitted by state table"
+    ));
+    assert!(
+        host.stdout().is_empty(),
+        "worker output must not be emitted after invalid template state"
+    );
+    assert!(
+        !host.events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::ProgramOutput { process, .. } if process == "Worker"
+        )),
+        "worker program output event must not be recorded after invalid template state"
+    );
+}
+
+#[test]
 fn in_memory_host_selects_transitions_by_message_id() {
     let artifact = sequence_artifact();
     let mut host = InMemoryRuntimeHost::default();
@@ -354,7 +437,7 @@ fn in_memory_host_preserves_current_next_state() {
         state_type: "WorkerState".to_string(),
         state_values: vec!["Idle".to_string(), "Handled".to_string()],
         message_type: "WorkerMsg".to_string(),
-        message_variants: vec!["Ping".to_string()],
+        message_variants: vec![ArtifactMessageVariant::unit("Ping")],
         process_refs: Vec::new(),
         mailbox_bound: 1,
         init_state: StateId::new(1),
@@ -433,7 +516,7 @@ fn valid_artifact() -> MantleArtifact {
                 state_type: "MainState".to_string(),
                 state_values: vec!["MainState".to_string()],
                 message_type: "MainMsg".to_string(),
-                message_variants: vec!["Start".to_string()],
+                message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -452,6 +535,7 @@ fn valid_artifact() -> MantleArtifact {
                         ArtifactAction::Send {
                             target: ProcessRefId::new(0),
                             message: MessageId::new(0),
+                            payload: None,
                         },
                     ],
                 }],
@@ -461,7 +545,7 @@ fn valid_artifact() -> MantleArtifact {
                 state_type: "WorkerState".to_string(),
                 state_values: vec!["Idle".to_string(), "Handled".to_string()],
                 message_type: "WorkerMsg".to_string(),
-                message_variants: vec!["Ping".to_string()],
+                message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
@@ -479,6 +563,44 @@ fn valid_artifact() -> MantleArtifact {
     }
 }
 
+fn payload_artifact() -> MantleArtifact {
+    let mut artifact = valid_artifact();
+    artifact.module = "actor_payloads".to_string();
+    artifact.outputs = vec!["worker assigned job".to_string()];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ProcessRefId::new(0),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: "Job".to_string(),
+            value: "Job{phase:Ready}".to_string(),
+        }),
+    };
+    artifact.processes[1].state_type = "WorkerState".to_string();
+    artifact.processes[1].state_values = vec![
+        "WorkerState{job:Job{phase:Done}}".to_string(),
+        "WorkerState{job:Job{phase:Ready}}".to_string(),
+    ];
+    artifact.processes[1].message_type = "WorkerMsg".to_string();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[1].transitions[0] = ArtifactTransition {
+        message: MessageId::new(0),
+        step_result: StepResult::Stop,
+        next_state: NextState::Template(ArtifactValueTemplate::Record {
+            ty: "WorkerState".to_string(),
+            fields: vec![ArtifactValueTemplateField {
+                name: "job".to_string(),
+                value: ArtifactValueTemplate::ReceivedPayload {
+                    ty: "Job".to_string(),
+                },
+            }],
+        }),
+        actions: vec![ArtifactAction::Emit {
+            output: OutputId::new(0),
+        }],
+    };
+    artifact
+}
+
 fn looping_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
@@ -494,7 +616,7 @@ fn looping_artifact() -> MantleArtifact {
                 state_type: "MainState".to_string(),
                 state_values: vec!["MainState".to_string()],
                 message_type: "MainMsg".to_string(),
-                message_variants: vec!["Start".to_string()],
+                message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -513,6 +635,7 @@ fn looping_artifact() -> MantleArtifact {
                         ArtifactAction::Send {
                             target: ProcessRefId::new(0),
                             message: MessageId::new(0),
+                            payload: None,
                         },
                     ],
                 }],
@@ -522,7 +645,7 @@ fn looping_artifact() -> MantleArtifact {
                 state_type: "WorkerState".to_string(),
                 state_values: vec!["WorkerState".to_string()],
                 message_type: "WorkerMsg".to_string(),
-                message_variants: vec!["Ping".to_string()],
+                message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "helper".to_string(),
                     target: ProcessId::new(2),
@@ -541,6 +664,7 @@ fn looping_artifact() -> MantleArtifact {
                         ArtifactAction::Send {
                             target: ProcessRefId::new(0),
                             message: MessageId::new(0),
+                            payload: None,
                         },
                     ],
                 }],
@@ -550,7 +674,7 @@ fn looping_artifact() -> MantleArtifact {
                 state_type: "HelperState".to_string(),
                 state_values: vec!["HelperState".to_string()],
                 message_type: "HelperMsg".to_string(),
-                message_variants: vec!["Ping".to_string()],
+                message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -569,6 +693,7 @@ fn looping_artifact() -> MantleArtifact {
                         ArtifactAction::Send {
                             target: ProcessRefId::new(0),
                             message: MessageId::new(0),
+                            payload: None,
                         },
                     ],
                 }],
@@ -596,7 +721,7 @@ fn sequence_artifact() -> MantleArtifact {
                 state_type: "MainState".to_string(),
                 state_values: vec!["MainState".to_string()],
                 message_type: "MainMsg".to_string(),
-                message_variants: vec!["Start".to_string()],
+                message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -615,10 +740,12 @@ fn sequence_artifact() -> MantleArtifact {
                         ArtifactAction::Send {
                             target: ProcessRefId::new(0),
                             message: MessageId::new(0),
+                            payload: None,
                         },
                         ArtifactAction::Send {
                             target: ProcessRefId::new(0),
                             message: MessageId::new(1),
+                            payload: None,
                         },
                     ],
                 }],
@@ -632,7 +759,10 @@ fn sequence_artifact() -> MantleArtifact {
                     "Done".to_string(),
                 ],
                 message_type: "WorkerMsg".to_string(),
-                message_variants: vec!["First".to_string(), "Second".to_string()],
+                message_variants: vec![
+                    ArtifactMessageVariant::unit("First"),
+                    ArtifactMessageVariant::unit("Second"),
+                ],
                 process_refs: Vec::new(),
                 mailbox_bound: 2,
                 init_state: StateId::new(0),

@@ -29,7 +29,7 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=1
+schema_version=2
 source_language=strata
 ```
 
@@ -47,6 +47,11 @@ binds a process-reference ID to a new runtime process instance for the current
 transition, and a send action targets a process-reference ID plus a message ID.
 Reference debug names remain metadata; runtime delivery uses admitted IDs and
 runtime process instance IDs.
+
+Message variants may carry an optional payload type. Send actions may carry an
+immutable payload value template, and Mantle delivers the evaluated value in a
+runtime message envelope. Message dispatch still uses admitted typed IDs, not
+payload text or source labels.
 
 Each transition's `action_count` is bounded during decode before allocation.
 Validation also caps the aggregate action count across all transitions for a

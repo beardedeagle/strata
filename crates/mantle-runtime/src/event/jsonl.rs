@@ -57,26 +57,29 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             process,
             message_id,
             message,
+            payload,
             queue_depth,
             sender_pid,
         } => match sender_pid {
             Some(sender_pid) => format!(
-                "{{\"event\":\"message_accepted\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\",\"queue_depth\":{},\"sender_pid\":{}}}",
+                "{{\"event\":\"message_accepted\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\"{},\"queue_depth\":{},\"sender_pid\":{}}}",
                 pid.as_u64(),
                 process_id.as_u32(),
                 json_escape(process),
                 message_id.as_u32(),
                 json_escape(message),
+                payload_json(payload),
                 queue_depth,
                 sender_pid.as_u64()
             ),
             None => format!(
-                "{{\"event\":\"message_accepted\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\",\"queue_depth\":{}}}",
+                "{{\"event\":\"message_accepted\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\"{},\"queue_depth\":{}}}",
                 pid.as_u64(),
                 process_id.as_u32(),
                 json_escape(process),
                 message_id.as_u32(),
                 json_escape(message),
+                payload_json(payload),
                 queue_depth
             ),
         },
@@ -86,14 +89,16 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             process,
             message_id,
             message,
+            payload,
             queue_depth,
         } => format!(
-            "{{\"event\":\"message_dequeued\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\",\"queue_depth\":{}}}",
+            "{{\"event\":\"message_dequeued\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\"{},\"queue_depth\":{}}}",
             pid.as_u64(),
             process_id.as_u32(),
             json_escape(process),
             message_id.as_u32(),
             json_escape(message),
+            payload_json(payload),
             queue_depth
         ),
         RuntimeEvent::ProgramOutput {
@@ -136,16 +141,18 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             process,
             message_id,
             message,
+            payload,
             result,
             state_id,
             state,
         } => format!(
-            "{{\"event\":\"process_stepped\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\",\"result\":\"{}\",\"state_id\":{},\"state\":\"{}\"}}",
+            "{{\"event\":\"process_stepped\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\"{},\"result\":\"{}\",\"state_id\":{},\"state\":\"{}\"}}",
             pid.as_u64(),
             process_id.as_u32(),
             json_escape(process),
             message_id.as_u32(),
             json_escape(message),
+            payload_json(payload),
             result.as_str(),
             state_id.as_u32(),
             json_escape(state)
@@ -201,6 +208,17 @@ fn hex_digit(value: u32) -> char {
     }
 }
 
+fn payload_json(payload: &Option<mantle_artifact::ArtifactPayload>) -> String {
+    match payload {
+        Some(payload) => format!(
+            ",\"payload_type\":\"{}\",\"payload\":\"{}\"",
+            json_escape(&payload.ty),
+            json_escape(&payload.value)
+        ),
+        None => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mantle_artifact::{MessageId, OutputId, ProcessId};
@@ -212,7 +230,7 @@ mod tests {
     fn artifact_loaded_trace_includes_entry_ids() {
         let event = RuntimeEvent::ArtifactLoaded {
             format: "mantle-target-artifact".to_string(),
-            schema_version: "1".to_string(),
+            schema_version: "2".to_string(),
             source_language: "strata".to_string(),
             module: "actor_sequence".to_string(),
             entry_process_id: ProcessId::new(7),

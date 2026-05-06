@@ -141,9 +141,8 @@ fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit
 ```
 
 The payload binding is immutable and local to the transition. Mantle still
-executes typed message IDs; in this source-to-runtime slice, the concrete
-payload send lowers to a concrete message case such as
-`Assign(Job{phase:Ready})`.
+executes typed message IDs; payload values travel in runtime message envelopes
+and appear in traces as payload metadata on the stable `Assign` message label.
 
 ## Multiple Instances
 

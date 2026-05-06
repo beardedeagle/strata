@@ -66,10 +66,11 @@ pub(in crate::language) enum CheckedStepResult {
     Stop,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) enum CheckedNextState {
     Current,
     Value(CheckedStateId),
+    Template(CheckedValueTemplate),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,8 +84,53 @@ impl CheckedPayloadValue {
         Self { ty, label }
     }
 
+    pub(in crate::language) fn ty(&self) -> &TypeRef {
+        &self.ty
+    }
+
     pub(in crate::language) fn label(&self) -> &str {
         &self.label
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) enum CheckedValueTemplate {
+    Literal(CheckedPayloadValue),
+    ReceivedPayload {
+        ty: TypeRef,
+    },
+    Record {
+        ty: TypeRef,
+        fields: Vec<CheckedValueTemplateField>,
+    },
+}
+
+impl CheckedValueTemplate {
+    pub(in crate::language) fn result_type(&self) -> &TypeRef {
+        match self {
+            Self::Literal(value) => value.ty(),
+            Self::ReceivedPayload { ty } | Self::Record { ty, .. } => ty,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedValueTemplateField {
+    name: Identifier,
+    value: CheckedValueTemplate,
+}
+
+impl CheckedValueTemplateField {
+    pub(in crate::language) fn new(name: Identifier, value: CheckedValueTemplate) -> Self {
+        Self { name, value }
+    }
+
+    pub(in crate::language) fn name(&self) -> &Identifier {
+        &self.name
+    }
+
+    pub(in crate::language) fn value(&self) -> &CheckedValueTemplate {
+        &self.value
     }
 }
 
@@ -92,20 +138,20 @@ impl CheckedPayloadValue {
 pub(in crate::language) struct CheckedMessageCase {
     label: String,
     variant: CheckedMessageVariantId,
-    payload: Option<CheckedPayloadValue>,
+    payload_type: Option<TypeRef>,
 }
 
 impl CheckedMessageCase {
     pub(in crate::language) fn new(
         label: String,
         variant: CheckedMessageVariantId,
-        payload: Option<CheckedPayloadValue>,
+        payload_type: Option<TypeRef>,
     ) -> Result<Self> {
         validate_message_label(&label).map_err(|err| Error::new(err.to_string()))?;
         Ok(Self {
             label,
             variant,
-            payload,
+            payload_type,
         })
     }
 
@@ -117,8 +163,8 @@ impl CheckedMessageCase {
         self.variant
     }
 
-    pub(in crate::language) fn payload(&self) -> Option<&CheckedPayloadValue> {
-        self.payload.as_ref()
+    pub(in crate::language) fn payload_type(&self) -> Option<&TypeRef> {
+        self.payload_type.as_ref()
     }
 }
 
@@ -154,6 +200,7 @@ pub(in crate::language) enum CheckedAction {
     Send {
         target: CheckedProcessRefId,
         message: CheckedMessageId,
+        payload: Option<CheckedValueTemplate>,
     },
 }
 
@@ -184,7 +231,7 @@ impl CheckedTransition {
     }
 
     pub(in crate::language) fn next_state(&self) -> CheckedNextState {
-        self.next_state
+        self.next_state.clone()
     }
 
     pub(in crate::language) fn actions(&self) -> &[CheckedAction] {
@@ -245,10 +292,6 @@ impl CheckedProcess {
 
     pub(in crate::language) fn message_cases(&self) -> &[CheckedMessageCase] {
         &self.message_cases
-    }
-
-    pub(in crate::language) fn message_labels(&self) -> impl Iterator<Item = &str> {
-        self.message_cases.iter().map(CheckedMessageCase::label)
     }
 
     pub(in crate::language) fn process_refs(&self) -> &[CheckedProcessRef] {

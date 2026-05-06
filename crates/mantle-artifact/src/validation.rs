@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ArtifactAction, Error, MantleArtifact, NextState, Result, ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES,
-    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    ArtifactAction, ArtifactMessageVariant, ArtifactValueTemplate, Error, MantleArtifact,
+    NextState, Result, ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES,
+    MAX_IDENTIFIER_BYTES,
 };
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
@@ -20,15 +21,23 @@ pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn validate_unique_message_label_list(values: &[String]) -> Result<()> {
+pub(crate) fn validate_unique_message_variant_list(
+    values: &[ArtifactMessageVariant],
+) -> Result<()> {
     if values.is_empty() {
         return Err(Error::new("message label list must not be empty"));
     }
     let mut seen = BTreeSet::new();
     for value in values {
-        validate_message_label(value)?;
-        if !seen.insert(value.as_str()) {
-            return Err(Error::new(format!("duplicate message label {value}")));
+        validate_message_label(&value.label)?;
+        if let Some(payload_type) = &value.payload_type {
+            validate_ident_field("message payload_type", payload_type)?;
+        }
+        if !seen.insert(value.label.as_str()) {
+            return Err(Error::new(format!(
+                "duplicate message label {}",
+                value.label
+            )));
         }
     }
     Ok(())
@@ -89,6 +98,24 @@ pub(crate) fn validate_output_text(output: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+pub(crate) fn validate_value_label(field: &str, value: &str) -> Result<()> {
+    if value.len() > MAX_FIELD_VALUE_BYTES {
+        return Err(Error::new(format!(
+            "{field} exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
+        )));
+    }
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return Err(Error::new(format!(
+            "{field} must be non-empty and contain no control characters"
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_payload_value_label(value: &str) -> Result<()> {
+    validate_value_label("payload value", value)
 }
 
 pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
@@ -164,8 +191,15 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
             add_field_bytes(
                 &mut encoded_len,
                 &format!("{prefix}.message.{message_index}"),
-                message,
+                &message.label,
             )?;
+            if let Some(payload_type) = &message.payload_type {
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{prefix}.message.{message_index}.payload_type"),
+                    payload_type,
+                )?;
+            }
         }
         add_field_bytes(
             &mut encoded_len,
@@ -217,11 +251,18 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                 &format!("{transition_prefix}.next_state"),
                 transition.next_state.kind_str(),
             )?;
-            if let NextState::Value(state) = transition.next_state {
+            if let NextState::Value(state) = &transition.next_state {
                 add_field_bytes(
                     &mut encoded_len,
                     &format!("{transition_prefix}.next_state_value"),
                     &state.as_u32().to_string(),
+                )?;
+            }
+            if let NextState::Template(template) = &transition.next_state {
+                add_value_template_bytes(
+                    &mut encoded_len,
+                    &format!("{transition_prefix}.next_state_template"),
+                    template,
                 )?;
             }
             add_field_bytes(
@@ -264,7 +305,11 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                             &process_ref.as_u32().to_string(),
                         )?;
                     }
-                    ArtifactAction::Send { target, message } => {
+                    ArtifactAction::Send {
+                        target,
+                        message,
+                        payload,
+                    } => {
                         add_field_bytes(
                             &mut encoded_len,
                             &format!("{action_prefix}.kind"),
@@ -280,6 +325,22 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                             &format!("{action_prefix}.message"),
                             &message.as_u32().to_string(),
                         )?;
+                        add_field_bytes(
+                            &mut encoded_len,
+                            &format!("{action_prefix}.payload"),
+                            if payload.is_some() {
+                                "template"
+                            } else {
+                                "none"
+                            },
+                        )?;
+                        if let Some(payload) = payload {
+                            add_value_template_bytes(
+                                &mut encoded_len,
+                                &format!("{action_prefix}.payload_template"),
+                                payload,
+                            )?;
+                        }
                     }
                 }
             }
@@ -321,6 +382,39 @@ fn add_field_bytes(total: &mut usize, key: &str, value: &str) -> Result<()> {
     add_encoded_bytes(total, 1)?;
     add_encoded_bytes(total, value.len())?;
     add_encoded_bytes(total, 1)
+}
+
+fn add_value_template_bytes(
+    total: &mut usize,
+    prefix: &str,
+    template: &ArtifactValueTemplate,
+) -> Result<()> {
+    match template {
+        ArtifactValueTemplate::Literal { ty, value } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "literal")?;
+            add_field_bytes(total, &format!("{prefix}.type"), ty)?;
+            add_field_bytes(total, &format!("{prefix}.value"), value)?;
+        }
+        ArtifactValueTemplate::ReceivedPayload { ty } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "received_payload")?;
+            add_field_bytes(total, &format!("{prefix}.type"), ty)?;
+        }
+        ArtifactValueTemplate::Record { ty, fields } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "record")?;
+            add_field_bytes(total, &format!("{prefix}.type"), ty)?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.field_count"),
+                &fields.len().to_string(),
+            )?;
+            for (field_index, field) in fields.iter().enumerate() {
+                let field_prefix = format!("{prefix}.field.{field_index}");
+                add_field_bytes(total, &format!("{field_prefix}.name"), &field.name)?;
+                add_value_template_bytes(total, &format!("{field_prefix}.value"), &field.value)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn add_encoded_bytes(total: &mut usize, count: usize) -> Result<()> {

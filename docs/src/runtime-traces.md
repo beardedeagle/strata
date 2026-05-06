@@ -62,7 +62,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"1","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"2","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -94,9 +94,15 @@ Example shape:
 `message_accepted` records mailbox admission. `message_dequeued` records the
 message selected for the next transition.
 
-Payload-bearing source messages appear as concrete admitted message labels, for
-example `Assign(Job{phase:Ready})`. Runtime dispatch still uses the numeric
-`message_id`; the label is trace metadata.
+Payload-bearing messages keep the stable admitted message label and add
+`payload_type` plus `payload` fields:
+
+```json
+{"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type":"Job","payload":"Job{phase:Ready}","queue_depth":1,"sender_pid":1}
+```
+
+Runtime dispatch still uses the numeric `message_id`; labels and payload values
+are trace metadata.
 
 ## Process Stepped
 
@@ -107,7 +113,8 @@ Example shape:
 ```
 
 `result` is `Continue` or `Stop`. `state_id` and `state` are the transition
-target state.
+target state. Payload-bearing steps include the same `payload_type` and
+`payload` fields as mailbox events.
 
 ## State Updated
 

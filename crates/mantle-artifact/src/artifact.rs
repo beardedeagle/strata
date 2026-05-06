@@ -3,13 +3,15 @@ use std::collections::BTreeSet;
 use crate::fields::ArtifactFields;
 use crate::validation::{
     validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
-    validate_source_hash, validate_unique_message_label_list, validate_unique_state_value_list,
+    validate_source_hash, validate_unique_message_variant_list, validate_unique_state_value_list,
+    validate_value_label,
 };
 use crate::{
     Error, MessageId, OutputId, ProcessId, ProcessRefId, Result, StateId, ARTIFACT_FORMAT,
     ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
+    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,17 +37,19 @@ impl StepResult {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NextState {
     Current,
     Value(StateId),
+    Template(ArtifactValueTemplate),
 }
 
 impl NextState {
-    pub(crate) fn kind_str(self) -> &'static str {
+    pub(crate) fn kind_str(&self) -> &'static str {
         match self {
             Self::Current => "current",
             Self::Value(_) => "value",
+            Self::Template(_) => "template",
         }
     }
 }
@@ -97,7 +101,15 @@ impl MantleArtifact {
                 process.message_variants.len()
             ));
             for (message_index, message) in process.message_variants.iter().enumerate() {
-                encoded.push_str(&format!("{prefix}.message.{message_index}={message}\n"));
+                encoded.push_str(&format!(
+                    "{prefix}.message.{message_index}={}\n",
+                    message.label
+                ));
+                if let Some(payload_type) = &message.payload_type {
+                    encoded.push_str(&format!(
+                        "{prefix}.message.{message_index}.payload_type={payload_type}\n"
+                    ));
+                }
             }
             encoded.push_str(&format!(
                 "{prefix}.process_ref_count={}\n",
@@ -124,11 +136,18 @@ impl MantleArtifact {
                     transition.step_result.as_str(),
                     transition.next_state.kind_str()
                 ));
-                if let NextState::Value(state) = transition.next_state {
+                if let NextState::Value(state) = &transition.next_state {
                     encoded.push_str(&format!(
                         "{transition_prefix}.next_state_value={}\n",
                         state.as_u32()
                     ));
+                }
+                if let NextState::Template(template) = &transition.next_state {
+                    encode_value_template(
+                        &mut encoded,
+                        &format!("{transition_prefix}.next_state_template"),
+                        template,
+                    );
                 }
                 encoded.push_str(&format!(
                     "{transition_prefix}.action_count={}\n",
@@ -182,8 +201,11 @@ impl MantleArtifact {
             )?;
             let mut message_variants = Vec::with_capacity(message_count);
             for message_index in 0..message_count {
-                message_variants
-                    .push(fields.take_required(&format!("{prefix}.message.{message_index}"))?);
+                message_variants.push(ArtifactMessageVariant {
+                    label: fields.take_required(&format!("{prefix}.message.{message_index}"))?,
+                    payload_type: fields
+                        .take_optional(&format!("{prefix}.message.{message_index}.payload_type")),
+                });
             }
 
             let process_ref_count = fields.take_bounded_usize(
@@ -225,7 +247,7 @@ impl MantleArtifact {
                     message: fields.take_message_id(&format!("{transition_prefix}.message"))?,
                     step_result: fields
                         .take_step_result(&format!("{transition_prefix}.step_result"))?,
-                    next_state: fields.take_next_state(&transition_prefix)?,
+                    next_state: decode_next_state(&mut fields, &transition_prefix)?,
                     actions,
                 });
             }
@@ -299,6 +321,15 @@ impl MantleArtifact {
                 self.entry_process.as_u32()
             )));
         }
+        if entry_process.message_variants[self.entry_message.index()]
+            .payload_type
+            .is_some()
+        {
+            return Err(Error::new(format!(
+                "entry message id {} must not require a payload",
+                self.entry_message.as_u32()
+            )));
+        }
 
         for (process_index, process) in self.processes.iter().enumerate() {
             process.validate_references(self, ProcessId::from_index(process_index)?)?;
@@ -338,12 +369,34 @@ fn validate_unique_process_ref_list(process_refs: &[ArtifactProcessRef]) -> Resu
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactMessageVariant {
+    pub label: String,
+    pub payload_type: Option<String>,
+}
+
+impl ArtifactMessageVariant {
+    pub fn unit(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            payload_type: None,
+        }
+    }
+
+    pub fn payload(label: impl Into<String>, payload_type: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            payload_type: Some(payload_type.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactProcess {
     pub debug_name: String,
     pub state_type: String,
     pub state_values: Vec<String>,
     pub message_type: String,
-    pub message_variants: Vec<String>,
+    pub message_variants: Vec<ArtifactMessageVariant>,
     pub process_refs: Vec<ArtifactProcessRef>,
     pub mailbox_bound: usize,
     pub init_state: StateId,
@@ -381,7 +434,7 @@ impl ArtifactProcess {
             MAX_TRANSITIONS_PER_PROCESS,
         )?;
         validate_unique_state_value_list(&self.state_values)?;
-        validate_unique_message_label_list(&self.message_variants)?;
+        validate_unique_message_variant_list(&self.message_variants)?;
         validate_unique_process_ref_list(&self.process_refs)?;
         if self.init_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(
@@ -413,13 +466,33 @@ impl ArtifactProcess {
                     transition.message.as_u32()
                 )));
             }
-            if let NextState::Value(state) = transition.next_state {
-                if state.index() >= self.state_values.len() {
-                    return Err(Error::new(format!(
-                        "process {} transition next_state id {} is not a valid state value",
-                        self.debug_name,
-                        state.as_u32()
-                    )));
+            match &transition.next_state {
+                NextState::Current => {}
+                NextState::Value(state) => {
+                    if state.index() >= self.state_values.len() {
+                        return Err(Error::new(format!(
+                            "process {} transition next_state id {} is not a valid state value",
+                            self.debug_name,
+                            state.as_u32()
+                        )));
+                    }
+                }
+                NextState::Template(template) => {
+                    let received_payload_type = self
+                        .message_variants
+                        .get(transition.message.index())
+                        .and_then(|message| message.payload_type.as_deref());
+                    template.validate_for_received_payload(
+                        &format!(
+                            "process {} transition {} next_state_template",
+                            self.debug_name,
+                            transition.message.as_u32()
+                        ),
+                        Some(&self.state_type),
+                        received_payload_type,
+                        0,
+                    )?;
+                    self.validate_static_next_state_template_value(transition, template)?;
                 }
             }
             action_count = action_count
@@ -436,6 +509,30 @@ impl ArtifactProcess {
             }
         }
         Ok(())
+    }
+
+    fn validate_static_next_state_template_value(
+        &self,
+        transition: &ArtifactTransition,
+        template: &ArtifactValueTemplate,
+    ) -> Result<()> {
+        if template.depends_on_received_payload() {
+            return Ok(());
+        }
+        let value = template.evaluate(None)?;
+        if self
+            .state_values
+            .iter()
+            .any(|state_value| state_value == &value.value)
+        {
+            return Ok(());
+        }
+        Err(Error::new(format!(
+            "process {} transition {} next_state_template produced value {} not admitted by state table",
+            self.debug_name,
+            transition.message.as_u32(),
+            value.value
+        )))
     }
 
     fn validate_references(&self, artifact: &MantleArtifact, process_id: ProcessId) -> Result<()> {
@@ -512,7 +609,11 @@ impl ArtifactProcess {
                     )));
                 }
             }
-            ArtifactAction::Send { target, message } => {
+            ArtifactAction::Send {
+                target,
+                message,
+                payload,
+            } => {
                 let target_process_id = self.process_ref_target(*target)?;
                 if !spawned_refs.contains(target) {
                     return Err(Error::new(format!(
@@ -540,6 +641,42 @@ impl ArtifactProcess {
                         target_process_id.as_u32()
                     )));
                 }
+                let target_message = &target_process.message_variants[message.index()];
+                match (&target_message.payload_type, payload) {
+                    (None, None) => {}
+                    (None, Some(_)) => {
+                        return Err(Error::new(format!(
+                            "process {} sends payload to process id {} message id {}, which does not accept one",
+                            self.debug_name,
+                            target_process_id.as_u32(),
+                            message.as_u32()
+                        )));
+                    }
+                    (Some(_), None) => {
+                        return Err(Error::new(format!(
+                            "process {} sends process id {} message id {} without required payload",
+                            self.debug_name,
+                            target_process_id.as_u32(),
+                            message.as_u32()
+                        )));
+                    }
+                    (Some(payload_type), Some(payload)) => {
+                        let received_payload_type = self
+                            .message_variants
+                            .get(transition.message.index())
+                            .and_then(|message| message.payload_type.as_deref());
+                        payload.validate_for_received_payload(
+                            &format!(
+                                "process {} transition {} send payload",
+                                self.debug_name,
+                                transition.message.as_u32()
+                            ),
+                            Some(payload_type),
+                            received_payload_type,
+                            0,
+                        )?;
+                    }
+                }
             }
         }
         Ok(())
@@ -566,6 +703,150 @@ pub struct ArtifactProcessRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArtifactValueTemplate {
+    Literal {
+        ty: String,
+        value: String,
+    },
+    ReceivedPayload {
+        ty: String,
+    },
+    Record {
+        ty: String,
+        fields: Vec<ArtifactValueTemplateField>,
+    },
+}
+
+impl ArtifactValueTemplate {
+    pub fn result_type(&self) -> &str {
+        match self {
+            Self::Literal { ty, .. } | Self::ReceivedPayload { ty } | Self::Record { ty, .. } => ty,
+        }
+    }
+
+    pub fn evaluate(&self, received_payload: Option<&ArtifactPayload>) -> Result<ArtifactPayload> {
+        match self {
+            Self::Literal { ty, value } => Ok(ArtifactPayload {
+                ty: ty.clone(),
+                value: value.clone(),
+            }),
+            Self::ReceivedPayload { ty } => {
+                let payload = received_payload.ok_or_else(|| {
+                    Error::new("received payload template requires a payload-bearing message")
+                })?;
+                if payload.ty != *ty {
+                    return Err(Error::new(format!(
+                        "received payload has type {}, expected {}",
+                        payload.ty, ty
+                    )));
+                }
+                Ok(payload.clone())
+            }
+            Self::Record { ty, fields } => {
+                let mut parts = Vec::with_capacity(fields.len());
+                for field in fields {
+                    let value = field.value.evaluate(received_payload)?;
+                    parts.push(format!("{}:{}", field.name, value.value));
+                }
+                let value = format!("{ty}{{{}}}", parts.join(","));
+                validate_value_label("record template value", &value)?;
+                Ok(ArtifactPayload {
+                    ty: ty.clone(),
+                    value,
+                })
+            }
+        }
+    }
+
+    fn depends_on_received_payload(&self) -> bool {
+        match self {
+            Self::Literal { .. } => false,
+            Self::ReceivedPayload { .. } => true,
+            Self::Record { fields, .. } => fields
+                .iter()
+                .any(|field| field.value.depends_on_received_payload()),
+        }
+    }
+
+    fn validate_for_received_payload(
+        &self,
+        field: &str,
+        expected_type: Option<&str>,
+        received_payload_type: Option<&str>,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return Err(Error::new(format!(
+                "{field} exceeds maximum value template depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+            )));
+        }
+        validate_ident_field(&format!("{field}.type"), self.result_type())?;
+        if let Some(expected_type) = expected_type {
+            if self.result_type() != expected_type {
+                return Err(Error::new(format!(
+                    "{field} has type {}, expected {}",
+                    self.result_type(),
+                    expected_type
+                )));
+            }
+        }
+        match self {
+            Self::Literal { value, .. } => validate_value_label(field, value),
+            Self::ReceivedPayload { ty } => {
+                let Some(received_payload_type) = received_payload_type else {
+                    return Err(Error::new(format!(
+                        "{field} requires a payload-bearing transition message"
+                    )));
+                };
+                if ty != received_payload_type {
+                    return Err(Error::new(format!(
+                        "{field} has received payload type {ty}, expected {received_payload_type}"
+                    )));
+                }
+                Ok(())
+            }
+            Self::Record { fields, .. } => {
+                validate_count(
+                    &format!("{field}.field_count"),
+                    fields.len(),
+                    1,
+                    MAX_VALUE_TEMPLATE_FIELDS,
+                )?;
+                let mut seen = BTreeSet::new();
+                for record_field in fields {
+                    validate_ident_field(&format!("{field}.field"), &record_field.name)?;
+                    if !seen.insert(record_field.name.as_str()) {
+                        return Err(Error::new(format!(
+                            "{field} duplicates field {}",
+                            record_field.name
+                        )));
+                    }
+                    record_field.value.validate_for_received_payload(
+                        &format!("{field}.field.{}", record_field.name),
+                        None,
+                        received_payload_type,
+                        depth + 1,
+                    )?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactValueTemplateField {
+    pub name: String,
+    pub value: ArtifactValueTemplate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactPayload {
+    pub ty: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactTransition {
     pub message: MessageId,
     pub step_result: StepResult,
@@ -585,7 +866,99 @@ pub enum ArtifactAction {
     Send {
         target: ProcessRefId,
         message: MessageId,
+        payload: Option<ArtifactValueTemplate>,
     },
+}
+
+fn encode_value_template(encoded: &mut String, prefix: &str, template: &ArtifactValueTemplate) {
+    match template {
+        ArtifactValueTemplate::Literal { ty, value } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=literal\n{prefix}.type={ty}\n{prefix}.value={value}\n"
+            ));
+        }
+        ArtifactValueTemplate::ReceivedPayload { ty } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=received_payload\n{prefix}.type={ty}\n"
+            ));
+        }
+        ArtifactValueTemplate::Record { ty, fields } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=record\n{prefix}.type={ty}\n{prefix}.field_count={}\n",
+                fields.len()
+            ));
+            for (field_index, field) in fields.iter().enumerate() {
+                let field_prefix = format!("{prefix}.field.{field_index}");
+                encoded.push_str(&format!("{field_prefix}.name={}\n", field.name));
+                encode_value_template(encoded, &format!("{field_prefix}.value"), &field.value);
+            }
+        }
+    }
+}
+
+fn decode_next_state(fields: &mut ArtifactFields, prefix: &str) -> Result<NextState> {
+    let key = format!("{prefix}.next_state");
+    match fields.take_required(&key)?.as_str() {
+        "current" => Ok(NextState::Current),
+        "value" => Ok(NextState::Value(
+            fields.take_state_id(&format!("{prefix}.next_state_value"))?,
+        )),
+        "template" => Ok(NextState::Template(decode_value_template(
+            fields,
+            &format!("{prefix}.next_state_template"),
+            0,
+        )?)),
+        value => Err(Error::new(format!(
+            "invalid {key} value {value:?}; expected \"current\", \"value\", or \"template\""
+        ))),
+    }
+}
+
+fn decode_value_template(
+    fields: &mut ArtifactFields,
+    prefix: &str,
+    depth: usize,
+) -> Result<ArtifactValueTemplate> {
+    if depth > MAX_VALUE_TEMPLATE_DEPTH {
+        return Err(Error::new(format!(
+            "{prefix} exceeds maximum value template depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+        )));
+    }
+    let kind_key = format!("{prefix}.kind");
+    match fields.take_required(&kind_key)?.as_str() {
+        "literal" => Ok(ArtifactValueTemplate::Literal {
+            ty: fields.take_required(&format!("{prefix}.type"))?,
+            value: fields.take_required(&format!("{prefix}.value"))?,
+        }),
+        "received_payload" => Ok(ArtifactValueTemplate::ReceivedPayload {
+            ty: fields.take_required(&format!("{prefix}.type"))?,
+        }),
+        "record" => {
+            let ty = fields.take_required(&format!("{prefix}.type"))?;
+            let field_count = fields.take_bounded_usize(
+                &format!("{prefix}.field_count"),
+                1,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?;
+            let mut record_fields = Vec::with_capacity(field_count);
+            for field_index in 0..field_count {
+                let field_prefix = format!("{prefix}.field.{field_index}");
+                record_fields.push(ArtifactValueTemplateField {
+                    name: fields.take_required(&format!("{field_prefix}.name"))?,
+                    value: decode_value_template(
+                        fields,
+                        &format!("{field_prefix}.value"),
+                        depth + 1,
+                    )?,
+                });
+            }
+            Ok(ArtifactValueTemplate::Record {
+                ty,
+                fields: record_fields,
+            })
+        }
+        value => Err(Error::new(format!("invalid {kind_key} value {value:?}"))),
+    }
 }
 
 fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAction) {
@@ -606,12 +979,24 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
                 process_ref.as_u32()
             ));
         }
-        ArtifactAction::Send { target, message } => {
+        ArtifactAction::Send {
+            target,
+            message,
+            payload,
+        } => {
             encoded.push_str(&format!(
-                "{action_prefix}.kind=send\n{action_prefix}.target_process_ref={}\n{action_prefix}.message={}\n",
+                "{action_prefix}.kind=send\n{action_prefix}.target_process_ref={}\n{action_prefix}.message={}\n{action_prefix}.payload={}\n",
                 target.as_u32(),
-                message.as_u32()
+                message.as_u32(),
+                if payload.is_some() { "template" } else { "none" }
             ));
+            if let Some(payload) = payload {
+                encode_value_template(
+                    encoded,
+                    &format!("{action_prefix}.payload_template"),
+                    payload,
+                );
+            }
         }
     }
 }
@@ -626,10 +1011,30 @@ fn decode_action(fields: &mut ArtifactFields, action_prefix: &str) -> Result<Art
             target: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
             process_ref: fields.take_process_ref_id(&format!("{action_prefix}.process_ref"))?,
         }),
-        "send" => Ok(ArtifactAction::Send {
-            target: fields.take_process_ref_id(&format!("{action_prefix}.target_process_ref"))?,
-            message: fields.take_message_id(&format!("{action_prefix}.message"))?,
-        }),
+        "send" => {
+            let target =
+                fields.take_process_ref_id(&format!("{action_prefix}.target_process_ref"))?;
+            let message = fields.take_message_id(&format!("{action_prefix}.message"))?;
+            let payload_key = format!("{action_prefix}.payload");
+            let payload = match fields.take_required(&payload_key)?.as_str() {
+                "none" => None,
+                "template" => Some(decode_value_template(
+                    fields,
+                    &format!("{action_prefix}.payload_template"),
+                    0,
+                )?),
+                value => {
+                    return Err(Error::new(format!(
+                        "invalid {payload_key} value {value:?}; expected \"none\" or \"template\""
+                    )))
+                }
+            };
+            Ok(ArtifactAction::Send {
+                target,
+                message,
+                payload,
+            })
+        }
         _ => Err(Error::new(format!("invalid artifact action kind {kind:?}"))),
     }
 }

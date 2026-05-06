@@ -288,10 +288,9 @@ variant clauses handle their named variants. One wildcard clause may cover
 variants that do not have explicit clauses. Duplicate explicit clauses,
 duplicate wildcard clauses, missing coverage, and unreachable wildcard clauses
 are rejected. Signature patterns are compile-time dispatch only: Mantle still
-dequeues one message at a time and dispatches by typed message ID. In the
-current closed-world source-to-runtime path, each concrete source-visible
-payload send becomes a checked Mantle message case with its own typed message
-ID.
+dequeues one message at a time and dispatches by typed message ID.
+Payload-bearing variants keep one stable admitted message case, and their
+immutable values travel in runtime message envelopes.
 
 ## State Transitions
 
@@ -333,7 +332,7 @@ The buildable source slice enforces bounded sizes:
 | Output literal bytes | 16 KiB |
 | Processes | 256 |
 | State values per process | 1024 |
-| Concrete message cases per process | 1024 |
+| Message variants per process | 1024 |
 | Static process-reference bindings per process definition | 4096 |
 | Distinct output literals | 4096 |
 | Actions per process | 4096 |

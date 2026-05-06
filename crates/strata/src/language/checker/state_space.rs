@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use mantle_artifact::{validate_state_value_label, MAX_STATE_VALUES_PER_PROCESS};
 
 use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
-use super::super::checked::CheckedStateId;
+use super::super::checked::{
+    CheckedPayloadValue, CheckedStateId, CheckedValueTemplate, CheckedValueTemplateField,
+};
 use super::super::diagnostic::{Error, Result};
 use super::super::MAX_VALUE_NESTING;
 use super::symbols::SemanticIndex;
@@ -20,6 +22,11 @@ pub(super) struct ValueBinding<'a> {
     pub(super) name: &'a Identifier,
     pub(super) ty: &'a TypeRef,
     pub(super) label: &'a str,
+}
+
+pub(super) struct ValueTemplateBinding<'a> {
+    pub(super) name: &'a Identifier,
+    pub(super) ty: &'a TypeRef,
 }
 
 impl<'module> StateSpace<'module> {
@@ -122,6 +129,26 @@ pub(super) fn canonical_source_value_with_bindings(
     canonical_value(module, semantic_index, expected_type, value, bindings, 0)
 }
 
+pub(super) fn source_value_uses_binding(value: &ValueExpr, binding: &Identifier) -> bool {
+    match value {
+        ValueExpr::Identifier(name) => name == binding,
+        ValueExpr::Record(record) => record
+            .fields
+            .iter()
+            .any(|field| source_value_uses_binding(&field.value, binding)),
+    }
+}
+
+pub(super) fn checked_value_template_with_binding(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    binding: Option<&ValueTemplateBinding<'_>>,
+) -> Result<CheckedValueTemplate> {
+    checked_value_template(module, semantic_index, expected_type, value, binding, 0)
+}
+
 fn canonical_value(
     module: &Module,
     semantic_index: &SemanticIndex,
@@ -175,6 +202,114 @@ fn canonical_value(
             enum_decl.name
         )))
     }
+}
+
+fn checked_value_template(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    binding: Option<&ValueTemplateBinding<'_>>,
+    depth: usize,
+) -> Result<CheckedValueTemplate> {
+    if depth > MAX_VALUE_NESTING {
+        return Err(Error::new(format!(
+            "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+        )));
+    }
+
+    if let (Some(binding), ValueExpr::Identifier(name)) = (binding, value) {
+        if name == binding.name {
+            if semantic_index.same_type(binding.ty, expected_type) {
+                return Ok(CheckedValueTemplate::ReceivedPayload {
+                    ty: binding.ty.clone(),
+                });
+            }
+            return Err(Error::new(format!(
+                "value binding {} has type {}, expected {}",
+                binding.name, binding.ty, expected_type
+            )));
+        }
+    }
+
+    if binding.is_none_or(|binding| !source_value_uses_binding(value, binding.name)) {
+        let label = canonical_value(module, semantic_index, expected_type, value, &[], depth)?;
+        return Ok(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+            expected_type.clone(),
+            label,
+        )));
+    }
+
+    let record = semantic_index.record_decl(module, expected_type)?;
+    checked_record_template(module, semantic_index, record, value, binding, depth)
+}
+
+fn checked_record_template(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    record: &Record,
+    value: &ValueExpr,
+    binding: Option<&ValueTemplateBinding<'_>>,
+    depth: usize,
+) -> Result<CheckedValueTemplate> {
+    let ValueExpr::Record(value) = value else {
+        return Err(Error::new(format!(
+            "record type {} must be constructed with {} {{ ... }}",
+            record.name, record.name
+        )));
+    };
+    if value.fields.is_empty() {
+        return Err(Error::new(format!(
+            "fieldless record values use `{}`; braced record values must declare at least one field",
+            value.name
+        )));
+    }
+    if value.name != record.name {
+        return Err(Error::new(format!(
+            "record constructor {} does not match expected record {}",
+            value.name, record.name
+        )));
+    }
+
+    let declared_fields = record
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut provided = BTreeMap::new();
+    for field in &value.fields {
+        if provided.insert(field.name.as_str(), &field.value).is_some() {
+            return Err(Error::new(format!(
+                "record value {} duplicates field {}",
+                record.name, field.name
+            )));
+        }
+        if !declared_fields.contains(field.name.as_str()) {
+            return Err(Error::new(format!(
+                "record value {} declares unknown field {}",
+                record.name, field.name
+            )));
+        }
+    }
+
+    let mut fields = Vec::with_capacity(record.fields.len());
+    for field in &record.fields {
+        let Some(value) = provided.get(field.name.as_str()) else {
+            return Err(Error::new(format!(
+                "record value {} is missing field {}",
+                record.name, field.name
+            )));
+        };
+        fields.push(CheckedValueTemplateField::new(
+            field.name.clone(),
+            checked_value_template(module, semantic_index, &field.ty, value, binding, depth + 1)?,
+        ));
+    }
+
+    Ok(CheckedValueTemplate::Record {
+        ty: TypeRef::Named(record.name.clone()),
+        fields,
+    })
 }
 
 fn canonical_record_value(

@@ -17,12 +17,15 @@ use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
     CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef,
     CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedTransitionParts,
+    CheckedTransition, CheckedTransitionParts, CheckedValueTemplate,
 };
 use super::diagnostic::{Error, Result};
 use super::{PROCESS_REF_TYPE, PROC_RESULT_TYPE};
 use outputs::OutputPool;
-use state_space::{canonical_source_value_with_bindings, StateSpace, ValueBinding};
+use state_space::{
+    canonical_source_value_with_bindings, checked_value_template_with_binding,
+    source_value_uses_binding, StateSpace, ValueBinding, ValueTemplateBinding,
+};
 use static_validation::validate_action_references;
 use symbols::SemanticIndex;
 
@@ -46,6 +49,7 @@ struct ProcessCheckContext<'a> {
 struct StepCheckContext<'a> {
     module: &'a Module,
     process: &'a Process,
+    process_id: CheckedProcessId,
     semantic_index: &'a SemanticIndex,
     process_ref_index: &'a BTreeMap<Identifier, ProcessRefBinding>,
     message_cases: &'a MessageCaseTable,
@@ -68,6 +72,7 @@ struct StepBodyClause<'a> {
 #[derive(Debug, Clone)]
 struct StepClause<'a> {
     step: &'a Function,
+    variant: CheckedMessageVariantId,
     message: CheckedMessageId,
     payload_binding: Option<StepPayloadBinding>,
     body: &'a FunctionBlock,
@@ -92,19 +97,38 @@ struct StepPayloadParam {
 struct StepPayloadBinding {
     name: Identifier,
     ty: TypeRef,
-    value: CheckedPayloadValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiscoveredMessageCase {
+    variant: CheckedMessageVariantId,
+    payload: Option<CheckedPayloadValue>,
+}
+
+impl DiscoveredMessageCase {
+    fn new(variant: CheckedMessageVariantId, payload: Option<CheckedPayloadValue>) -> Self {
+        Self { variant, payload }
+    }
+
+    fn variant(&self) -> CheckedMessageVariantId {
+        self.variant
+    }
+
+    fn payload(&self) -> Option<&CheckedPayloadValue> {
+        self.payload.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct MessageCaseKey {
     process: CheckedProcessId,
     variant: CheckedMessageVariantId,
-    payload: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 struct MessageCaseTable {
     cases_by_process: Vec<Vec<CheckedMessageCase>>,
+    payloads_by_process: Vec<Vec<Vec<CheckedPayloadValue>>>,
     ids_by_key: BTreeMap<MessageCaseKey, CheckedMessageId>,
 }
 
@@ -224,37 +248,39 @@ impl MessageCaseTable {
                 .ok_or_else(|| Error::new("message case discovery iteration count overflowed"))?;
             if iteration_count > max_iterations {
                 return Err(Error::new(
-                    "message case discovery did not converge within the concrete message limit",
+                    "message case discovery did not converge within the message variant limit",
                 ));
             }
         }
 
         let mut cases_by_process = Vec::with_capacity(builders.len());
+        let mut payloads_by_process = Vec::with_capacity(builders.len());
         let mut ids_by_key = BTreeMap::new();
         for builder in builders {
             let process_id = builder.process_id;
-            let cases = builder.into_cases()?;
+            let cases = builder.logical_cases()?;
             for (message_index, case) in cases.iter().enumerate() {
                 let key = MessageCaseKey {
                     process: process_id,
                     variant: case.variant(),
-                    payload: case.payload().map(|payload| payload.label().to_string()),
                 };
                 if ids_by_key
                     .insert(key, CheckedMessageId::from_index(message_index)?)
                     .is_some()
                 {
                     return Err(Error::new(format!(
-                        "process id {} declares duplicate concrete message case",
+                        "process id {} declares duplicate message case",
                         process_id.as_u32()
                     )));
                 }
             }
+            payloads_by_process.push(builder.payload_domains()?);
             cases_by_process.push(cases);
         }
 
         Ok(Self {
             cases_by_process,
+            payloads_by_process,
             ids_by_key,
         })
     }
@@ -270,20 +296,33 @@ impl MessageCaseTable {
         &self,
         process: CheckedProcessId,
         variant: CheckedMessageVariantId,
-        payload: Option<&str>,
     ) -> Result<CheckedMessageId> {
-        let key = MessageCaseKey {
-            process,
-            variant,
-            payload: payload.map(str::to_string),
-        };
+        let key = MessageCaseKey { process, variant };
         self.ids_by_key.get(&key).copied().ok_or_else(|| {
             Error::new(format!(
-                "process id {} has no concrete message case for message id {}",
+                "process id {} has no message case for message id {}",
                 process.as_u32(),
                 variant.as_u32()
             ))
         })
+    }
+
+    fn payload_values(
+        &self,
+        process: CheckedProcessId,
+        variant: CheckedMessageVariantId,
+    ) -> Result<&[CheckedPayloadValue]> {
+        self.payloads_by_process
+            .get(process.index())
+            .and_then(|process_payloads| process_payloads.get(variant.index()))
+            .map(Vec::as_slice)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process id {} has no payload domain for message id {}",
+                    process.as_u32(),
+                    variant.as_u32()
+                ))
+            })
     }
 }
 
@@ -369,7 +408,7 @@ impl<'a> MessageCaseBuilder<'a> {
         true
     }
 
-    fn current_cases(&self) -> Result<Vec<CheckedMessageCase>> {
+    fn current_cases(&self) -> Result<Vec<DiscoveredMessageCase>> {
         let msg_enum = self
             .semantic_index
             .enum_decl(self.module, &self.process.msg_type)?;
@@ -379,54 +418,52 @@ impl<'a> MessageCaseBuilder<'a> {
             if variant.payload_type.is_some() {
                 if let Some(payloads) = self.payload_cases.get(&variant_id) {
                     for payload in payloads.values() {
-                        cases.push(CheckedMessageCase::new(
-                            format!("{}({})", variant.name, payload.label()),
+                        cases.push(DiscoveredMessageCase::new(
                             variant_id,
                             Some(payload.clone()),
-                        )?);
+                        ));
                     }
                 }
             } else {
-                cases.push(CheckedMessageCase::new(
-                    variant.name.to_string(),
-                    variant_id,
-                    None,
-                )?);
+                cases.push(DiscoveredMessageCase::new(variant_id, None));
             }
         }
         Ok(cases)
     }
 
-    fn into_cases(self) -> Result<Vec<CheckedMessageCase>> {
+    fn logical_cases(&self) -> Result<Vec<CheckedMessageCase>> {
         let msg_enum = self
             .semantic_index
             .enum_decl(self.module, &self.process.msg_type)?;
+        msg_enum
+            .variants
+            .iter()
+            .enumerate()
+            .map(|(variant_index, variant)| {
+                CheckedMessageCase::new(
+                    variant.name.to_string(),
+                    CheckedMessageVariantId::from_index(variant_index)?,
+                    variant.payload_type.clone(),
+                )
+            })
+            .collect()
+    }
+
+    fn payload_domains(&self) -> Result<Vec<Vec<CheckedPayloadValue>>> {
+        let msg_enum = self
+            .semantic_index
+            .enum_decl(self.module, &self.process.msg_type)?;
+        let mut payloads_by_variant = vec![Vec::new(); msg_enum.variants.len()];
         for (variant_index, variant) in msg_enum.variants.iter().enumerate() {
             if variant.payload_type.is_none() {
                 continue;
             }
             let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
-            let Some(payloads) = self.payload_cases.get(&variant_id) else {
-                return Err(Error::new(format!(
-                    "process {} message {} has no concrete payload sends in this source slice",
-                    self.process.name, variant.name
-                )));
-            };
-            if payloads.is_empty() {
-                return Err(Error::new(format!(
-                    "process {} message {} has no concrete payload sends in this source slice",
-                    self.process.name, variant.name
-                )));
+            if let Some(payloads) = self.payload_cases.get(&variant_id) {
+                payloads_by_variant[variant_index] = payloads.values().cloned().collect();
             }
         }
-        let cases = self.current_cases()?;
-        if cases.is_empty() {
-            return Err(Error::new(format!(
-                "process {} has no concrete message cases in this source slice",
-                self.process.name
-            )));
-        }
-        Ok(cases)
+        Ok(payloads_by_variant)
     }
 }
 
@@ -553,7 +590,7 @@ fn check_process(
         MAX_MESSAGE_VARIANTS_PER_PROCESS,
     )?;
     validate_count(
-        &format!("process {} concrete_message_count", process.name),
+        &format!("process {} message_case_count", process.name),
         message_cases.cases_for(process_id)?.len(),
         1,
         MAX_MESSAGE_VARIANTS_PER_PROCESS,
@@ -648,6 +685,7 @@ fn check_step(
     let step_context = StepCheckContext {
         module: context.module,
         process: context.process,
+        process_id: context.process_id,
         semantic_index: context.semantic_index,
         process_ref_index: &process_ref_index,
         message_cases: context.message_cases,
@@ -659,6 +697,7 @@ fn check_step(
             &step_context,
             state_space,
             outputs,
+            clause.variant,
             clause.message,
             clause.payload_binding.as_ref(),
             clause.body,
@@ -740,8 +779,8 @@ fn check_step_clauses<'a>(
         )));
     }
 
-    let concrete_cases = message_cases.cases_for(process_id)?;
-    let mut clauses = Vec::with_capacity(concrete_cases.len());
+    let message_cases_for_process = message_cases.cases_for(process_id)?;
+    let mut clauses = Vec::with_capacity(message_cases_for_process.len());
     for (index, message_variant) in msg_enum.variants.iter().enumerate() {
         let Some(clause) = explicit_clauses[index]
             .as_ref()
@@ -753,30 +792,30 @@ fn check_step_clauses<'a>(
             )));
         };
         let variant_id = CheckedMessageVariantId::from_index(index)?;
-        for case in concrete_cases
+        let case = message_cases_for_process
             .iter()
-            .filter(|case| case.variant() == variant_id)
-        {
-            let payload_binding = match (&clause.payload_param, case.payload()) {
-                (Some(param), Some(value)) => Some(StepPayloadBinding {
-                    name: param.name.clone(),
-                    ty: param.ty.clone(),
-                    value: value.clone(),
-                }),
-                _ => None,
-            };
-            let message = message_cases.message_id(
-                process_id,
-                variant_id,
-                case.payload().map(CheckedPayloadValue::label),
-            )?;
-            clauses.push(StepClause {
-                step: clause.step,
-                message,
-                payload_binding,
-                body: clause.body,
-            });
-        }
+            .find(|case| case.variant() == variant_id)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} has no checked message case for message {}",
+                    process.name, message_variant.name
+                ))
+            })?;
+        let payload_binding = match (&clause.payload_param, case.payload_type()) {
+            (Some(param), Some(_)) => Some(StepPayloadBinding {
+                name: param.name.clone(),
+                ty: param.ty.clone(),
+            }),
+            _ => None,
+        };
+        let message = message_cases.message_id(process_id, variant_id)?;
+        clauses.push(StepClause {
+            step: clause.step,
+            variant: variant_id,
+            message,
+            payload_binding,
+            body: clause.body,
+        });
     }
 
     Ok(clauses)
@@ -806,10 +845,10 @@ fn collect_explicit_step_variants(
 }
 
 fn matching_message_cases<'a>(
-    cases: &'a [CheckedMessageCase],
+    cases: &'a [DiscoveredMessageCase],
     pattern: &StepSignaturePattern,
     explicit_variants: &BTreeSet<CheckedMessageVariantId>,
-) -> Vec<&'a CheckedMessageCase> {
+) -> Vec<&'a DiscoveredMessageCase> {
     cases
         .iter()
         .filter(|case| match pattern {
@@ -821,7 +860,7 @@ fn matching_message_cases<'a>(
 
 fn payload_value_bindings<'a>(
     pattern: &'a StepSignaturePattern,
-    case: &'a CheckedMessageCase,
+    case: &'a DiscoveredMessageCase,
 ) -> Vec<ValueBinding<'a>> {
     match (pattern, case.payload()) {
         (
@@ -1136,19 +1175,15 @@ fn check_step_transition(
     context: &StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
+    variant: CheckedMessageVariantId,
     message: CheckedMessageId,
     payload_binding: Option<&StepPayloadBinding>,
     block: &FunctionBlock,
 ) -> Result<CheckedTransition> {
-    let payload_bindings = if let Some(binding) = payload_binding {
-        vec![ValueBinding {
-            name: &binding.name,
-            ty: &binding.ty,
-            label: binding.value.label(),
-        }]
-    } else {
-        Vec::new()
-    };
+    let payload_template_binding = payload_binding.map(|binding| ValueTemplateBinding {
+        name: &binding.name,
+        ty: &binding.ty,
+    });
     let mut actions = Vec::with_capacity(block.statements.len());
     for statement in &block.statements {
         match statement {
@@ -1185,11 +1220,12 @@ fn check_step_transition(
                     binding.target,
                     message,
                     payload.as_ref(),
-                    &payload_bindings,
+                    payload_template_binding.as_ref(),
                 )?;
                 actions.push(CheckedAction::Send {
                     target: binding.id,
-                    message: message_id,
+                    message: message_id.message,
+                    payload: message_id.payload,
                 });
             }
         }
@@ -1209,12 +1245,30 @@ fn check_step_transition(
     let next_state = if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
     {
         CheckedNextState::Current
+    } else if let Some(binding) = payload_binding {
+        if source_value_uses_binding(state_arg, &binding.name) {
+            let template = checked_value_template_with_binding(
+                context.module,
+                context.semantic_index,
+                &context.process.state_type,
+                state_arg,
+                payload_template_binding.as_ref(),
+            )?;
+            populate_payload_template_state_values(
+                context,
+                state_space,
+                variant,
+                state_arg,
+                binding,
+            )?;
+            CheckedNextState::Template(template)
+        } else {
+            CheckedNextState::Value(
+                state_space.resolve_state_value(context.semantic_index, state_arg)?,
+            )
+        }
     } else {
-        CheckedNextState::Value(state_space.resolve_state_value_with_bindings(
-            context.semantic_index,
-            state_arg,
-            &payload_bindings,
-        )?)
+        CheckedNextState::Value(state_space.resolve_state_value(context.semantic_index, state_arg)?)
     };
 
     Ok(CheckedTransition::new(CheckedTransitionParts {
@@ -1225,13 +1279,18 @@ fn check_step_transition(
     }))
 }
 
+struct CheckedSendMessage {
+    message: CheckedMessageId,
+    payload: Option<CheckedValueTemplate>,
+}
+
 fn resolve_send_message_case(
     context: &StepCheckContext<'_>,
     target_process: CheckedProcessId,
     message: &Identifier,
     payload: Option<&ValueExpr>,
-    bindings: &[ValueBinding<'_>],
-) -> Result<CheckedMessageId> {
+    binding: Option<&ValueTemplateBinding<'_>>,
+) -> Result<CheckedSendMessage> {
     let variant = context.semantic_index.message_id_for_process(
         context.module,
         context.process.name.as_str(),
@@ -1242,7 +1301,7 @@ fn resolve_send_message_case(
         context
             .semantic_index
             .message_variant(context.module, target_process, variant)?;
-    let payload_label = match (&variant_decl.payload_type, payload) {
+    let payload = match (&variant_decl.payload_type, payload) {
         (None, None) => None,
         (None, Some(_)) => {
             return Err(Error::new(format!(
@@ -1256,17 +1315,42 @@ fn resolve_send_message_case(
                 context.process.name, variant_decl.name
             )))
         }
-        (Some(payload_type), Some(payload)) => Some(canonical_source_value_with_bindings(
+        (Some(payload_type), Some(payload)) => Some(checked_value_template_with_binding(
             context.module,
             context.semantic_index,
             payload_type,
             payload,
-            bindings,
+            binding,
         )?),
     };
-    context
+    Ok(CheckedSendMessage {
+        message: context.message_cases.message_id(target_process, variant)?,
+        payload,
+    })
+}
+
+fn populate_payload_template_state_values(
+    context: &StepCheckContext<'_>,
+    state_space: &mut StateSpace<'_>,
+    variant: CheckedMessageVariantId,
+    state_arg: &ValueExpr,
+    binding: &StepPayloadBinding,
+) -> Result<()> {
+    for payload in context
         .message_cases
-        .message_id(target_process, variant, payload_label.as_deref())
+        .payload_values(context.process_id, variant)?
+    {
+        state_space.resolve_state_value_with_bindings(
+            context.semantic_index,
+            state_arg,
+            &[ValueBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+                label: payload.label(),
+            }],
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_process_ref_name(
