@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ArtifactAction, ArtifactMessageVariant, ArtifactValueTemplate, Error, MantleArtifact,
-    NextState, Result, ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES,
-    MAX_IDENTIFIER_BYTES,
+    ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactValueTemplate, Error,
+    MantleArtifact, NextState, Result, ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES,
+    MAX_IDENTIFIER_BYTES, MAX_TYPE_REF_BYTES,
 };
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
@@ -21,6 +21,36 @@ pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
     }
 }
 
+pub(crate) fn validate_type_field(field: &str, value: &str) -> Result<()> {
+    if value.len() > MAX_TYPE_REF_BYTES {
+        return Err(Error::new(format!(
+            "artifact field {field} exceeds maximum type length of {MAX_TYPE_REF_BYTES} bytes"
+        )));
+    }
+    if value.len() > MAX_IDENTIFIER_BYTES && is_artifact_ident(value) {
+        return Err(Error::new(format!(
+            "artifact field {field} exceeds maximum type identifier length of {MAX_IDENTIFIER_BYTES} bytes"
+        )));
+    }
+    if is_artifact_type_ref(value) {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "artifact field {field} must be a type reference, got {value:?}"
+        )))
+    }
+}
+
+pub(crate) fn process_ref_type_target(value: &str) -> Option<&str> {
+    raw_process_ref_type_target(value).filter(|target| is_bounded_artifact_ident(target))
+}
+
+fn raw_process_ref_type_target(value: &str) -> Option<&str> {
+    value
+        .strip_prefix("ProcessRef<")
+        .and_then(|value| value.strip_suffix('>'))
+}
+
 pub(crate) fn validate_unique_message_variant_list(
     values: &[ArtifactMessageVariant],
 ) -> Result<()> {
@@ -31,7 +61,7 @@ pub(crate) fn validate_unique_message_variant_list(
     for value in values {
         validate_message_label(&value.label)?;
         if let Some(payload_type) = &value.payload_type {
-            validate_ident_field("message payload_type", payload_type)?;
+            validate_type_field("message payload_type", payload_type)?;
         }
         if !seen.insert(value.label.as_str()) {
             return Err(Error::new(format!(
@@ -315,11 +345,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                             &format!("{action_prefix}.kind"),
                             "send",
                         )?;
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.target_process_ref"),
-                            &target.as_u32().to_string(),
-                        )?;
+                        add_send_target_bytes(&mut encoded_len, &action_prefix, target)?;
                         add_field_bytes(
                             &mut encoded_len,
                             &format!("{action_prefix}.message"),
@@ -399,6 +425,24 @@ fn add_value_template_bytes(
             add_field_bytes(total, &format!("{prefix}.kind"), "received_payload")?;
             add_field_bytes(total, &format!("{prefix}.type"), ty)?;
         }
+        ArtifactValueTemplate::ProcessRef {
+            ty,
+            target_process,
+            process_ref,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "process_ref")?;
+            add_field_bytes(total, &format!("{prefix}.type"), ty)?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.target_process"),
+                &target_process.as_u32().to_string(),
+            )?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.process_ref"),
+                &process_ref.as_u32().to_string(),
+            )?;
+        }
         ArtifactValueTemplate::Record { ty, fields } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "record")?;
             add_field_bytes(total, &format!("{prefix}.type"), ty)?;
@@ -412,6 +456,37 @@ fn add_value_template_bytes(
                 add_field_bytes(total, &format!("{field_prefix}.name"), &field.name)?;
                 add_value_template_bytes(total, &format!("{field_prefix}.value"), &field.value)?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn add_send_target_bytes(
+    total: &mut usize,
+    action_prefix: &str,
+    target: &ArtifactSendTarget,
+) -> Result<()> {
+    match target {
+        ArtifactSendTarget::ProcessRef(process_ref) => {
+            add_field_bytes(total, &format!("{action_prefix}.target"), "process_ref")?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.target_process_ref"),
+                &process_ref.as_u32().to_string(),
+            )?;
+        }
+        ArtifactSendTarget::ReceivedPayload { ty, target_process } => {
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.target"),
+                "received_payload",
+            )?;
+            add_field_bytes(total, &format!("{action_prefix}.target_payload_type"), ty)?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.target_process"),
+                &target_process.as_u32().to_string(),
+            )?;
         }
     }
     Ok(())
@@ -438,4 +513,15 @@ fn is_artifact_ident(value: &str) -> bool {
         return false;
     }
     chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn is_bounded_artifact_ident(value: &str) -> bool {
+    value.len() <= MAX_IDENTIFIER_BYTES && is_artifact_ident(value)
+}
+
+fn is_artifact_type_ref(value: &str) -> bool {
+    if is_bounded_artifact_ident(value) {
+        return true;
+    }
+    process_ref_type_target(value).is_some()
 }

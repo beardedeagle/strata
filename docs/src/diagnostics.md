@@ -47,11 +47,12 @@ result of the first invalid shape.
 | `sends message ... not accepted by ...` | The target process message enum has no such variant. | Send a declared target message variant. |
 | `message ... requires a payload` | A send omits the payload for a payload variant. | Pass one value with `send worker Variant(value);`. |
 | `message ... does not accept a payload` | A send passes a payload to a unit variant. | Remove the payload argument or send a payload variant. |
-| `payload type ... must be a named record or enum type` | A payload variant uses an applied/generic type. | Declare a named record or enum type and use that as the payload. |
+| `payload type ... must be a named record, enum, or process reference type` | A payload variant uses an unsupported applied/generic type. | Declare a named record or enum type, or use `ProcessRef<TargetProcess>`. |
 | `step pattern payload ... has type ... expected ...` | A step payload binding annotation does not match the variant payload type. | Use the declared payload type in the signature pattern. |
 | `payload binding ... conflicts` / `process reference ... conflicts with payload binding` | A local immutable binding shadows `state`, a process, a type, a value constructor, or another local binding in the same transition. | Use distinct immutable binding names. |
 | `payload has type ..., expected ...` | A runtime envelope or artifact payload template carries the wrong value type. | Match the payload value type to the target message variant. |
 | `payload ... exceeds maximum length` | A payload value label is too large for the artifact or runtime trace boundary. | Use a smaller payload value or split the payload into smaller fields/messages. |
+| `payload ... is not a bound process reference` | A `ProcessRef<T>` payload send uses a value that is not a process reference. | Pass an immutable process reference binding or received `ProcessRef<T>` payload. |
 
 ## State Errors
 
@@ -69,6 +70,7 @@ result of the first invalid shape.
 | `spawns itself` | A process tries to spawn itself. | Spawn another declared process. |
 | `conflicts with a process declaration` | A process reference uses the same name as a process definition. | Use a distinct reference name. |
 | `undeclared process reference` | A send references a name that is never spawned in the process. | Add a matching `let worker: ProcessRef<Worker> = spawn Worker;` statement. |
+| `send target ... is not a process reference payload` | A send target names a payload binding whose type is not `ProcessRef<T>`. | Send through a process reference binding or a received `ProcessRef<T>` payload. |
 | `unbound process reference` | A transition sends through a reference before it is bound. | Spawn the reference before sending through it. |
 | `duplicates process reference id` | A transition binds the same reference twice. | Use two distinct references or bind once. |
 | `mailbox would exceed bound` | A send would overflow the target mailbox. | Increase the mailbox bound or send fewer messages before the target runs. |

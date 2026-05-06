@@ -1,0 +1,60 @@
+module actor_reply;
+
+record MainState;
+record WorkerState;
+record SinkState;
+
+enum MainMsg {
+    Start,
+}
+enum WorkerMsg {
+    Work(ProcessRef<Sink>),
+}
+enum SinkMsg {
+    Done,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Work(sink);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [emit, send] ~ [] @det {
+        emit "worker forwarded done";
+        send reply_to Done;
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received done";
+        return Stop(state);
+    }
+}

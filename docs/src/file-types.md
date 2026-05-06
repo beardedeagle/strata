@@ -29,7 +29,7 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=2
+schema_version=3
 source_language=strata
 ```
 
@@ -44,14 +44,15 @@ transition table by typed message ID.
 
 Process references are encoded as per-process reference tables. A spawn action
 binds a process-reference ID to a new runtime process instance for the current
-transition, and a send action targets a process-reference ID plus a message ID.
-Reference debug names remain metadata; runtime delivery uses admitted IDs and
-runtime process instance IDs.
+transition. A send action targets either a process-reference ID or a received
+typed process-reference payload plus a message ID. Reference debug names remain
+metadata; runtime delivery uses admitted IDs and runtime process instance IDs.
 
 Message variants may carry an optional payload type. Send actions may carry an
 immutable payload value template, and Mantle delivers the evaluated value in a
-runtime message envelope. Message dispatch still uses admitted typed IDs, not
-payload text or source labels.
+runtime message envelope. Process-reference payloads carry the admitted target
+process ID and runtime process ID. Message dispatch still uses admitted typed
+IDs, not payload text or source labels.
 
 Each transition's `action_count` is bounded during decode before allocation.
 Validation also caps the aggregate action count across all transitions for a

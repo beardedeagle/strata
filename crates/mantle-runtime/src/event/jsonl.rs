@@ -210,18 +210,28 @@ fn hex_digit(value: u32) -> char {
 
 fn payload_json(payload: &Option<mantle_artifact::ArtifactPayload>) -> String {
     match payload {
-        Some(payload) => format!(
-            ",\"payload_type\":\"{}\",\"payload\":\"{}\"",
-            json_escape(&payload.ty),
-            json_escape(&payload.value)
-        ),
+        Some(payload) => {
+            let mut json = format!(
+                ",\"payload_type\":\"{}\",\"payload\":\"{}\"",
+                json_escape(&payload.ty),
+                json_escape(&payload.value)
+            );
+            if let Some(process_ref) = payload.process_ref {
+                json.push_str(&format!(
+                    ",\"payload_process_id\":{},\"payload_pid\":{}",
+                    process_ref.target_process.as_u32(),
+                    process_ref.pid
+                ));
+            }
+            json
+        }
         None => String::new(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use mantle_artifact::{MessageId, OutputId, ProcessId};
+    use mantle_artifact::{MessageId, OutputId, ProcessId, ARTIFACT_SCHEMA_VERSION};
 
     use super::*;
     use crate::{RuntimeEvent, RuntimeOutputStream, RuntimeProcessId};
@@ -230,7 +240,7 @@ mod tests {
     fn artifact_loaded_trace_includes_entry_ids() {
         let event = RuntimeEvent::ArtifactLoaded {
             format: "mantle-target-artifact".to_string(),
-            schema_version: "2".to_string(),
+            schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
             source_language: "strata".to_string(),
             module: "actor_sequence".to_string(),
             entry_process_id: ProcessId::new(7),

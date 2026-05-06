@@ -149,7 +149,7 @@ fn validate_accepts_payload_message_metadata() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
-        target: ProcessRefId::new(0),
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: "Job".to_string(),
@@ -170,6 +170,70 @@ fn validate_accepts_payload_message_metadata() {
 }
 
 #[test]
+fn validate_accepts_process_ref_type_at_boundary() {
+    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES - 1));
+    let value = format!("ProcessRef<{target}>");
+
+    assert_eq!(target.len(), MAX_IDENTIFIER_BYTES);
+    assert_eq!(value.len(), MAX_TYPE_REF_BYTES);
+
+    super::validation::validate_type_field("message payload_type", &value)
+        .expect("bounded process reference type should validate");
+    assert_eq!(
+        super::validation::process_ref_type_target(&value),
+        Some(target.as_str())
+    );
+}
+
+#[test]
+fn validate_rejects_named_type_above_identifier_limit() {
+    let oversized = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
+
+    assert_eq!(oversized.len(), MAX_IDENTIFIER_BYTES + 1);
+
+    let err = super::validation::validate_type_field("message payload_type", &oversized)
+        .expect_err("oversized named type should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "artifact field message payload_type exceeds maximum type identifier length of {MAX_IDENTIFIER_BYTES} bytes"
+    )));
+}
+
+#[test]
+fn validate_rejects_process_ref_target_above_identifier_limit() {
+    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
+    let value = format!("ProcessRef<{target}>");
+
+    assert_eq!(target.len(), MAX_IDENTIFIER_BYTES + 1);
+    assert_eq!(value.len(), MAX_TYPE_REF_BYTES + 1);
+
+    let err = super::validation::validate_type_field("message payload_type", &value)
+        .expect_err("oversized process reference type should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "artifact field message payload_type exceeds maximum type length of {MAX_TYPE_REF_BYTES} bytes"
+    )));
+    assert_eq!(super::validation::process_ref_type_target(&value), None);
+}
+
+#[test]
+fn validate_rejects_message_payload_type_above_type_ref_limit() {
+    let mut artifact = valid_artifact();
+    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
+    let payload_type = format!("ProcessRef<{target}>");
+    artifact.processes[1].message_variants =
+        vec![ArtifactMessageVariant::payload("Assign", payload_type)];
+
+    let err = artifact
+        .validate()
+        .expect_err("oversized message payload type should fail artifact validation");
+
+    assert!(err.to_string().contains(&format!(
+        "artifact field message payload_type exceeds maximum type length of {MAX_TYPE_REF_BYTES} bytes"
+    )));
+}
+
+#[test]
 fn validate_rejects_missing_required_send_payload() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
@@ -187,7 +251,7 @@ fn validate_rejects_missing_required_send_payload() {
 fn validate_rejects_payload_for_unit_message_variant() {
     let mut artifact = valid_artifact();
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
-        target: ProcessRefId::new(0),
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: "Job".to_string(),
@@ -209,7 +273,7 @@ fn validate_rejects_send_payload_type_mismatch() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
-        target: ProcessRefId::new(0),
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: "OtherJob".to_string(),
@@ -227,11 +291,160 @@ fn validate_rejects_send_payload_type_mismatch() {
 }
 
 #[test]
+fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: "Job".to_string(),
+            value: "Job".to_string(),
+        }),
+    };
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::Send {
+        target: ArtifactSendTarget::ReceivedPayload {
+            ty: "Job".to_string(),
+            target_process: ProcessId::new(1),
+        },
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: "Job".to_string(),
+            value: "Job".to_string(),
+        }),
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("received payload send target must require ProcessRef type");
+
+    assert!(err.to_string().contains(
+        "artifact field send target payload type must be a process reference type, got \"Job\""
+    ));
+}
+
+#[test]
+fn validate_rejects_process_ref_template_with_non_process_ref_type() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::ProcessRef {
+            ty: "Job".to_string(),
+            target_process: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        }),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("process reference payload template must require ProcessRef type");
+
+    assert!(err.to_string().contains(
+        "artifact field process reference payload type must be a process reference type, got \"Job\""
+    ));
+}
+
+#[test]
+fn validate_rejects_process_ref_template_target_type_mismatch() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
+        "Assign",
+        "ProcessRef<Main>",
+    )];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::ProcessRef {
+            ty: "ProcessRef<Main>".to_string(),
+            target_process: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        }),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("process reference type target mismatch should fail");
+
+    assert!(err.to_string().contains(
+        "artifact field process reference payload type ProcessRef<Main> targets Main, expected Worker"
+    ));
+}
+
+#[test]
+fn validate_rejects_received_payload_send_target_type_mismatch() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
+        "Assign",
+        "ProcessRef<Worker>",
+    )];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::ProcessRef {
+            ty: "ProcessRef<Worker>".to_string(),
+            target_process: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        }),
+    };
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::Send {
+        target: ArtifactSendTarget::ReceivedPayload {
+            ty: "ProcessRef<Worker>".to_string(),
+            target_process: ProcessId::new(0),
+        },
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::ProcessRef {
+            ty: "ProcessRef<Worker>".to_string(),
+            target_process: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        }),
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("received process reference target mismatch should fail");
+
+    assert!(err.to_string().contains(
+        "artifact field send target payload type ProcessRef<Worker> targets Worker, expected Main"
+    ));
+}
+
+#[test]
+fn validate_rejects_nested_process_ref_payload_template() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Box")];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Record {
+            ty: "Box".to_string(),
+            fields: vec![ArtifactValueTemplateField {
+                name: "reply_to".to_string(),
+                value: ArtifactValueTemplate::ProcessRef {
+                    ty: "ProcessRef<Worker>".to_string(),
+                    target_process: ProcessId::new(1),
+                    process_ref: ProcessRefId::new(0),
+                },
+            }],
+        }),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("nested process reference template should fail");
+
+    assert!(err.to_string().contains(
+        "process Main transition 0 send payload.field.reply_to process reference template must be a direct message payload"
+    ));
+}
+
+#[test]
 fn validate_rejects_received_payload_template_without_payload_message() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
-        target: ProcessRefId::new(0),
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ReceivedPayload {
             ty: "Job".to_string(),
@@ -351,7 +564,7 @@ fn validate_rejects_unknown_send_message() {
     artifact.processes[0].transitions[0]
         .actions
         .push(ArtifactAction::Send {
-            target: ProcessRefId::new(0),
+            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
             message: MessageId::new(1),
             payload: None,
         });
@@ -371,7 +584,7 @@ fn validate_rejects_unknown_send_process_ref() {
     artifact.processes[0].transitions[0]
         .actions
         .push(ArtifactAction::Send {
-            target: ProcessRefId::new(99),
+            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(99)),
             message: MessageId::new(0),
             payload: None,
         });
@@ -783,7 +996,7 @@ fn valid_artifact() -> MantleArtifact {
                             process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessRefId::new(0),
+                            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
                             message: MessageId::new(0),
                             payload: None,
                         },

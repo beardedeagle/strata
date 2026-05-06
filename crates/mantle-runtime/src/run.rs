@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use mantle_artifact::{
-    ArtifactPayload, ArtifactValueTemplate, Error, MantleArtifact, MessageId, NextState, OutputId,
-    ProcessId, ProcessRefId, Result, StateId, StepResult,
+    validate_payload_value_label, ArtifactPayload, ArtifactProcessRefPayload,
+    ArtifactValueTemplate, Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, Result, StateId, StepResult,
 };
 
 use crate::event::{
@@ -11,7 +12,7 @@ use crate::event::{
 };
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
-use crate::program::{LoadedAction, LoadedProgram};
+use crate::program::{LoadedAction, LoadedProgram, LoadedSendTarget};
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
 pub fn run_artifact_with_host<H: RuntimeHost>(
@@ -193,6 +194,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let process = &self.processes[process_index];
         let target_process = self.program.process(process.process_id)?;
         envelope.validate_for_process(self.program, process.process_id)?;
+        self.validate_envelope_process_ref(&envelope)?;
         let message_label = self
             .program
             .message_label(process.process_id, envelope.message)?
@@ -231,6 +233,47 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             process: process_label,
             message: envelope.display_label(&message_label),
         });
+        Ok(())
+    }
+
+    fn validate_envelope_process_ref(&self, envelope: &RuntimeMessageEnvelope) -> Result<()> {
+        let Some(payload) = &envelope.payload else {
+            return Ok(());
+        };
+        let expected_target = process_ref_type_target(&payload.ty);
+        let Some(process_ref) = payload.process_ref else {
+            if expected_target.is_some() {
+                return Err(Error::new(format!(
+                    "payload type {} requires process reference runtime metadata",
+                    payload.ty
+                )));
+            }
+            return Ok(());
+        };
+        let Some(expected_target) = expected_target else {
+            return Err(Error::new(format!(
+                "payload type {} must not carry process reference runtime metadata",
+                payload.ty
+            )));
+        };
+        let process_index =
+            self.process_index_for_pid(RuntimeProcessId::from_u64(process_ref.pid)?)?;
+        let referenced = &self.processes[process_index];
+        if referenced.process_id != process_ref.target_process {
+            return Err(Error::new(format!(
+                "payload process reference pid {} targets process id {}, but runtime pid has process id {}",
+                process_ref.pid,
+                process_ref.target_process.as_u32(),
+                referenced.process_id.as_u32()
+            )));
+        }
+        let target_process = self.program.process(process_ref.target_process)?;
+        if target_process.debug_name != expected_target {
+            return Err(Error::new(format!(
+                "payload process reference metadata targets {}, expected {} for type {}",
+                target_process.debug_name, expected_target, payload.ty
+            )));
+        }
         Ok(())
     }
 
@@ -309,11 +352,10 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
         let final_state = self.resolve_next_state(process_index, &step, &next_state)?;
-        let action_payloads = prepare_action_payloads(&step, &transition.actions)?;
         let mut local_process_refs = BTreeMap::new();
 
-        for (action, prepared_payload) in transition.actions.iter().zip(action_payloads) {
-            self.execute_action(&mut local_process_refs, &step, action, prepared_payload)?;
+        for action in &transition.actions {
+            self.execute_action(&mut local_process_refs, &step, action)?;
         }
 
         self.apply_next_state(process_index, &step, final_state)?;
@@ -325,7 +367,6 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         local_process_refs: &mut BTreeMap<ProcessRefId, RuntimeProcessId>,
         step: &ActiveStep,
         action: &LoadedAction,
-        prepared_payload: Option<ArtifactPayload>,
     ) -> Result<()> {
         match action {
             LoadedAction::Emit { output } => self.emit_output(step, *output),
@@ -351,14 +392,58 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             LoadedAction::Send {
                 target,
                 message,
-                payload: _,
+                payload,
             } => {
-                let pid = self.resolve_process_ref(local_process_refs, step, *target)?;
+                let pid = self.resolve_send_target(local_process_refs, step, target)?;
+                let prepared_payload = match payload {
+                    Some(payload) => Some(evaluate_runtime_template(
+                        payload,
+                        step.payload.as_ref(),
+                        step,
+                        local_process_refs,
+                    )?),
+                    None => None,
+                };
                 self.send_message(
                     pid,
                     RuntimeMessageEnvelope::new(*message, prepared_payload),
                     Some(step.pid),
                 )
+            }
+        }
+    }
+
+    fn resolve_send_target(
+        &self,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        step: &ActiveStep,
+        target: &LoadedSendTarget,
+    ) -> Result<RuntimeProcessId> {
+        match target {
+            LoadedSendTarget::ProcessRef(process_ref) => {
+                self.resolve_process_ref(local_process_refs, step, *process_ref)
+            }
+            LoadedSendTarget::ReceivedPayload { ty, target_process } => {
+                let payload = step.payload.as_ref().ok_or_else(|| {
+                    Error::new("received process reference send target requires a payload")
+                })?;
+                if payload.ty != *ty {
+                    return Err(Error::new(format!(
+                        "received process reference send target has type {}, expected {}",
+                        payload.ty, ty
+                    )));
+                }
+                let process_ref = payload.process_ref.ok_or_else(|| {
+                    Error::new("received payload is not a process reference value")
+                })?;
+                if process_ref.target_process != *target_process {
+                    return Err(Error::new(format!(
+                        "received process reference targets process id {}, expected {}",
+                        process_ref.target_process.as_u32(),
+                        target_process.as_u32()
+                    )));
+                }
+                Ok(RuntimeProcessId::from_u64(process_ref.pid)?)
             }
         }
     }
@@ -464,7 +549,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         template: &ArtifactValueTemplate,
     ) -> Result<StateId> {
-        let value = evaluate_runtime_template(template, step.payload.as_ref())?;
+        let value = template.evaluate(step.payload.as_ref())?;
         let process = self.program.process(step.process_id)?;
         let state_index = process
             .state_values
@@ -566,6 +651,23 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         }
         Ok(())
     }
+}
+
+fn process_ref_type_target(ty: &str) -> Option<&str> {
+    ty.strip_prefix("ProcessRef<")
+        .and_then(|value| value.strip_suffix('>'))
+        .filter(|target| is_artifact_ident(target))
+}
+
+fn is_artifact_ident(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 struct ProcessInstance {
@@ -691,24 +793,64 @@ impl ActiveStep {
 fn evaluate_runtime_template(
     template: &ArtifactValueTemplate,
     received_payload: Option<&ArtifactPayload>,
-) -> Result<ArtifactPayload> {
-    template.evaluate(received_payload)
-}
-
-fn prepare_action_payloads(
     step: &ActiveStep,
-    actions: &[LoadedAction],
-) -> Result<Vec<Option<ArtifactPayload>>> {
-    actions
-        .iter()
-        .map(|action| match action {
-            LoadedAction::Send { payload, .. } => payload
-                .as_ref()
-                .map(|payload| evaluate_runtime_template(payload, step.payload.as_ref()))
-                .transpose(),
-            _ => Ok(None),
-        })
-        .collect()
+    process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+) -> Result<ArtifactPayload> {
+    match template {
+        ArtifactValueTemplate::Literal { ty, value } => Ok(ArtifactPayload {
+            ty: ty.clone(),
+            value: value.clone(),
+            process_ref: None,
+        }),
+        ArtifactValueTemplate::ReceivedPayload { ty } => {
+            let payload = received_payload.ok_or_else(|| {
+                Error::new("received payload template requires a payload-bearing message")
+            })?;
+            if payload.ty != *ty {
+                return Err(Error::new(format!(
+                    "received payload has type {}, expected {}",
+                    payload.ty, ty
+                )));
+            }
+            Ok(payload.clone())
+        }
+        ArtifactValueTemplate::ProcessRef {
+            ty,
+            target_process,
+            process_ref,
+        } => {
+            let pid = process_refs.get(process_ref).copied().ok_or_else(|| {
+                Error::new(format!(
+                    "process {} sends unbound process reference id {} as payload",
+                    step.process_name,
+                    process_ref.as_u32()
+                ))
+            })?;
+            Ok(ArtifactPayload {
+                ty: ty.clone(),
+                value: format!("{ty}#{}", pid.as_u64()),
+                process_ref: Some(ArtifactProcessRefPayload {
+                    target_process: *target_process,
+                    pid: pid.as_u64(),
+                }),
+            })
+        }
+        ArtifactValueTemplate::Record { ty, fields } => {
+            let mut parts = Vec::with_capacity(fields.len());
+            for field in fields {
+                let value =
+                    evaluate_runtime_template(&field.value, received_payload, step, process_refs)?;
+                parts.push(format!("{}:{}", field.name, value.value));
+            }
+            let value = format!("{ty}{{{}}}", parts.join(","));
+            validate_payload_value_label(&value)?;
+            Ok(ArtifactPayload {
+                ty: ty.clone(),
+                value,
+                process_ref: None,
+            })
+        }
+    }
 }
 
 fn checked_trace_event_bytes(current: usize, event: &RuntimeEventRecord) -> Result<usize> {
@@ -736,8 +878,8 @@ mod tests {
     };
     use mantle_artifact::{
         ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactTransition,
-        StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, MAX_PROCESS_REFS_PER_PROCESS,
-        STRATA_SOURCE_LANGUAGE,
+        ArtifactValueTemplateField, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
+        MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS, STRATA_SOURCE_LANGUAGE,
     };
 
     #[test]
@@ -823,6 +965,131 @@ mod tests {
             .expect_err("unspawned pid should be rejected");
 
         assert!(err.to_string().contains("runtime process 2 is not spawned"));
+    }
+
+    #[test]
+    fn runtime_rejects_unspawned_process_ref_payload() {
+        let mut artifact = artifact_with_large_unbound_process_ref_table();
+        artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
+            "Ping",
+            "ProcessRef<Worker>",
+        )];
+        let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        let mut host = InMemoryRuntimeHost::default();
+        let mut run = RuntimeRun::new(
+            &program,
+            &mut host,
+            DEFAULT_MAX_RUNTIME_PROCESSES,
+            DEFAULT_MAX_TRACE_BYTES,
+            DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
+        );
+        let main_pid = run
+            .spawn_process(ProcessId::new(0), None)
+            .expect("entry process should spawn");
+        let worker_pid = run
+            .spawn_process(ProcessId::new(1), Some(main_pid))
+            .expect("worker process should spawn");
+
+        let err = run
+            .send_message(
+                worker_pid,
+                RuntimeMessageEnvelope::new(
+                    MessageId::new(0),
+                    Some(ArtifactPayload {
+                        ty: "ProcessRef<Worker>".to_string(),
+                        value: "ProcessRef<Worker>#99".to_string(),
+                        process_ref: Some(ArtifactProcessRefPayload {
+                            target_process: ProcessId::new(1),
+                            pid: 99,
+                        }),
+                    }),
+                ),
+                Some(main_pid),
+            )
+            .expect_err("unspawned process ref payload should fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("runtime process 99 is not spawned"));
+    }
+
+    #[test]
+    fn runtime_rejects_process_ref_payload_target_type_mismatch() {
+        let mut artifact = artifact_with_large_unbound_process_ref_table();
+        artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
+            "Ping",
+            "ProcessRef<Worker>",
+        )];
+        let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        let mut host = InMemoryRuntimeHost::default();
+        let mut run = RuntimeRun::new(
+            &program,
+            &mut host,
+            DEFAULT_MAX_RUNTIME_PROCESSES,
+            DEFAULT_MAX_TRACE_BYTES,
+            DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
+        );
+        let main_pid = run
+            .spawn_process(ProcessId::new(0), None)
+            .expect("entry process should spawn");
+        let worker_pid = run
+            .spawn_process(ProcessId::new(1), Some(main_pid))
+            .expect("worker process should spawn");
+
+        let err = run
+            .send_message(
+                worker_pid,
+                RuntimeMessageEnvelope::new(
+                    MessageId::new(0),
+                    Some(ArtifactPayload {
+                        ty: "ProcessRef<Worker>".to_string(),
+                        value: "ProcessRef<Worker>#1".to_string(),
+                        process_ref: Some(ArtifactProcessRefPayload {
+                            target_process: ProcessId::new(0),
+                            pid: main_pid.as_u64(),
+                        }),
+                    }),
+                ),
+                Some(main_pid),
+            )
+            .expect_err("process ref target type mismatch should fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("payload process reference metadata targets Main, expected Worker for type ProcessRef<Worker>"));
+    }
+
+    #[test]
+    fn runtime_rejects_oversized_record_payload_template_value() {
+        let template = ArtifactValueTemplate::Record {
+            ty: "Box".to_string(),
+            fields: vec![ArtifactValueTemplateField {
+                name: "item".to_string(),
+                value: ArtifactValueTemplate::ReceivedPayload {
+                    ty: "Job".to_string(),
+                },
+            }],
+        };
+        let received = ArtifactPayload {
+            ty: "Job".to_string(),
+            value: "a".repeat(MAX_FIELD_VALUE_BYTES),
+            process_ref: None,
+        };
+        let step = ActiveStep {
+            pid: RuntimeProcessId::FIRST,
+            process_id: ProcessId::new(0),
+            process_name: "Main".to_string(),
+            message: MessageId::new(0),
+            message_label: "Start".to_string(),
+            payload: Some(received.clone()),
+        };
+
+        let err = evaluate_runtime_template(&template, Some(&received), &step, &BTreeMap::new())
+            .expect_err("oversized record payload labels should fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("payload value exceeds maximum length"));
     }
 
     fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {

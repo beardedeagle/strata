@@ -1,11 +1,13 @@
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
-    CheckedProcessId, CheckedProcessRefId, CheckedStateId, CheckedStepResult, CheckedTransition,
+    CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
+    CheckedTransition,
 };
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
-    ArtifactMessageVariant, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactValueTemplate, ProcessId,
+    ProcessRefId, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
     MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
     MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS,
 };
@@ -618,6 +620,94 @@ proc Sink mailbox bounded(1) {
 }
 
 #[test]
+fn forwards_process_ref_payload_through_received_send_target() {
+    let source = r#"
+module process_ref_reply;
+
+record MainState;
+record WorkerState;
+record SinkState;
+enum MainMsg { Start }
+enum WorkerMsg { Work(ProcessRef<Sink>) }
+enum SinkMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Work(sink);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [send] ~ [] @det {
+        send reply_to Done;
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("process ref payload forwarding should check");
+    let artifact = lower_to_artifact(&checked, source).expect("process ref payload should lower");
+
+    assert_eq!(
+        artifact.processes[1].message_variants,
+        [ArtifactMessageVariant::payload("Work", "ProcessRef<Sink>")]
+    );
+    assert_eq!(
+        artifact.processes[0].transitions[0].actions[2],
+        ArtifactAction::Send {
+            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            message: mantle_artifact::MessageId::new(0),
+            payload: Some(ArtifactValueTemplate::ProcessRef {
+                ty: "ProcessRef<Sink>".to_string(),
+                target_process: ProcessId::new(2),
+                process_ref: ProcessRefId::new(1),
+            }),
+        }
+    );
+    assert_eq!(
+        artifact.processes[1].transitions[0].actions[0],
+        ArtifactAction::Send {
+            target: ArtifactSendTarget::ReceivedPayload {
+                ty: "ProcessRef<Sink>".to_string(),
+                target_process: ProcessId::new(2),
+            },
+            message: mantle_artifact::MessageId::new(0),
+            payload: None,
+        }
+    );
+}
+
+#[test]
 fn rejects_send_missing_required_message_payload() {
     let source = payload_source_with(
         "send worker Assign;",
@@ -737,6 +827,131 @@ proc Sink mailbox bounded(1) {
     assert!(err
         .to_string()
         .contains("value binding job has type Job, expected OtherJob"));
+}
+
+#[test]
+fn rejects_process_ref_payload_with_wrong_target_type() {
+    let source = r#"
+module wrong_process_ref_payload;
+
+record MainState;
+record WorkerState;
+record SinkState;
+record OtherState;
+enum MainMsg { Start }
+enum WorkerMsg { Work(ProcessRef<Other>) }
+enum SinkMsg { Done }
+enum OtherMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Work(sink);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work(reply_to: ProcessRef<Other>)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Other mailbox bounded(1) {
+    type State = OtherState;
+    type Msg = OtherMsg;
+
+    fn init() -> OtherState ! [] ~ [] @det {
+        return OtherState;
+    }
+
+    fn step(state: OtherState, Done) -> ProcResult<OtherState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("wrong process ref payload should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process reference payload sink targets process id 2, expected 3"));
+}
+
+#[test]
+fn rejects_non_process_ref_payload_as_send_target() {
+    let source = r#"
+module non_ref_send_target;
+
+record MainState;
+record Job;
+record WorkerState;
+enum MainMsg { Start }
+enum WorkerMsg { Work(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Work(Job);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work(job: Job)) -> ProcResult<WorkerState> ! [send] ~ [] @det {
+        send job Work(Job);
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("non-ref send target should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker send target job is not a process reference payload"));
 }
 
 #[test]
@@ -998,9 +1213,9 @@ proc Worker mailbox bounded(1) {
 
     let err = check_source(source).expect_err("generic payload type should fail");
 
-    assert!(err
-        .to_string()
-        .contains("payload type ProcResult<Job> must be a named record or enum type"));
+    assert!(err.to_string().contains(
+        "payload type ProcResult<Job> must be a named record, enum, or process reference type"
+    ));
 }
 
 #[test]
@@ -1234,7 +1449,7 @@ fn parses_and_checks_actor_ping() {
                 process_ref: checked_process_ref_id(0)
             },
             CheckedAction::Send {
-                target: checked_process_ref_id(0),
+                target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                 message: checked_message_id(0),
                 payload: None
             }
@@ -1332,12 +1547,12 @@ fn parses_and_checks_actor_instances_with_distinct_process_refs() {
                 process_ref: checked_process_ref_id(1)
             },
             CheckedAction::Send {
-                target: checked_process_ref_id(0),
+                target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                 message: checked_message_id(0),
                 payload: None
             },
             CheckedAction::Send {
-                target: checked_process_ref_id(1),
+                target: CheckedSendTarget::ProcessRef(checked_process_ref_id(1)),
                 message: checked_message_id(0),
                 payload: None
             }
@@ -1549,7 +1764,7 @@ proc Main mailbox bounded(1) {
                 process_ref: checked_process_ref_id(0)
             },
             CheckedAction::Send {
-                target: checked_process_ref_id(0),
+                target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                 message: checked_message_id(0),
                 payload: None
             }

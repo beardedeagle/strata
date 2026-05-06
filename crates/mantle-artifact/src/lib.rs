@@ -10,8 +10,8 @@ mod validation;
 
 pub use artifact::{
     ArtifactAction, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
-    ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact,
-    NextState, StepResult,
+    ArtifactProcessRefPayload, ArtifactSendTarget, ArtifactTransition, ArtifactValueTemplate,
+    ArtifactValueTemplateField, MantleArtifact, NextState, StepResult,
 };
 pub use constants::*;
 pub use error::{Error, Result};

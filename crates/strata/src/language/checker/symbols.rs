@@ -109,6 +109,8 @@ fn validate_record_fields(
 fn validate_message_payload_type(
     symbols: &SymbolTable,
     types: &BTreeMap<Symbol, TypeDecl>,
+    processes: &BTreeMap<Symbol, CheckedProcessId>,
+    process_ref_type: Symbol,
     enum_decl: &Enum,
     variant: &EnumVariant,
     payload_type: &TypeRef,
@@ -122,9 +124,36 @@ fn validate_message_payload_type(
                 ))
             })?;
         }
-        TypeRef::Applied { .. } => {
+        TypeRef::Applied { constructor, args } => {
+            let Some(constructor_symbol) = symbols.resolve(constructor.as_str()) else {
+                return Err(Error::new(format!(
+                    "enum {} variant {} payload type {} must be a named record, enum, or process reference type",
+                    enum_decl.name, variant.name, payload_type
+                )));
+            };
+            if constructor_symbol == process_ref_type
+                && args.len() == 1
+                && matches!(&args[0], TypeRef::Named(_))
+            {
+                let TypeRef::Named(target) = &args[0] else {
+                    unreachable!("matches! above proves named target");
+                };
+                let target_symbol = symbols.resolve(target.as_str()).ok_or_else(|| {
+                    Error::new(format!(
+                        "enum {} variant {} payload type {} targets undeclared process {}",
+                        enum_decl.name, variant.name, payload_type, target
+                    ))
+                })?;
+                if processes.contains_key(&target_symbol) {
+                    return Ok(());
+                }
+                return Err(Error::new(format!(
+                    "enum {} variant {} payload type {} targets undeclared process {}",
+                    enum_decl.name, variant.name, payload_type, target
+                )));
+            }
             return Err(Error::new(format!(
-                "enum {} variant {} payload type {} must be a named record or enum type",
+                "enum {} variant {} payload type {} must be a named record, enum, or process reference type",
                 enum_decl.name, variant.name, payload_type
             )));
         }
@@ -153,6 +182,7 @@ fn type_decl_from_tables(
 pub(super) struct SemanticIndex {
     symbols: SymbolTable,
     proc_result_type: Symbol,
+    process_ref_type: Symbol,
     types: BTreeMap<Symbol, TypeDecl>,
     processes: BTreeMap<Symbol, CheckedProcessId>,
     enum_variants: Vec<BTreeMap<Symbol, usize>>,
@@ -224,14 +254,6 @@ impl SemanticIndex {
             enum_variants.push(variants);
         }
 
-        for item in &module.enums {
-            for variant in &item.variants {
-                if let Some(payload_type) = &variant.payload_type {
-                    validate_message_payload_type(&symbols, &types, item, variant, payload_type)?;
-                }
-            }
-        }
-
         for (index, process) in module.processes.iter().enumerate() {
             let symbol = symbols.intern(&process.name)?;
             if processes
@@ -245,6 +267,22 @@ impl SemanticIndex {
             }
         }
 
+        for item in &module.enums {
+            for variant in &item.variants {
+                if let Some(payload_type) = &variant.payload_type {
+                    validate_message_payload_type(
+                        &symbols,
+                        &types,
+                        &processes,
+                        process_ref_type,
+                        item,
+                        variant,
+                        payload_type,
+                    )?;
+                }
+            }
+        }
+
         for record in &module.records {
             validate_record_fields(&symbols, &types, record)?;
         }
@@ -252,6 +290,7 @@ impl SemanticIndex {
         Ok(Self {
             symbols,
             proc_result_type,
+            process_ref_type,
             types,
             processes,
             enum_variants,
@@ -314,6 +353,29 @@ impl SemanticIndex {
         args.len() == 1
             && constructor_symbol == self.proc_result_type
             && self.same_type(&args[0], state_type)
+    }
+
+    pub(super) fn process_ref_target_type(&self, ty: &TypeRef) -> Result<Option<CheckedProcessId>> {
+        let TypeRef::Applied { constructor, args } = ty else {
+            return Ok(None);
+        };
+        let Some(constructor_symbol) = self.symbols.resolve(constructor.as_str()) else {
+            return Ok(None);
+        };
+        if constructor_symbol != self.process_ref_type {
+            return Ok(None);
+        }
+        if args.len() != 1 {
+            return Err(Error::new(format!(
+                "process reference type {ty} must declare exactly one target process"
+            )));
+        }
+        let TypeRef::Named(target) = &args[0] else {
+            return Err(Error::new(format!(
+                "process reference type {ty} must target a declared process"
+            )));
+        };
+        self.process_id(target).map(Some)
     }
 
     fn type_decl(&self, ty: &TypeRef) -> Result<TypeDecl> {

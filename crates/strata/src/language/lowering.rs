@@ -1,14 +1,15 @@
 use mantle_artifact::{
     source_hash_fnv1a64, ArtifactAction, ArtifactMessageVariant, ArtifactProcess,
-    ArtifactProcessRef, ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField,
-    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
+    ArtifactProcessRef, ArtifactSendTarget, ArtifactTransition, ArtifactValueTemplate,
+    ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
+    STRATA_SOURCE_LANGUAGE,
 };
 
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedNextState, CheckedOutputId,
-    CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedStateId,
-    CheckedStepResult, CheckedTransition, CheckedValueTemplate,
+    CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget,
+    CheckedStateId, CheckedStepResult, CheckedTransition, CheckedValueTemplate,
 };
 
 pub fn lower_to_artifact(
@@ -81,7 +82,7 @@ fn lower_action(action: &CheckedAction) -> ArtifactAction {
             message,
             payload,
         } => ArtifactAction::Send {
-            target: lower_process_ref_id(*target),
+            target: lower_send_target(target),
             message: lower_message_id(*message),
             payload: payload.as_ref().map(lower_value_template),
         },
@@ -114,6 +115,15 @@ fn lower_value_template(template: &CheckedValueTemplate) -> ArtifactValueTemplat
         CheckedValueTemplate::ReceivedPayload { ty } => {
             ArtifactValueTemplate::ReceivedPayload { ty: ty.to_string() }
         }
+        CheckedValueTemplate::ProcessRef {
+            ty,
+            target,
+            process_ref,
+        } => ArtifactValueTemplate::ProcessRef {
+            ty: ty.to_string(),
+            target_process: lower_process_id(*target),
+            process_ref: lower_process_ref_id(*process_ref),
+        },
         CheckedValueTemplate::Record { ty, fields } => ArtifactValueTemplate::Record {
             ty: ty.to_string(),
             fields: fields
@@ -123,6 +133,18 @@ fn lower_value_template(template: &CheckedValueTemplate) -> ArtifactValueTemplat
                     value: lower_value_template(field.value()),
                 })
                 .collect(),
+        },
+    }
+}
+
+fn lower_send_target(target: &CheckedSendTarget) -> ArtifactSendTarget {
+    match target {
+        CheckedSendTarget::ProcessRef(process_ref) => {
+            ArtifactSendTarget::ProcessRef(lower_process_ref_id(*process_ref))
+        }
+        CheckedSendTarget::ReceivedPayload { ty, target } => ArtifactSendTarget::ReceivedPayload {
+            ty: ty.to_string(),
+            target_process: lower_process_id(*target),
         },
     }
 }

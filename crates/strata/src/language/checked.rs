@@ -77,11 +77,29 @@ pub(in crate::language) enum CheckedNextState {
 pub(in crate::language) struct CheckedPayloadValue {
     ty: TypeRef,
     label: String,
+    process_ref: Option<CheckedProcessRefPayload>,
 }
 
 impl CheckedPayloadValue {
     pub(in crate::language) fn new(ty: TypeRef, label: String) -> Self {
-        Self { ty, label }
+        Self {
+            ty,
+            label,
+            process_ref: None,
+        }
+    }
+
+    pub(in crate::language) fn process_ref(
+        ty: TypeRef,
+        label: String,
+        target: CheckedProcessId,
+        pid: u64,
+    ) -> Self {
+        Self {
+            ty,
+            label,
+            process_ref: Some(CheckedProcessRefPayload { target, pid }),
+        }
     }
 
     pub(in crate::language) fn ty(&self) -> &TypeRef {
@@ -91,6 +109,26 @@ impl CheckedPayloadValue {
     pub(in crate::language) fn label(&self) -> &str {
         &self.label
     }
+
+    pub(in crate::language) fn process_ref_payload(&self) -> Option<CheckedProcessRefPayload> {
+        self.process_ref
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) struct CheckedProcessRefPayload {
+    target: CheckedProcessId,
+    pid: u64,
+}
+
+impl CheckedProcessRefPayload {
+    pub(in crate::language) fn target(self) -> CheckedProcessId {
+        self.target
+    }
+
+    pub(in crate::language) fn pid(self) -> u64 {
+        self.pid
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +136,11 @@ pub(in crate::language) enum CheckedValueTemplate {
     Literal(CheckedPayloadValue),
     ReceivedPayload {
         ty: TypeRef,
+    },
+    ProcessRef {
+        ty: TypeRef,
+        target: CheckedProcessId,
+        process_ref: CheckedProcessRefId,
     },
     Record {
         ty: TypeRef,
@@ -109,7 +152,9 @@ impl CheckedValueTemplate {
     pub(in crate::language) fn result_type(&self) -> &TypeRef {
         match self {
             Self::Literal(value) => value.ty(),
-            Self::ReceivedPayload { ty } | Self::Record { ty, .. } => ty,
+            Self::ReceivedPayload { ty }
+            | Self::ProcessRef { ty, .. }
+            | Self::Record { ty, .. } => ty,
         }
     }
 }
@@ -198,9 +243,18 @@ pub(in crate::language) enum CheckedAction {
         process_ref: CheckedProcessRefId,
     },
     Send {
-        target: CheckedProcessRefId,
+        target: CheckedSendTarget,
         message: CheckedMessageId,
         payload: Option<CheckedValueTemplate>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) enum CheckedSendTarget {
+    ProcessRef(CheckedProcessRefId),
+    ReceivedPayload {
+        ty: TypeRef,
+        target: CheckedProcessId,
     },
 }
 

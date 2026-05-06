@@ -17,8 +17,8 @@ Mantle artifact internals.
 | Imports | Not available. |
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
-| Process references | `let worker: ProcessRef<Worker> = spawn Worker;` and `send worker Ping;`. |
-| Message payloads | `enum WorkerMsg { Assign(Job) }`, `send worker Assign(Job { ... });`, and `Assign(job: Job)` step patterns. |
+| Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
+| Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, payload sends, and payload-binding step patterns. |
 | Transition result | `ProcResult<T>` with `Stop(value)` and `Continue(value)`. |
 
 The current `module` declaration names a source unit. It does not create an
@@ -211,12 +211,12 @@ slice.
 reference. The reference binding is local to the current transition and must be
 typed as `ProcessRef<TargetProcess>`.
 
-`send` queues a message through a previously spawned process reference. The
-message must be accepted by the reference target's process message enum. Static
-validation rejects self-spawn, spawning the already-started entry process,
-duplicate process-reference binding in one transition, sends before the
-reference is bound, mailbox overflow, and messages left unhandled after a target
-stops.
+`send` queues a message through a previously spawned process reference or
+through a received `ProcessRef<T>` payload binding. The message must be accepted
+by the reference target's process message enum. Static validation rejects
+self-spawn, spawning the already-started entry process, duplicate
+process-reference binding in one transition, sends before the reference is
+bound, mailbox overflow, and messages left unhandled after a target stops.
 
 Payload messages use the variant constructor at the send site:
 
@@ -228,6 +228,26 @@ The payload value is checked against the target message variant's payload type.
 Unit message variants reject payload arguments, and payload variants require
 one payload argument.
 
+Process references can be payloads when the message variant declares a typed
+reference:
+
+```strata
+enum WorkerMsg { Work(ProcessRef<Sink>) }
+send worker Work(sink);
+```
+
+The received reference is immutable and can be used as a send target:
+
+```strata
+fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [send] ~ [] @det {
+    send reply_to Done;
+    return Stop(state);
+}
+```
+
+Runtime dispatch still uses the transported runtime process ID and admitted
+target process ID. Source names remain diagnostics and trace metadata.
+
 ## Effects
 
 The `! [...]` effect list must exactly match the effects used by each `step`
@@ -237,7 +257,7 @@ clause. Missing effects and unused declared effects are both rejected.
 | --- | --- |
 | `emit` | `emit "text";` |
 | `spawn` | `let worker: ProcessRef<Worker> = spawn Worker;` |
-| `send` | `send worker Ping;` |
+| `send` | `send worker Ping;` or `send reply_to Done;` |
 
 `init` cannot perform statements in the current buildable slice and therefore
 uses an empty effect list.
@@ -263,10 +283,11 @@ fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ 
 
 The binding is immutable and local to that transition. It can be used where a
 value of the bound payload type is expected, including whole-value state
-returns, record fields, and downstream message payload sends. Payload bindings
-cannot shadow the `state` parameter, process declarations, type names, or value
-constructors. Process-reference bindings in the same transition cannot shadow a
-payload binding.
+returns, record fields, downstream message payload sends, and send targets when
+the payload type is `ProcessRef<T>`. Payload bindings cannot shadow the `state`
+parameter, process declarations, type names, or value constructors.
+Process-reference bindings in the same transition cannot shadow a payload
+binding.
 
 If a process accepts more than one message, it can declare explicit clauses for
 specific variants and one wildcard clause for the remaining variants:

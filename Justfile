@@ -71,6 +71,9 @@ product-gates: build
     cargo run -p strata --bin strata -- check examples/actor_payloads.str
     cargo run -p strata --bin strata -- build examples/actor_payloads.str
     cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+    cargo run -p strata --bin strata -- check examples/actor_reply.str
+    cargo run -p strata --bin strata -- build examples/actor_reply.str
+    cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
 
 quality: fmt-check check test lint metadata-check docs product-gates diff-check
 
