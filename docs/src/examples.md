@@ -52,7 +52,8 @@ Key source ideas:
 
 `examples/actor_sequence.str` exercises message-keyed process transitions. The
 worker handles `First`, returns a whole replacement state with `Continue(...)`,
-then handles `Second` and returns a whole replacement state with `Stop(...)`.
+then handles `Second` through the wildcard clause and returns a whole
+replacement state with `Stop(...)`.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/actor_sequence.str
@@ -62,8 +63,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 
 Key source ideas:
 
-- `WorkerMsg` has two variants, so `Worker` declares two `step` clauses.
-- The step patterns are exhaustive.
+- `WorkerMsg` has two variants, and each variant resolves to exactly one
+  `step` clause.
+- The explicit `First` clause handles `First`; `_` covers the remaining
+  accepted message variants.
 - `Continue(SawFirst)` keeps the worker alive for the next queued message.
 - `Stop(Done)` terminates the worker normally.
 

@@ -204,6 +204,118 @@ fn parses_step_return_type_as_structured_type_ref() {
 }
 
 #[test]
+fn parses_and_checks_wildcard_step_pattern() {
+    let source = r#"
+module actor_catchall;
+
+record MainState;
+enum MainMsg { Start }
+enum WorkerState { Idle, SawFirst }
+enum WorkerMsg { First, Second, Third }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Second;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(3) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(SawFirst);
+    }
+
+    fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+}
+"#;
+    let module = parse_source(source).expect("wildcard step pattern should parse");
+    let worker = module
+        .processes
+        .iter()
+        .find(|process| process.name.as_str() == "Worker")
+        .expect("Worker should parse");
+    assert_eq!(
+        worker.steps[1].params[1],
+        FunctionParam::Pattern(SignaturePattern::Wildcard)
+    );
+
+    let checked = check_module(module).expect("wildcard step pattern should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    assert_eq!(worker.transitions().len(), 3);
+    assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
+    assert_eq!(
+        worker.transitions()[0].next_state(),
+        CheckedNextState::Value(checked_state_id(1))
+    );
+    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
+    assert_eq!(
+        worker.transitions()[1].next_state(),
+        CheckedNextState::Current
+    );
+    assert_eq!(worker.transitions()[2].message(), checked_message_id(2));
+    assert_eq!(
+        worker.transitions()[2].next_state(),
+        CheckedNextState::Current
+    );
+
+    let artifact =
+        lower_to_artifact(&checked, source).expect("wildcard should lower to typed transitions");
+    let worker_artifact = &artifact.processes[1];
+    assert_eq!(worker_artifact.transitions.len(), 3);
+    assert_eq!(
+        worker_artifact.transitions[0].message,
+        mantle_artifact::MessageId::new(0)
+    );
+    assert_eq!(
+        worker_artifact.transitions[1].message,
+        mantle_artifact::MessageId::new(1)
+    );
+    assert_eq!(
+        worker_artifact.transitions[2].message,
+        mantle_artifact::MessageId::new(2)
+    );
+}
+
+#[test]
+fn checks_wildcard_only_step_pattern() {
+    let source = HELLO.replace(
+        "fn step(state: MainState, Start)",
+        "fn step(state: MainState, _)",
+    );
+
+    let checked = check_source(&source).expect("wildcard-only step pattern should check");
+    let main = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Main")
+        .expect("Main should be checked");
+
+    assert_eq!(main.transitions().len(), 1);
+    assert_eq!(main.transitions()[0].message(), checked_message_id(0));
+}
+
+#[test]
 fn public_ast_constructors_validate_values() {
     let identifier = Identifier::new("MainState").expect("valid identifier should construct");
     assert_eq!(identifier.as_str(), "MainState");
@@ -212,6 +324,7 @@ fn public_ast_constructors_validate_values() {
     assert_eq!(identifier_from_try.as_str(), "Worker");
     assert!(Identifier::new("1Invalid").is_err());
     assert!(Identifier::new("invalid-name").is_err());
+    assert!(Identifier::new("_").is_err());
     assert!(Identifier::new("as").is_err());
     assert!(Identifier::new("let").is_err());
     assert!(Identifier::new("mut").is_err());
@@ -479,6 +592,53 @@ fn rejects_duplicate_step_message_pattern() {
 }
 
 #[test]
+fn rejects_duplicate_wildcard_step_pattern() {
+    let source = ACTOR_SEQUENCE
+        .replace(
+            "fn step(state: WorkerState, First)",
+            "fn step(state: WorkerState, _)",
+        )
+        .replace(
+            "fn step(state: WorkerState, Second)",
+            "fn step(state: WorkerState, _)",
+        );
+
+    let err = check_source(&source).expect_err("duplicate wildcard pattern should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker declares duplicate wildcard step pattern"));
+}
+
+#[test]
+fn rejects_unreachable_wildcard_step_pattern() {
+    let source = ACTOR_SEQUENCE.replace(
+        r#"
+    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
+    }
+"#,
+        r#"
+    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
+    }
+
+    fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+"#,
+    );
+
+    let err = check_source(&source).expect_err("unreachable wildcard pattern should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker wildcard step pattern is unreachable"));
+}
+
+#[test]
 fn rejects_typed_msg_step_parameter() {
     let source = ACTOR_PING.replace(
         "fn step(state: WorkerState, Ping)",
@@ -489,7 +649,7 @@ fn rejects_typed_msg_step_parameter() {
 
     assert!(err
         .to_string()
-        .contains("step second parameter must be a message variant pattern"));
+        .contains("step second parameter must be a message variant pattern or wildcard pattern"));
 }
 
 #[test]

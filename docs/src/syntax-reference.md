@@ -74,8 +74,9 @@ message_alias =
 ```
 
 The aliases and functions may appear in any order. `State`, `Msg`, and `init`
-must each appear exactly once. `step` must appear once for each message variant.
-Other process members are rejected.
+must each appear exactly once. Each message variant must resolve to exactly one
+`step` clause, either through an explicit variant pattern or through one
+wildcard pattern. Other process members are rejected.
 
 ## Functions
 
@@ -99,6 +100,7 @@ param_binding =
 
 signature_pattern =
     ident
+  | "_"
 
 effect_list =
     "[" (effect ("," effect)* ","?)? "]"
@@ -128,19 +130,22 @@ block_body =
 ```
 
 Buildable source requires bodies. `init` uses no parameters. Each `step` uses
-`state: StateType` followed by one message-variant signature pattern:
+`state: StateType` followed by one message-variant or wildcard signature
+pattern:
 
 ```text
 step_function =
-    "fn" "step" "(" "state" ":" type_ref "," ident ")"
+    "fn" "step" "(" "state" ":" type_ref "," (ident | "_") ")"
     "->" "ProcResult" "<" type_ref ">"
     "!" effect_list "~" "[]" "@det"
     "{" block_body "}"
 ```
 
-The `type_ref` entries must name the process state type. The `ident` after the
-comma is a message variant accepted by the process message type. Signature
-patterns are accepted only for actor `step` message dispatch in this slice.
+The `type_ref` entries must name the process state type. An `ident` after the
+comma is a message variant accepted by the process message type. `_` is a
+wildcard pattern that covers accepted variants without explicit clauses.
+Signature patterns are accepted only for actor `step` message dispatch in this
+slice.
 
 ## Statements
 
@@ -221,5 +226,6 @@ ident =
 ```
 
 `as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
-`ProcResult` and `ProcessRef` are reserved type names because they name built-in
-transition and process-reference types.
+The single `_` token is reserved for wildcard patterns. `ProcResult` and
+`ProcessRef` are reserved type names because they name built-in transition and
+process-reference types.

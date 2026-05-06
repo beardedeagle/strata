@@ -41,10 +41,23 @@ struct StepCheckContext<'a> {
     process_ref_index: &'a BTreeMap<Identifier, ProcessRefBinding>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StepBodyClause<'a> {
+    step: &'a Function,
+    body: &'a FunctionBlock,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct StepClause<'a> {
     step: &'a Function,
     message: CheckedMessageId,
     body: &'a FunctionBlock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepSignaturePattern {
+    Variant(CheckedMessageId),
+    Wildcard,
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -263,35 +276,56 @@ fn check_step_clauses<'a>(
     semantic_index: &SemanticIndex,
 ) -> Result<Vec<StepClause<'a>>> {
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
-    let mut seen = vec![false; msg_enum.variants.len()];
-    let mut clauses = Vec::with_capacity(process.steps.len());
+    let mut explicit_clauses = vec![None; msg_enum.variants.len()];
+    let mut wildcard_clause = None;
 
     for step in &process.steps {
-        let message = check_step_signature(module, process, process_id, semantic_index, step)?;
-        if std::mem::replace(&mut seen[message.index()], true) {
-            return Err(Error::new(format!(
-                "process {} declares duplicate step pattern for message {}",
-                process.name,
-                msg_enum.variants[message.index()]
-            )));
-        }
+        let pattern = check_step_signature(module, process, process_id, semantic_index, step)?;
         let Some(body) = &step.body else {
             return Err(Error::new("step must have a body for buildable source"));
         };
-        clauses.push(StepClause {
-            step,
-            message,
-            body,
-        });
+        let clause = StepBodyClause { step, body };
+        match pattern {
+            StepSignaturePattern::Variant(message) => {
+                if explicit_clauses[message.index()].replace(clause).is_some() {
+                    return Err(Error::new(format!(
+                        "process {} declares duplicate step pattern for message {}",
+                        process.name,
+                        msg_enum.variants[message.index()]
+                    )));
+                }
+            }
+            StepSignaturePattern::Wildcard => {
+                if wildcard_clause.replace(clause).is_some() {
+                    return Err(Error::new(format!(
+                        "process {} declares duplicate wildcard step pattern",
+                        process.name
+                    )));
+                }
+            }
+        }
     }
 
-    for (index, covered) in seen.iter().enumerate() {
-        if !covered {
+    if wildcard_clause.is_some() && explicit_clauses.iter().all(Option::is_some) {
+        return Err(Error::new(format!(
+            "process {} wildcard step pattern is unreachable",
+            process.name
+        )));
+    }
+
+    let mut clauses = Vec::with_capacity(msg_enum.variants.len());
+    for (index, message_variant) in msg_enum.variants.iter().enumerate() {
+        let Some(clause) = explicit_clauses[index].or(wildcard_clause) else {
             return Err(Error::new(format!(
                 "process {} must declare step pattern for message {}",
-                process.name, msg_enum.variants[index]
+                process.name, message_variant
             )));
-        }
+        };
+        clauses.push(StepClause {
+            step: clause.step,
+            message: CheckedMessageId::from_index(index)?,
+            body: clause.body,
+        });
     }
 
     Ok(clauses)
@@ -303,7 +337,7 @@ fn check_step_signature(
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     step: &Function,
-) -> Result<CheckedMessageId> {
+) -> Result<StepSignaturePattern> {
     if step.params.len() != 2 {
         return Err(Error::new(
             "step must declare state parameter and message pattern",
@@ -323,9 +357,9 @@ fn check_step_signature(
             process.state_type
         )));
     }
-    let FunctionParam::Pattern(SignaturePattern::Variant(message)) = &step.params[1] else {
+    let FunctionParam::Pattern(message_pattern) = &step.params[1] else {
         return Err(Error::new(
-            "step second parameter must be a message variant pattern",
+            "step second parameter must be a message variant pattern or wildcard pattern",
         ));
     };
 
@@ -343,7 +377,12 @@ fn check_step_signature(
         return Err(Error::new("step must be deterministic"));
     }
 
-    semantic_index.message_id_for_step_pattern(module, process_id, message)
+    match message_pattern {
+        SignaturePattern::Variant(message) => semantic_index
+            .message_id_for_step_pattern(module, process_id, message)
+            .map(StepSignaturePattern::Variant),
+        SignaturePattern::Wildcard => Ok(StepSignaturePattern::Wildcard),
+    }
 }
 
 fn collect_process_refs(

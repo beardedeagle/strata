@@ -43,7 +43,7 @@ proc Worker mailbox bounded(2) {
         return Continue(SawFirst);
     }
 
-    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
         emit "worker handled Second";
         return Stop(Done);
     }
