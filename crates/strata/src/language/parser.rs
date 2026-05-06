@@ -1,7 +1,7 @@
 use super::ast::{
-    Determinism, Effect, Enum, Function, FunctionBlock, FunctionBody, Identifier, MessageMatch,
-    MessageMatchArm, Module, OutputLiteral, Param, Process, Record, RecordField, RecordValue,
-    RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
+    Determinism, Effect, Enum, Function, FunctionBlock, FunctionParam, Identifier, Module,
+    OutputLiteral, Param, Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr,
+    SignaturePattern, Statement, TypeRef, ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
@@ -148,7 +148,7 @@ impl Parser {
         let mut state_type = None;
         let mut msg_type = None;
         let mut init = None;
-        let mut step = None;
+        let mut steps = Vec::new();
 
         while !self.consume_symbol('}') {
             if self.peek_keyword("type") {
@@ -192,12 +192,7 @@ impl Parser {
                         init = Some(function);
                     }
                     "step" => {
-                        if step.is_some() {
-                            return Err(Error::new(format!(
-                                "process {name} declares duplicate step function"
-                            )));
-                        }
-                        step = Some(function);
+                        steps.push(function);
                     }
                     other => {
                         return Err(Error::new(format!(
@@ -209,6 +204,9 @@ impl Parser {
                 return Err(self.error_here("expected process type alias or function"));
             }
         }
+        if steps.is_empty() {
+            return Err(Error::new(format!("process {name} must declare step")));
+        }
 
         Ok(Process {
             name: name.clone(),
@@ -218,7 +216,7 @@ impl Parser {
             msg_type: msg_type
                 .ok_or_else(|| Error::new(format!("process {name} must declare type Msg")))?,
             init: init.ok_or_else(|| Error::new(format!("process {name} must declare init")))?,
-            step: step.ok_or_else(|| Error::new(format!("process {name} must declare step")))?,
+            steps,
         })
     }
 
@@ -230,12 +228,17 @@ impl Parser {
         if !self.consume_symbol(')') {
             loop {
                 let param_name = self.expect_identifier()?;
-                self.expect_symbol(':')?;
-                let ty = self.parse_type()?;
-                params.push(Param {
-                    name: param_name,
-                    ty,
-                });
+                if self.consume_symbol(':') {
+                    let ty = self.parse_type()?;
+                    params.push(FunctionParam::Binding(Param {
+                        name: param_name,
+                        ty,
+                    }));
+                } else {
+                    params.push(FunctionParam::Pattern(SignaturePattern::Variant(
+                        param_name,
+                    )));
+                }
                 if self.consume_symbol(',') {
                     if self.consume_symbol(')') {
                         break;
@@ -266,11 +269,7 @@ impl Parser {
             None
         } else {
             self.expect_symbol('{')?;
-            let body = if self.peek_keyword("match") {
-                FunctionBody::MatchMessage(self.parse_message_match()?)
-            } else {
-                FunctionBody::Block(self.parse_function_block()?)
-            };
+            let body = self.parse_function_block()?;
             self.expect_symbol('}')?;
             Some(body)
         };
@@ -300,30 +299,12 @@ impl Parser {
         })
     }
 
-    fn parse_message_match(&mut self) -> Result<MessageMatch> {
-        self.expect_keyword("match")?;
-        let scrutinee = self.expect_identifier()?;
-        self.expect_symbol('{')?;
-        let mut arms = Vec::new();
-        if self.peek_symbol('}') {
-            return Err(self.error_here("message match must declare at least one arm"));
-        }
-        loop {
-            let message = self.expect_identifier()?;
-            self.expect_fat_arrow()?;
-            self.expect_symbol('{')?;
-            let body = self.parse_function_block()?;
-            self.expect_symbol('}')?;
-            arms.push(MessageMatchArm { message, body });
-            self.consume_symbol(',');
-            if self.consume_symbol('}') {
-                break;
-            }
-        }
-        Ok(MessageMatch { scrutinee, arms })
-    }
-
     fn parse_function_statement(&mut self) -> Result<Statement> {
+        if self.peek_keyword("match") {
+            return Err(self.error_here(
+                "message match bodies are not supported; declare one step clause per message variant",
+            ));
+        }
         if self.peek_keyword("emit") {
             self.expect_keyword("emit")?;
             let text = self.expect_string_literal()?;
@@ -564,11 +545,6 @@ impl Parser {
         } else {
             Err(self.error_here("expected ->"))
         }
-    }
-
-    fn expect_fat_arrow(&mut self) -> Result<()> {
-        self.expect_symbol('=')?;
-        self.expect_symbol('>')
     }
 
     fn expect_symbol(&mut self, symbol: char) -> Result<()> {

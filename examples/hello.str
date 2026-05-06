@@ -13,7 +13,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [emit] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
         emit "hello from Strata";
         return Stop(state);
     }

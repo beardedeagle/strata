@@ -58,7 +58,7 @@ fn init() -> WorkerState ! [] ~ [] @det {
 After handling `Ping`, it stops in `Handled`:
 
 ```strata
-fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
     emit "worker handled Ping";
     return Stop(Handled);
 }
@@ -77,25 +77,22 @@ enum WorkerMsg {
 }
 ```
 
-When a process accepts multiple messages, `step` must use exhaustive
-`match msg`:
+When a process accepts multiple messages, it must declare one `step` clause per
+message pattern:
 
 ```strata
-fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-    match msg {
-        First => {
-            emit "worker handled First";
-            return Continue(SawFirst);
-        }
-        Second => {
-            emit "worker handled Second";
-            return Stop(Done);
-        }
-    }
+fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    emit "worker handled First";
+    return Continue(SawFirst);
+}
+
+fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    emit "worker handled Second";
+    return Stop(Done);
 }
 ```
 
-Each message variant needs one arm. Missing arms and duplicate arms are
+Each message variant needs one clause. Missing clauses and duplicate clauses are
 rejected.
 
 ## Continue Versus Stop

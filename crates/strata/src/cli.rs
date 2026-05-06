@@ -446,7 +446,7 @@ proc {process_name} mailbox bounded(1) {{
     type State = MainState;
     type Msg = MainMsg;
     fn init() -> MainState ! [] ~ [] @det {{ return S0; }}
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {{
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {{
         return Stop(state);
     }}
 }}

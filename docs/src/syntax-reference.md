@@ -73,8 +73,9 @@ message_alias =
     "type" "Msg" "=" type_ref ";"
 ```
 
-The aliases and functions may appear in any order, but each must appear exactly
-once. Other process members are rejected.
+The aliases and functions may appear in any order. `State`, `Msg`, and `init`
+must each appear exactly once. `step` must appear once for each message variant.
+Other process members are rejected.
 
 ## Functions
 
@@ -87,10 +88,17 @@ function =
     function_body
 
 params =
-    param ("," param)* ","?
+    function_param ("," function_param)* ","?
 
-param =
+function_param =
+    param_binding
+  | signature_pattern
+
+param_binding =
     ident ":" type_ref
+
+signature_pattern =
+    ident
 
 effect_list =
     "[" (effect ("," effect)* ","?)? "]"
@@ -114,20 +122,25 @@ requires deterministic functions and empty may-behavior lists.
 function_body =
     ";"
   | "{" block_body "}"
-  | "{" message_match_body "}"
 
 block_body =
     statement* return_statement
-
-message_match_body =
-    "match" "msg" "{" message_match_arm+ "}"
-
-message_match_arm =
-    ident "=>" "{" block_body "}" ","?
 ```
 
-Buildable source requires bodies. `init` uses a block body. A multi-message
-`step` uses `match msg`.
+Buildable source requires bodies. `init` uses no parameters. Each `step` uses
+`state: StateType` followed by one message-variant signature pattern:
+
+```text
+step_function =
+    "fn" "step" "(" "state" ":" type_ref "," ident ")"
+    "->" "ProcResult" "<" type_ref ">"
+    "!" effect_list "~" "[]" "@det"
+    "{" block_body "}"
+```
+
+The `type_ref` entries must name the process state type. The `ident` after the
+comma is a message variant accepted by the process message type. Signature
+patterns are accepted only for actor `step` message dispatch in this slice.
 
 ## Statements
 

@@ -22,7 +22,7 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         send worker First;
         send worker Second;
@@ -38,16 +38,13 @@ proc Worker mailbox bounded(2) {
         return Waiting;
     }
 
-    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-        match msg {
-            First => {
-                emit "worker handled First";
-                return Continue(SawFirst);
-            }
-            Second => {
-                emit "worker handled Second";
-                return Stop(Done);
-            }
-        }
+    fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled First";
+        return Continue(SawFirst);
+    }
+
+    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
     }
 }

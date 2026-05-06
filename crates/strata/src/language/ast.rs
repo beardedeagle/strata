@@ -161,42 +161,35 @@ pub struct Process {
     pub state_type: TypeRef,
     pub msg_type: TypeRef,
     pub init: Function,
-    pub step: Function,
+    pub steps: Vec<Function>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: Identifier,
-    pub params: Vec<Param>,
+    pub params: Vec<FunctionParam>,
     pub return_type: TypeRef,
     pub effects: Vec<Effect>,
     pub may: Vec<Identifier>,
     pub determinism: Determinism,
-    pub body: Option<FunctionBody>,
+    pub body: Option<FunctionBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FunctionBody {
-    Block(FunctionBlock),
-    MatchMessage(MessageMatch),
+pub enum FunctionParam {
+    Binding(Param),
+    Pattern(SignaturePattern),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignaturePattern {
+    Variant(Identifier),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionBlock {
     pub statements: Vec<Statement>,
     pub returns: ReturnExpr,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageMatch {
-    pub scrutinee: Identifier,
-    pub arms: Vec<MessageMatchArm>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageMatchArm {
-    pub message: Identifier,
-    pub body: FunctionBlock,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

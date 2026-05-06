@@ -55,7 +55,7 @@ impl TypeDecl {
 #[derive(Debug, Clone, Copy)]
 enum MessageResolutionContext<'a> {
     Send { sender_process: &'a str },
-    MatchArm,
+    StepPattern,
 }
 
 impl MessageResolutionContext<'_> {
@@ -65,8 +65,8 @@ impl MessageResolutionContext<'_> {
                 "process {} sends message {} not accepted by {}",
                 sender_process, message, process.name
             )),
-            Self::MatchArm => Error::new(format!(
-                "process {} step match arm message {} is not accepted",
+            Self::StepPattern => Error::new(format!(
+                "process {} step pattern message {} is not accepted",
                 process.name, message
             )),
         }
@@ -325,7 +325,7 @@ impl SemanticIndex {
         )
     }
 
-    pub(super) fn message_id_for_match_arm(
+    pub(super) fn message_id_for_step_pattern(
         &self,
         module: &Module,
         process_id: CheckedProcessId,
@@ -335,7 +335,7 @@ impl SemanticIndex {
             module,
             process_id,
             message,
-            MessageResolutionContext::MatchArm,
+            MessageResolutionContext::StepPattern,
         )
     }
 
