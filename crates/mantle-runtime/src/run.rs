@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use mantle_artifact::{
-    ArtifactPayload, ArtifactProcessRefPayload, ArtifactValueTemplate, Error, MantleArtifact,
-    MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
+    validate_payload_value_label, ArtifactPayload, ArtifactProcessRefPayload,
+    ArtifactValueTemplate, Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, Result, StateId, StepResult,
 };
 
 use crate::event::{
@@ -841,9 +842,11 @@ fn evaluate_runtime_template(
                     evaluate_runtime_template(&field.value, received_payload, step, process_refs)?;
                 parts.push(format!("{}:{}", field.name, value.value));
             }
+            let value = format!("{ty}{{{}}}", parts.join(","));
+            validate_payload_value_label(&value)?;
             Ok(ArtifactPayload {
                 ty: ty.clone(),
-                value: format!("{ty}{{{}}}", parts.join(",")),
+                value,
                 process_ref: None,
             })
         }
@@ -875,8 +878,8 @@ mod tests {
     };
     use mantle_artifact::{
         ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactTransition,
-        StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, MAX_PROCESS_REFS_PER_PROCESS,
-        STRATA_SOURCE_LANGUAGE,
+        ArtifactValueTemplateField, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
+        MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS, STRATA_SOURCE_LANGUAGE,
     };
 
     #[test]
@@ -1054,6 +1057,39 @@ mod tests {
         assert!(err
             .to_string()
             .contains("payload process reference metadata targets Main, expected Worker for type ProcessRef<Worker>"));
+    }
+
+    #[test]
+    fn runtime_rejects_oversized_record_payload_template_value() {
+        let template = ArtifactValueTemplate::Record {
+            ty: "Box".to_string(),
+            fields: vec![ArtifactValueTemplateField {
+                name: "item".to_string(),
+                value: ArtifactValueTemplate::ReceivedPayload {
+                    ty: "Job".to_string(),
+                },
+            }],
+        };
+        let received = ArtifactPayload {
+            ty: "Job".to_string(),
+            value: "a".repeat(MAX_FIELD_VALUE_BYTES),
+            process_ref: None,
+        };
+        let step = ActiveStep {
+            pid: RuntimeProcessId::FIRST,
+            process_id: ProcessId::new(0),
+            process_name: "Main".to_string(),
+            message: MessageId::new(0),
+            message_label: "Start".to_string(),
+            payload: Some(received.clone()),
+        };
+
+        let err = evaluate_runtime_template(&template, Some(&received), &step, &BTreeMap::new())
+            .expect_err("oversized record payload labels should fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("payload value exceeds maximum length"));
     }
 
     fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {
