@@ -9,6 +9,8 @@ Read them in this order:
 3. `actor_sequence.str` for multiple messages and message-keyed transitions.
 4. `actor_instances.str` for multiple runtime instances of one process
    definition.
+5. `actor_payloads.str` for typed message payloads and immutable payload
+   bindings in actor step signatures.
 
 ## Hello
 
@@ -95,3 +97,23 @@ Key source ideas:
   definition label.
 - The runtime trace records two different `pid` values with the same
   `process_id` for `Worker`.
+
+## Actor Payloads
+
+`examples/actor_payloads.str` sends a typed payload from `Main` to `Worker`.
+`Worker` binds that payload in its `step` signature and returns a whole
+replacement state containing the immutable payload value.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payloads.str
+cargo run -p strata --bin strata -- build examples/actor_payloads.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+```
+
+Key source ideas:
+
+- `enum WorkerMsg { Assign(Job) }` declares a payload-bearing message variant.
+- `send worker Assign(Job { phase: Ready });` sends one checked payload value.
+- `Assign(job: Job)` binds the received payload as an immutable step-local
+  value.
+- `WorkerState { job: job }` constructs the next state as a whole value.

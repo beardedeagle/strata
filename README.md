@@ -82,6 +82,18 @@ That example spawns two `Worker` instances through distinct process references
 and sends `Ping` to both. Mantle records different runtime `pid` values for the
 two workers while retaining the same loaded process definition ID.
 
+Actor messages can also carry typed immutable payloads:
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payloads.str
+cargo run -p strata --bin strata -- build examples/actor_payloads.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+```
+
+That example sends `Assign(Job { phase: Ready })`, binds the payload in the
+worker `step` signature as `Assign(job: Job)`, and returns a whole replacement
+state containing the bound payload value.
+
 ## What Strata Is For
 
 Strata is aimed at programs where the important behavior should be explicit:

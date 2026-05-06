@@ -29,7 +29,7 @@ fn validate_transition(
     entry_process: CheckedProcessId,
     transition: &CheckedTransition,
 ) -> Result<()> {
-    if transition.message().index() >= process.message_variants().len() {
+    if transition.message().index() >= process.message_cases().len() {
         return Err(Error::new(format!(
             "process {} transition message id {} is not accepted",
             process.debug_name(),
@@ -96,7 +96,7 @@ fn validate_transition(
                     )));
                 }
                 let target_process = process_by_id(processes, target_process_id)?;
-                if message.index() >= target_process.message_variants().len() {
+                if message.index() >= target_process.message_cases().len() {
                     return Err(Error::new(format!(
                         "process {} sends message id {} not accepted by {}",
                         process.debug_name(),
@@ -310,7 +310,7 @@ fn validate_static_runtime_order(
                         })?;
                     let target_process =
                         process_by_id(processes, instances[target_index].process_id)?;
-                    if message.index() >= target_process.message_variants().len() {
+                    if message.index() >= target_process.message_cases().len() {
                         return Err(Error::new(format!(
                             "process {} sends message id {} not accepted by {}",
                             process.debug_name(),
@@ -401,7 +401,10 @@ fn process_label(processes: &[CheckedProcess], process_id: CheckedProcessId) -> 
 mod tests {
     use super::*;
     use crate::language::ast::{Identifier, TypeRef};
-    use crate::language::checked::{CheckedProcessParts, CheckedProcessRef, CheckedStateId};
+    use crate::language::checked::{
+        CheckedMessageCase, CheckedMessageVariantId, CheckedProcessParts, CheckedProcessRef,
+        CheckedStateId,
+    };
 
     #[test]
     fn static_process_refs_bind_sparsely_within_transition_scope() {
@@ -498,7 +501,12 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: vec!["MainState".to_string()],
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_variants: vec![ident("Start")],
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
             process_refs: (0..process_ref_count)
                 .map(|index| {
                     CheckedProcessRef::new(ident(&format!("worker_{index}")), checked_process_id(1))

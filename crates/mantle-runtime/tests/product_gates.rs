@@ -350,3 +350,66 @@ fn actor_instances_checks_builds_and_runs_on_mantle() {
     assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","result":"Stop","state_id":1,"state":"Handled""#));
     assert!(trace.contains(r#""event":"process_stepped","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","result":"Stop","state_id":1,"state":"Handled""#));
 }
+
+#[test]
+fn actor_payloads_checks_builds_and_runs_on_mantle() {
+    let root = workspace_root();
+    ensure_workspace_binaries(&root);
+    let strata = binary_path(&root, "strata");
+    let mantle = binary_path(&root, "mantle");
+
+    let check = Command::new(&strata)
+        .args(["check", "examples/actor_payloads.str"])
+        .current_dir(&root)
+        .output()
+        .expect("strata check should run");
+    assert!(
+        check.status.success(),
+        "strata check failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let build = Command::new(&strata)
+        .args(["build", "examples/actor_payloads.str"])
+        .current_dir(&root)
+        .output()
+        .expect("strata build should run");
+    assert!(
+        build.status.success(),
+        "strata build failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let artifact_path = root.join("target/strata/actor_payloads.mta");
+    assert!(
+        artifact_path.exists(),
+        "expected {}",
+        artifact_path.display()
+    );
+
+    let run = Command::new(&mantle)
+        .args(["run", "target/strata/actor_payloads.mta"])
+        .current_dir(&root)
+        .output()
+        .expect("mantle run should run");
+    assert!(
+        run.status.success(),
+        "mantle run failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: delivered Assign(Job{phase:Ready}) to Worker"));
+    assert!(stdout.contains("worker assigned job"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+
+    let trace_path = root.join("target/strata/actor_payloads.observability.jsonl");
+    let trace = std::fs::read_to_string(&trace_path)
+        .unwrap_or_else(|err| panic!("expected trace {}: {err}", trace_path.display()));
+    assert!(trace.contains(r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign(Job{phase:Ready})""#));
+    assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"WorkerState{job:Job{phase:Done}}","to_state_id":1,"to":"WorkerState{job:Job{phase:Ready}}""#));
+    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign(Job{phase:Ready})","result":"Stop","state_id":1,"state":"WorkerState{job:Job{phase:Ready}}""#));
+}

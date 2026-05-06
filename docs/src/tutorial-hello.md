@@ -103,5 +103,6 @@ That trace should contain `artifact_loaded`, `process_spawned`,
 If you remove `emit "hello from Strata";`, also change the effect list from
 `[emit]` to `[]`. Declaring an unused effect is rejected.
 
-If you add a second message variant to `MainMsg`, add a second `step` clause for
-that variant. Each accepted message needs exactly one clause.
+If you add a second message variant to `MainMsg`, add a `step` clause for that
+variant or use one `_` clause for variants without explicit clauses. Each
+accepted message must resolve to exactly one clause.

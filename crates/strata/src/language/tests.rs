@@ -196,9 +196,10 @@ fn parses_step_return_type_as_structured_type_ref() {
                 name: Identifier::new("state").expect("state identifier"),
                 ty: TypeRef::Named(Identifier::new("MainState").expect("MainState identifier")),
             }),
-            FunctionParam::Pattern(SignaturePattern::Variant(
-                Identifier::new("Start").expect("Start identifier")
-            )),
+            FunctionParam::Pattern(SignaturePattern::Variant {
+                name: Identifier::new("Start").expect("Start identifier"),
+                binding: None,
+            }),
         ]
     );
 }
@@ -313,6 +314,747 @@ fn checks_wildcard_only_step_pattern() {
 
     assert_eq!(main.transitions().len(), 1);
     assert_eq!(main.transitions()[0].message(), checked_message_id(0));
+}
+
+#[test]
+fn parses_checks_and_lowers_message_payload_step_binding() {
+    let source = r#"
+module actor_payloads;
+
+record MainState;
+record Job { phase: JobPhase }
+record WorkerState { job: Job }
+enum MainMsg { Start }
+enum JobPhase { Ready, Done }
+enum WorkerMsg { Assign(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { job: Job { phase: Done } };
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(WorkerState { job: job });
+    }
+}
+"#;
+
+    let module = parse_source(source).expect("payload source should parse");
+    let worker = module
+        .processes
+        .iter()
+        .find(|process| process.name.as_str() == "Worker")
+        .expect("Worker should parse");
+    assert_eq!(
+        worker.steps[0].params[1],
+        FunctionParam::Pattern(SignaturePattern::Variant {
+            name: Identifier::new("Assign").expect("Assign identifier"),
+            binding: Some(Param {
+                name: Identifier::new("job").expect("job identifier"),
+                ty: TypeRef::Named(Identifier::new("Job").expect("Job identifier")),
+            }),
+        })
+    );
+
+    let checked = check_module(module).expect("payload source should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    assert_eq!(
+        worker
+            .message_cases()
+            .iter()
+            .map(|case| case.label())
+            .collect::<Vec<_>>(),
+        ["Assign(Job{phase:Ready})"]
+    );
+    assert_eq!(
+        worker.state_values(),
+        [
+            "WorkerState{job:Job{phase:Done}}",
+            "WorkerState{job:Job{phase:Ready}}"
+        ]
+    );
+    assert_eq!(
+        only_transition(worker).next_state(),
+        CheckedNextState::Value(checked_state_id(1))
+    );
+
+    let artifact = lower_to_artifact(&checked, source).expect("payload source should lower");
+    assert_eq!(
+        artifact.processes[1].message_variants,
+        ["Assign(Job{phase:Ready})"]
+    );
+    assert_eq!(
+        artifact.processes[1].state_values,
+        [
+            "WorkerState{job:Job{phase:Done}}",
+            "WorkerState{job:Job{phase:Ready}}"
+        ]
+    );
+}
+
+#[test]
+fn expands_one_payload_step_pattern_to_multiple_concrete_messages() {
+    let source = r#"
+module actor_payload_cases;
+
+record MainState;
+record Job { phase: JobPhase }
+enum JobPhase { Ready, Done }
+enum WorkerState { Idle, ReadySeen, DoneSeen }
+enum MainMsg { Start }
+enum WorkerMsg { Assign(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        send worker Assign(Job { phase: Done });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("multiple payload cases should check");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        worker
+            .message_cases()
+            .iter()
+            .map(|case| case.label())
+            .collect::<Vec<_>>(),
+        ["Assign(Job{phase:Done})", "Assign(Job{phase:Ready})"]
+    );
+    assert_eq!(worker.transitions().len(), 2);
+    assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
+    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
+}
+
+#[test]
+fn wildcard_step_pattern_handles_payload_messages_without_binding() {
+    let source = r#"
+module actor_payload_wildcard;
+
+record MainState;
+record Job { phase: JobPhase }
+enum JobPhase { Ready, Done }
+enum WorkerState { Idle }
+enum MainMsg { Start }
+enum WorkerMsg { Assign(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        send worker Assign(Job { phase: Done });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("wildcard payload handler should check");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        worker
+            .message_cases()
+            .iter()
+            .map(|case| case.label())
+            .collect::<Vec<_>>(),
+        ["Assign(Job{phase:Done})", "Assign(Job{phase:Ready})"]
+    );
+    assert_eq!(worker.transitions().len(), 2);
+    assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
+    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
+}
+
+#[test]
+fn forwards_payload_binding_through_send() {
+    let source = r#"
+module forward_payload;
+
+record MainState;
+record Job { phase: JobPhase }
+enum JobPhase { Ready, Done }
+enum MainMsg { Start }
+enum WorkerState { Idle }
+enum WorkerMsg { Assign(Job) }
+enum SinkState { Idle }
+enum SinkMsg { Assign(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send sink Assign(job);
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: SinkState, Assign(job: Job)) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("payload binding forwarding should check");
+    let sink = &checked.processes()[2];
+
+    assert_eq!(
+        sink.message_cases()
+            .iter()
+            .map(|case| case.label())
+            .collect::<Vec<_>>(),
+        ["Assign(Job{phase:Ready})"]
+    );
+
+    let artifact = lower_to_artifact(&checked, source).expect("forwarded payload should lower");
+    assert_eq!(
+        artifact.processes[2].message_variants,
+        ["Assign(Job{phase:Ready})"]
+    );
+}
+
+#[test]
+fn rejects_send_missing_required_message_payload() {
+    let source = payload_source_with(
+        "send worker Assign;",
+        "fn step(state: WorkerState, Assign(job: Job))",
+    );
+
+    let err = check_source(&source).expect_err("missing message payload should fail");
+
+    assert!(err
+        .to_string()
+        .contains("message Assign requires a payload"));
+}
+
+#[test]
+fn rejects_payload_for_unit_message_variant() {
+    let source = ACTOR_PING.replace("send worker Ping;", "send worker Ping(MainState);");
+
+    let err = check_source(&source).expect_err("payload on unit message should fail");
+
+    assert!(err
+        .to_string()
+        .contains("message Ping does not accept a payload"));
+}
+
+#[test]
+fn rejects_payload_message_label_above_artifact_limit_during_checking() {
+    let source = payload_message_label_overflow_source();
+
+    let err =
+        check_source(&source).expect_err("oversized concrete message label should fail checking");
+
+    assert!(err
+        .to_string()
+        .contains("message label exceeds maximum length"));
+}
+
+#[test]
+fn rejects_wildcard_payload_binding() {
+    let source = payload_source_with(
+        "send worker Assign(Job { phase: Ready });",
+        "fn step(state: WorkerState, _(job: Job))",
+    );
+
+    let err = parse_source(&source).expect_err("wildcard payload binding should fail");
+
+    assert!(err
+        .to_string()
+        .contains("wildcard step patterns cannot bind payloads"));
+}
+
+#[test]
+fn rejects_forward_payload_binding_with_wrong_send_type() {
+    let source = r#"
+module forward_payload_wrong_type;
+
+record MainState;
+record Job { phase: JobPhase }
+record OtherJob { phase: JobPhase }
+enum JobPhase { Ready, Done }
+enum MainMsg { Start }
+enum WorkerState { Idle }
+enum WorkerMsg { Assign(Job) }
+enum SinkState { Idle }
+enum SinkMsg { Assign(OtherJob) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send sink Assign(job);
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: SinkState, Assign(job: OtherJob)) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("forwarded payload type mismatch should fail");
+
+    assert!(err
+        .to_string()
+        .contains("value binding job has type Job, expected OtherJob"));
+}
+
+#[test]
+fn rejects_step_payload_binding_with_wrong_type() {
+    let source = payload_source_with(
+        "send worker Assign(Job { phase: Ready });",
+        "fn step(state: WorkerState, Assign(job: MainState))",
+    );
+
+    let err = check_source(&source).expect_err("wrong payload binding type should fail");
+
+    assert!(err
+        .to_string()
+        .contains("step pattern payload job has type MainState, expected Job"));
+}
+
+#[test]
+fn rejects_payload_binding_named_like_value_constructor() {
+    let source = payload_source_with(
+        "send worker Assign(Job { phase: Ready });",
+        "fn step(state: WorkerState, Assign(Job: Job))",
+    );
+
+    let err = check_source(&source).expect_err("constructor-like payload binding should fail");
+
+    assert!(err
+        .to_string()
+        .contains("payload binding Job conflicts with a declared type or value constructor"));
+}
+
+#[test]
+fn rejects_process_ref_named_like_payload_binding() {
+    let source = r#"
+module payload_process_ref_conflict;
+
+record MainState;
+record Job { phase: JobPhase }
+enum JobPhase { Ready, Done }
+enum MainMsg { Start }
+enum WorkerState { Idle }
+enum WorkerMsg { Assign(Job) }
+enum SinkState { Idle }
+enum SinkMsg { Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+        let job: ProcessRef<Sink> = spawn Sink;
+        send job Ping;
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: SinkState, Ping) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("local binding shadowing should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process reference job conflicts with payload binding"));
+}
+
+#[test]
+fn rejects_payload_message_without_concrete_send_case() {
+    let source = payload_source_with(
+        "send worker Ping;",
+        "fn step(state: WorkerState, Assign(job: Job))",
+    )
+    .replace(
+        "enum WorkerMsg { Assign(Job) }",
+        "enum WorkerMsg { Assign(Job), Ping }",
+    );
+
+    let err = check_source(&source).expect_err("unsent payload message should fail");
+
+    assert!(err
+        .to_string()
+        .contains("message Assign has no concrete payload sends"));
+}
+
+#[test]
+fn rejects_invalid_step_signature_before_payload_case_discovery() {
+    let source = r#"
+module invalid_step_discovery;
+
+record MainState;
+record Job { phase: Phase }
+enum Phase { Ready }
+enum MainMsg { Start }
+enum WorkerState { Idle }
+enum WorkerMsg { Assign(Job) }
+enum SinkState { Idle }
+enum SinkMsg { Forward(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send sink Forward(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: SinkState, Forward(job: Job)) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("invalid step signature should fail first");
+
+    assert!(err
+        .to_string()
+        .contains("step second parameter must be a message variant pattern or wildcard pattern"));
+}
+
+#[test]
+fn rejects_generic_message_payload_type_with_precise_diagnostic() {
+    let source = r#"
+module generic_payload_type;
+
+record MainState;
+record Job;
+enum MainMsg { Start }
+enum WorkerState { Idle }
+enum WorkerMsg { Assign(ProcResult<Job>) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: ProcResult<Job>)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("generic payload type should fail");
+
+    assert!(err
+        .to_string()
+        .contains("payload type ProcResult<Job> must be a named record or enum type"));
+}
+
+#[test]
+fn accepts_payload_enum_type_declared_after_message_enum() {
+    let source = r#"
+module payload_enum_order;
+
+record MainState;
+enum MainMsg { Start }
+enum WorkerMsg { Assign(JobKind) }
+enum JobKind { Ready }
+enum WorkerState { Idle }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Ready);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(kind: JobKind)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("later enum payload type should resolve");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        worker
+            .message_cases()
+            .iter()
+            .map(|case| case.label())
+            .collect::<Vec<_>>(),
+        ["Assign(Ready)"]
+    );
+}
+
+#[test]
+fn rejects_payload_entry_message() {
+    let source = r#"
+module entry_payload;
+
+record MainState;
+record Job;
+enum MainMsg { Start(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start(job: Job)) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("payload entry message should fail");
+
+    assert!(err
+        .to_string()
+        .contains("entry message Start must not require a payload"));
+}
+
+#[test]
+fn rejects_state_enum_payload_variant() {
+    let source = r#"
+module state_payload;
+
+record Job;
+enum MainState { Idle(Job) }
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("state payload variant should fail");
+
+    assert!(err
+        .to_string()
+        .contains("state enum MainState variant Idle must not declare a payload"));
 }
 
 #[test]
@@ -923,6 +1665,64 @@ fn rejects_message_count_above_artifact_limit_during_checking() {
 
     assert!(err.to_string().contains(&format!(
         "process Main message_count must be no greater than {MAX_MESSAGE_VARIANTS_PER_PROCESS}"
+    )));
+}
+
+#[test]
+fn rejects_concrete_payload_message_count_above_artifact_limit_during_checking() {
+    let phases = (0..=MAX_MESSAGE_VARIANTS_PER_PROCESS)
+        .map(|index| format!("P{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sends = (0..=MAX_MESSAGE_VARIANTS_PER_PROCESS)
+        .map(|index| format!("        send worker Assign(Job {{ phase: P{index} }});\n"))
+        .collect::<String>();
+    let mailbox_bound = MAX_MESSAGE_VARIANTS_PER_PROCESS + 1;
+    let source = format!(
+        r#"
+module concrete_payload_count;
+
+record MainState;
+record Job {{ phase: JobPhase }}
+enum JobPhase {{ {phases} }}
+enum MainMsg {{ Start }}
+enum WorkerState {{ Idle }}
+enum WorkerMsg {{ Assign(Job) }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {{
+        let worker: ProcessRef<Worker> = spawn Worker;
+{sends}        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded({mailbox_bound}) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return Idle;
+    }}
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Continue(state);
+    }}
+}}
+"#
+    );
+    let module = parse_source(&source).expect("concrete-message-count source should parse");
+
+    let err = check_module(module).expect_err("concrete message count above limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process Worker concrete_message_count must be no greater than {MAX_MESSAGE_VARIANTS_PER_PROCESS}"
     )));
 }
 
@@ -1867,6 +2667,129 @@ fn nested_record_value_source(depth: usize) -> String {
         value = format!("State{index} {{ next: {value} }}");
     }
     value
+}
+
+fn payload_source_with(send_statement: &str, step_header: &str) -> String {
+    format!(
+        r#"
+module actor_payloads;
+
+record MainState;
+record Job {{ phase: JobPhase }}
+record WorkerState {{ job: Job }}
+enum MainMsg {{ Start }}
+enum JobPhase {{ Ready, Done }}
+enum WorkerMsg {{ Assign(Job) }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {{
+        let worker: ProcessRef<Worker> = spawn Worker;
+        {send_statement}
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(1) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return WorkerState {{ job: Job {{ phase: Done }} }};
+    }}
+
+    {step_header} -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Stop(WorkerState {{ job: job }});
+    }}
+}}
+"#
+    )
+}
+
+fn payload_message_label_overflow_source() -> String {
+    let field_names = payload_overflow_field_names();
+    let record_fields = field_names
+        .iter()
+        .map(|name| format!("    {name}: Phase,\n"))
+        .collect::<String>();
+    let payload_fields = field_names
+        .iter()
+        .map(|name| format!("            {name}: Ready,\n"))
+        .collect::<String>();
+
+    format!(
+        r#"
+module payload_label_limit;
+
+record MainState;
+record WorkerState;
+enum Phase {{ Ready }}
+record Job {{
+{record_fields}}}
+enum MainMsg {{ Start }}
+enum WorkerMsg {{ Assign(Job) }}
+
+proc Main mailbox bounded(16) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {{
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job {{
+{payload_fields}        }});
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(16) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return WorkerState;
+    }}
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+    )
+}
+
+fn payload_overflow_field_names() -> Vec<String> {
+    for field_count in 1..MAX_FIELD_VALUE_BYTES {
+        let field_names = (0..field_count)
+            .map(|index| format!("f{index}"))
+            .collect::<Vec<_>>();
+        let payload_label = payload_record_label(&field_names);
+        let message_label = format!("Assign({payload_label})");
+        if payload_label.len() <= MAX_FIELD_VALUE_BYTES
+            && message_label.len() > MAX_FIELD_VALUE_BYTES
+        {
+            return field_names;
+        }
+    }
+    panic!("test fixture should find a payload label at the wrapped message boundary");
+}
+
+fn payload_record_label(field_names: &[String]) -> String {
+    let fields = field_names
+        .iter()
+        .map(|name| format!("{name}:Ready"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("Job{{{fields}}}")
 }
 
 fn checked_process_id(index: usize) -> CheckedProcessId {

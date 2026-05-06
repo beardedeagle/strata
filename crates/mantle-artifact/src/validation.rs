@@ -20,16 +20,30 @@ pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn validate_unique_ident_list(label: &str, values: &[String]) -> Result<()> {
+pub(crate) fn validate_unique_message_label_list(values: &[String]) -> Result<()> {
     if values.is_empty() {
-        return Err(Error::new(format!("{label} list must not be empty")));
+        return Err(Error::new("message label list must not be empty"));
     }
     let mut seen = BTreeSet::new();
     for value in values {
-        validate_ident_field(label, value)?;
+        validate_message_label(value)?;
         if !seen.insert(value.as_str()) {
-            return Err(Error::new(format!("duplicate {label} {value}")));
+            return Err(Error::new(format!("duplicate message label {value}")));
         }
+    }
+    Ok(())
+}
+
+pub fn validate_message_label(value: &str) -> Result<()> {
+    if value.len() > MAX_FIELD_VALUE_BYTES {
+        return Err(Error::new(format!(
+            "message label exceeds maximum length of {MAX_FIELD_VALUE_BYTES} bytes"
+        )));
+    }
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return Err(Error::new(
+            "message labels must be non-empty and contain no control characters",
+        ));
     }
     Ok(())
 }

@@ -16,6 +16,12 @@ pub(super) struct StateSpace<'module> {
     values: Vec<String>,
 }
 
+pub(super) struct ValueBinding<'a> {
+    pub(super) name: &'a Identifier,
+    pub(super) ty: &'a TypeRef,
+    pub(super) label: &'a str,
+}
+
 impl<'module> StateSpace<'module> {
     pub(super) fn new(
         module: &'module Module,
@@ -43,7 +49,19 @@ impl<'module> StateSpace<'module> {
                 enum_decl.name
             )));
         }
-        let values = enum_decl.variants.iter().map(ToString::to_string).collect();
+        for variant in &enum_decl.variants {
+            if variant.payload_type.is_some() {
+                return Err(Error::new(format!(
+                    "state enum {} variant {} must not declare a payload in this slice",
+                    enum_decl.name, variant.name
+                )));
+            }
+        }
+        let values = enum_decl
+            .variants
+            .iter()
+            .map(|variant| variant.name.to_string())
+            .collect();
         Ok(Self {
             module,
             process_name: &process.name,
@@ -57,7 +75,23 @@ impl<'module> StateSpace<'module> {
         semantic_index: &SemanticIndex,
         value: &ValueExpr,
     ) -> Result<CheckedStateId> {
-        let label = self.canonical_value(semantic_index, self.state_type, value, 0)?;
+        self.resolve_state_value_with_bindings(semantic_index, value, &[])
+    }
+
+    pub(super) fn resolve_state_value_with_bindings(
+        &mut self,
+        semantic_index: &SemanticIndex,
+        value: &ValueExpr,
+        bindings: &[ValueBinding<'_>],
+    ) -> Result<CheckedStateId> {
+        let label = canonical_value(
+            self.module,
+            semantic_index,
+            self.state_type,
+            value,
+            bindings,
+            0,
+        )?;
         if let Some(index) = self.values.iter().position(|candidate| candidate == &label) {
             return CheckedStateId::from_index(index);
         }
@@ -76,115 +110,155 @@ impl<'module> StateSpace<'module> {
         reject_reserved_state_values(self.process_name, &self.values)?;
         Ok(self.values)
     }
+}
 
-    fn canonical_value(
-        &self,
-        semantic_index: &SemanticIndex,
-        expected_type: &TypeRef,
-        value: &ValueExpr,
-        depth: usize,
-    ) -> Result<String> {
-        if depth > MAX_VALUE_NESTING {
+pub(super) fn canonical_source_value_with_bindings(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[ValueBinding<'_>],
+) -> Result<String> {
+    canonical_value(module, semantic_index, expected_type, value, bindings, 0)
+}
+
+fn canonical_value(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[ValueBinding<'_>],
+    depth: usize,
+) -> Result<String> {
+    if depth > MAX_VALUE_NESTING {
+        return Err(Error::new(format!(
+            "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+        )));
+    }
+    if let ValueExpr::Identifier(name) = value {
+        if let Some(binding) = bindings.iter().find(|binding| binding.name == name) {
+            if semantic_index.same_type(binding.ty, expected_type) {
+                return Ok(binding.label.to_string());
+            }
             return Err(Error::new(format!(
-                "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+                "value binding {} has type {}, expected {}",
+                binding.name, binding.ty, expected_type
             )));
         }
-        if let Ok(record) = semantic_index.record_decl(self.module, expected_type) {
-            return self.canonical_record_value(semantic_index, record, value, depth);
-        }
+    }
+    if let Ok(record) = semantic_index.record_decl(module, expected_type) {
+        return canonical_record_value(module, semantic_index, record, value, bindings, depth);
+    }
 
-        let enum_decl = semantic_index.enum_decl(self.module, expected_type)?;
-        let ValueExpr::Identifier(name) = value else {
+    let enum_decl = semantic_index.enum_decl(module, expected_type)?;
+    let ValueExpr::Identifier(name) = value else {
+        return Err(Error::new(format!(
+            "expected enum variant identifier for enum {}",
+            enum_decl.name
+        )));
+    };
+    if let Some(variant) = enum_decl
+        .variants
+        .iter()
+        .find(|variant| variant.name == *name)
+    {
+        if variant.payload_type.is_some() {
             return Err(Error::new(format!(
-                "expected enum variant identifier for enum {}",
-                enum_decl.name
+                "enum variant {} requires a payload and cannot be used as a fieldless value",
+                variant.name
             )));
-        };
-        if enum_decl.variants.iter().any(|variant| variant == name) {
-            Ok(name.to_string())
-        } else {
-            Err(Error::new(format!(
-                "value {name} is not a variant of enum {}",
-                enum_decl.name
-            )))
+        }
+        Ok(name.to_string())
+    } else {
+        Err(Error::new(format!(
+            "value {name} is not a variant of enum {}",
+            enum_decl.name
+        )))
+    }
+}
+
+fn canonical_record_value(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    record: &Record,
+    value: &ValueExpr,
+    bindings: &[ValueBinding<'_>],
+    depth: usize,
+) -> Result<String> {
+    if let ValueExpr::Record(value) = value {
+        if value.fields.is_empty() {
+            return Err(Error::new(format!(
+                "fieldless record values use `{}`; braced record values must declare at least one field",
+                value.name
+            )));
         }
     }
 
-    fn canonical_record_value(
-        &self,
-        semantic_index: &SemanticIndex,
-        record: &Record,
-        value: &ValueExpr,
-        depth: usize,
-    ) -> Result<String> {
-        if let ValueExpr::Record(value) = value {
-            if value.fields.is_empty() {
-                return Err(Error::new(format!(
-                    "fieldless record values use `{}`; braced record values must declare at least one field",
-                    value.name
-                )));
-            }
-        }
+    if record.fields.is_empty() {
+        return match value {
+            ValueExpr::Identifier(name) if name == &record.name => Ok(record.name.to_string()),
+            _ => Err(Error::new(format!(
+                "provided value is not a value of record {}",
+                record.name
+            ))),
+        };
+    }
 
-        if record.fields.is_empty() {
-            return match value {
-                ValueExpr::Identifier(name) if name == &record.name => Ok(record.name.to_string()),
-                _ => Err(Error::new(format!(
-                    "provided value is not a value of record {}",
-                    record.name
-                ))),
-            };
-        }
+    let ValueExpr::Record(value) = value else {
+        return Err(Error::new(format!(
+            "record state type {} must be constructed with {} {{ ... }}",
+            record.name, record.name
+        )));
+    };
+    if value.name != record.name {
+        return Err(Error::new(format!(
+            "record constructor {} does not match expected record {}",
+            value.name, record.name
+        )));
+    }
 
-        let ValueExpr::Record(value) = value else {
+    let declared_fields = record
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut provided = BTreeMap::new();
+    for field in &value.fields {
+        if provided.insert(field.name.as_str(), &field.value).is_some() {
             return Err(Error::new(format!(
-                "record state type {} must be constructed with {} {{ ... }}",
-                record.name, record.name
+                "record value {} duplicates field {}",
+                record.name, field.name
+            )));
+        }
+        if !declared_fields.contains(field.name.as_str()) {
+            return Err(Error::new(format!(
+                "record value {} declares unknown field {}",
+                record.name, field.name
+            )));
+        }
+    }
+
+    let mut parts = Vec::with_capacity(record.fields.len());
+    for field in &record.fields {
+        let Some(value) = provided.get(field.name.as_str()) else {
+            return Err(Error::new(format!(
+                "record value {} is missing field {}",
+                record.name, field.name
             )));
         };
-        if value.name != record.name {
-            return Err(Error::new(format!(
-                "record constructor {} does not match expected record {}",
-                value.name, record.name
-            )));
-        }
-
-        let declared_fields = record
-            .fields
-            .iter()
-            .map(|field| field.name.as_str())
-            .collect::<BTreeSet<_>>();
-        let mut provided = BTreeMap::new();
-        for field in &value.fields {
-            if provided.insert(field.name.as_str(), &field.value).is_some() {
-                return Err(Error::new(format!(
-                    "record value {} duplicates field {}",
-                    record.name, field.name
-                )));
-            }
-            if !declared_fields.contains(field.name.as_str()) {
-                return Err(Error::new(format!(
-                    "record value {} declares unknown field {}",
-                    record.name, field.name
-                )));
-            }
-        }
-
-        let mut parts = Vec::with_capacity(record.fields.len());
-        for field in &record.fields {
-            let Some(value) = provided.get(field.name.as_str()) else {
-                return Err(Error::new(format!(
-                    "record value {} is missing field {}",
-                    record.name, field.name
-                )));
-            };
-            let field_value = self.canonical_value(semantic_index, &field.ty, value, depth + 1)?;
-            parts.push(format!("{}:{field_value}", field.name));
-        }
-        let label = format!("{}{{{}}}", record.name, parts.join(","));
-        validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-        Ok(label)
+        let field_value = canonical_value(
+            module,
+            semantic_index,
+            &field.ty,
+            value,
+            bindings,
+            depth + 1,
+        )?;
+        parts.push(format!("{}:{field_value}", field.name));
     }
+    let label = format!("{}{{{}}}", record.name, parts.join(","));
+    validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+    Ok(label)
 }
 
 fn validate_state_value_count(process_name: &Identifier, count: usize) -> Result<()> {
@@ -219,8 +293,8 @@ fn reject_reserved_state_values(process_name: &Identifier, state_values: &[Strin
 #[cfg(test)]
 mod tests {
     use super::super::super::ast::{
-        Determinism, Enum, Function, Identifier, Module, Process, Record, RecordField, RecordValue,
-        RecordValueField, TypeRef, ValueExpr,
+        Determinism, Enum, EnumVariant, Function, Identifier, Module, Process, Record, RecordField,
+        RecordValue, RecordValueField, TypeRef, ValueExpr,
     };
     use super::super::symbols::SemanticIndex;
     use super::*;
@@ -297,7 +371,7 @@ mod tests {
             }],
             enums: vec![Enum {
                 name: ident("MainMsg"),
-                variants: vec![ident("Start")],
+                variants: vec![unit_variant("Start")],
             }],
             processes: vec![Process {
                 name: ident("Main"),
@@ -323,7 +397,7 @@ mod tests {
             }],
             enums: vec![Enum {
                 name: ident("MainMsg"),
-                variants: vec![ident("Start")],
+                variants: vec![unit_variant("Start")],
             }],
             processes: vec![Process {
                 name: ident("Main"),
@@ -364,5 +438,12 @@ mod tests {
 
     fn ident(value: &str) -> Identifier {
         Identifier::new(value).expect("test identifier should be valid")
+    }
+
+    fn unit_variant(value: &str) -> EnumVariant {
+        EnumVariant {
+            name: ident(value),
+            payload_type: None,
+        }
     }
 }

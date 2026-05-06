@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use crate::fields::ArtifactFields;
 use crate::validation::{
     validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
-    validate_source_hash, validate_unique_ident_list, validate_unique_state_value_list,
+    validate_source_hash, validate_unique_message_label_list, validate_unique_state_value_list,
 };
 use crate::{
     Error, MessageId, OutputId, ProcessId, ProcessRefId, Result, StateId, ARTIFACT_FORMAT,
@@ -381,7 +381,7 @@ impl ArtifactProcess {
             MAX_TRANSITIONS_PER_PROCESS,
         )?;
         validate_unique_state_value_list(&self.state_values)?;
-        validate_unique_ident_list("message variant", &self.message_variants)?;
+        validate_unique_message_label_list(&self.message_variants)?;
         validate_unique_process_ref_list(&self.process_refs)?;
         if self.init_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(

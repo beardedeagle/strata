@@ -47,10 +47,16 @@ enum_decl =
     "enum" ident "{" enum_variant_list? "}"
 
 enum_variant_list =
-    ident ("," ident)* ","?
+    enum_variant ("," enum_variant)* ","?
+
+enum_variant =
+    ident
+  | ident "(" type_ref ")"
 ```
 
 Enums used as process state or message types must have at least one variant.
+Payload variants are accepted for process message enums. State enum payload
+variants are rejected in this slice.
 
 ## Processes
 
@@ -100,6 +106,7 @@ param_binding =
 
 signature_pattern =
     ident
+  | ident "(" ident ":" type_ref ")"
   | "_"
 
 effect_list =
@@ -135,15 +142,18 @@ pattern:
 
 ```text
 step_function =
-    "fn" "step" "(" "state" ":" type_ref "," (ident | "_") ")"
+    "fn" "step" "(" "state" ":" type_ref ","
+        (ident | ident "(" ident ":" type_ref ")" | "_") ")"
     "->" "ProcResult" "<" type_ref ">"
     "!" effect_list "~" "[]" "@det"
     "{" block_body "}"
 ```
 
-The `type_ref` entries must name the process state type. An `ident` after the
-comma is a message variant accepted by the process message type. `_` is a
-wildcard pattern that covers accepted variants without explicit clauses.
+The first `type_ref` must name the process state type. An `ident` after the
+comma is a message variant accepted by the process message type. A payload
+pattern such as `Assign(job: Job)` binds the received payload as an immutable
+transition-local value. `_` is a wildcard pattern that covers accepted variants
+without explicit clauses.
 Signature patterns are accepted only for actor `step` message dispatch in this
 slice.
 
@@ -165,7 +175,10 @@ process_ref_type =
     "ProcessRef" "<" ident ">"
 
 send_statement =
-    "send" ident ident ";"
+    "send" ident ident payload_arg? ";"
+
+payload_arg =
+    "(" value_expr ")"
 
 return_statement =
     "return" return_expr ";"
@@ -176,7 +189,8 @@ identifier after `spawn` is the process definition name. The `ProcessRef<T>`
 annotation must name the same process definition.
 
 The first identifier in `send` is a process reference. The second identifier is
-the message variant to send.
+the message variant to send. Payload variants require one payload value. Unit
+variants reject payload values.
 
 ## Types
 

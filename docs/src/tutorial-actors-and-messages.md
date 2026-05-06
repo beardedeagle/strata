@@ -111,6 +111,40 @@ wildcards that cannot cover any remaining message are rejected.
 
 The runtime trace records both steps with message IDs and state IDs.
 
+## Message Payloads
+
+`examples/actor_payloads.str` adds a typed payload to a worker message:
+
+```strata
+record Job {
+    phase: JobPhase,
+}
+
+enum WorkerMsg {
+    Assign(Job),
+}
+```
+
+The sender constructs one immutable payload value:
+
+```strata
+send worker Assign(Job { phase: Ready });
+```
+
+The receiver binds that value in the step signature:
+
+```strata
+fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    emit "worker assigned job";
+    return Stop(WorkerState { job: job });
+}
+```
+
+The payload binding is immutable and local to the transition. Mantle still
+executes typed message IDs; in this source-to-runtime slice, the concrete
+payload send lowers to a concrete message case such as
+`Assign(Job{phase:Ready})`.
+
 ## Multiple Instances
 
 `examples/actor_instances.str` spawns two runtime instances of the same process
@@ -144,6 +178,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 cargo run -p strata --bin strata -- check examples/actor_instances.str
 cargo run -p strata --bin strata -- build examples/actor_instances.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
+
+cargo run -p strata --bin strata -- check examples/actor_payloads.str
+cargo run -p strata --bin strata -- build examples/actor_payloads.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
 ```
 
 For `actor_sequence`, the trace should show `Worker` dequeuing `First`, stepping

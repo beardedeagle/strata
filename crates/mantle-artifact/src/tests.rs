@@ -145,6 +145,23 @@ fn validate_accepts_structured_state_value_labels() {
 }
 
 #[test]
+fn validate_accepts_structured_message_labels() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].message_variants = vec!["Assign(Job{phase:Ready})".to_string()];
+
+    artifact
+        .validate()
+        .expect("structured message labels should remain display metadata");
+
+    let decoded =
+        MantleArtifact::decode(&artifact.encode()).expect("structured labels should decode");
+    assert_eq!(
+        decoded.processes[0].message_variants,
+        artifact.processes[0].message_variants
+    );
+}
+
+#[test]
 fn validate_state_value_label_defines_artifact_metadata_boundary() {
     validate_state_value_label("MainState{phase:Idle}")
         .expect("structured state labels should be valid artifact metadata");
