@@ -10,19 +10,19 @@ use mantle_artifact::{
 };
 
 use super::ast::{
-    Determinism, Effect, Function, FunctionBlock, FunctionParam, Identifier, Module, Process,
-    ReturnExpr, SignaturePattern, Statement, TypeRef, ValueExpr,
+    Determinism, Effect, EnumVariant, Function, FunctionBlock, FunctionParam, Identifier, Module,
+    Param, Process, ReturnExpr, SignaturePattern, Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
-    CheckedAction, CheckedMessageId, CheckedNextState, CheckedProcess, CheckedProcessId,
-    CheckedProcessParts, CheckedProcessRef, CheckedProcessRefId, CheckedProgram,
-    CheckedProgramParts, CheckedStateId, CheckedStepResult, CheckedTransition,
-    CheckedTransitionParts,
+    CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
+    CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef,
+    CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedStateId, CheckedStepResult,
+    CheckedTransition, CheckedTransitionParts,
 };
 use super::diagnostic::{Error, Result};
 use super::{PROCESS_REF_TYPE, PROC_RESULT_TYPE};
 use outputs::OutputPool;
-use state_space::StateSpace;
+use state_space::{canonical_source_value_with_bindings, StateSpace, ValueBinding};
 use static_validation::validate_action_references;
 use symbols::SemanticIndex;
 
@@ -34,30 +34,400 @@ struct ProcessRefBinding {
     target: CheckedProcessId,
 }
 
+struct ProcessCheckContext<'a> {
+    module: &'a Module,
+    process: &'a Process,
+    process_id: CheckedProcessId,
+    entry_process: CheckedProcessId,
+    semantic_index: &'a SemanticIndex,
+    message_cases: &'a MessageCaseTable,
+}
+
 struct StepCheckContext<'a> {
     module: &'a Module,
     process: &'a Process,
     semantic_index: &'a SemanticIndex,
     process_ref_index: &'a BTreeMap<Identifier, ProcessRefBinding>,
+    message_cases: &'a MessageCaseTable,
 }
 
-#[derive(Debug, Clone, Copy)]
+struct ProcessRefCollectionContext<'a> {
+    process: &'a Process,
+    process_id: CheckedProcessId,
+    entry_process: CheckedProcessId,
+    semantic_index: &'a SemanticIndex,
+}
+
+#[derive(Debug, Clone)]
 struct StepBodyClause<'a> {
     step: &'a Function,
     body: &'a FunctionBlock,
+    payload_param: Option<StepPayloadParam>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct StepClause<'a> {
     step: &'a Function,
     message: CheckedMessageId,
+    payload_binding: Option<StepPayloadBinding>,
     body: &'a FunctionBlock,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum StepSignaturePattern {
-    Variant(CheckedMessageId),
+    Variant {
+        message: CheckedMessageVariantId,
+        binding: Option<StepPayloadParam>,
+    },
     Wildcard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StepPayloadParam {
+    name: Identifier,
+    ty: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StepPayloadBinding {
+    name: Identifier,
+    ty: TypeRef,
+    value: CheckedPayloadValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct MessageCaseKey {
+    process: CheckedProcessId,
+    variant: CheckedMessageVariantId,
+    payload: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct MessageCaseTable {
+    cases_by_process: Vec<Vec<CheckedMessageCase>>,
+    ids_by_key: BTreeMap<MessageCaseKey, CheckedMessageId>,
+}
+
+impl MessageCaseTable {
+    fn build(
+        module: &Module,
+        entry_process: CheckedProcessId,
+        semantic_index: &SemanticIndex,
+    ) -> Result<Self> {
+        reject_payload_entry_message(module, entry_process, semantic_index)?;
+        let mut builders = module
+            .processes
+            .iter()
+            .enumerate()
+            .map(|(process_index, process)| {
+                let process_id = CheckedProcessId::from_index(process_index)?;
+                MessageCaseBuilder::new(module, semantic_index, process, process_id)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let process_ref_targets = module
+            .processes
+            .iter()
+            .enumerate()
+            .map(|(process_index, process)| {
+                let process_id = CheckedProcessId::from_index(process_index)?;
+                collect_message_case_process_refs(process, process_id, semantic_index)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let explicit_step_variants = module
+            .processes
+            .iter()
+            .enumerate()
+            .map(|(process_index, process)| {
+                let process_id = CheckedProcessId::from_index(process_index)?;
+                collect_explicit_step_variants(module, process, process_id, semantic_index)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut iteration_count = 0usize;
+        let max_iterations = MAX_MESSAGE_VARIANTS_PER_PROCESS.saturating_mul(builders.len());
+        loop {
+            let case_snapshots = builders
+                .iter()
+                .map(MessageCaseBuilder::current_cases)
+                .collect::<Result<Vec<_>>>()?;
+            let mut changed = false;
+            for (process_index, process) in module.processes.iter().enumerate() {
+                let process_id = CheckedProcessId::from_index(process_index)?;
+                let sender_cases = &case_snapshots[process_index];
+                for step in &process.steps {
+                    let Some(body) = &step.body else {
+                        continue;
+                    };
+                    let Some(pattern) = resolve_step_message_pattern(
+                        module,
+                        process,
+                        process_id,
+                        semantic_index,
+                        step,
+                    )?
+                    else {
+                        continue;
+                    };
+                    for sender_case in matching_message_cases(
+                        sender_cases,
+                        &pattern,
+                        &explicit_step_variants[process_index],
+                    ) {
+                        let bindings = payload_value_bindings(&pattern, sender_case);
+                        for statement in &body.statements {
+                            let Statement::Send {
+                                target,
+                                message,
+                                payload,
+                            } = statement
+                            else {
+                                continue;
+                            };
+                            let target_process_id = process_ref_targets[process_index]
+                                .get(target)
+                                .ok_or_else(|| {
+                                    Error::new(format!(
+                                        "process {} sends to undeclared process reference {}",
+                                        process.name, target
+                                    ))
+                                })?;
+                            let target_variant = semantic_index.message_id_for_process(
+                                module,
+                                process.name.as_str(),
+                                *target_process_id,
+                                message,
+                            )?;
+                            let builder =
+                                builders.get_mut(target_process_id.index()).ok_or_else(|| {
+                                    Error::new(format!(
+                                        "process id {} is not declared",
+                                        target_process_id.as_u32()
+                                    ))
+                                })?;
+                            changed |= builder.add_payload_case(
+                                module,
+                                semantic_index,
+                                *target_process_id,
+                                target_variant,
+                                payload.as_ref(),
+                                &bindings,
+                            )?;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+            iteration_count = iteration_count
+                .checked_add(1)
+                .ok_or_else(|| Error::new("message case discovery iteration count overflowed"))?;
+            if iteration_count > max_iterations {
+                return Err(Error::new(
+                    "message case discovery did not converge within the concrete message limit",
+                ));
+            }
+        }
+
+        let mut cases_by_process = Vec::with_capacity(builders.len());
+        let mut ids_by_key = BTreeMap::new();
+        for builder in builders {
+            let process_id = builder.process_id;
+            let cases = builder.into_cases()?;
+            for (message_index, case) in cases.iter().enumerate() {
+                let key = MessageCaseKey {
+                    process: process_id,
+                    variant: case.variant(),
+                    payload: case.payload().map(|payload| payload.label().to_string()),
+                };
+                if ids_by_key
+                    .insert(key, CheckedMessageId::from_index(message_index)?)
+                    .is_some()
+                {
+                    return Err(Error::new(format!(
+                        "process id {} declares duplicate concrete message case",
+                        process_id.as_u32()
+                    )));
+                }
+            }
+            cases_by_process.push(cases);
+        }
+
+        Ok(Self {
+            cases_by_process,
+            ids_by_key,
+        })
+    }
+
+    fn cases_for(&self, process: CheckedProcessId) -> Result<&[CheckedMessageCase]> {
+        self.cases_by_process
+            .get(process.index())
+            .map(Vec::as_slice)
+            .ok_or_else(|| Error::new(format!("process id {} is not declared", process.as_u32())))
+    }
+
+    fn message_id(
+        &self,
+        process: CheckedProcessId,
+        variant: CheckedMessageVariantId,
+        payload: Option<&str>,
+    ) -> Result<CheckedMessageId> {
+        let key = MessageCaseKey {
+            process,
+            variant,
+            payload: payload.map(str::to_string),
+        };
+        self.ids_by_key.get(&key).copied().ok_or_else(|| {
+            Error::new(format!(
+                "process id {} has no concrete message case for message id {}",
+                process.as_u32(),
+                variant.as_u32()
+            ))
+        })
+    }
+}
+
+struct MessageCaseBuilder<'a> {
+    module: &'a Module,
+    semantic_index: &'a SemanticIndex,
+    process: &'a Process,
+    process_id: CheckedProcessId,
+    payload_cases: BTreeMap<CheckedMessageVariantId, BTreeMap<String, CheckedPayloadValue>>,
+}
+
+impl<'a> MessageCaseBuilder<'a> {
+    fn new(
+        module: &'a Module,
+        semantic_index: &'a SemanticIndex,
+        process: &'a Process,
+        process_id: CheckedProcessId,
+    ) -> Result<Self> {
+        let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+        let mut payload_cases = BTreeMap::new();
+        for (variant_index, variant) in msg_enum.variants.iter().enumerate() {
+            let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
+            if variant.payload_type.is_some() {
+                payload_cases.insert(variant_id, BTreeMap::new());
+            }
+        }
+        Ok(Self {
+            module,
+            semantic_index,
+            process,
+            process_id,
+            payload_cases,
+        })
+    }
+
+    fn add_payload_case(
+        &mut self,
+        module: &Module,
+        semantic_index: &SemanticIndex,
+        process_id: CheckedProcessId,
+        variant_id: CheckedMessageVariantId,
+        payload: Option<&ValueExpr>,
+        bindings: &[ValueBinding<'_>],
+    ) -> Result<bool> {
+        let variant = semantic_index.message_variant(module, process_id, variant_id)?;
+        match (&variant.payload_type, payload) {
+            (None, None) => Ok(false),
+            (None, Some(_)) => Err(Error::new(format!(
+                "message {} does not accept a payload",
+                variant.name
+            ))),
+            (Some(_), None) => Err(Error::new(format!(
+                "message {} requires a payload",
+                variant.name
+            ))),
+            (Some(payload_type), Some(payload)) => {
+                let label = canonical_source_value_with_bindings(
+                    module,
+                    semantic_index,
+                    payload_type,
+                    payload,
+                    bindings,
+                )?;
+                Ok(self.insert_payload_case(variant_id, payload_type, label))
+            }
+        }
+    }
+
+    fn insert_payload_case(
+        &mut self,
+        variant_id: CheckedMessageVariantId,
+        payload_type: &TypeRef,
+        label: String,
+    ) -> bool {
+        let payloads = self.payload_cases.entry(variant_id).or_default();
+        if payloads.contains_key(&label) {
+            return false;
+        }
+        payloads.insert(
+            label.clone(),
+            CheckedPayloadValue::new(payload_type.clone(), label),
+        );
+        true
+    }
+
+    fn current_cases(&self) -> Result<Vec<CheckedMessageCase>> {
+        let msg_enum = self
+            .semantic_index
+            .enum_decl(self.module, &self.process.msg_type)?;
+        let mut cases = Vec::new();
+        for (variant_index, variant) in msg_enum.variants.iter().enumerate() {
+            let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
+            if variant.payload_type.is_some() {
+                if let Some(payloads) = self.payload_cases.get(&variant_id) {
+                    for payload in payloads.values() {
+                        cases.push(CheckedMessageCase::new(
+                            format!("{}({})", variant.name, payload.label()),
+                            variant_id,
+                            Some(payload.clone()),
+                        ));
+                    }
+                }
+            } else {
+                cases.push(CheckedMessageCase::new(
+                    variant.name.to_string(),
+                    variant_id,
+                    None,
+                ));
+            }
+        }
+        Ok(cases)
+    }
+
+    fn into_cases(self) -> Result<Vec<CheckedMessageCase>> {
+        let msg_enum = self
+            .semantic_index
+            .enum_decl(self.module, &self.process.msg_type)?;
+        for (variant_index, variant) in msg_enum.variants.iter().enumerate() {
+            if variant.payload_type.is_none() {
+                continue;
+            }
+            let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
+            let Some(payloads) = self.payload_cases.get(&variant_id) else {
+                return Err(Error::new(format!(
+                    "process {} message {} has no concrete payload sends in this source slice",
+                    self.process.name, variant.name
+                )));
+            };
+            if payloads.is_empty() {
+                return Err(Error::new(format!(
+                    "process {} message {} has no concrete payload sends in this source slice",
+                    self.process.name, variant.name
+                )));
+            }
+        }
+        let cases = self.current_cases()?;
+        if cases.is_empty() {
+            return Err(Error::new(format!(
+                "process {} has no concrete message cases in this source slice",
+                self.process.name
+            )));
+        }
+        Ok(cases)
+    }
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -81,6 +451,8 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     let entry_process = semantic_index
         .process_id_by_name("Main")
         .map_err(|_| Error::new("entry process Main is not declared"))?;
+    validate_process_declarations_before_message_cases(&module, &semantic_index)?;
+    let message_cases = MessageCaseTable::build(&module, entry_process, &semantic_index)?;
     let mut outputs = OutputPool::new();
     let mut checked_processes = Vec::with_capacity(module.processes.len());
     for (index, process) in module.processes.iter().enumerate() {
@@ -91,6 +463,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
             process_id,
             entry_process,
             &semantic_index,
+            &message_cases,
             &mut outputs,
         )?);
     }
@@ -101,7 +474,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     let entry_process_definition = checked_processes
         .get(entry_process.index())
         .ok_or_else(|| Error::new("entry process id is not defined"))?;
-    if entry_process_definition.message_variants().is_empty() {
+    if entry_process_definition.message_cases().is_empty() {
         return Err(Error::new(format!(
             "entry process {} has no messages",
             entry_process_definition.debug_name()
@@ -117,12 +490,42 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     }))
 }
 
+fn validate_process_declarations_before_message_cases(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+) -> Result<()> {
+    for process in &module.processes {
+        validate_count(
+            &format!("process {} mailbox_bound", process.name),
+            process.mailbox_bound,
+            1,
+            MAX_MAILBOX_BOUND,
+        )?;
+        let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+        if msg_enum.variants.is_empty() {
+            return Err(Error::new(format!(
+                "enum {} must declare at least one variant",
+                msg_enum.name
+            )));
+        }
+        validate_count(
+            &format!("process {} message_count", process.name),
+            msg_enum.variants.len(),
+            1,
+            MAX_MESSAGE_VARIANTS_PER_PROCESS,
+        )?;
+        let _ = StateSpace::new(module, semantic_index, process)?;
+    }
+    Ok(())
+}
+
 fn check_process(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
     entry_process: CheckedProcessId,
     semantic_index: &SemanticIndex,
+    message_cases: &MessageCaseTable,
     outputs: &mut OutputPool,
 ) -> Result<CheckedProcess> {
     validate_count(
@@ -145,18 +548,24 @@ fn check_process(
         1,
         MAX_MESSAGE_VARIANTS_PER_PROCESS,
     )?;
+    validate_count(
+        &format!("process {} concrete_message_count", process.name),
+        message_cases.cases_for(process_id)?.len(),
+        1,
+        MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    )?;
 
     let mut state_space = StateSpace::new(module, semantic_index, process)?;
     let init_state = check_init(semantic_index, process, &mut state_space)?;
-    let (process_refs, transitions) = check_step(
+    let process_context = ProcessCheckContext {
         module,
         process,
         process_id,
         entry_process,
         semantic_index,
-        &mut state_space,
-        outputs,
-    )?;
+        message_cases,
+    };
+    let (process_refs, transitions) = check_step(&process_context, &mut state_space, outputs)?;
     let state_values = state_space.into_values()?;
 
     Ok(CheckedProcess::new(CheckedProcessParts {
@@ -164,7 +573,7 @@ fn check_process(
         state_type: process.state_type.clone(),
         state_values,
         message_type: process.msg_type.clone(),
-        message_variants: msg_enum.variants.clone(),
+        message_cases: message_cases.cases_for(process_id)?.to_vec(),
         process_refs,
         mailbox_bound: process.mailbox_bound,
         init_state,
@@ -214,27 +623,30 @@ fn check_init(
 }
 
 fn check_step(
-    module: &Module,
-    process: &Process,
-    process_id: CheckedProcessId,
-    entry_process: CheckedProcessId,
-    semantic_index: &SemanticIndex,
+    context: &ProcessCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
 ) -> Result<(Vec<CheckedProcessRef>, Vec<CheckedTransition>)> {
-    let step_clauses = check_step_clauses(module, process, process_id, semantic_index)?;
+    let step_clauses = check_step_clauses(
+        context.module,
+        context.process,
+        context.process_id,
+        context.semantic_index,
+        context.message_cases,
+    )?;
     let (process_refs, process_ref_index) = collect_process_refs(
-        process,
-        process_id,
-        entry_process,
-        semantic_index,
+        context.process,
+        context.process_id,
+        context.entry_process,
+        context.semantic_index,
         &step_clauses,
     )?;
     let step_context = StepCheckContext {
-        module,
-        process,
-        semantic_index,
+        module: context.module,
+        process: context.process,
+        semantic_index: context.semantic_index,
         process_ref_index: &process_ref_index,
+        message_cases: context.message_cases,
     };
 
     let mut transitions = Vec::with_capacity(step_clauses.len());
@@ -244,6 +656,7 @@ fn check_step(
             state_space,
             outputs,
             clause.message,
+            clause.payload_binding.as_ref(),
             clause.body,
         )?;
         let used_effects =
@@ -260,7 +673,7 @@ fn check_step(
 
     let action_count = total_action_count(&transitions)?;
     validate_count(
-        &format!("process {} action_count", process.name),
+        &format!("process {} action_count", context.process.name),
         action_count,
         0,
         MAX_ACTIONS_PER_PROCESS,
@@ -274,6 +687,7 @@ fn check_step_clauses<'a>(
     process: &'a Process,
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
+    message_cases: &MessageCaseTable,
 ) -> Result<Vec<StepClause<'a>>> {
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
     let mut explicit_clauses = vec![None; msg_enum.variants.len()];
@@ -284,18 +698,27 @@ fn check_step_clauses<'a>(
         let Some(body) = &step.body else {
             return Err(Error::new("step must have a body for buildable source"));
         };
-        let clause = StepBodyClause { step, body };
         match pattern {
-            StepSignaturePattern::Variant(message) => {
+            StepSignaturePattern::Variant { message, binding } => {
+                let clause = StepBodyClause {
+                    step,
+                    body,
+                    payload_param: binding,
+                };
                 if explicit_clauses[message.index()].replace(clause).is_some() {
                     return Err(Error::new(format!(
                         "process {} declares duplicate step pattern for message {}",
                         process.name,
-                        msg_enum.variants[message.index()]
+                        msg_enum.variants[message.index()].name
                     )));
                 }
             }
             StepSignaturePattern::Wildcard => {
+                let clause = StepBodyClause {
+                    step,
+                    body,
+                    payload_param: None,
+                };
                 if wildcard_clause.replace(clause).is_some() {
                     return Err(Error::new(format!(
                         "process {} declares duplicate wildcard step pattern",
@@ -313,22 +736,128 @@ fn check_step_clauses<'a>(
         )));
     }
 
-    let mut clauses = Vec::with_capacity(msg_enum.variants.len());
+    let concrete_cases = message_cases.cases_for(process_id)?;
+    let mut clauses = Vec::with_capacity(concrete_cases.len());
     for (index, message_variant) in msg_enum.variants.iter().enumerate() {
-        let Some(clause) = explicit_clauses[index].or(wildcard_clause) else {
+        let Some(clause) = explicit_clauses[index]
+            .as_ref()
+            .or(wildcard_clause.as_ref())
+        else {
             return Err(Error::new(format!(
                 "process {} must declare step pattern for message {}",
-                process.name, message_variant
+                process.name, message_variant.name
             )));
         };
-        clauses.push(StepClause {
-            step: clause.step,
-            message: CheckedMessageId::from_index(index)?,
-            body: clause.body,
-        });
+        let variant_id = CheckedMessageVariantId::from_index(index)?;
+        for case in concrete_cases
+            .iter()
+            .filter(|case| case.variant() == variant_id)
+        {
+            let payload_binding = match (&clause.payload_param, case.payload()) {
+                (Some(param), Some(value)) => Some(StepPayloadBinding {
+                    name: param.name.clone(),
+                    ty: param.ty.clone(),
+                    value: value.clone(),
+                }),
+                _ => None,
+            };
+            let message = message_cases.message_id(
+                process_id,
+                variant_id,
+                case.payload().map(CheckedPayloadValue::label),
+            )?;
+            clauses.push(StepClause {
+                step: clause.step,
+                message,
+                payload_binding,
+                body: clause.body,
+            });
+        }
     }
 
     Ok(clauses)
+}
+
+fn collect_explicit_step_variants(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+) -> Result<BTreeSet<CheckedMessageVariantId>> {
+    let mut variants = BTreeSet::new();
+    for step in &process.steps {
+        if step.body.is_none() {
+            continue;
+        }
+        let Some(pattern) =
+            resolve_step_message_pattern(module, process, process_id, semantic_index, step)?
+        else {
+            continue;
+        };
+        if let StepSignaturePattern::Variant { message, .. } = pattern {
+            variants.insert(message);
+        }
+    }
+    Ok(variants)
+}
+
+fn matching_message_cases<'a>(
+    cases: &'a [CheckedMessageCase],
+    pattern: &StepSignaturePattern,
+    explicit_variants: &BTreeSet<CheckedMessageVariantId>,
+) -> Vec<&'a CheckedMessageCase> {
+    cases
+        .iter()
+        .filter(|case| match pattern {
+            StepSignaturePattern::Variant { message, .. } => case.variant() == *message,
+            StepSignaturePattern::Wildcard => !explicit_variants.contains(&case.variant()),
+        })
+        .collect()
+}
+
+fn payload_value_bindings<'a>(
+    pattern: &'a StepSignaturePattern,
+    case: &'a CheckedMessageCase,
+) -> Vec<ValueBinding<'a>> {
+    match (pattern, case.payload()) {
+        (
+            StepSignaturePattern::Variant {
+                binding: Some(param),
+                ..
+            },
+            Some(payload),
+        ) => vec![ValueBinding {
+            name: &param.name,
+            ty: &param.ty,
+            label: payload.label(),
+        }],
+        _ => Vec::new(),
+    }
+}
+
+fn resolve_step_message_pattern(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    step: &Function,
+) -> Result<Option<StepSignaturePattern>> {
+    let Some(FunctionParam::Pattern(message_pattern)) = step.params.get(1) else {
+        return Ok(None);
+    };
+    match message_pattern {
+        SignaturePattern::Variant { name, binding } => {
+            let message = semantic_index.message_id_for_step_pattern(module, process_id, name)?;
+            let variant = semantic_index.message_variant(module, process_id, message)?;
+            let payload_param =
+                check_step_payload_pattern(process, semantic_index, variant, binding.as_ref())?;
+            Ok(Some(StepSignaturePattern::Variant {
+                message,
+                binding: payload_param,
+            }))
+        }
+        SignaturePattern::Wildcard => Ok(Some(StepSignaturePattern::Wildcard)),
+    }
 }
 
 fn check_step_signature(
@@ -357,11 +886,11 @@ fn check_step_signature(
             process.state_type
         )));
     }
-    let FunctionParam::Pattern(message_pattern) = &step.params[1] else {
+    if !matches!(&step.params[1], FunctionParam::Pattern(_)) {
         return Err(Error::new(
             "step second parameter must be a message variant pattern or wildcard pattern",
         ));
-    };
+    }
 
     if !semantic_index.is_proc_result_of(&step.return_type, &process.state_type) {
         return Err(Error::new(format!(
@@ -377,12 +906,68 @@ fn check_step_signature(
         return Err(Error::new("step must be deterministic"));
     }
 
-    match message_pattern {
-        SignaturePattern::Variant(message) => semantic_index
-            .message_id_for_step_pattern(module, process_id, message)
-            .map(StepSignaturePattern::Variant),
-        SignaturePattern::Wildcard => Ok(StepSignaturePattern::Wildcard),
+    resolve_step_message_pattern(module, process, process_id, semantic_index, step)?.ok_or_else(
+        || {
+            Error::new(
+                "step second parameter must be a message variant pattern or wildcard pattern",
+            )
+        },
+    )
+}
+
+fn check_step_payload_pattern(
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    variant: &EnumVariant,
+    binding: Option<&Param>,
+) -> Result<Option<StepPayloadParam>> {
+    match (&variant.payload_type, binding) {
+        (None, None) => Ok(None),
+        (None, Some(_)) => Err(Error::new(format!(
+            "process {} step pattern message {} does not carry a payload",
+            process.name, variant.name
+        ))),
+        (Some(_), None) => Ok(None),
+        (Some(payload_type), Some(binding)) => {
+            validate_payload_binding_name(process, semantic_index, &binding.name)?;
+            if !semantic_index.same_type(&binding.ty, payload_type) {
+                return Err(Error::new(format!(
+                    "process {} step pattern payload {} has type {}, expected {}",
+                    process.name, binding.name, binding.ty, payload_type
+                )));
+            }
+            Ok(Some(StepPayloadParam {
+                name: binding.name.clone(),
+                ty: binding.ty.clone(),
+            }))
+        }
     }
+}
+
+fn validate_payload_binding_name(
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    binding: &Identifier,
+) -> Result<()> {
+    if binding.as_str() == STEP_STATE_PARAMETER_NAME {
+        return Err(Error::new(format!(
+            "process {} payload binding {} conflicts with a step parameter name",
+            process.name, binding
+        )));
+    }
+    if semantic_index.process_id(binding).is_ok() {
+        return Err(Error::new(format!(
+            "process {} payload binding {} conflicts with a process declaration",
+            process.name, binding
+        )));
+    }
+    if semantic_index.identifier_conflicts_with_declared_value(binding) {
+        return Err(Error::new(format!(
+            "process {} payload binding {} conflicts with a declared type or value constructor",
+            process.name, binding
+        )));
+    }
+    Ok(())
 }
 
 fn collect_process_refs(
@@ -397,13 +982,17 @@ fn collect_process_refs(
 )> {
     let mut process_refs = Vec::new();
     let mut process_ref_index = BTreeMap::new();
+    let context = ProcessRefCollectionContext {
+        process,
+        process_id,
+        entry_process,
+        semantic_index,
+    };
     for clause in step_clauses {
         collect_process_refs_from_block(
-            process,
-            process_id,
-            entry_process,
-            semantic_index,
+            &context,
             clause.body,
+            clause.payload_binding.as_ref(),
             &mut process_refs,
             &mut process_ref_index,
         )?;
@@ -411,12 +1000,75 @@ fn collect_process_refs(
     Ok((process_refs, process_ref_index))
 }
 
-fn collect_process_refs_from_block(
+fn collect_message_case_process_refs(
     process: &Process,
     process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+) -> Result<BTreeMap<Identifier, CheckedProcessId>> {
+    let mut refs = BTreeMap::new();
+    for step in &process.steps {
+        let Some(body) = &step.body else {
+            continue;
+        };
+        for statement in &body.statements {
+            let Statement::LetProcessRef { name, ty, target } = statement else {
+                continue;
+            };
+            validate_process_ref_name(process, semantic_index, name)?;
+            let annotated_target = process_ref_type_target(process, semantic_index, name, ty)?;
+            let target_id = semantic_index.process_id(target)?;
+            if annotated_target != target_id {
+                return Err(Error::new(format!(
+                    "process {} process reference {} has type {ty} but spawns {}",
+                    process.name, name, target
+                )));
+            }
+            if target_id == process_id {
+                return Err(Error::new(format!(
+                    "process {} spawns itself, which is not supported",
+                    process.name
+                )));
+            }
+            let existing = refs.insert(name.clone(), target_id);
+            if existing.is_some_and(|existing| existing != target_id) {
+                return Err(Error::new(format!(
+                    "process {} process reference {} is bound to multiple process definitions",
+                    process.name, name
+                )));
+            }
+        }
+    }
+    Ok(refs)
+}
+
+fn reject_payload_entry_message(
+    module: &Module,
     entry_process: CheckedProcessId,
     semantic_index: &SemanticIndex,
+) -> Result<()> {
+    let entry = module.processes.get(entry_process.index()).ok_or_else(|| {
+        Error::new(format!(
+            "entry process id {} is not declared",
+            entry_process.as_u32()
+        ))
+    })?;
+    let msg_enum = semantic_index.enum_decl(module, &entry.msg_type)?;
+    let Some(first_message) = msg_enum.variants.first() else {
+        return Ok(());
+    };
+    if first_message.payload_type.is_some() {
+        return Err(Error::new(format!(
+            "entry message {} must not require a payload in this source slice",
+            first_message.name
+        )));
+    }
+    Ok(())
+}
+
+fn collect_process_refs_from_block(
+    context: &ProcessRefCollectionContext<'_>,
     block: &FunctionBlock,
+    payload_binding: Option<&StepPayloadBinding>,
     process_refs: &mut Vec<CheckedProcessRef>,
     process_ref_index: &mut BTreeMap<Identifier, ProcessRefBinding>,
 ) -> Result<()> {
@@ -424,32 +1076,41 @@ fn collect_process_refs_from_block(
         let Statement::LetProcessRef { name, ty, target } = statement else {
             continue;
         };
-        validate_process_ref_name(process, semantic_index, name)?;
-        let annotated_target = process_ref_type_target(process, semantic_index, name, ty)?;
-        let target_id = semantic_index.process_id(target)?;
+        if let Some(binding) = payload_binding {
+            if binding.name == *name {
+                return Err(Error::new(format!(
+                    "process {} process reference {} conflicts with payload binding",
+                    context.process.name, name
+                )));
+            }
+        }
+        validate_process_ref_name(context.process, context.semantic_index, name)?;
+        let annotated_target =
+            process_ref_type_target(context.process, context.semantic_index, name, ty)?;
+        let target_id = context.semantic_index.process_id(target)?;
         if annotated_target != target_id {
             return Err(Error::new(format!(
                 "process {} process reference {} has type {ty} but spawns {}",
-                process.name, name, target
+                context.process.name, name, target
             )));
         }
-        if target_id == entry_process {
+        if target_id == context.entry_process {
             return Err(Error::new(format!(
                 "process {} spawns entry process {}, which is already started",
-                process.name, target
+                context.process.name, target
             )));
         }
-        if target_id == process_id {
+        if target_id == context.process_id {
             return Err(Error::new(format!(
                 "process {} spawns itself, which is not supported",
-                process.name
+                context.process.name
             )));
         }
         if let Some(existing) = process_ref_index.get(name) {
             if existing.target != target_id {
                 return Err(Error::new(format!(
                     "process {} process reference {} is bound to multiple process definitions",
-                    process.name, name
+                    context.process.name, name
                 )));
             }
             continue;
@@ -472,8 +1133,18 @@ fn check_step_transition(
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     message: CheckedMessageId,
+    payload_binding: Option<&StepPayloadBinding>,
     block: &FunctionBlock,
 ) -> Result<CheckedTransition> {
+    let payload_bindings = if let Some(binding) = payload_binding {
+        vec![ValueBinding {
+            name: &binding.name,
+            ty: &binding.ty,
+            label: binding.value.label(),
+        }]
+    } else {
+        Vec::new()
+    };
     let mut actions = Vec::with_capacity(block.statements.len());
     for statement in &block.statements {
         match statement {
@@ -494,18 +1165,23 @@ fn check_step_transition(
                     process_ref: binding.id,
                 });
             }
-            Statement::Send { target, message } => {
+            Statement::Send {
+                target,
+                message,
+                payload,
+            } => {
                 let binding = context.process_ref_index.get(target).ok_or_else(|| {
                     Error::new(format!(
                         "process {} sends to undeclared process reference {}",
                         context.process.name, target
                     ))
                 })?;
-                let message_id = context.semantic_index.message_id_for_process(
-                    context.module,
-                    context.process.name.as_str(),
+                let message_id = resolve_send_message_case(
+                    context,
                     binding.target,
                     message,
+                    payload.as_ref(),
+                    &payload_bindings,
                 )?;
                 actions.push(CheckedAction::Send {
                     target: binding.id,
@@ -530,7 +1206,11 @@ fn check_step_transition(
     {
         CheckedNextState::Current
     } else {
-        CheckedNextState::Value(state_space.resolve_state_value(context.semantic_index, state_arg)?)
+        CheckedNextState::Value(state_space.resolve_state_value_with_bindings(
+            context.semantic_index,
+            state_arg,
+            &payload_bindings,
+        )?)
     };
 
     Ok(CheckedTransition::new(CheckedTransitionParts {
@@ -539,6 +1219,50 @@ fn check_step_transition(
         next_state,
         actions,
     }))
+}
+
+fn resolve_send_message_case(
+    context: &StepCheckContext<'_>,
+    target_process: CheckedProcessId,
+    message: &Identifier,
+    payload: Option<&ValueExpr>,
+    bindings: &[ValueBinding<'_>],
+) -> Result<CheckedMessageId> {
+    let variant = context.semantic_index.message_id_for_process(
+        context.module,
+        context.process.name.as_str(),
+        target_process,
+        message,
+    )?;
+    let variant_decl =
+        context
+            .semantic_index
+            .message_variant(context.module, target_process, variant)?;
+    let payload_label = match (&variant_decl.payload_type, payload) {
+        (None, None) => None,
+        (None, Some(_)) => {
+            return Err(Error::new(format!(
+                "process {} sends payload to message {}, which does not accept one",
+                context.process.name, variant_decl.name
+            )))
+        }
+        (Some(_), None) => {
+            return Err(Error::new(format!(
+                "process {} sends message {} without required payload",
+                context.process.name, variant_decl.name
+            )))
+        }
+        (Some(payload_type), Some(payload)) => Some(canonical_source_value_with_bindings(
+            context.module,
+            context.semantic_index,
+            payload_type,
+            payload,
+            bindings,
+        )?),
+    };
+    context
+        .message_cases
+        .message_id(target_process, variant, payload_label.as_deref())
 }
 
 fn validate_process_ref_name(

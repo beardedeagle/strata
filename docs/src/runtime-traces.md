@@ -33,7 +33,7 @@ IDs are for stable runtime identity:
 
 - `pid`, the runtime process instance ID;
 - `process_id`, the admitted process definition ID;
-- `message_id`, the admitted message variant ID;
+- `message_id`, the admitted message case ID;
 - `state_id`, the admitted state value ID;
 - `output_id`, the admitted output literal ID.
 
@@ -93,6 +93,10 @@ Example shape:
 
 `message_accepted` records mailbox admission. `message_dequeued` records the
 message selected for the next transition.
+
+Payload-bearing source messages appear as concrete admitted message labels, for
+example `Assign(Job{phase:Ready})`. Runtime dispatch still uses the numeric
+`message_id`; the label is trace metadata.
 
 ## Process Stepped
 

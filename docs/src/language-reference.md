@@ -18,6 +18,7 @@ Mantle artifact internals.
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;` and `send worker Ping;`. |
+| Message payloads | `enum WorkerMsg { Assign(Job) }`, `send worker Assign(Job { ... });`, and `Assign(job: Job)` step patterns. |
 | Transition result | `ProcResult<T>` with `Stop(value)` and `Continue(value)`. |
 
 The current `module` declaration names a source unit. It does not create an
@@ -132,10 +133,17 @@ enum WorkerState {
     Idle,
     Handled,
 }
+
+enum WorkerMsg {
+    Assign(Job),
+    Stop,
+}
 ```
 
 Enums used as process state or message types must declare at least one variant.
-Duplicate variants are rejected.
+Duplicate variants are rejected. Payload variants are accepted for process
+message enums. State enum payload variants are rejected in the current buildable
+slice.
 
 ## Processes
 
@@ -178,7 +186,7 @@ Buildable source currently requires:
 | Function | Required Shape |
 | --- | --- |
 | `init` | No parameters, returns the process state type, uses `! [] ~ [] @det`. |
-| `step` | Parameters exactly `state: StateType, MessageVariant`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
+| `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
 
 The parser recognizes `@nondet`, but buildable source currently rejects it.
 The may-behavior list after `~` must currently be empty.
@@ -210,6 +218,16 @@ duplicate process-reference binding in one transition, sends before the
 reference is bound, mailbox overflow, and messages left unhandled after a target
 stops.
 
+Payload messages use the variant constructor at the send site:
+
+```strata
+send worker Assign(Job { phase: Ready });
+```
+
+The payload value is checked against the target message variant's payload type.
+Unit message variants reject payload arguments, and payload variants require
+one payload argument.
+
 ## Effects
 
 The `! [...]` effect list must exactly match the effects used by each `step`
@@ -235,6 +253,21 @@ fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
 }
 ```
 
+Payload variants can bind the received payload in the signature:
+
+```strata
+fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Stop(WorkerState { job: job });
+}
+```
+
+The binding is immutable and local to that transition. It can be used where a
+value of the bound payload type is expected, including whole-value state
+returns, record fields, and downstream message payload sends. Payload bindings
+cannot shadow the `state` parameter, process declarations, type names, or value
+constructors. Process-reference bindings in the same transition cannot shadow a
+payload binding.
+
 If a process accepts more than one message, it can declare explicit clauses for
 specific variants and one wildcard clause for the remaining variants:
 
@@ -255,7 +288,10 @@ variant clauses handle their named variants. One wildcard clause may cover
 variants that do not have explicit clauses. Duplicate explicit clauses,
 duplicate wildcard clauses, missing coverage, and unreachable wildcard clauses
 are rejected. Signature patterns are compile-time dispatch only: Mantle still
-dequeues one message at a time and dispatches by typed message ID.
+dequeues one message at a time and dispatches by typed message ID. In the
+current closed-world source-to-runtime path, each concrete source-visible
+payload send becomes a checked Mantle message case with its own typed message
+ID.
 
 ## State Transitions
 
@@ -297,7 +333,7 @@ The buildable source slice enforces bounded sizes:
 | Output literal bytes | 16 KiB |
 | Processes | 256 |
 | State values per process | 1024 |
-| Message variants per process | 1024 |
+| Concrete message cases per process | 1024 |
 | Static process-reference bindings per process definition | 4096 |
 | Distinct output literals | 4096 |
 | Actions per process | 4096 |

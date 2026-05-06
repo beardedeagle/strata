@@ -23,6 +23,7 @@ macro_rules! define_checked_id {
 
 define_checked_id!(CheckedProcessId);
 define_checked_id!(CheckedProcessRefId);
+define_checked_id!(CheckedMessageVariantId);
 define_checked_id!(CheckedStateId);
 define_checked_id!(CheckedMessageId);
 define_checked_id!(CheckedOutputId);
@@ -34,6 +35,12 @@ impl CheckedProcessId {
 }
 
 impl CheckedMessageId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl CheckedMessageVariantId {
     pub(in crate::language) fn index(self) -> usize {
         self.0 as usize
     }
@@ -61,6 +68,55 @@ pub(in crate::language) enum CheckedStepResult {
 pub(in crate::language) enum CheckedNextState {
     Current,
     Value(CheckedStateId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedPayloadValue {
+    ty: TypeRef,
+    label: String,
+}
+
+impl CheckedPayloadValue {
+    pub(in crate::language) fn new(ty: TypeRef, label: String) -> Self {
+        Self { ty, label }
+    }
+
+    pub(in crate::language) fn label(&self) -> &str {
+        &self.label
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedMessageCase {
+    label: String,
+    variant: CheckedMessageVariantId,
+    payload: Option<CheckedPayloadValue>,
+}
+
+impl CheckedMessageCase {
+    pub(in crate::language) fn new(
+        label: String,
+        variant: CheckedMessageVariantId,
+        payload: Option<CheckedPayloadValue>,
+    ) -> Self {
+        Self {
+            label,
+            variant,
+            payload,
+        }
+    }
+
+    pub(in crate::language) fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub(in crate::language) fn variant(&self) -> CheckedMessageVariantId {
+        self.variant
+    }
+
+    pub(in crate::language) fn payload(&self) -> Option<&CheckedPayloadValue> {
+        self.payload.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,7 +202,7 @@ pub(in crate::language) struct CheckedProcess {
     state_type: TypeRef,
     state_values: Vec<String>,
     message_type: TypeRef,
-    message_variants: Vec<Identifier>,
+    message_cases: Vec<CheckedMessageCase>,
     process_refs: Vec<CheckedProcessRef>,
     mailbox_bound: usize,
     init_state: CheckedStateId,
@@ -160,7 +216,7 @@ impl CheckedProcess {
             state_type: parts.state_type,
             state_values: parts.state_values,
             message_type: parts.message_type,
-            message_variants: parts.message_variants,
+            message_cases: parts.message_cases,
             process_refs: parts.process_refs,
             mailbox_bound: parts.mailbox_bound,
             init_state: parts.init_state,
@@ -184,8 +240,12 @@ impl CheckedProcess {
         &self.message_type
     }
 
-    pub(in crate::language) fn message_variants(&self) -> &[Identifier] {
-        &self.message_variants
+    pub(in crate::language) fn message_cases(&self) -> &[CheckedMessageCase] {
+        &self.message_cases
+    }
+
+    pub(in crate::language) fn message_labels(&self) -> impl Iterator<Item = &str> {
+        self.message_cases.iter().map(CheckedMessageCase::label)
     }
 
     pub(in crate::language) fn process_refs(&self) -> &[CheckedProcessRef] {
@@ -210,7 +270,7 @@ pub(in crate::language) struct CheckedProcessParts {
     pub state_type: TypeRef,
     pub state_values: Vec<String>,
     pub message_type: TypeRef,
-    pub message_variants: Vec<Identifier>,
+    pub message_cases: Vec<CheckedMessageCase>,
     pub process_refs: Vec<CheckedProcessRef>,
     pub mailbox_bound: usize,
     pub init_state: CheckedStateId,

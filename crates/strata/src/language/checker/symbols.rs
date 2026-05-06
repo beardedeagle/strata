@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use super::super::ast::{Enum, Identifier, Module, Process, Record, TypeRef};
-use super::super::checked::{CheckedMessageId, CheckedProcessId};
+use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, TypeRef};
+use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
 use super::super::{PROCESS_REF_TYPE, PROC_RESULT_TYPE};
 
@@ -187,12 +187,20 @@ impl SemanticIndex {
 
             let mut variants = BTreeMap::new();
             for (variant_index, variant) in item.variants.iter().enumerate() {
-                let variant_symbol = symbols.intern(variant)?;
+                let variant_symbol = symbols.intern(&variant.name)?;
                 if variants.insert(variant_symbol, variant_index).is_some() {
                     return Err(Error::new(format!(
                         "duplicate variant in enum {} declaration {}",
-                        item.name, variant
+                        item.name, variant.name
                     )));
+                }
+                if let Some(payload_type) = &variant.payload_type {
+                    type_decl_from_tables(&symbols, &types, payload_type).map_err(|_| {
+                        Error::new(format!(
+                            "enum {} variant {} uses undeclared payload type {}",
+                            item.name, variant.name, payload_type
+                        ))
+                    })?;
                 }
             }
             enum_variants.push(variants);
@@ -316,7 +324,7 @@ impl SemanticIndex {
         sender_process: &str,
         process_id: CheckedProcessId,
         message: &Identifier,
-    ) -> Result<CheckedMessageId> {
+    ) -> Result<CheckedMessageVariantId> {
         self.message_id_for_process_with_context(
             module,
             process_id,
@@ -330,7 +338,7 @@ impl SemanticIndex {
         module: &Module,
         process_id: CheckedProcessId,
         message: &Identifier,
-    ) -> Result<CheckedMessageId> {
+    ) -> Result<CheckedMessageVariantId> {
         self.message_id_for_process_with_context(
             module,
             process_id,
@@ -345,7 +353,7 @@ impl SemanticIndex {
         process_id: CheckedProcessId,
         message: &Identifier,
         context: MessageResolutionContext<'_>,
-    ) -> Result<CheckedMessageId> {
+    ) -> Result<CheckedMessageVariantId> {
         let process = module.processes.get(process_id.index()).ok_or_else(|| {
             Error::new(format!(
                 "process id {} is not declared",
@@ -370,8 +378,41 @@ impl SemanticIndex {
             .ok_or_else(|| Error::new(format!("enum index {enum_index} is not declared")))?
             .get(&message_symbol)
             .copied()
-            .map(CheckedMessageId::from_index)
+            .map(CheckedMessageVariantId::from_index)
             .transpose()?
             .ok_or_else(|| context.not_accepted_error(process, message))
+    }
+
+    pub(super) fn message_variant<'a>(
+        &self,
+        module: &'a Module,
+        process_id: CheckedProcessId,
+        message: CheckedMessageVariantId,
+    ) -> Result<&'a EnumVariant> {
+        let process = module.processes.get(process_id.index()).ok_or_else(|| {
+            Error::new(format!(
+                "process id {} is not declared",
+                process_id.as_u32()
+            ))
+        })?;
+        let enum_decl = self.enum_decl(module, &process.msg_type)?;
+        enum_decl.variants.get(message.index()).ok_or_else(|| {
+            Error::new(format!(
+                "process {} message id {} is not accepted",
+                process.name,
+                message.as_u32()
+            ))
+        })
+    }
+
+    pub(super) fn identifier_conflicts_with_declared_value(&self, name: &Identifier) -> bool {
+        let Some(symbol) = self.symbols.resolve(name.as_str()) else {
+            return false;
+        };
+        self.types.contains_key(&symbol)
+            || self
+                .enum_variants
+                .iter()
+                .any(|variants| variants.contains_key(&symbol))
     }
 }

@@ -65,6 +65,7 @@ accept.
 ```strata
 enum WorkerMsg {
     Ping,
+    Assign(Job),
 }
 ```
 
@@ -72,10 +73,17 @@ Sends are statically checked against the target process message enum:
 
 ```strata
 send worker Ping;
+send worker Assign(Job { phase: Ready });
 ```
 
-The current source form sends message variants through process references only.
-Message payloads are not available yet.
+Payload variants carry one immutable value. Actor `step` signatures can bind
+that payload:
+
+```strata
+fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Stop(WorkerState { job: job });
+}
+```
 
 ## State
 

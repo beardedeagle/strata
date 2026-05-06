@@ -1,7 +1,7 @@
 use super::ast::{
-    Determinism, Effect, Enum, Function, FunctionBlock, FunctionParam, Identifier, Module,
-    OutputLiteral, Param, Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr,
-    SignaturePattern, Statement, TypeRef, ValueExpr,
+    Determinism, Effect, Enum, EnumVariant, Function, FunctionBlock, FunctionParam, Identifier,
+    Module, OutputLiteral, Param, Process, Record, RecordField, RecordValue, RecordValueField,
+    ReturnExpr, SignaturePattern, Statement, TypeRef, ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
@@ -118,7 +118,15 @@ impl Parser {
             return Ok(Enum { name, variants });
         }
         loop {
-            variants.push(self.expect_identifier()?);
+            let name = self.expect_identifier()?;
+            let payload_type = if self.consume_symbol('(') {
+                let ty = self.parse_type()?;
+                self.expect_symbol(')')?;
+                Some(ty)
+            } else {
+                None
+            };
+            variants.push(EnumVariant { name, payload_type });
             if self.consume_symbol(',') {
                 if self.consume_symbol('}') {
                     break;
@@ -235,7 +243,9 @@ impl Parser {
                         ty,
                     }));
                 } else {
-                    params.push(FunctionParam::Pattern(Self::signature_pattern(param_name)?));
+                    params.push(FunctionParam::Pattern(
+                        self.parse_signature_pattern(param_name)?,
+                    ));
                 }
                 if self.consume_symbol(',') {
                     if self.consume_symbol(')') {
@@ -283,12 +293,25 @@ impl Parser {
         })
     }
 
-    fn signature_pattern(value: String) -> Result<SignaturePattern> {
+    fn parse_signature_pattern(&mut self, value: String) -> Result<SignaturePattern> {
         if value == "_" {
-            Ok(SignaturePattern::Wildcard)
-        } else {
-            Identifier::new(value).map(SignaturePattern::Variant)
+            if self.peek_symbol('(') {
+                return Err(self.error_here("wildcard step patterns cannot bind payloads"));
+            }
+            return Ok(SignaturePattern::Wildcard);
         }
+
+        let name = Identifier::new(value)?;
+        let binding = if self.consume_symbol('(') {
+            let name = self.expect_identifier()?;
+            self.expect_symbol(':')?;
+            let ty = self.parse_type()?;
+            self.expect_symbol(')')?;
+            Some(Param { name, ty })
+        } else {
+            None
+        };
+        Ok(SignaturePattern::Variant { name, binding })
     }
 
     fn parse_function_block(&mut self) -> Result<FunctionBlock> {
@@ -332,8 +355,19 @@ impl Parser {
             self.expect_keyword("send")?;
             let target = self.expect_identifier()?;
             let message = self.expect_identifier()?;
+            let payload = if self.consume_symbol('(') {
+                let value = self.parse_value_expr()?;
+                self.expect_symbol(')')?;
+                Some(value)
+            } else {
+                None
+            };
             self.expect_symbol(';')?;
-            return Ok(Statement::Send { target, message });
+            return Ok(Statement::Send {
+                target,
+                message,
+                payload,
+            });
         }
         Err(self.error_here("expected emit, let, send, or return statement"))
     }

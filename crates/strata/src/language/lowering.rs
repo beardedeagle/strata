@@ -35,11 +35,7 @@ fn lower_process(process: &CheckedProcess) -> ArtifactProcess {
         state_type: process.state_type().to_string(),
         state_values: process.state_values().to_vec(),
         message_type: process.message_type().to_string(),
-        message_variants: process
-            .message_variants()
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
+        message_variants: process.message_labels().map(ToString::to_string).collect(),
         process_refs: process
             .process_refs()
             .iter()

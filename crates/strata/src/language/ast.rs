@@ -151,7 +151,13 @@ pub struct RecordField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Enum {
     pub name: Identifier,
-    pub variants: Vec<Identifier>,
+    pub variants: Vec<EnumVariant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumVariant {
+    pub name: Identifier,
+    pub payload_type: Option<TypeRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,7 +189,10 @@ pub enum FunctionParam {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignaturePattern {
-    Variant(Identifier),
+    Variant {
+        name: Identifier,
+        binding: Option<Param>,
+    },
     Wildcard,
 }
 
@@ -204,6 +213,7 @@ pub enum Statement {
     Send {
         target: Identifier,
         message: Identifier,
+        payload: Option<ValueExpr>,
     },
 }
 
