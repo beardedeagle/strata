@@ -4,9 +4,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
     write_artifact, ArtifactAction, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
-    ArtifactProcessRef, ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField,
-    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
+    ArtifactProcessRef, ArtifactSendTarget, ArtifactTransition, ArtifactValueTemplate,
+    ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
+    STRATA_SOURCE_LANGUAGE,
 };
 
 use super::program::LoadedProgram;
@@ -266,6 +267,7 @@ fn in_memory_host_delivers_payload_envelopes_and_template_state() {
     let expected_payload = ArtifactPayload {
         ty: "Job".to_string(),
         value: "Job{phase:Ready}".to_string(),
+        process_ref: None,
     };
     let mut host = InMemoryRuntimeHost::default();
 
@@ -533,7 +535,7 @@ fn valid_artifact() -> MantleArtifact {
                             process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessRefId::new(0),
+                            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
                             message: MessageId::new(0),
                             payload: None,
                         },
@@ -568,7 +570,7 @@ fn payload_artifact() -> MantleArtifact {
     artifact.module = "actor_payloads".to_string();
     artifact.outputs = vec!["worker assigned job".to_string()];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
-        target: ProcessRefId::new(0),
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: "Job".to_string(),
@@ -633,7 +635,7 @@ fn looping_artifact() -> MantleArtifact {
                             process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessRefId::new(0),
+                            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
                             message: MessageId::new(0),
                             payload: None,
                         },
@@ -662,7 +664,7 @@ fn looping_artifact() -> MantleArtifact {
                             process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessRefId::new(0),
+                            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
                             message: MessageId::new(0),
                             payload: None,
                         },
@@ -691,7 +693,7 @@ fn looping_artifact() -> MantleArtifact {
                             process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessRefId::new(0),
+                            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
                             message: MessageId::new(0),
                             payload: None,
                         },
@@ -738,12 +740,12 @@ fn sequence_artifact() -> MantleArtifact {
                             process_ref: ProcessRefId::new(0),
                         },
                         ArtifactAction::Send {
-                            target: ProcessRefId::new(0),
+                            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
                             message: MessageId::new(0),
                             payload: None,
                         },
                         ArtifactAction::Send {
-                            target: ProcessRefId::new(0),
+                            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
                             message: MessageId::new(1),
                             payload: None,
                         },

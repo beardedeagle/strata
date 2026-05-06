@@ -11,6 +11,8 @@ Read them in this order:
    definition.
 5. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step signatures.
+6. `actor_reply.str` for transporting typed process references through message
+   payloads.
 
 ## Hello
 
@@ -117,3 +119,24 @@ Key source ideas:
 - `Assign(job: Job)` binds the received payload as an immutable step-local
   value.
 - `WorkerState { job: job }` constructs the next state as a whole value.
+
+## Actor Reply References
+
+`examples/actor_reply.str` passes a `ProcessRef<Sink>` as a typed immutable
+message payload. `Worker` receives that reference and sends `Done` through it.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_reply.str
+cargo run -p strata --bin strata -- build examples/actor_reply.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
+```
+
+Key source ideas:
+
+- `enum WorkerMsg { Work(ProcessRef<Sink>) }` declares a typed reference
+  payload.
+- `send worker Work(sink);` transports the spawned `Sink` reference to
+  `Worker`.
+- `Work(reply_to: ProcessRef<Sink>)` binds the received reference immutably.
+- `send reply_to Done;` routes by the transported runtime process ID and
+  admitted target process ID, not by source labels.

@@ -106,7 +106,8 @@ The current runnable examples are:
 - `examples/actor_ping.str`;
 - `examples/actor_sequence.str`;
 - `examples/actor_instances.str`;
-- `examples/actor_payloads.str`.
+- `examples/actor_payloads.str`;
+- `examples/actor_reply.str`.
 
 The integration tests in `crates/mantle-runtime/tests/product_gates.rs` mirror
 the same source check, artifact build, and runtime execution sequence:

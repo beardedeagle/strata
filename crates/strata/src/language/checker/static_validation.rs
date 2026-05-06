@@ -2,12 +2,14 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mantle_artifact::{validate_payload_value_label, validate_state_value_label};
 
+use super::super::ast::TypeRef;
 use super::super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess,
-    CheckedProcessId, CheckedProcessRefId, CheckedStateId, CheckedStepResult, CheckedTransition,
-    CheckedValueTemplate,
+    CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
+    CheckedTransition, CheckedValueTemplate,
 };
 use super::super::diagnostic::{Error, Result};
+use super::super::PROCESS_REF_TYPE;
 use super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
 
 pub(super) fn validate_action_references(
@@ -93,15 +95,13 @@ fn validate_transition(
                 message,
                 payload,
             } => {
-                let target_process_id = process_ref_target(process, *target)?;
-                if !spawned_refs.contains(target) {
-                    return Err(Error::new(format!(
-                        "process {} sends through unbound process reference id {} within message transition {}",
-                        process.debug_name(),
-                        target.as_u32(),
-                        transition.message().as_u32()
-                    )));
-                }
+                let target_process_id = validate_send_target(
+                    processes,
+                    process,
+                    transition.message(),
+                    target,
+                    &spawned_refs,
+                )?;
                 let target_process = process_by_id(processes, target_process_id)?;
                 if message.index() >= target_process.message_cases().len() {
                     return Err(Error::new(format!(
@@ -117,6 +117,8 @@ fn validate_transition(
                     target_process,
                     *message,
                     payload.as_ref(),
+                    &spawned_refs,
+                    processes,
                 )?;
             }
         }
@@ -130,6 +132,8 @@ fn validate_send_payload_shape(
     target_process: &CheckedProcess,
     target_message: CheckedMessageId,
     payload: Option<&CheckedValueTemplate>,
+    spawned_refs: &BTreeSet<CheckedProcessRefId>,
+    processes: &[CheckedProcess],
 ) -> Result<()> {
     let current_payload_type = message_payload_type(process, current_message)?;
     let target_payload_type = message_payload_type(target_process, target_message)?;
@@ -148,6 +152,7 @@ fn validate_send_payload_shape(
         (Some(expected_type), Some(payload)) => {
             validate_value_template_received_type(payload, current_payload_type)?;
             validate_value_template_payload_labels(payload)?;
+            validate_value_template_process_refs(processes, process, payload, spawned_refs, true)?;
             if payload.result_type() != expected_type {
                 return Err(Error::new(format!(
                     "process {} sends payload of type {}, expected {}",
@@ -192,6 +197,7 @@ fn validate_next_state(
                 message_payload_type(process, current_message)?,
             )?;
             validate_value_template_payload_labels(&template)?;
+            reject_process_ref_template_in_next_state(&template)?;
             if !checked_template_depends_on_received_payload(&template) {
                 resolve_checked_template_state(process, &template, None)?;
             }
@@ -237,6 +243,7 @@ fn validate_value_template_received_type(
             }
             Ok(())
         }
+        CheckedValueTemplate::ProcessRef { .. } => Ok(()),
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 validate_value_template_received_type(field.value(), received_payload_type)?;
@@ -252,9 +259,80 @@ fn validate_value_template_payload_labels(template: &CheckedValueTemplate) -> Re
             validate_payload_value_label(value.label()).map_err(|err| Error::new(err.to_string()))
         }
         CheckedValueTemplate::ReceivedPayload { .. } => Ok(()),
+        CheckedValueTemplate::ProcessRef { .. } => Ok(()),
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 validate_value_template_payload_labels(field.value())?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_value_template_process_refs(
+    processes: &[CheckedProcess],
+    process: &CheckedProcess,
+    template: &CheckedValueTemplate,
+    spawned_refs: &BTreeSet<CheckedProcessRefId>,
+    allow_direct_process_ref: bool,
+) -> Result<()> {
+    match template {
+        CheckedValueTemplate::Literal(_) | CheckedValueTemplate::ReceivedPayload { .. } => Ok(()),
+        CheckedValueTemplate::ProcessRef {
+            ty,
+            target,
+            process_ref,
+            ..
+        } => {
+            if !allow_direct_process_ref {
+                return Err(Error::new(
+                    "process reference payload templates must be direct message payloads",
+                ));
+            }
+            validate_process_ref_type_target(processes, ty, *target)?;
+            let declared_target = process_ref_target(process, *process_ref)?;
+            if declared_target != *target {
+                return Err(Error::new(format!(
+                    "process {} process reference payload id {} targets process id {}, expected {}",
+                    process.debug_name(),
+                    process_ref.as_u32(),
+                    declared_target.as_u32(),
+                    target.as_u32()
+                )));
+            }
+            if !spawned_refs.contains(process_ref) {
+                return Err(Error::new(format!(
+                    "process {} sends unbound process reference id {} as payload",
+                    process.debug_name(),
+                    process_ref.as_u32()
+                )));
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::Record { fields, .. } => {
+            for field in fields {
+                validate_value_template_process_refs(
+                    processes,
+                    process,
+                    field.value(),
+                    spawned_refs,
+                    false,
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) -> Result<()> {
+    match template {
+        CheckedValueTemplate::Literal(_) | CheckedValueTemplate::ReceivedPayload { .. } => Ok(()),
+        CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
+            "process reference templates are not valid next-state values",
+        )),
+        CheckedValueTemplate::Record { fields, .. } => {
+            for field in fields {
+                reject_process_ref_template_in_next_state(field.value())?;
             }
             Ok(())
         }
@@ -265,6 +343,7 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
     match template {
         CheckedValueTemplate::Literal(_) => false,
         CheckedValueTemplate::ReceivedPayload { .. } => true,
+        CheckedValueTemplate::ProcessRef { .. } => false,
         CheckedValueTemplate::Record { fields, .. } => fields
             .iter()
             .any(|field| checked_template_depends_on_received_payload(field.value())),
@@ -290,10 +369,65 @@ fn evaluate_checked_template(
             }
             Ok(payload.clone())
         }
+        CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
+            "process reference template requires static runtime process reference bindings",
+        )),
         CheckedValueTemplate::Record { ty, fields } => {
             let mut parts = Vec::with_capacity(fields.len());
             for field in fields {
                 let value = evaluate_checked_template(field.value(), received_payload)?;
+                parts.push(format!("{}:{}", field.name(), value.label()));
+            }
+            let label = format!("{ty}{{{}}}", parts.join(","));
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
+        }
+    }
+}
+
+fn evaluate_checked_runtime_template(
+    template: &CheckedValueTemplate,
+    received_payload: Option<&CheckedPayloadValue>,
+    process: &CheckedProcess,
+    process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
+) -> Result<CheckedPayloadValue> {
+    match template {
+        CheckedValueTemplate::Literal(value) => Ok(value.clone()),
+        CheckedValueTemplate::ReceivedPayload { ty } => {
+            let payload = received_payload.ok_or_else(|| {
+                Error::new("received payload template requires a payload-bearing message")
+            })?;
+            if payload.ty() != ty {
+                return Err(Error::new(format!(
+                    "received payload has type {}, expected {}",
+                    payload.ty(),
+                    ty
+                )));
+            }
+            Ok(payload.clone())
+        }
+        CheckedValueTemplate::ProcessRef {
+            ty,
+            target,
+            process_ref,
+        } => {
+            let pid = resolve_static_process_ref(process, process_refs, *process_ref)?;
+            Ok(CheckedPayloadValue::process_ref(
+                ty.clone(),
+                format!("{ty}#{}", pid.as_u32()),
+                *target,
+                u64::from(pid.as_u32()),
+            ))
+        }
+        CheckedValueTemplate::Record { ty, fields } => {
+            let mut parts = Vec::with_capacity(fields.len());
+            for field in fields {
+                let value = evaluate_checked_runtime_template(
+                    field.value(),
+                    received_payload,
+                    process,
+                    process_refs,
+                )?;
                 parts.push(format!("{}:{}", field.name(), value.label()));
             }
             let label = format!("{ty}{{{}}}", parts.join(","));
@@ -353,6 +487,78 @@ fn process_ref_target(
                 process_ref.as_u32()
             ))
         })
+}
+
+fn validate_send_target(
+    processes: &[CheckedProcess],
+    process: &CheckedProcess,
+    current_message: CheckedMessageId,
+    target: &CheckedSendTarget,
+    spawned_refs: &BTreeSet<CheckedProcessRefId>,
+) -> Result<CheckedProcessId> {
+    match target {
+        CheckedSendTarget::ProcessRef(process_ref) => {
+            let target_process_id = process_ref_target(process, *process_ref)?;
+            if !spawned_refs.contains(process_ref) {
+                return Err(Error::new(format!(
+                    "process {} sends through unbound process reference id {} within message transition {}",
+                    process.debug_name(),
+                    process_ref.as_u32(),
+                    current_message.as_u32()
+                )));
+            }
+            Ok(target_process_id)
+        }
+        CheckedSendTarget::ReceivedPayload { ty, target } => {
+            validate_process_ref_type_target(processes, ty, *target)?;
+            let Some(received_type) = message_payload_type(process, current_message)? else {
+                return Err(Error::new(format!(
+                    "process {} send target requires a payload-bearing message",
+                    process.debug_name()
+                )));
+            };
+            if received_type != ty {
+                return Err(Error::new(format!(
+                    "process {} send target has received payload type {}, expected {}",
+                    process.debug_name(),
+                    ty,
+                    received_type
+                )));
+            }
+            Ok(*target)
+        }
+    }
+}
+
+fn validate_process_ref_type_target(
+    processes: &[CheckedProcess],
+    ty: &TypeRef,
+    target: CheckedProcessId,
+) -> Result<()> {
+    let TypeRef::Applied { constructor, args } = ty else {
+        return Err(Error::new(format!(
+            "process reference payload type {ty} must be a process reference type"
+        )));
+    };
+    if constructor.as_str() != PROCESS_REF_TYPE || args.len() != 1 {
+        return Err(Error::new(format!(
+            "process reference payload type {ty} must be a process reference type"
+        )));
+    }
+    let TypeRef::Named(target_name) = &args[0] else {
+        return Err(Error::new(format!(
+            "process reference payload type {ty} must target a declared process"
+        )));
+    };
+    let target_process = process_by_id(processes, target)?;
+    if target_process.debug_name().as_str() != target_name.as_str() {
+        return Err(Error::new(format!(
+            "process reference payload type {ty} targets {}, expected {}",
+            target_name,
+            target_process.debug_name()
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -428,6 +634,48 @@ fn resolve_static_process_ref(
             process_ref.as_u32()
         ))
     })
+}
+
+fn resolve_static_send_target(
+    process: &CheckedProcess,
+    process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    target: &CheckedSendTarget,
+    received_payload: Option<&CheckedPayloadValue>,
+) -> Result<StaticProcessId> {
+    match target {
+        CheckedSendTarget::ProcessRef(process_ref) => {
+            resolve_static_process_ref(process, process_refs, *process_ref)
+        }
+        CheckedSendTarget::ReceivedPayload { ty, target } => {
+            let payload = received_payload.ok_or_else(|| {
+                Error::new("received process reference send target requires a payload")
+            })?;
+            if payload.ty() != ty {
+                return Err(Error::new(format!(
+                    "received process reference send target has type {}, expected {}",
+                    payload.ty(),
+                    ty
+                )));
+            }
+            let process_ref = payload
+                .process_ref_payload()
+                .ok_or_else(|| Error::new("received payload is not a process reference value"))?;
+            if process_ref.target() != *target {
+                return Err(Error::new(format!(
+                    "received process reference targets process id {}, expected {}",
+                    process_ref.target().as_u32(),
+                    target.as_u32()
+                )));
+            }
+            let pid = u32::try_from(process_ref.pid()).map_err(|_| {
+                Error::new(format!(
+                    "received process reference pid {} cannot be represented by static validation",
+                    process_ref.pid()
+                ))
+            })?;
+            Ok(StaticProcessId(pid))
+        }
+    }
 }
 
 fn static_process_index_for_pid(
@@ -537,16 +785,18 @@ fn validate_static_runtime_order(
                     message,
                     payload,
                 } => {
-                    let target_pid =
-                        resolve_static_process_ref(process, &local_process_refs, *target).map_err(
-                            |err| Error::new(format!("process {} {err}", process.debug_name())),
-                        )?;
+                    let target_pid = resolve_static_send_target(
+                        process,
+                        &local_process_refs,
+                        target,
+                        envelope.payload.as_ref(),
+                    )
+                    .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
                     let target_index = static_process_index_for_pid(&instances, target_pid)
                         .map_err(|err| {
                             Error::new(format!(
-                                "process {} sends through process reference id {} to {err}",
-                                process.debug_name(),
-                                target.as_u32()
+                                "process {} sends through process reference to {err}",
+                                process.debug_name()
                             ))
                         })?;
                     let target_process =
@@ -576,9 +826,11 @@ fn validate_static_runtime_order(
                         )));
                     }
                     let payload = match payload {
-                        Some(payload) => Some(evaluate_checked_template(
+                        Some(payload) => Some(evaluate_checked_runtime_template(
                             payload,
                             envelope.payload.as_ref(),
+                            process,
+                            &local_process_refs,
                         )?),
                         None => None,
                     };
@@ -851,7 +1103,7 @@ mod tests {
                         process_ref: checked_process_ref_id(0),
                     },
                     CheckedAction::Send {
-                        target: checked_process_ref_id(0),
+                        target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                         message: checked_message_id(0),
                         payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
                             TypeRef::Named(ident("Job")),
@@ -896,6 +1148,294 @@ mod tests {
     }
 
     #[test]
+    fn static_validation_rejects_received_payload_send_target_with_non_process_ref_type() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                Some(TypeRef::Named(ident("Job"))),
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: vec![CheckedAction::Send {
+                    target: CheckedSendTarget::ReceivedPayload {
+                        ty: TypeRef::Named(ident("Job")),
+                        target: checked_process_id(1),
+                    },
+                    message: checked_message_id(0),
+                    payload: None,
+                }],
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: TypeRef::Named(ident("WorkerState")),
+            state_values: vec!["WorkerState".to_string()],
+            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Done".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("non-process-ref received send target should fail");
+
+        assert!(err
+            .to_string()
+            .contains("process reference payload type Job must be a process reference type"));
+    }
+
+    #[test]
+    fn static_validation_rejects_process_ref_template_with_non_process_ref_type() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: vec![CheckedProcessRef::new(
+                ident("worker"),
+                checked_process_id(1),
+            )],
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: vec![
+                    CheckedAction::Spawn {
+                        target: checked_process_id(1),
+                        process_ref: checked_process_ref_id(0),
+                    },
+                    CheckedAction::Send {
+                        target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                        message: checked_message_id(0),
+                        payload: Some(CheckedValueTemplate::ProcessRef {
+                            ty: TypeRef::Named(ident("Job")),
+                            target: checked_process_id(1),
+                            process_ref: checked_process_ref_id(0),
+                        }),
+                    },
+                ],
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: TypeRef::Named(ident("WorkerState")),
+            state_values: vec!["WorkerState".to_string()],
+            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Assign".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                Some(TypeRef::Named(ident("Job"))),
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("non-process-ref process ref template should fail");
+
+        assert!(err
+            .to_string()
+            .contains("process reference payload type Job must be a process reference type"));
+    }
+
+    #[test]
+    fn static_validation_rejects_nested_process_ref_payload_template() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: vec![CheckedProcessRef::new(
+                ident("worker"),
+                checked_process_id(1),
+            )],
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: vec![
+                    CheckedAction::Spawn {
+                        target: checked_process_id(1),
+                        process_ref: checked_process_ref_id(0),
+                    },
+                    CheckedAction::Send {
+                        target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                        message: checked_message_id(0),
+                        payload: Some(CheckedValueTemplate::Record {
+                            ty: TypeRef::Named(ident("Box")),
+                            fields: vec![CheckedValueTemplateField::new(
+                                ident("reply_to"),
+                                CheckedValueTemplate::ProcessRef {
+                                    ty: process_ref_type("Worker"),
+                                    target: checked_process_id(1),
+                                    process_ref: checked_process_ref_id(0),
+                                },
+                            )],
+                        }),
+                    },
+                ],
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: TypeRef::Named(ident("WorkerState")),
+            state_values: vec!["WorkerState".to_string()],
+            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Assign".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                Some(TypeRef::Named(ident("Box"))),
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("nested process ref template should fail");
+
+        assert!(err
+            .to_string()
+            .contains("process reference payload templates must be direct message payloads"));
+    }
+
+    #[test]
+    fn static_validation_rejects_process_ref_next_state_template() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: vec![CheckedProcessRef::new(
+                ident("worker"),
+                checked_process_id(1),
+            )],
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Template(CheckedValueTemplate::Record {
+                    ty: TypeRef::Named(ident("MainState")),
+                    fields: vec![CheckedValueTemplateField::new(
+                        ident("reply_to"),
+                        CheckedValueTemplate::ProcessRef {
+                            ty: process_ref_type("Worker"),
+                            target: checked_process_id(1),
+                            process_ref: checked_process_ref_id(0),
+                        },
+                    )],
+                }),
+                actions: Vec::new(),
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: TypeRef::Named(ident("WorkerState")),
+            state_values: vec!["WorkerState".to_string()],
+            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Done".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("process ref next-state template should fail");
+
+        assert!(err
+            .to_string()
+            .contains("process reference templates are not valid next-state values"));
+    }
+
+    #[test]
     fn static_validation_rejects_payload_template_next_state_outside_state_table() {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
@@ -924,7 +1464,7 @@ mod tests {
                         process_ref: checked_process_ref_id(0),
                     },
                     CheckedAction::Send {
-                        target: checked_process_ref_id(0),
+                        target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                         message: checked_message_id(0),
                         payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
                             TypeRef::Named(ident("Job")),
@@ -1001,6 +1541,13 @@ mod tests {
 
     fn ident(value: &str) -> Identifier {
         Identifier::new(value).expect("test identifier should be valid")
+    }
+
+    fn process_ref_type(target: &str) -> TypeRef {
+        TypeRef::Applied {
+            constructor: ident(PROCESS_REF_TYPE),
+            args: vec![TypeRef::Named(ident(target))],
+        }
     }
 
     fn checked_process_id(index: usize) -> CheckedProcessId {

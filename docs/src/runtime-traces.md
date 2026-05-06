@@ -62,7 +62,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"2","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"3","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -103,6 +103,13 @@ Payload-bearing messages keep the stable admitted message label and add
 
 Runtime dispatch still uses the numeric `message_id`; labels and payload values
 are trace metadata.
+
+When a payload is a transported process reference, the trace also includes the
+admitted target process ID and runtime process ID:
+
+```json
+{"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work","payload_type":"ProcessRef<Sink>","payload":"ProcessRef<Sink>#3","payload_process_id":2,"payload_pid":3,"queue_depth":1,"sender_pid":1}
+```
 
 ## Process Stepped
 

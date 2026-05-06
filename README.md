@@ -94,6 +94,19 @@ That example sends `Assign(Job { phase: Ready })`, binds the payload in the
 worker `step` signature as `Assign(job: Job)`, and returns a whole replacement
 state containing the bound payload value.
 
+Process references can travel as typed immutable payloads:
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_reply.str
+cargo run -p strata --bin strata -- build examples/actor_reply.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
+```
+
+That example sends `Work(ProcessRef<Sink>)` to a worker, binds the received
+reference as `Work(reply_to: ProcessRef<Sink>)`, and sends `Done` through the
+received typed reference. Mantle traces both the runtime `pid` and admitted
+process ID for the transported reference.
+
 ## What Strata Is For
 
 Strata is aimed at programs where the important behavior should be explicit:

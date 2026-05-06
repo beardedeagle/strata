@@ -16,8 +16,8 @@ use super::ast::{
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
     CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef,
-    CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedTransitionParts, CheckedValueTemplate,
+    CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedSendTarget, CheckedStateId,
+    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedValueTemplate,
 };
 use super::diagnostic::{Error, Result};
 use super::{PROCESS_REF_TYPE, PROC_RESULT_TYPE};
@@ -207,18 +207,17 @@ impl MessageCaseTable {
                             else {
                                 continue;
                             };
-                            let target_process_id = process_ref_targets[process_index]
-                                .get(target)
-                                .ok_or_else(|| {
-                                    Error::new(format!(
-                                        "process {} sends to undeclared process reference {}",
-                                        process.name, target
-                                    ))
-                                })?;
+                            let target_process_id = resolve_send_target_process_for_discovery(
+                                process,
+                                semantic_index,
+                                &process_ref_targets[process_index],
+                                &pattern,
+                                target,
+                            )?;
                             let target_variant = semantic_index.message_id_for_process(
                                 module,
                                 process.name.as_str(),
-                                *target_process_id,
+                                target_process_id,
                                 message,
                             )?;
                             let builder =
@@ -229,12 +228,10 @@ impl MessageCaseTable {
                                     ))
                                 })?;
                             changed |= builder.add_payload_case(
-                                module,
-                                semantic_index,
-                                *target_process_id,
                                 target_variant,
                                 payload.as_ref(),
                                 &bindings,
+                                &process_ref_targets[process_index],
                             )?;
                         }
                     }
@@ -360,14 +357,14 @@ impl<'a> MessageCaseBuilder<'a> {
 
     fn add_payload_case(
         &mut self,
-        module: &Module,
-        semantic_index: &SemanticIndex,
-        process_id: CheckedProcessId,
         variant_id: CheckedMessageVariantId,
         payload: Option<&ValueExpr>,
         bindings: &[ValueBinding<'_>],
+        process_refs: &BTreeMap<Identifier, CheckedProcessId>,
     ) -> Result<bool> {
-        let variant = semantic_index.message_variant(module, process_id, variant_id)?;
+        let variant =
+            self.semantic_index
+                .message_variant(self.module, self.process_id, variant_id)?;
         match (&variant.payload_type, payload) {
             (None, None) => Ok(false),
             (None, Some(_)) => Err(Error::new(format!(
@@ -379,13 +376,25 @@ impl<'a> MessageCaseBuilder<'a> {
                 variant.name
             ))),
             (Some(payload_type), Some(payload)) => {
-                let label = canonical_source_value_with_bindings(
-                    module,
-                    semantic_index,
-                    payload_type,
-                    payload,
-                    bindings,
-                )?;
+                let label = if let Some(target) =
+                    self.semantic_index.process_ref_target_type(payload_type)?
+                {
+                    canonical_process_ref_payload_label(
+                        payload_type,
+                        target,
+                        payload,
+                        bindings,
+                        process_refs,
+                    )?
+                } else {
+                    canonical_source_value_with_bindings(
+                        self.module,
+                        self.semantic_index,
+                        payload_type,
+                        payload,
+                        bindings,
+                    )?
+                };
                 Ok(self.insert_payload_case(variant_id, payload_type, label))
             }
         }
@@ -465,6 +474,42 @@ impl<'a> MessageCaseBuilder<'a> {
         }
         Ok(payloads_by_variant)
     }
+}
+
+fn canonical_process_ref_payload_label(
+    expected_type: &TypeRef,
+    expected_target: CheckedProcessId,
+    payload: &ValueExpr,
+    bindings: &[ValueBinding<'_>],
+    process_refs: &BTreeMap<Identifier, CheckedProcessId>,
+) -> Result<String> {
+    let ValueExpr::Identifier(name) = payload else {
+        return Err(Error::new(format!(
+            "process reference payload type {expected_type} must be passed as an immutable process reference value"
+        )));
+    };
+    if let Some(binding) = bindings.iter().find(|binding| binding.name == name) {
+        if binding.ty == expected_type {
+            return Ok(binding.label.to_string());
+        }
+        return Err(Error::new(format!(
+            "value binding {} has type {}, expected {}",
+            binding.name, binding.ty, expected_type
+        )));
+    }
+    let Some(actual_target) = process_refs.get(name) else {
+        return Err(Error::new(format!(
+            "process reference payload {name} is not a bound process reference"
+        )));
+    };
+    if *actual_target != expected_target {
+        return Err(Error::new(format!(
+            "process reference payload {name} targets process id {}, expected {}",
+            actual_target.as_u32(),
+            expected_target.as_u32()
+        )));
+    }
+    Ok(expected_type.to_string())
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -878,6 +923,38 @@ fn payload_value_bindings<'a>(
     }
 }
 
+fn resolve_send_target_process_for_discovery(
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    process_refs: &BTreeMap<Identifier, CheckedProcessId>,
+    pattern: &StepSignaturePattern,
+    target: &Identifier,
+) -> Result<CheckedProcessId> {
+    if let Some(target_process) = process_refs.get(target) {
+        return Ok(*target_process);
+    }
+    if let StepSignaturePattern::Variant {
+        binding: Some(param),
+        ..
+    } = pattern
+    {
+        if param.name == *target {
+            return semantic_index
+                .process_ref_target_type(&param.ty)?
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} send target {} is not a process reference payload",
+                        process.name, target
+                    ))
+                });
+        }
+    }
+    Err(Error::new(format!(
+        "process {} sends to undeclared process reference {}",
+        process.name, target
+    )))
+}
+
 fn resolve_step_message_pattern(
     module: &Module,
     process: &Process,
@@ -1209,21 +1286,16 @@ fn check_step_transition(
                 message,
                 payload,
             } => {
-                let binding = context.process_ref_index.get(target).ok_or_else(|| {
-                    Error::new(format!(
-                        "process {} sends to undeclared process reference {}",
-                        context.process.name, target
-                    ))
-                })?;
+                let send_target = resolve_checked_send_target(context, payload_binding, target)?;
                 let message_id = resolve_send_message_case(
                     context,
-                    binding.target,
+                    send_target.target_process,
                     message,
                     payload.as_ref(),
                     payload_template_binding.as_ref(),
                 )?;
                 actions.push(CheckedAction::Send {
-                    target: binding.id,
+                    target: send_target.target,
                     message: message_id.message,
                     payload: message_id.payload,
                 });
@@ -1279,6 +1351,48 @@ fn check_step_transition(
     }))
 }
 
+struct ResolvedCheckedSendTarget {
+    target: CheckedSendTarget,
+    target_process: CheckedProcessId,
+}
+
+fn resolve_checked_send_target(
+    context: &StepCheckContext<'_>,
+    payload_binding: Option<&StepPayloadBinding>,
+    target: &Identifier,
+) -> Result<ResolvedCheckedSendTarget> {
+    if let Some(binding) = context.process_ref_index.get(target) {
+        return Ok(ResolvedCheckedSendTarget {
+            target: CheckedSendTarget::ProcessRef(binding.id),
+            target_process: binding.target,
+        });
+    }
+    if let Some(binding) = payload_binding {
+        if binding.name == *target {
+            let target_process = context
+                .semantic_index
+                .process_ref_target_type(&binding.ty)?
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} send target {} is not a process reference payload",
+                        context.process.name, target
+                    ))
+                })?;
+            return Ok(ResolvedCheckedSendTarget {
+                target: CheckedSendTarget::ReceivedPayload {
+                    ty: binding.ty.clone(),
+                    target: target_process,
+                },
+                target_process,
+            });
+        }
+    }
+    Err(Error::new(format!(
+        "process {} sends to undeclared process reference {}",
+        context.process.name, target
+    )))
+}
+
 struct CheckedSendMessage {
     message: CheckedMessageId,
     payload: Option<CheckedValueTemplate>,
@@ -1315,9 +1429,8 @@ fn resolve_send_message_case(
                 context.process.name, variant_decl.name
             )))
         }
-        (Some(payload_type), Some(payload)) => Some(checked_value_template_with_binding(
-            context.module,
-            context.semantic_index,
+        (Some(payload_type), Some(payload)) => Some(checked_send_payload_template(
+            context,
             payload_type,
             payload,
             binding,
@@ -1327,6 +1440,66 @@ fn resolve_send_message_case(
         message: context.message_cases.message_id(target_process, variant)?,
         payload,
     })
+}
+
+fn checked_send_payload_template(
+    context: &StepCheckContext<'_>,
+    expected_type: &TypeRef,
+    payload: &ValueExpr,
+    binding: Option<&ValueTemplateBinding<'_>>,
+) -> Result<CheckedValueTemplate> {
+    if let Some(target_process) = context
+        .semantic_index
+        .process_ref_target_type(expected_type)?
+    {
+        let ValueExpr::Identifier(name) = payload else {
+            return Err(Error::new(format!(
+                "process {} sends process reference payload of type {} using a non-reference value",
+                context.process.name, expected_type
+            )));
+        };
+        if let Some(binding) = binding {
+            if name == binding.name {
+                if binding.ty == expected_type {
+                    return Ok(CheckedValueTemplate::ReceivedPayload {
+                        ty: binding.ty.clone(),
+                    });
+                }
+                return Err(Error::new(format!(
+                    "value binding {} has type {}, expected {}",
+                    binding.name, binding.ty, expected_type
+                )));
+            }
+        }
+        let process_ref = context.process_ref_index.get(name).ok_or_else(|| {
+            Error::new(format!(
+                "process {} payload {} is not a bound process reference",
+                context.process.name, name
+            ))
+        })?;
+        if process_ref.target != target_process {
+            return Err(Error::new(format!(
+                "process {} payload {} targets process id {}, expected {}",
+                context.process.name,
+                name,
+                process_ref.target.as_u32(),
+                target_process.as_u32()
+            )));
+        }
+        return Ok(CheckedValueTemplate::ProcessRef {
+            ty: expected_type.clone(),
+            target: target_process,
+            process_ref: process_ref.id,
+        });
+    }
+
+    checked_value_template_with_binding(
+        context.module,
+        context.semantic_index,
+        expected_type,
+        payload,
+        binding,
+    )
 }
 
 fn populate_payload_template_state_values(

@@ -34,6 +34,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mt
 cargo run -p strata --bin strata -- check examples/actor_payloads.str
 cargo run -p strata --bin strata -- build examples/actor_payloads.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+
+cargo run -p strata --bin strata -- check examples/actor_reply.str
+cargo run -p strata --bin strata -- build examples/actor_reply.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
 ```
 
 Each `mantle run` command must admit the generated `.mta`, execute it, and emit

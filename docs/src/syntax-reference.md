@@ -188,8 +188,9 @@ The identifier after `let` names an immutable process reference value. The
 identifier after `spawn` is the process definition name. The `ProcessRef<T>`
 annotation must name the same process definition.
 
-The first identifier in `send` is a process reference. The second identifier is
-the message variant to send. Payload variants require one payload value. Unit
+The first identifier in `send` is a local process reference or a received
+payload binding whose type is `ProcessRef<T>`. The second identifier is the
+message variant to send. Payload variants require one payload value. Unit
 variants reject payload values.
 
 ## Types
@@ -202,7 +203,8 @@ type_ref =
 
 The built-in generic types currently accepted by checking are
 `ProcResult<StateType>` as a `step` return type and
-`ProcessRef<ProcessName>` in spawn bindings.
+`ProcessRef<ProcessName>` in spawn bindings, message payload declarations, and
+payload-binding step patterns.
 
 ## Values
 

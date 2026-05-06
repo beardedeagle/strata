@@ -1,7 +1,7 @@
 use mantle_artifact::{
     ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-    ArtifactTransition, ArtifactValueTemplate, Error, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
+    ArtifactSendTarget, ArtifactTransition, ArtifactValueTemplate, Error, MantleArtifact,
+    MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
 };
 
 #[derive(Debug, Clone)]
@@ -243,9 +243,18 @@ pub(crate) enum LoadedAction {
         process_ref: ProcessRefId,
     },
     Send {
-        target: ProcessRefId,
+        target: LoadedSendTarget,
         message: MessageId,
         payload: Option<ArtifactValueTemplate>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LoadedSendTarget {
+    ProcessRef(ProcessRefId),
+    ReceivedPayload {
+        ty: String,
+        target_process: ProcessId,
     },
 }
 
@@ -265,9 +274,21 @@ impl LoadedAction {
                 message,
                 payload,
             } => Self::Send {
-                target: *target,
+                target: LoadedSendTarget::from_artifact(target),
                 message: *message,
                 payload: payload.clone(),
+            },
+        }
+    }
+}
+
+impl LoadedSendTarget {
+    fn from_artifact(target: &ArtifactSendTarget) -> Self {
+        match target {
+            ArtifactSendTarget::ProcessRef(process_ref) => Self::ProcessRef(*process_ref),
+            ArtifactSendTarget::ReceivedPayload { ty, target_process } => Self::ReceivedPayload {
+                ty: ty.clone(),
+                target_process: *target_process,
             },
         }
     }

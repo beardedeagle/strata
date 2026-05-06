@@ -144,6 +144,29 @@ The payload binding is immutable and local to the transition. Mantle still
 executes typed message IDs; payload values travel in runtime message envelopes
 and appear in traces as payload metadata on the stable `Assign` message label.
 
+Process references can also travel as typed payloads:
+
+```strata
+enum WorkerMsg {
+    Work(ProcessRef<Sink>),
+}
+
+send worker Work(sink);
+```
+
+The receiver can use the immutable payload binding as a send target:
+
+```strata
+fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [send] ~ [] @det {
+    send reply_to Done;
+    return Stop(state);
+}
+```
+
+Mantle routes that send by the transported runtime process ID and admitted
+target process ID. The source binding name is trace and diagnostic metadata,
+not the runtime dispatch key.
+
 ## Multiple Instances
 
 `examples/actor_instances.str` spawns two runtime instances of the same process
@@ -181,6 +204,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mt
 cargo run -p strata --bin strata -- check examples/actor_payloads.str
 cargo run -p strata --bin strata -- build examples/actor_payloads.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+
+cargo run -p strata --bin strata -- check examples/actor_reply.str
+cargo run -p strata --bin strata -- build examples/actor_reply.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
 ```
 
 For `actor_sequence`, the trace should show `Worker` dequeuing `First`, stepping
