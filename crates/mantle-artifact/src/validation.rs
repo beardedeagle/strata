@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use crate::{
     ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactValueTemplate, Error,
     MantleArtifact, NextState, Result, ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES,
-    MAX_IDENTIFIER_BYTES,
+    MAX_IDENTIFIER_BYTES, MAX_TYPE_REF_BYTES,
 };
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
@@ -22,9 +22,14 @@ pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
 }
 
 pub(crate) fn validate_type_field(field: &str, value: &str) -> Result<()> {
-    if value.len() > MAX_FIELD_VALUE_BYTES {
+    if value.len() > MAX_TYPE_REF_BYTES {
         return Err(Error::new(format!(
-            "artifact field {field} exceeds maximum type length of {MAX_FIELD_VALUE_BYTES} bytes"
+            "artifact field {field} exceeds maximum type length of {MAX_TYPE_REF_BYTES} bytes"
+        )));
+    }
+    if value.len() > MAX_IDENTIFIER_BYTES && is_artifact_ident(value) {
+        return Err(Error::new(format!(
+            "artifact field {field} exceeds maximum type identifier length of {MAX_IDENTIFIER_BYTES} bytes"
         )));
     }
     if is_artifact_type_ref(value) {
@@ -37,10 +42,13 @@ pub(crate) fn validate_type_field(field: &str, value: &str) -> Result<()> {
 }
 
 pub(crate) fn process_ref_type_target(value: &str) -> Option<&str> {
+    raw_process_ref_type_target(value).filter(|target| is_bounded_artifact_ident(target))
+}
+
+fn raw_process_ref_type_target(value: &str) -> Option<&str> {
     value
         .strip_prefix("ProcessRef<")
         .and_then(|value| value.strip_suffix('>'))
-        .filter(|target| is_artifact_ident(target))
 }
 
 pub(crate) fn validate_unique_message_variant_list(
@@ -507,8 +515,12 @@ fn is_artifact_ident(value: &str) -> bool {
     chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
+fn is_bounded_artifact_ident(value: &str) -> bool {
+    value.len() <= MAX_IDENTIFIER_BYTES && is_artifact_ident(value)
+}
+
 fn is_artifact_type_ref(value: &str) -> bool {
-    if is_artifact_ident(value) {
+    if is_bounded_artifact_ident(value) {
         return true;
     }
     process_ref_type_target(value).is_some()

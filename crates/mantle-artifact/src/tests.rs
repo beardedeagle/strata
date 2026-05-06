@@ -170,6 +170,70 @@ fn validate_accepts_payload_message_metadata() {
 }
 
 #[test]
+fn validate_accepts_process_ref_type_at_boundary() {
+    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES - 1));
+    let value = format!("ProcessRef<{target}>");
+
+    assert_eq!(target.len(), MAX_IDENTIFIER_BYTES);
+    assert_eq!(value.len(), MAX_TYPE_REF_BYTES);
+
+    super::validation::validate_type_field("message payload_type", &value)
+        .expect("bounded process reference type should validate");
+    assert_eq!(
+        super::validation::process_ref_type_target(&value),
+        Some(target.as_str())
+    );
+}
+
+#[test]
+fn validate_rejects_named_type_above_identifier_limit() {
+    let oversized = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
+
+    assert_eq!(oversized.len(), MAX_IDENTIFIER_BYTES + 1);
+
+    let err = super::validation::validate_type_field("message payload_type", &oversized)
+        .expect_err("oversized named type should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "artifact field message payload_type exceeds maximum type identifier length of {MAX_IDENTIFIER_BYTES} bytes"
+    )));
+}
+
+#[test]
+fn validate_rejects_process_ref_target_above_identifier_limit() {
+    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
+    let value = format!("ProcessRef<{target}>");
+
+    assert_eq!(target.len(), MAX_IDENTIFIER_BYTES + 1);
+    assert_eq!(value.len(), MAX_TYPE_REF_BYTES + 1);
+
+    let err = super::validation::validate_type_field("message payload_type", &value)
+        .expect_err("oversized process reference type should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "artifact field message payload_type exceeds maximum type length of {MAX_TYPE_REF_BYTES} bytes"
+    )));
+    assert_eq!(super::validation::process_ref_type_target(&value), None);
+}
+
+#[test]
+fn validate_rejects_message_payload_type_above_type_ref_limit() {
+    let mut artifact = valid_artifact();
+    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
+    let payload_type = format!("ProcessRef<{target}>");
+    artifact.processes[1].message_variants =
+        vec![ArtifactMessageVariant::payload("Assign", payload_type)];
+
+    let err = artifact
+        .validate()
+        .expect_err("oversized message payload type should fail artifact validation");
+
+    assert!(err.to_string().contains(&format!(
+        "artifact field message payload_type exceeds maximum type length of {MAX_TYPE_REF_BYTES} bytes"
+    )));
+}
+
+#[test]
 fn validate_rejects_missing_required_send_payload() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];

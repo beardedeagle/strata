@@ -6,6 +6,7 @@ pub const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 pub const MAX_ARTIFACT_FIELDS: usize = 16_384;
 pub const MAX_FIELD_VALUE_BYTES: usize = 16 * 1024;
 pub const MAX_IDENTIFIER_BYTES: usize = 128;
+pub const MAX_TYPE_REF_BYTES: usize = MAX_IDENTIFIER_BYTES + "ProcessRef<>".len();
 pub const MAX_PROCESS_COUNT: usize = 256;
 pub const MAX_STATE_VALUES_PER_PROCESS: usize = 1024;
 pub const MAX_MESSAGE_VARIANTS_PER_PROCESS: usize = 1024;
