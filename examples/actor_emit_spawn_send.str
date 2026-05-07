@@ -1,0 +1,49 @@
+module actor_emit_spawn_send;
+
+record MainState {
+    phase: MainPhase,
+}
+enum MainPhase {
+    Ready,
+    Done,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Idle,
+    Handled,
+}
+enum WorkerMsg {
+    Ping,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { phase: Ready };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn, send] ~ [] @det {
+        emit "main authorized worker";
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Ping;
+        return Stop(MainState { phase: Done });
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled authorized Ping";
+        return Stop(Handled);
+    }
+}
