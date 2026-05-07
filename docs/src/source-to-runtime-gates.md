@@ -43,6 +43,10 @@ cargo run -p strata --bin strata -- check examples/actor_reply.str
 cargo run -p strata --bin strata -- build examples/actor_reply.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
 
+cargo run -p strata --bin strata -- check examples/actor_emit_spawn_send.str
+cargo run -p strata --bin strata -- build examples/actor_emit_spawn_send.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_emit_spawn_send.mta
+
 # Expected to fail during source checking before build/lowering.
 cargo run -p strata --bin strata -- check examples/failures/effect_authority_missing.str
 

@@ -675,7 +675,10 @@ fn decode_rejects_unknown_transition_effect() {
 
     let err = MantleArtifact::decode(&encoded).expect_err("unknown effect should fail");
 
-    assert!(err.to_string().contains("invalid effect value \"write\""));
+    assert!(
+        err.to_string()
+            .contains("process.0.transition.0.effect.1: invalid effect value \"write\"")
+    );
 }
 
 #[test]

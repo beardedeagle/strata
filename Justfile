@@ -114,6 +114,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_reply.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_reply.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_emit_spawn_send.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_emit_spawn_send.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_emit_spawn_send.mta
 
 source-to-runtime-failure-gates: build
     #!/usr/bin/env bash

@@ -356,7 +356,11 @@ impl MantleArtifact {
                 let mut effects = Vec::with_capacity(effect_count);
                 for effect_index in 0..effect_count {
                     let key = format!("{transition_prefix}.effect.{effect_index}");
-                    effects.push(ArtifactEffect::parse(&fields.take_required(&key)?)?);
+                    let effect = fields.take_required(&key)?;
+                    effects.push(
+                        ArtifactEffect::parse(&effect)
+                            .map_err(|err| Error::new(format!("{key}: {err}")))?,
+                    );
                 }
                 let action_count = fields.take_bounded_usize(
                     &format!("{transition_prefix}.action_count"),

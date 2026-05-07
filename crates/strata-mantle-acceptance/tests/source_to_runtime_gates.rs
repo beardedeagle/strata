@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Once;
 
-use mantle_artifact::{ArtifactTypeKind, MantleArtifact, ProcessId, TypeId, read_artifact};
+use mantle_artifact::{
+    ArtifactEffect, ArtifactTypeKind, MantleArtifact, ProcessId, TypeId, read_artifact,
+};
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
 
@@ -103,6 +105,15 @@ impl GateHarness {
             .unwrap_or_else(|err| panic!("expected artifact {artifact}: {err}"))
     }
 
+    fn write_unvalidated_encoded_artifact(&self, artifact: &str, encoded_artifact: &str) {
+        fs::write(self.root.join(artifact), encoded_artifact)
+            .unwrap_or_else(|err| panic!("could not write artifact {artifact}: {err}"));
+    }
+
+    fn trace_exists(&self, stem: &str) -> bool {
+        self.trace_path(stem).exists()
+    }
+
     fn trace_path(&self, stem: &str) -> PathBuf {
         self.root
             .join("target/strata")
@@ -135,6 +146,19 @@ fn artifact_type_id(artifact: &MantleArtifact, label: &str, kind: ArtifactTypeKi
         .position(|ty| ty.label == label && ty.kind == kind)
         .unwrap_or_else(|| panic!("artifact type {label} with kind {kind:?} should exist"));
     TypeId::from_index(index).expect("artifact type index should fit")
+}
+
+fn transition_effects<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a [ArtifactEffect] {
+    artifact
+        .processes
+        .iter()
+        .find(|candidate| candidate.debug_name == process)
+        .unwrap_or_else(|| panic!("artifact process {process} should exist"))
+        .transitions
+        .first()
+        .unwrap_or_else(|| panic!("artifact process {process} should have an entry transition"))
+        .effects
+        .as_slice()
 }
 
 fn workspace_root() -> PathBuf {
@@ -226,6 +250,93 @@ fn remove_file_if_exists(path: &Path) {
         fs::remove_file(path)
             .unwrap_or_else(|err| panic!("could not remove stale file {}: {err}", path.display()));
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AuthorityAdmissionCase {
+    stem: &'static str,
+    mutation: AuthorityAdmissionMutation,
+    diagnostic: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AuthorityAdmissionMutation {
+    MissingEmitAuthority,
+    UnusedSpawnAuthority,
+    DuplicateEmitAuthority,
+    UnknownEncodedEffect,
+}
+
+const AUTHORITY_ADMISSION_CASES: [AuthorityAdmissionCase; 4] = [
+    AuthorityAdmissionCase {
+        stem: "effect_authority_missing_runtime",
+        mutation: AuthorityAdmissionMutation::MissingEmitAuthority,
+        diagnostic: "mantle: error: process Main transition 0 uses effect emit but does not declare it",
+    },
+    AuthorityAdmissionCase {
+        stem: "effect_authority_unused_runtime",
+        mutation: AuthorityAdmissionMutation::UnusedSpawnAuthority,
+        diagnostic: "mantle: error: process Main transition 0 declares effect spawn but no action uses it",
+    },
+    AuthorityAdmissionCase {
+        stem: "effect_authority_duplicate_runtime",
+        mutation: AuthorityAdmissionMutation::DuplicateEmitAuthority,
+        diagnostic: "mantle: error: process Main transition 0 declares duplicate effect emit",
+    },
+    AuthorityAdmissionCase {
+        stem: "effect_authority_unknown_runtime",
+        mutation: AuthorityAdmissionMutation::UnknownEncodedEffect,
+        diagnostic: "mantle: error: process.0.transition.0.effect.0: invalid effect value \"write\"",
+    },
+];
+
+impl AuthorityAdmissionMutation {
+    fn invalid_encoded_artifact(self, mut artifact: MantleArtifact) -> String {
+        let effects = hello_start_transition_effects_mut(&mut artifact);
+        assert_eq!(effects.as_slice(), &[ArtifactEffect::Emit]);
+
+        match self {
+            Self::MissingEmitAuthority => {
+                *effects = vec![ArtifactEffect::Spawn];
+                artifact.encode()
+            }
+            Self::UnusedSpawnAuthority => {
+                *effects = vec![ArtifactEffect::Emit, ArtifactEffect::Spawn];
+                artifact.encode()
+            }
+            Self::DuplicateEmitAuthority => {
+                *effects = vec![ArtifactEffect::Emit, ArtifactEffect::Emit];
+                artifact.encode()
+            }
+            Self::UnknownEncodedEffect => replace_exactly_once(
+                &artifact.encode(),
+                "process.0.transition.0.effect.0=emit\n",
+                "process.0.transition.0.effect.0=write\n",
+            ),
+        }
+    }
+}
+
+fn hello_start_transition_effects_mut(artifact: &mut MantleArtifact) -> &mut Vec<ArtifactEffect> {
+    let main = artifact
+        .processes
+        .first_mut()
+        .expect("hello artifact should define an entry process");
+    assert_eq!(main.debug_name, "Main");
+    let transition = main
+        .transitions
+        .first_mut()
+        .expect("hello entry process should accept Start");
+    &mut transition.effects
+}
+
+fn replace_exactly_once(input: &str, needle: &str, replacement: &str) -> String {
+    assert_eq!(
+        input.matches(needle).count(),
+        1,
+        "encoded artifact should contain {needle:?} exactly once"
+    );
+    input.replace(needle, replacement)
 }
 
 #[test]
@@ -376,6 +487,54 @@ fn actor_reply_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn actor_emit_spawn_send_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/actor_emit_spawn_send.str",
+        "target/strata/actor_emit_spawn_send.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: spawned Main pid=1"));
+    assert!(stdout.contains("mantle: spawned Worker pid=2"));
+    assert!(stdout.contains("mantle: delivered Start to Main"));
+    assert!(stdout.contains("mantle: delivered Ping to Worker"));
+    assert!(stdout.contains("main authorized worker"));
+    assert!(stdout.contains("worker handled authorized Ping"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+
+    let artifact = gate.read_artifact("target/strata/actor_emit_spawn_send.mta");
+    assert_eq!(
+        transition_effects(&artifact, "Main"),
+        &[
+            ArtifactEffect::Emit,
+            ArtifactEffect::Spawn,
+            ArtifactEffect::Send
+        ]
+    );
+    assert_eq!(
+        transition_effects(&artifact, "Worker"),
+        &[ArtifactEffect::Emit]
+    );
+
+    let trace = gate.read_trace("actor_emit_spawn_send");
+    assert!(trace.contains(r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"main authorized worker""#));
+    assert!(trace.contains(r#""event":"process_spawned","pid":2,"process_id":1,"process":"Worker","state_id":0,"state":"Idle""#));
+    assert!(trace.contains(r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","queue_depth":1,"sender_pid":1"#));
+    assert!(trace.contains(r#""event":"state_updated","pid":1,"process_id":0,"process":"Main","from_state_id":0,"from":"MainState{phase:Ready}","to_state_id":1,"to":"MainState{phase:Done}""#));
+    assert!(trace.contains(r#""event":"process_stepped","pid":1,"process_id":0,"process":"Main","message_id":0,"message":"Start","result":"Stop","state_id":1,"state":"MainState{phase:Done}""#));
+    assert!(trace.contains(r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":1,"text":"worker handled authorized Ping""#));
+    assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"Idle","to_state_id":1,"to":"Handled""#));
+    assert!(trace.contains(
+        r#""event":"process_stopped","pid":1,"process_id":0,"process":"Main","reason":"normal""#
+    ));
+    assert!(trace.contains(
+        r#""event":"process_stopped","pid":2,"process_id":1,"process":"Worker","reason":"normal""#
+    ));
+}
+
+#[test]
 fn effect_authority_missing_fails_source_check_before_build() {
     let gate = GateHarness::new();
     gate.remove_artifact("target/strata/effect_authority_missing.mta");
@@ -396,6 +555,51 @@ fn effect_authority_missing_fails_source_check_before_build() {
             .exists(),
         "source check failure must not create target/strata/effect_authority_missing.mta"
     );
+}
+
+#[test]
+fn mantle_run_rejects_authority_mismatched_artifacts_before_trace() {
+    let gate = GateHarness::new();
+
+    gate.check("examples/hello.str");
+    gate.build("examples/hello.str", "target/strata/hello.mta");
+
+    for case in AUTHORITY_ADMISSION_CASES {
+        let invalid_artifact_path = format!("target/strata/{}.mta", case.stem);
+        gate.remove_artifact(&invalid_artifact_path);
+        gate.remove_trace(case.stem);
+
+        let artifact = gate.read_artifact("target/strata/hello.mta");
+        let encoded_artifact = case.mutation.invalid_encoded_artifact(artifact);
+        gate.write_unvalidated_encoded_artifact(&invalid_artifact_path, &encoded_artifact);
+
+        let run = gate.run_mantle_failure(&invalid_artifact_path);
+
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(
+            stderr.contains(case.diagnostic),
+            "unexpected diagnostic for {:?}\nstdout:\n{}\nstderr:\n{}",
+            case.mutation,
+            stdout,
+            stderr
+        );
+        assert!(
+            !stdout.contains("mantle: loaded"),
+            "authority admission failure must not report artifact loading for {:?}",
+            case.mutation
+        );
+        assert!(
+            !stdout.contains("hello from Strata"),
+            "authority admission failure must not produce runtime output for {:?}",
+            case.mutation
+        );
+        assert!(
+            !gate.trace_exists(case.stem),
+            "authority admission failure must not create an observability trace for {:?}",
+            case.mutation
+        );
+    }
 }
 
 #[test]
