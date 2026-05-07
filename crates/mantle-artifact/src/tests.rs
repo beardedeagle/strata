@@ -856,15 +856,16 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
 #[test]
 fn validate_rejects_state_value_type_mismatch() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].state_values[1] = ArtifactStateValue::new("OtherState", "Handled");
+    artifact.processes[1].state_values[1] =
+        ArtifactStateValue::with_label("OtherState", "HandledIdentity", "HandledLabel");
 
     let err = artifact
         .validate()
         .expect_err("state value type mismatch should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker state value Handled has type OtherState, expected WorkerState"));
+    assert!(err.to_string().contains(
+        "process Worker state value HandledIdentity (label HandledLabel) has type OtherState, expected WorkerState"
+    ));
 }
 
 #[test]

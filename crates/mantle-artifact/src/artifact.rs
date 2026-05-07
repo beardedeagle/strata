@@ -531,8 +531,12 @@ impl ArtifactProcess {
         for state_value in &self.state_values {
             if state_value.ty != self.state_type {
                 return Err(Error::new(format!(
-                    "process {} state value {} has type {}, expected {}",
-                    self.debug_name, state_value.label, state_value.ty, self.state_type
+                    "process {} state value {} (label {}) has type {}, expected {}",
+                    self.debug_name,
+                    state_value.value,
+                    state_value.label,
+                    state_value.ty,
+                    self.state_type
                 )));
             }
         }
