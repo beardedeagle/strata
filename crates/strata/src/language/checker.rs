@@ -31,6 +31,8 @@ use static_validation::validate_action_references;
 use symbols::SemanticIndex;
 
 const STEP_STATE_PARAMETER_NAME: &str = "state";
+pub(super) const CHECKED_TYPE_LABEL_PREFIX: &str = "__strata_checked_";
+const CHECKED_PROCESS_REF_TYPE_LABEL_PREFIX: &str = "__strata_checked_process_ref_";
 
 #[derive(Debug, Clone, Copy)]
 struct ProcessRefBinding {
@@ -98,7 +100,7 @@ fn checked_type_label(ty: &TypeRef) -> Result<String> {
                     "{PROCESS_REF_TYPE} checked type target must be a named process"
                 ))
             })?;
-            Ok(format!("{PROCESS_REF_TYPE}_{target}"))
+            Ok(format!("{CHECKED_PROCESS_REF_TYPE_LABEL_PREFIX}{target}"))
         }
         TypeRef::Applied { constructor, .. } => Ok(constructor.to_string()),
     }

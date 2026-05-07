@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Once;
 
+use mantle_artifact::{ArtifactTypeKind, MantleArtifact, ProcessId, TypeId, read_artifact};
+
 static BUILD_WORKSPACE_BINS: Once = Once::new();
 
 struct GateHarness {
@@ -96,11 +98,33 @@ impl GateHarness {
             .unwrap_or_else(|err| panic!("expected trace {}: {err}", trace_path.display()))
     }
 
+    fn read_artifact(&self, artifact: &str) -> MantleArtifact {
+        read_artifact(&self.root.join(artifact))
+            .unwrap_or_else(|err| panic!("expected artifact {artifact}: {err}"))
+    }
+
     fn trace_path(&self, stem: &str) -> PathBuf {
         self.root
             .join("target/strata")
             .join(format!("{stem}.observability.jsonl"))
     }
+}
+
+fn value_type_id(artifact: &MantleArtifact, label: &str) -> TypeId {
+    artifact_type_id(artifact, label, ArtifactTypeKind::Value)
+}
+
+fn process_ref_type_id(artifact: &MantleArtifact, label: &str, target: ProcessId) -> TypeId {
+    artifact_type_id(artifact, label, ArtifactTypeKind::ProcessRef { target })
+}
+
+fn artifact_type_id(artifact: &MantleArtifact, label: &str, kind: ArtifactTypeKind) -> TypeId {
+    let index = artifact
+        .types
+        .iter()
+        .position(|ty| ty.label == label && ty.kind == kind)
+        .unwrap_or_else(|| panic!("artifact type {label} with kind {kind:?} should exist"));
+    TypeId::from_index(index).expect("artifact type index should fit")
 }
 
 fn workspace_root() -> PathBuf {
@@ -301,10 +325,17 @@ fn actor_payloads_checks_builds_and_runs_on_mantle() {
     assert!(stdout.contains("worker assigned job"));
     assert!(stdout.contains("mantle: stopped Worker normally"));
 
+    let artifact = gate.read_artifact("target/strata/actor_payloads.mta");
+    let job_type = value_type_id(&artifact, "Job");
+    let payload_type = format!(r#""payload_type_id":{}"#, job_type.as_u32());
     let trace = gate.read_trace("actor_payloads");
-    assert!(trace.contains(r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type_id":0,"payload":"Job{phase:Ready}""#));
+    assert!(trace.contains(&format!(
+        r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}""#
+    )));
     assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"WorkerState{job:Job{phase:Done}}","to_state_id":1,"to":"WorkerState{job:Job{phase:Ready}}""#));
-    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type_id":0,"payload":"Job{phase:Ready}","result":"Stop","state_id":1,"state":"WorkerState{job:Job{phase:Ready}}""#));
+    assert!(trace.contains(&format!(
+        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}","result":"Stop","state_id":1,"state":"WorkerState{{job:Job{{phase:Ready}}}}""#
+    )));
 }
 
 #[test]
@@ -313,15 +344,29 @@ fn actor_reply_checks_builds_and_runs_on_mantle() {
     let run = gate.check_build_run("examples/actor_reply.str", "target/strata/actor_reply.mta");
 
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("mantle: delivered Work(type0#3) to Worker"));
+    let artifact = gate.read_artifact("target/strata/actor_reply.mta");
+    let sink_ref_type = process_ref_type_id(
+        &artifact,
+        "__strata_checked_process_ref_Sink",
+        ProcessId::new(2),
+    );
+    let process_ref_payload = format!("type{}#3", sink_ref_type.as_u32());
+    assert!(stdout.contains(&format!(
+        "mantle: delivered Work({process_ref_payload}) to Worker"
+    )));
     assert!(stdout.contains("mantle: delivered Done to Sink"));
     assert!(stdout.contains("worker forwarded done"));
     assert!(stdout.contains("sink received done"));
 
+    let payload_type = format!(r#""payload_type_id":{}"#, sink_ref_type.as_u32());
     let trace = gate.read_trace("actor_reply");
-    assert!(trace.contains(r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work","payload_type_id":0,"payload":"type0#3","payload_process_id":2,"payload_pid":3,"queue_depth":1,"sender_pid":1"#));
+    assert!(trace.contains(&format!(
+        r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work",{payload_type},"payload":"{process_ref_payload}","payload_process_id":2,"payload_pid":3,"queue_depth":1,"sender_pid":1"#
+    )));
     assert!(trace.contains(r#""event":"message_accepted","pid":3,"process_id":2,"process":"Sink","message_id":0,"message":"Done","queue_depth":1,"sender_pid":2"#));
-    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work","payload_type_id":0,"payload":"type0#3","payload_process_id":2,"payload_pid":3,"result":"Stop","state_id":0,"state":"WorkerState""#));
+    assert!(trace.contains(&format!(
+        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work",{payload_type},"payload":"{process_ref_payload}","payload_process_id":2,"payload_pid":3,"result":"Stop","state_id":0,"state":"WorkerState""#
+    )));
 }
 
 #[test]

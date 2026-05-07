@@ -84,6 +84,8 @@ _
 `as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
 `ProcResult` and `ProcessRef` are reserved type names because they name built-in
 transition and process-reference types.
+Type names beginning with `__strata_checked_` are reserved for checked IR and
+artifact metadata.
 
 ## Records
 

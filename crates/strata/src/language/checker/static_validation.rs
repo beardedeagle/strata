@@ -1760,7 +1760,10 @@ mod tests {
             "Worker" => checked_process_id(1),
             other => panic!("test process ref target {other} is not mapped"),
         };
-        CheckedTypeRef::test_process_ref(&format!("ProcessRef_{target}"), target_process)
+        CheckedTypeRef::test_process_ref(
+            &format!("__strata_checked_process_ref_{target}"),
+            target_process,
+        )
     }
 
     fn checked_state_values(ty: &str, values: &[&str]) -> Vec<CheckedStateValue> {

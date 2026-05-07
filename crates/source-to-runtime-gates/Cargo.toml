@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 
+[dev-dependencies]
+mantle-artifact = { path = "../mantle-artifact" }
+
 [lib]
 name = "source_to_runtime_gates"
 path = "src/lib.rs"

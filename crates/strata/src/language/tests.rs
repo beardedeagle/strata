@@ -689,7 +689,7 @@ proc Sink mailbox bounded(1) {
     let checked_sink_ref = checked
         .types()
         .iter()
-        .find(|ty| ty.label() == "ProcessRef_Sink")
+        .find(|ty| ty.label() == "__strata_checked_process_ref_Sink")
         .expect("checked type table should contain Sink process reference type");
     assert_eq!(
         checked_sink_ref.kind(),
@@ -704,7 +704,7 @@ proc Sink mailbox bounded(1) {
         Some(checked_sink_ref.id())
     );
     let artifact = lower_to_artifact(&checked, source).expect("process ref payload should lower");
-    let sink_ref = artifact_type_id(&artifact, "ProcessRef_Sink");
+    let sink_ref = artifact_type_id(&artifact, "__strata_checked_process_ref_Sink");
 
     assert_eq!(
         artifact.processes[1].message_variants,
@@ -3079,6 +3079,27 @@ fn rejects_reserved_proc_result_type_declarations() {
         let err = check_source(&source).expect_err("reserved type name should fail");
 
         assert!(err.to_string().contains("type name ProcResult is reserved"));
+    }
+}
+
+#[test]
+fn rejects_internal_checked_type_label_prefix_declarations() {
+    for source in [
+        HELLO.replace(
+            "record MainState;",
+            "record __strata_checked_process_ref_Main;",
+        ),
+        HELLO.replace(
+            "enum MainMsg { Start }",
+            "enum __strata_checked_process_ref_Main { Start }",
+        ),
+    ] {
+        let err = check_source(&source).expect_err("reserved type label prefix should fail");
+
+        assert!(
+            err.to_string()
+                .contains("uses reserved prefix __strata_checked_")
+        );
     }
 }
 
