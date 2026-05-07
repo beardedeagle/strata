@@ -57,10 +57,10 @@ an observability trace under `target/strata/`. Expected-failure gates must
 return non-zero with failure evidence in the trace.
 
 The source-to-runtime gate integration tests in
-`crates/source-to-runtime-gates/tests/source_to_runtime_gates.rs` mirror this user-facing
-sequence and should stay aligned with the examples. They live outside
-Mantle-owned crates because these gates prove the Strata/Mantle execution path,
-not Mantle runtime ownership of Strata source behavior.
+`crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs` mirror this
+user-facing sequence and should stay aligned with the examples. They live
+outside Mantle-owned crates because these gates prove the Strata/Mantle
+execution path, not Mantle runtime ownership of Strata source behavior.
 
 When adding a new user-visible language or runtime behavior, add or update an
 example that follows this shape. A passing unit test is useful, but it does not
