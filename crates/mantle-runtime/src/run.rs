@@ -1028,6 +1028,39 @@ mod tests {
     }
 
     #[test]
+    fn runtime_rejects_loaded_control_character_process_name_before_duplicate_check() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].debug_name = "bad\nprocess".to_string();
+        program.processes[1].debug_name = "bad\nprocess".to_string();
+
+        let err = loaded_admission_error_before_artifact_loaded(&program);
+
+        assert!(err.contains("process debug_name must be an identifier"));
+        assert!(err.contains("\"bad\\nprocess\""));
+        assert!(!err.contains("bad\nprocess"));
+        assert!(!err.contains("duplicate loaded process debug_name"));
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_control_character_state_type_before_mismatch_diagnostic() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].state_values[0].ty = "Bad\nState".to_string();
+
+        let err = loaded_admission_error_before_artifact_loaded(&program);
+
+        assert!(
+            err.contains(
+                "process Main state value type: state value type must be a type reference"
+            )
+        );
+        assert!(err.contains("\"Bad\\nState\""));
+        assert!(!err.contains("Bad\nState"));
+        assert!(!err.contains("loaded state value MainState has type"));
+    }
+
+    #[test]
     fn runtime_rejects_loaded_payload_bearing_entry_message_before_artifact_loaded() {
         let artifact = artifact_with_large_unbound_process_ref_table();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

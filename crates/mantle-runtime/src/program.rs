@@ -151,9 +151,10 @@ impl LoadedProgram {
 
         let mut process_names = BTreeSet::new();
         for process in &self.processes {
+            validate_loaded_ident_field("process debug_name", &process.debug_name)?;
             if !process_names.insert(process.debug_name.as_str()) {
                 return Err(Error::new(format!(
-                    "duplicate loaded process debug_name {}",
+                    "duplicate loaded process debug_name {:?}",
                     process.debug_name
                 )));
             }
@@ -279,6 +280,12 @@ impl LoadedProcess {
 
         let mut states = BTreeSet::new();
         for state in &self.state_values {
+            validate_loaded_type_field("state value type", &state.ty).map_err(|err| {
+                Error::new(format!(
+                    "process {} state value type: {err}",
+                    self.debug_name
+                ))
+            })?;
             validate_state_value_label(&state.value).map_err(|err| {
                 Error::new(format!("process {} state value: {err}", self.debug_name))
             })?;
@@ -287,13 +294,13 @@ impl LoadedProcess {
             })?;
             if state.ty != self.state_type {
                 return Err(Error::new(format!(
-                    "process {} loaded state value {} has type {}, expected {}",
+                    "process {} loaded state value {} has type {:?}, expected {:?}",
                     self.debug_name, state.label, state.ty, self.state_type
                 )));
             }
             if !states.insert((state.ty.as_str(), state.value.as_str())) {
                 return Err(Error::new(format!(
-                    "process {} loads duplicate state value {} with type {}",
+                    "process {} loads duplicate state value {} with type {:?}",
                     self.debug_name, state.value, state.ty
                 )));
             }
