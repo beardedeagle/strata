@@ -30,6 +30,7 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
     host: &mut H,
     limits: RunLimits,
 ) -> Result<RuntimeReport> {
+    program.validate_effect_authority()?;
     let mut run = RuntimeRun::new(
         program,
         host,
@@ -349,11 +350,6 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let step = ActiveStep::new(self.program, &self.processes[process_index], envelope)?;
         let definition = self.program.process(step.process_id)?;
         let transition = definition.transition_for_message(step.message)?;
-        transition.effect_authority.validate_actions(
-            &definition.debug_name,
-            step.message,
-            &transition.actions,
-        )?;
         let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
         let final_state = self.resolve_next_state(process_index, &step, &next_state)?;

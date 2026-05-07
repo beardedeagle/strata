@@ -5,8 +5,6 @@ use mantle_artifact::{
     StepResult,
 };
 
-use std::collections::BTreeSet;
-
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedProgram {
     pub(crate) format: String,
@@ -106,6 +104,13 @@ impl LoadedProgram {
             .map(String::as_str)
             .ok_or_else(|| Error::new(format!("output id {} is not loaded", output_id.as_u32())))
     }
+
+    pub(crate) fn validate_effect_authority(&self) -> Result<()> {
+        for process in &self.processes {
+            process.validate_effect_authority()?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,6 +153,17 @@ impl LoadedProcess {
                 message.as_u32()
             ))
         })
+    }
+
+    fn validate_effect_authority(&self) -> Result<()> {
+        for (message_index, transition) in self.transitions.iter().enumerate() {
+            transition.effect_authority.validate_actions(
+                &self.debug_name,
+                MessageId::from_index(message_index)?,
+                &transition.actions,
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -256,30 +272,33 @@ impl LoadedEffectAuthority {
         message: MessageId,
         actions: &[LoadedAction],
     ) -> Result<()> {
-        let mut admitted = BTreeSet::new();
+        let mut admitted = [false; 3];
         for &effect in &self.effects {
-            if !admitted.insert(effect) {
+            let index = Self::effect_index(effect);
+            if admitted[index] {
                 return Err(Error::new(format!(
                     "process {process_name} transition {} admits duplicate effect {effect}",
                     message.as_u32()
                 )));
             }
+            admitted[index] = true;
         }
 
-        let mut used = BTreeSet::new();
+        let mut used = [false; 3];
         for action in actions {
             let effect = action.effect();
-            if !admitted.contains(&effect) {
+            let index = Self::effect_index(effect);
+            if !admitted[index] {
                 return Err(Error::new(format!(
                     "process {process_name} transition {} uses effect {effect} without admitted authority",
                     message.as_u32()
                 )));
             }
-            used.insert(effect);
+            used[index] = true;
         }
 
-        for effect in &admitted {
-            if !used.contains(effect) {
+        for &effect in &self.effects {
+            if !used[Self::effect_index(effect)] {
                 return Err(Error::new(format!(
                     "process {process_name} transition {} admits effect {effect} but no action uses it",
                     message.as_u32()
@@ -288,6 +307,14 @@ impl LoadedEffectAuthority {
         }
 
         Ok(())
+    }
+
+    fn effect_index(effect: ArtifactEffect) -> usize {
+        match effect {
+            ArtifactEffect::Emit => 0,
+            ArtifactEffect::Spawn => 1,
+            ArtifactEffect::Send => 2,
+        }
     }
 }
 
