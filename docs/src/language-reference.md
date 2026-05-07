@@ -361,6 +361,7 @@ The buildable source slice enforces bounded sizes:
 | --- | --- |
 | Source bytes | 1 MiB |
 | Identifier bytes | 128 |
+| Distinct checked artifact types | 4096 |
 | Output literal bytes | 16 KiB |
 | Processes | 256 |
 | State values per process | 1024 |

@@ -557,10 +557,12 @@ fn validate_send_target(
                 )));
             };
             if received_type != ty {
+                let target_type = checked_type_diagnostic(processes, ty)?;
+                let received_type = checked_type_diagnostic(processes, received_type)?;
                 return Err(Error::new(format!(
-                    "process {} send target has received payload type {}, expected {}",
+                    "process {} send target has process reference type {}, but current message carries {}",
                     process.debug_name(),
-                    ty,
+                    target_type,
                     received_type
                 )));
             }
@@ -574,21 +576,40 @@ fn validate_process_ref_type_target(
     ty: &CheckedTypeRef,
     target: CheckedProcessId,
 ) -> Result<()> {
-    process_by_id(processes, target)?;
+    let expected_process = process_by_id(processes, target)?;
     match ty.kind() {
         CheckedTypeKind::ProcessRef {
             target: type_target,
         } if type_target == target => Ok(()),
         CheckedTypeKind::ProcessRef {
             target: type_target,
-        } => Err(Error::new(format!(
-            "process reference payload type {ty} targets process id {}, expected {}",
-            type_target.as_u32(),
-            target.as_u32()
-        ))),
-        CheckedTypeKind::Value => Err(Error::new(format!(
-            "process reference payload type {ty} must be a process reference type"
-        ))),
+        } => {
+            let type_process = process_by_id(processes, type_target)?;
+            let type_name = checked_type_diagnostic(processes, ty)?;
+            Err(Error::new(format!(
+                "process reference payload type {type_name} targets {} (process id {}), expected {} (process id {})",
+                type_process.debug_name(),
+                type_target.as_u32(),
+                expected_process.debug_name(),
+                target.as_u32()
+            )))
+        }
+        CheckedTypeKind::Value => {
+            let type_name = checked_type_diagnostic(processes, ty)?;
+            Err(Error::new(format!(
+                "process reference payload type {type_name} must be a process reference type"
+            )))
+        }
+    }
+}
+
+fn checked_type_diagnostic(processes: &[CheckedProcess], ty: &CheckedTypeRef) -> Result<String> {
+    match ty.kind() {
+        CheckedTypeKind::Value => Ok(ty.label().to_string()),
+        CheckedTypeKind::ProcessRef { target } => {
+            let process = process_by_id(processes, target)?;
+            Ok(format!("ProcessRef<{}>", process.debug_name()))
+        }
     }
 }
 
@@ -1466,6 +1487,88 @@ mod tests {
             err.to_string()
                 .contains("process reference payload type Job must be a process reference type")
         );
+    }
+
+    #[test]
+    fn static_validation_formats_process_ref_type_diagnostics_without_internal_labels() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: value_type("MainState"),
+            state_values: checked_state_values("MainState", &["MainState"]),
+            message_type: value_type("MainMsg"),
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
+            process_refs: vec![CheckedProcessRef::new(
+                ident("worker"),
+                checked_process_id(1),
+            )],
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: vec![Effect::Spawn, Effect::Send],
+                actions: vec![
+                    CheckedAction::Spawn {
+                        target: checked_process_id(1),
+                        process_ref: checked_process_ref_id(0),
+                    },
+                    CheckedAction::Send {
+                        target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                        message: checked_message_id(0),
+                        payload: Some(CheckedValueTemplate::ProcessRef {
+                            ty: process_ref_type("Worker"),
+                            target: checked_process_id(0),
+                            process_ref: checked_process_ref_id(0),
+                        }),
+                    },
+                ],
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: value_type("WorkerState"),
+            state_values: checked_state_values("WorkerState", &["WorkerState"]),
+            message_type: value_type("WorkerMsg"),
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Reply".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(process_ref_type("Worker")),
+                )
+                .expect("valid checked message case"),
+            ],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: Vec::new(),
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("process-ref type target mismatch should fail");
+        let message = err.to_string();
+
+        assert!(message.contains(
+            "process reference payload type ProcessRef<Worker> targets Worker (process id 1), expected Main (process id 0)"
+        ));
+        assert!(!message.contains("__strata_checked_process_ref_"));
     }
 
     #[test]

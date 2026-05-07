@@ -692,7 +692,14 @@ impl ArtifactProcess {
         validate_unique_message_variant_list(&self.message_variants)?;
         for message in &self.message_variants {
             if let Some(payload_type) = message.payload_type {
-                artifact.type_entry(payload_type)?;
+                artifact.type_entry(payload_type).map_err(|err| {
+                    Error::new(format!(
+                        "process {} message {} payload_type_id {} is invalid: {err}",
+                        self.debug_name,
+                        message.label,
+                        payload_type.as_u32()
+                    ))
+                })?;
             }
         }
         validate_unique_process_ref_list(&self.process_refs)?;

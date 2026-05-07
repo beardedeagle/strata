@@ -286,7 +286,7 @@ fn validate_rejects_unknown_message_payload_type_id() {
 
     assert!(
         err.to_string()
-            .contains("artifact type id 99 is not defined")
+            .contains("process Worker message Assign payload_type_id 99 is invalid: artifact type id 99 is not defined")
     );
 }
 

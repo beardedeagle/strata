@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
     MAX_ACTIONS_PER_PROCESS, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_TYPE_COUNT,
 };
 
 use super::ast::{
@@ -70,6 +70,11 @@ impl<'a> CheckedTypeInterner<'a> {
             return Ok(checked.clone());
         }
 
+        if self.entries.len() >= MAX_TYPE_COUNT {
+            return Err(Error::new(format!(
+                "checked type_count exceeds Mantle artifact limit of {MAX_TYPE_COUNT} types"
+            )));
+        }
         let id = CheckedTypeId::from_index(self.entries.len())?;
         let process_ref_target = self.semantic_index.process_ref_target_type(ty)?;
         let kind = process_ref_target.map_or(CheckedTypeKind::Value, |target| {

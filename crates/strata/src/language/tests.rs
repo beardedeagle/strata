@@ -1,3 +1,4 @@
+use super::ast::EnumVariant;
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
@@ -9,8 +10,8 @@ use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget, ArtifactTypeKind,
     ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
     MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, ProcessId,
-    ProcessRefId, StepResult, TypeId,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact,
+    ProcessId, ProcessRefId, StepResult, TypeId,
 };
 
 const HELLO: &str = r#"
@@ -2132,6 +2133,18 @@ fn rejects_message_count_above_artifact_limit_during_checking() {
 }
 
 #[test]
+fn rejects_checked_type_count_above_artifact_limit_during_checking() {
+    let module = checked_type_count_overflow_module();
+
+    let err =
+        check_module(module).expect_err("checked type count above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "checked type_count exceeds Mantle artifact limit of {MAX_TYPE_COUNT} types"
+    )));
+}
+
+#[test]
 fn accepts_payload_send_count_above_message_variant_limit_without_case_expansion() {
     let phases = (0..=MAX_MESSAGE_VARIANTS_PER_PROCESS)
         .map(|index| format!("P{index}"))
@@ -3270,6 +3283,108 @@ proc Worker mailbox bounded(1) {{
 }}
 "#
     )
+}
+
+fn checked_type_count_overflow_module() -> Module {
+    let payload_variants_per_process = MAX_MESSAGE_VARIANTS_PER_PROCESS - 1;
+    let mut process_count = 1usize;
+    while process_count * (payload_variants_per_process + 2) <= MAX_TYPE_COUNT {
+        process_count += 1;
+    }
+    assert!(process_count <= MAX_PROCESS_COUNT);
+
+    let mut records = Vec::new();
+    let mut enums = Vec::new();
+    let mut processes = Vec::new();
+
+    for process_index in 0..process_count {
+        let state_name = format!("State{process_index}");
+        let msg_name = format!("Msg{process_index}");
+        records.push(Record {
+            name: ident(state_name.as_str()),
+            fields: Vec::new(),
+        });
+
+        let mut variants = vec![EnumVariant {
+            name: ident("Start"),
+            payload_type: None,
+        }];
+        for payload_index in 0..payload_variants_per_process {
+            let payload_name = format!("Payload{process_index}_{payload_index}");
+            records.push(Record {
+                name: ident(&payload_name),
+                fields: Vec::new(),
+            });
+            variants.push(EnumVariant {
+                name: ident(format!("M{process_index}_{payload_index}")),
+                payload_type: Some(TypeRef::Named(ident(payload_name))),
+            });
+        }
+        enums.push(Enum {
+            name: ident(msg_name.as_str()),
+            variants,
+        });
+
+        let process_name = if process_index == 0 {
+            "Main".to_string()
+        } else {
+            format!("P{process_index}")
+        };
+        let state_type = TypeRef::Named(ident(state_name.as_str()));
+        processes.push(Process {
+            name: ident(process_name),
+            mailbox_bound: 1,
+            state_type: state_type.clone(),
+            msg_type: TypeRef::Named(ident(msg_name)),
+            init: Function {
+                name: ident("init"),
+                params: Vec::new(),
+                return_type: state_type.clone(),
+                effects: Vec::new(),
+                may: Vec::new(),
+                determinism: Determinism::Det,
+                body: Some(FunctionBlock {
+                    statements: Vec::new(),
+                    returns: ReturnExpr::Value(ValueExpr::Identifier(ident(state_name.as_str()))),
+                }),
+            },
+            steps: vec![Function {
+                name: ident("step"),
+                params: vec![
+                    FunctionParam::Binding(Param {
+                        name: ident("state"),
+                        ty: state_type.clone(),
+                    }),
+                    FunctionParam::Pattern(SignaturePattern::Wildcard),
+                ],
+                return_type: TypeRef::Applied {
+                    constructor: ident("ProcResult"),
+                    args: vec![state_type],
+                },
+                effects: Vec::new(),
+                may: Vec::new(),
+                determinism: Determinism::Det,
+                body: Some(FunctionBlock {
+                    statements: Vec::new(),
+                    returns: ReturnExpr::Call {
+                        name: ident("Stop"),
+                        arg: ValueExpr::Identifier(ident("state")),
+                    },
+                }),
+            }],
+        });
+    }
+
+    Module {
+        name: ident("type_count_overflow"),
+        records,
+        enums,
+        processes,
+    }
+}
+
+fn ident(value: impl Into<String>) -> Identifier {
+    Identifier::new(value).expect("test identifier should be valid")
 }
 
 fn payload_message_label_overflow_source() -> String {

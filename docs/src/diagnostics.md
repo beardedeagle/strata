@@ -22,6 +22,7 @@ result of the first invalid shape.
 | `expected record, enum, or proc declaration` | A top-level item is not accepted. | Use only `record`, `enum`, or `proc` after `module`. |
 | `entry process Main is not declared` | The program has no `Main` process. | Add `proc Main ...`. |
 | `uses reserved prefix __strata_checked_` | A source type name collides with internal checked type metadata. | Rename the source type without the reserved prefix. |
+| `checked type_count exceeds Mantle artifact limit` | The checked program needs more distinct artifact types than Mantle admits. | Reduce the number of distinct state, message, payload, and process-reference types. |
 | `process ... must declare type State` | A process is missing its state alias. | Add `type State = StateType;`. |
 | `process ... must declare type Msg` | A process is missing its message alias. | Add `type Msg = MessageEnum;`. |
 | `unsupported process function` | A process declares a function other than `init` or `step`. | Move the logic into `init` or `step`; general functions are not available. |
