@@ -487,7 +487,7 @@ fn resolve_checked_template_state(
     let state_index = process
         .state_values()
         .iter()
-        .position(|state| state == value.label())
+        .position(|state| state.has_same_identity_as_payload(&value))
         .ok_or_else(|| {
             Error::new(format!(
                 "process {} next_state template produced value {} not admitted by state table",
@@ -947,7 +947,8 @@ mod tests {
     use crate::language::ast::{Effect, Identifier, TypeRef};
     use crate::language::checked::{
         CheckedMessageCase, CheckedMessageVariantId, CheckedOutputId, CheckedProcessParts,
-        CheckedProcessRef, CheckedStateId, CheckedTransitionParts, CheckedValueTemplateField,
+        CheckedProcessRef, CheckedStateId, CheckedStateValue, CheckedTransitionParts,
+        CheckedValueTemplateField,
     };
 
     #[test]
@@ -1047,7 +1048,7 @@ mod tests {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1083,7 +1084,7 @@ mod tests {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1122,7 +1123,7 @@ mod tests {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1158,7 +1159,7 @@ mod tests {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1192,7 +1193,7 @@ mod tests {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1226,7 +1227,7 @@ mod tests {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1264,7 +1265,7 @@ mod tests {
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
             state_type: TypeRef::Named(ident("WorkerState")),
-            state_values: vec!["WorkerState".to_string()],
+            state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Assign".to_string(),
@@ -1301,7 +1302,7 @@ mod tests {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1330,7 +1331,7 @@ mod tests {
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
             state_type: TypeRef::Named(ident("WorkerState")),
-            state_values: vec!["WorkerState".to_string()],
+            state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Done".to_string(),
@@ -1367,7 +1368,7 @@ mod tests {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1406,7 +1407,7 @@ mod tests {
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
             state_type: TypeRef::Named(ident("WorkerState")),
-            state_values: vec!["WorkerState".to_string()],
+            state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Assign".to_string(),
@@ -1443,7 +1444,7 @@ mod tests {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1488,7 +1489,7 @@ mod tests {
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
             state_type: TypeRef::Named(ident("WorkerState")),
-            state_values: vec!["WorkerState".to_string()],
+            state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Assign".to_string(),
@@ -1525,7 +1526,7 @@ mod tests {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1560,7 +1561,7 @@ mod tests {
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
             state_type: TypeRef::Named(ident("WorkerState")),
-            state_values: vec!["WorkerState".to_string()],
+            state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Done".to_string(),
@@ -1597,7 +1598,7 @@ mod tests {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1635,7 +1636,10 @@ mod tests {
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
             state_type: TypeRef::Named(ident("WorkerState")),
-            state_values: vec!["WorkerState{active:Job{phase:Done}}".to_string()],
+            state_values: checked_state_values(
+                "WorkerState",
+                &["WorkerState{active:Job{phase:Done}}"],
+            ),
             message_type: TypeRef::Named(ident("WorkerMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Assign".to_string(),
@@ -1679,7 +1683,7 @@ mod tests {
         CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
             state_type: TypeRef::Named(ident("MainState")),
-            state_values: vec!["MainState".to_string()],
+            state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
             message_cases: vec![CheckedMessageCase::new(
                 "Start".to_string(),
@@ -1707,6 +1711,13 @@ mod tests {
             constructor: ident(PROCESS_REF_TYPE),
             args: vec![TypeRef::Named(ident(target))],
         }
+    }
+
+    fn checked_state_values(ty: &str, values: &[&str]) -> Vec<CheckedStateValue> {
+        values
+            .iter()
+            .map(|value| CheckedStateValue::new(TypeRef::Named(ident(ty)), (*value).to_string()))
+            .collect()
     }
 
     fn checked_process_id(index: usize) -> CheckedProcessId {

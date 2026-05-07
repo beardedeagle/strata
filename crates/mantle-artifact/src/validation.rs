@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactValueTemplate, Error,
-    MantleArtifact, NextState, Result, ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES,
-    MAX_IDENTIFIER_BYTES, MAX_TYPE_REF_BYTES,
+    ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactStateValue,
+    ArtifactValueTemplate, Error, MantleArtifact, NextState, Result, ARTIFACT_MAGIC,
+    MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_TYPE_REF_BYTES,
 };
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
@@ -87,15 +87,20 @@ pub fn validate_message_label(value: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn validate_unique_state_value_list(values: &[String]) -> Result<()> {
+pub(crate) fn validate_unique_state_value_list(values: &[ArtifactStateValue]) -> Result<()> {
     if values.is_empty() {
         return Err(Error::new("state value list must not be empty"));
     }
     let mut seen = BTreeSet::new();
     for value in values {
-        validate_state_value_label(value)?;
-        if !seen.insert(value.as_str()) {
-            return Err(Error::new(format!("duplicate state value {value}")));
+        validate_type_field("state value type", &value.ty)?;
+        validate_value_label("state value", &value.value)?;
+        validate_state_value_label(&value.label)?;
+        if !seen.insert((value.ty.as_str(), value.value.as_str())) {
+            return Err(Error::new(format!(
+                "duplicate state value {} with type {}",
+                value.value, value.ty
+            )));
         }
     }
     Ok(())
@@ -201,10 +206,17 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
             &process.state_values.len().to_string(),
         )?;
         for (value_index, value) in process.state_values.iter().enumerate() {
+            let value_prefix = format!("{prefix}.state_value.{value_index}");
+            add_field_bytes(&mut encoded_len, &format!("{value_prefix}.type"), &value.ty)?;
             add_field_bytes(
                 &mut encoded_len,
-                &format!("{prefix}.state_value.{value_index}"),
-                value,
+                &format!("{value_prefix}.value"),
+                &value.value,
+            )?;
+            add_field_bytes(
+                &mut encoded_len,
+                &format!("{value_prefix}.label"),
+                &value.label,
             )?;
         }
         add_field_bytes(

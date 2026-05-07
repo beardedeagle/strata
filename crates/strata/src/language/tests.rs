@@ -399,7 +399,7 @@ proc Worker mailbox bounded(1) {
         ["Assign"]
     );
     assert_eq!(
-        worker.state_values(),
+        checked_state_labels(worker),
         [
             "WorkerState{job:Job{phase:Done}}",
             "WorkerState{job:Job{phase:Ready}}"
@@ -416,7 +416,7 @@ proc Worker mailbox bounded(1) {
         [ArtifactMessageVariant::payload("Assign", "Job")]
     );
     assert_eq!(
-        artifact.processes[1].state_values,
+        artifact_state_labels(&artifact.processes[1]),
         [
             "WorkerState{job:Job{phase:Done}}",
             "WorkerState{job:Job{phase:Ready}}"
@@ -1393,7 +1393,7 @@ proc Main mailbox bounded(1) {
 
     let checked = check_source(source).expect("lowercase state values should check");
 
-    assert_eq!(checked.processes()[0].state_values(), ["ready"]);
+    assert_eq!(checked_state_labels(&checked.processes()[0]), ["ready"]);
     assert_eq!(checked.processes()[0].init_state(), checked_state_id(0));
     assert_eq!(
         only_transition(&checked.processes()[0]).next_state(),
@@ -1489,7 +1489,10 @@ fn parses_and_checks_actor_sequence_step_patterns() {
         .iter()
         .find(|process| process.debug_name().as_str() == "Worker")
         .expect("Worker should be checked");
-    assert_eq!(worker.state_values(), ["Waiting", "SawFirst", "Done"]);
+    assert_eq!(
+        checked_state_labels(worker),
+        ["Waiting", "SawFirst", "Done"]
+    );
     assert_eq!(worker.transitions().len(), 2);
     assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
     assert_eq!(
@@ -2273,7 +2276,7 @@ proc Main mailbox bounded(1) {
     let checked = check_source(source).expect("immutable record state should check");
 
     assert_eq!(
-        checked.processes()[0].state_values(),
+        checked_state_labels(&checked.processes()[0]),
         ["MainState{phase:Idle}", "MainState{phase:Handled}"]
     );
     assert_eq!(checked.processes()[0].init_state(), checked_state_id(0));
@@ -3128,6 +3131,22 @@ fn checked_message_id(index: usize) -> CheckedMessageId {
 
 fn checked_output_id(index: usize) -> CheckedOutputId {
     CheckedOutputId::from_index(index).expect("valid checked output id")
+}
+
+fn checked_state_labels(process: &CheckedProcess) -> Vec<&str> {
+    process
+        .state_values()
+        .iter()
+        .map(|state| state.label())
+        .collect()
+}
+
+fn artifact_state_labels(process: &mantle_artifact::ArtifactProcess) -> Vec<&str> {
+    process
+        .state_values
+        .iter()
+        .map(|state| state.label.as_str())
+        .collect()
 }
 
 fn repeated_emit_statements(count: usize, indent: usize) -> String {

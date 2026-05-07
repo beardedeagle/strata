@@ -1,7 +1,8 @@
 use mantle_artifact::{
     ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactTransition, ArtifactValueTemplate, Error, MantleArtifact,
-    MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
+    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactValueTemplate, Error,
+    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId,
+    StepResult,
 };
 
 #[derive(Debug, Clone)]
@@ -51,7 +52,7 @@ impl LoadedProgram {
         self.process(process_id)?
             .state_values
             .get(state_id.index())
-            .map(String::as_str)
+            .map(|state| state.label.as_str())
             .ok_or_else(|| {
                 Error::new(format!(
                     "state id {} is not loaded for process id {}",
@@ -108,7 +109,7 @@ impl LoadedProgram {
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedProcess {
     pub(crate) debug_name: String,
-    pub(crate) state_values: Vec<String>,
+    pub(crate) state_values: Vec<ArtifactStateValue>,
     pub(crate) message_variants: Vec<LoadedMessageVariant>,
     pub(crate) process_refs: Vec<LoadedProcessRef>,
     pub(crate) mailbox_bound: usize,

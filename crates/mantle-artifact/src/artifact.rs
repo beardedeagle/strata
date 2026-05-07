@@ -126,7 +126,11 @@ impl MantleArtifact {
                 process.state_values.len()
             ));
             for (value_index, value) in process.state_values.iter().enumerate() {
-                encoded.push_str(&format!("{prefix}.state_value.{value_index}={value}\n"));
+                encode_state_value(
+                    &mut encoded,
+                    &format!("{prefix}.state_value.{value_index}"),
+                    value,
+                );
             }
             encoded.push_str(&format!(
                 "{prefix}.message_type={}\n{prefix}.message_count={}\n",
@@ -233,8 +237,10 @@ impl MantleArtifact {
             )?;
             let mut state_values = Vec::with_capacity(state_value_count);
             for value_index in 0..state_value_count {
-                state_values
-                    .push(fields.take_required(&format!("{prefix}.state_value.{value_index}"))?);
+                state_values.push(decode_state_value(
+                    &mut fields,
+                    &format!("{prefix}.state_value.{value_index}"),
+                )?);
             }
 
             let message_count = fields.take_bounded_usize(
@@ -445,10 +451,44 @@ impl ArtifactMessageVariant {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactStateValue {
+    pub ty: String,
+    pub value: String,
+    pub label: String,
+}
+
+impl ArtifactStateValue {
+    pub fn new(ty: impl Into<String>, value: impl Into<String>) -> Self {
+        let value = value.into();
+        Self {
+            ty: ty.into(),
+            label: value.clone(),
+            value,
+        }
+    }
+
+    pub fn with_label(
+        ty: impl Into<String>,
+        value: impl Into<String>,
+        label: impl Into<String>,
+    ) -> Self {
+        Self {
+            ty: ty.into(),
+            value: value.into(),
+            label: label.into(),
+        }
+    }
+
+    fn has_same_identity(&self, other: &Self) -> bool {
+        self.ty == other.ty && self.value == other.value
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactProcess {
     pub debug_name: String,
     pub state_type: String,
-    pub state_values: Vec<String>,
+    pub state_values: Vec<ArtifactStateValue>,
     pub message_type: String,
     pub message_variants: Vec<ArtifactMessageVariant>,
     pub process_refs: Vec<ArtifactProcessRef>,
@@ -488,6 +528,14 @@ impl ArtifactProcess {
             MAX_TRANSITIONS_PER_PROCESS,
         )?;
         validate_unique_state_value_list(&self.state_values)?;
+        for state_value in &self.state_values {
+            if state_value.ty != self.state_type {
+                return Err(Error::new(format!(
+                    "process {} state value {} has type {}, expected {}",
+                    self.debug_name, state_value.label, state_value.ty, self.state_type
+                )));
+            }
+        }
         validate_unique_message_variant_list(&self.message_variants)?;
         validate_unique_process_ref_list(&self.process_refs)?;
         if self.init_state.index() >= self.state_values.len() {
@@ -573,11 +621,11 @@ impl ArtifactProcess {
         if template.depends_on_received_payload() {
             return Ok(());
         }
-        let value = template.evaluate(None)?;
+        let value = template.evaluate_state_value(None)?;
         if self
             .state_values
             .iter()
-            .any(|state_value| state_value == &value.value)
+            .any(|state_value| state_value.has_same_identity(&value))
         {
             return Ok(());
         }
@@ -585,7 +633,7 @@ impl ArtifactProcess {
             "process {} transition {} next_state_template produced value {} not admitted by state table",
             self.debug_name,
             transition.message.as_u32(),
-            value.value
+            value.label
         )))
     }
 
@@ -939,13 +987,12 @@ impl ArtifactValueTemplate {
         }
     }
 
-    pub fn evaluate(&self, received_payload: Option<&ArtifactPayload>) -> Result<ArtifactPayload> {
+    pub fn evaluate_state_value(
+        &self,
+        received_payload: Option<&ArtifactPayload>,
+    ) -> Result<ArtifactStateValue> {
         match self {
-            Self::Literal { ty, value } => Ok(ArtifactPayload {
-                ty: ty.clone(),
-                value: value.clone(),
-                process_ref: None,
-            }),
+            Self::Literal { ty, value } => Ok(ArtifactStateValue::new(ty.clone(), value.clone())),
             Self::ReceivedPayload { ty } => {
                 let payload = received_payload.ok_or_else(|| {
                     Error::new("received payload template requires a payload-bearing message")
@@ -956,24 +1003,32 @@ impl ArtifactValueTemplate {
                         payload.ty, ty
                     )));
                 }
-                Ok(payload.clone())
+                if payload.process_ref.is_some() {
+                    return Err(Error::new(
+                        "process reference payloads are not valid state values",
+                    ));
+                }
+                Ok(ArtifactStateValue::new(
+                    payload.ty.clone(),
+                    payload.value.clone(),
+                ))
             }
             Self::ProcessRef { .. } => Err(Error::new(
                 "process reference template requires runtime process reference bindings",
             )),
             Self::Record { ty, fields } => {
                 let mut parts = Vec::with_capacity(fields.len());
+                let mut labels = Vec::with_capacity(fields.len());
                 for field in fields {
-                    let value = field.value.evaluate(received_payload)?;
+                    let value = field.value.evaluate_state_value(received_payload)?;
                     parts.push(format!("{}:{}", field.name, value.value));
+                    labels.push(format!("{}:{}", field.name, value.label));
                 }
                 let value = format!("{ty}{{{}}}", parts.join(","));
+                let label = format!("{ty}{{{}}}", labels.join(","));
                 validate_value_label("record template value", &value)?;
-                Ok(ArtifactPayload {
-                    ty: ty.clone(),
-                    value,
-                    process_ref: None,
-                })
+                validate_value_label("record template label", &label)?;
+                Ok(ArtifactStateValue::with_label(ty.clone(), value, label))
             }
         }
     }
@@ -1145,6 +1200,21 @@ pub enum ArtifactSendTarget {
         ty: String,
         target_process: ProcessId,
     },
+}
+
+fn encode_state_value(encoded: &mut String, prefix: &str, state_value: &ArtifactStateValue) {
+    encoded.push_str(&format!(
+        "{prefix}.type={}\n{prefix}.value={}\n{prefix}.label={}\n",
+        state_value.ty, state_value.value, state_value.label
+    ));
+}
+
+fn decode_state_value(fields: &mut ArtifactFields, prefix: &str) -> Result<ArtifactStateValue> {
+    Ok(ArtifactStateValue {
+        ty: fields.take_required(&format!("{prefix}.type"))?,
+        value: fields.take_required(&format!("{prefix}.value"))?,
+        label: fields.take_required(&format!("{prefix}.label"))?,
+    })
 }
 
 fn encode_value_template(encoded: &mut String, prefix: &str, template: &ArtifactValueTemplate) {

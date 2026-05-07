@@ -17,7 +17,7 @@ execution, the artifact decoder and validator check:
 - artifact magic, format, schema version, and source language;
 - bounded process, message, state, output, transition, and action counts;
 - unique process debug names;
-- unique state values per process;
+- unique typed state value identities per process;
 - unique process reference names per process;
 - exactly one transition per accepted message;
 - exact transition effect authority for emitted, spawned, and sent actions;
@@ -32,6 +32,8 @@ artifact body.
 Mantle loads admitted transitions into indexed runtime tables. A dequeued
 message selects the transition by typed message ID. The runtime then applies the
 transition as a whole-value state replacement and executes admitted actions.
+Dynamic next-state templates resolve to an admitted state ID by typed state
+value identity, not by display label text.
 Transition effect metadata is admitted with the artifact and must exactly match
 the action effects that execute.
 

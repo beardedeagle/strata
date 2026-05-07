@@ -34,11 +34,11 @@ IDs are for stable runtime identity:
 - `pid`, the runtime process instance ID;
 - `process_id`, the admitted process definition ID;
 - `message_id`, the admitted message case ID;
-- `state_id`, the admitted state value ID;
+- `state_id`, the admitted typed state value ID;
 - `output_id`, the admitted output literal ID.
 
 Do not treat labels as runtime dispatch keys. Runtime execution uses admitted
-typed IDs.
+typed IDs and typed state value identities.
 
 When multiple runtime instances are spawned from one process definition, the
 instances share `process_id` and label metadata but have different `pid` values.
@@ -62,7 +62,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"4","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"5","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
