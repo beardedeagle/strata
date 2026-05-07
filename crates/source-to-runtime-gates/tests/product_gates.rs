@@ -114,8 +114,18 @@ fn value_type_id(artifact: &MantleArtifact, label: &str) -> TypeId {
     artifact_type_id(artifact, label, ArtifactTypeKind::Value)
 }
 
-fn process_ref_type_id(artifact: &MantleArtifact, label: &str, target: ProcessId) -> TypeId {
-    artifact_type_id(artifact, label, ArtifactTypeKind::ProcessRef { target })
+fn process_ref_type_id(artifact: &MantleArtifact, target: ProcessId) -> TypeId {
+    let index = artifact
+        .types
+        .iter()
+        .position(|ty| ty.kind == ArtifactTypeKind::ProcessRef { target })
+        .unwrap_or_else(|| {
+            panic!(
+                "artifact process reference type targeting process {} should exist",
+                target.as_u32()
+            )
+        });
+    TypeId::from_index(index).expect("artifact type index should fit")
 }
 
 fn artifact_type_id(artifact: &MantleArtifact, label: &str, kind: ArtifactTypeKind) -> TypeId {
@@ -345,11 +355,7 @@ fn actor_reply_checks_builds_and_runs_on_mantle() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     let artifact = gate.read_artifact("target/strata/actor_reply.mta");
-    let sink_ref_type = process_ref_type_id(
-        &artifact,
-        "__strata_checked_process_ref_Sink",
-        ProcessId::new(2),
-    );
+    let sink_ref_type = process_ref_type_id(&artifact, ProcessId::new(2));
     let process_ref_payload = format!("type{}#3", sink_ref_type.as_u32());
     assert!(stdout.contains(&format!(
         "mantle: delivered Work({process_ref_payload}) to Worker"

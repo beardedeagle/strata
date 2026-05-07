@@ -6,7 +6,7 @@ use super::checked::{
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
-    ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget,
+    ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget, ArtifactTypeKind,
     ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
     MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
     MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, ProcessId,
@@ -689,8 +689,14 @@ proc Sink mailbox bounded(1) {
     let checked_sink_ref = checked
         .types()
         .iter()
-        .find(|ty| ty.label() == "__strata_checked_process_ref_Sink")
+        .find(|ty| {
+            ty.kind()
+                == (CheckedTypeKind::ProcessRef {
+                    target: checked_process_id(2),
+                })
+        })
         .expect("checked type table should contain Sink process reference type");
+    assert_eq!(checked_sink_ref.label(), "__strata_checked_process_ref_2");
     assert_eq!(
         checked_sink_ref.kind(),
         CheckedTypeKind::ProcessRef {
@@ -704,7 +710,7 @@ proc Sink mailbox bounded(1) {
         Some(checked_sink_ref.id())
     );
     let artifact = lower_to_artifact(&checked, source).expect("process ref payload should lower");
-    let sink_ref = artifact_type_id(&artifact, "__strata_checked_process_ref_Sink");
+    let sink_ref = artifact_process_ref_type_id(&artifact, ProcessId::new(2));
 
     assert_eq!(
         artifact.processes[1].message_variants,
@@ -732,6 +738,85 @@ proc Sink mailbox bounded(1) {
             message: mantle_artifact::MessageId::new(0),
             payload: None,
         }
+    );
+}
+
+#[test]
+fn process_ref_type_label_is_bounded_for_max_length_target_process() {
+    let target = format!("P{}", "a".repeat(MAX_IDENTIFIER_BYTES - 1));
+    let source = format!(
+        r#"
+module process_ref_limit;
+
+record MainState;
+record WorkerState;
+record SinkState;
+enum MainMsg {{ Start }}
+enum WorkerMsg {{ Work(ProcessRef<{target}>) }}
+enum SinkMsg {{ Done }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(1) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return WorkerState;
+    }}
+
+    fn step(state: WorkerState, Work(reply_to: ProcessRef<{target}>)) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+
+proc {target} mailbox bounded(1) {{
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {{
+        return SinkState;
+    }}
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+    );
+
+    let checked = check_source(&source).expect("max-length process-ref target should check");
+    let checked_sink_ref = checked
+        .types()
+        .iter()
+        .find(|ty| {
+            ty.kind()
+                == (CheckedTypeKind::ProcessRef {
+                    target: checked_process_id(2),
+                })
+        })
+        .expect("checked type table should contain bounded process reference type");
+
+    assert_eq!(checked_sink_ref.label(), "__strata_checked_process_ref_2");
+    assert!(checked_sink_ref.label().len() <= MAX_IDENTIFIER_BYTES);
+
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("bounded process ref label should lower");
+    let sink_ref = artifact_process_ref_type_id(&artifact, ProcessId::new(2));
+    assert_eq!(
+        artifact.types[sink_ref.index()].label,
+        checked_sink_ref.label()
     );
 }
 
@@ -3318,6 +3403,20 @@ fn artifact_type_id(artifact: &MantleArtifact, label: &str) -> TypeId {
         .iter()
         .position(|ty| ty.label == label)
         .unwrap_or_else(|| panic!("artifact type {label} should exist"));
+    TypeId::from_index(index).expect("artifact type index should fit")
+}
+
+fn artifact_process_ref_type_id(artifact: &MantleArtifact, target: ProcessId) -> TypeId {
+    let index = artifact
+        .types
+        .iter()
+        .position(|ty| ty.kind == ArtifactTypeKind::ProcessRef { target })
+        .unwrap_or_else(|| {
+            panic!(
+                "artifact process reference type targeting process {} should exist",
+                target.as_u32()
+            )
+        });
     TypeId::from_index(index).expect("artifact type index should fit")
 }
 

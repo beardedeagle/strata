@@ -85,7 +85,8 @@ _
 `ProcResult` and `ProcessRef` are reserved type names because they name built-in
 transition and process-reference types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
-artifact metadata.
+artifact metadata. Checked process-reference artifact labels under that prefix
+are keyed by resolved process IDs, not source process names.
 
 ## Records
 

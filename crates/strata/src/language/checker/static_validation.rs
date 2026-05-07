@@ -1761,7 +1761,7 @@ mod tests {
             other => panic!("test process ref target {other} is not mapped"),
         };
         CheckedTypeRef::test_process_ref(
-            &format!("__strata_checked_process_ref_{target}"),
+            &format!("__strata_checked_process_ref_{}", target_process.as_u32()),
             target_process,
         )
     }

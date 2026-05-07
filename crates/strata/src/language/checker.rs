@@ -6,7 +6,8 @@ mod symbols;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
-    MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
+    MAX_ACTIONS_PER_PROCESS, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
 };
 
 use super::ast::{
@@ -70,13 +71,11 @@ impl<'a> CheckedTypeInterner<'a> {
         }
 
         let id = CheckedTypeId::from_index(self.entries.len())?;
-        let kind = self
-            .semantic_index
-            .process_ref_target_type(ty)?
-            .map_or(CheckedTypeKind::Value, |target| {
-                CheckedTypeKind::ProcessRef { target }
-            });
-        let checked = CheckedTypeRef::new(id, checked_type_label(ty)?, kind);
+        let process_ref_target = self.semantic_index.process_ref_target_type(ty)?;
+        let kind = process_ref_target.map_or(CheckedTypeKind::Value, |target| {
+            CheckedTypeKind::ProcessRef { target }
+        });
+        let checked = CheckedTypeRef::new(id, checked_type_label(ty, process_ref_target)?, kind);
         self.entries.push((ty.clone(), checked.clone()));
         Ok(checked)
     }
@@ -89,21 +88,27 @@ impl<'a> CheckedTypeInterner<'a> {
     }
 }
 
-fn checked_type_label(ty: &TypeRef) -> Result<String> {
+fn checked_type_label(
+    ty: &TypeRef,
+    process_ref_target: Option<CheckedProcessId>,
+) -> Result<String> {
+    if let Some(target) = process_ref_target {
+        return checked_process_ref_type_label(target);
+    }
     match ty {
         TypeRef::Named(name) => Ok(name.to_string()),
-        TypeRef::Applied { constructor, args }
-            if constructor.as_str() == PROCESS_REF_TYPE && args.len() == 1 =>
-        {
-            let target = args[0].as_named().ok_or_else(|| {
-                Error::new(format!(
-                    "{PROCESS_REF_TYPE} checked type target must be a named process"
-                ))
-            })?;
-            Ok(format!("{CHECKED_PROCESS_REF_TYPE_LABEL_PREFIX}{target}"))
-        }
         TypeRef::Applied { constructor, .. } => Ok(constructor.to_string()),
     }
+}
+
+fn checked_process_ref_type_label(target: CheckedProcessId) -> Result<String> {
+    let label = format!("{CHECKED_PROCESS_REF_TYPE_LABEL_PREFIX}{}", target.as_u32());
+    if label.len() > MAX_IDENTIFIER_BYTES {
+        return Err(Error::new(format!(
+            "checked process reference type label exceeds maximum identifier length of {MAX_IDENTIFIER_BYTES} bytes"
+        )));
+    }
+    Ok(label)
 }
 
 struct ProcessCheckContext<'a> {
