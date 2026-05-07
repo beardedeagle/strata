@@ -1,0 +1,42 @@
+module actor_panic_no_replay;
+
+record MainState;
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Ready,
+    Failed,
+}
+enum WorkerMsg {
+    Ping,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Ping;
+        send worker Ping;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Ready;
+    }
+
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Panic(Failed);
+    }
+}

@@ -1317,9 +1317,12 @@ fn check_step_transition(
         ReturnExpr::Call { name, arg } if name.as_str() == "Continue" => {
             (CheckedStepResult::Continue, arg)
         }
+        ReturnExpr::Call { name, arg } if name.as_str() == "Panic" => {
+            (CheckedStepResult::Panic, arg)
+        }
         _ => {
             return Err(Error::new(
-                "step body must return Stop(<state value>) or Continue(<state value>)",
+                "step body must return Stop(<state value>), Continue(<state value>), or Panic(<state value>)",
             ))
         }
     };

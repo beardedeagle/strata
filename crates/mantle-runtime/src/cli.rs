@@ -37,6 +37,9 @@ where
                     ProcessStatus::Stopped => {
                         println!("mantle: stopped {} normally", process.process);
                     }
+                    ProcessStatus::Failed => {
+                        println!("mantle: failed {} abnormally", process.process);
+                    }
                 }
             }
             println!("mantle: trace {}", report.trace_path.display());

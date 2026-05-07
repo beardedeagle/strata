@@ -5,14 +5,16 @@ program.
 
 ## Prerequisites
 
-Install a Rust toolchain with Cargo. The repository automation uses `just`, but
-the first commands can also be run directly with Cargo-built binaries.
+Install stable Rust with Cargo. Standard repository gates select stable
+explicitly; nightly is reserved for fuzz and Miri recipes that opt into it per
+command.
 
 Useful local tools:
 
 ```sh
-cargo install just --version 1.50.0 --locked
-cargo install mdbook --version 0.5.2 --locked
+rustup toolchain install stable --profile minimal --component rustfmt,clippy
+cargo +stable install just --version 1.50.0 --locked
+cargo +stable install mdbook --version 0.5.2 --locked
 ```
 
 The standard `just quality` gate runs documentation and metadata checks on every
@@ -33,6 +35,9 @@ Windows systems should install `jq` and an `xmllint` provider such as libxml2
 with their package manager, or run the full `just quality` bundle in a WSL
 Ubuntu environment. Confirm the tools are on `PATH` with `jq --version`,
 `xmllint --version`, and `mdbook --version`.
+
+Do not set a repository-wide nightly Rust override. Use `just install-fuzz-tools`
+and `just install-miri-tools` only when running the nightly fuzz or Miri gates.
 
 ## Build The Binaries
 

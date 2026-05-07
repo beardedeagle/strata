@@ -228,6 +228,75 @@ fn actor_artifact_spawns_sends_updates_state_and_stops() {
 }
 
 #[test]
+fn in_memory_host_fails_closed_for_panic_without_replay() {
+    let artifact = panic_artifact();
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect_err("panic artifact should fail closed");
+
+    assert!(err.to_string().contains(
+        "process Worker panicked after consuming message Ping; message will not be replayed"
+    ));
+    assert_eq!(
+        host.events()
+            .iter()
+            .filter(|event| matches!(
+                event,
+                RuntimeEvent::MessageAccepted {
+                    process,
+                    message,
+                    ..
+                } if process == "Worker" && message == "Ping"
+            ))
+            .count(),
+        2
+    );
+    assert_eq!(
+        host.events()
+            .iter()
+            .filter(|event| matches!(
+                event,
+                RuntimeEvent::MessageDequeued {
+                    process,
+                    message,
+                    ..
+                } if process == "Worker" && message == "Ping"
+            ))
+            .count(),
+        1
+    );
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::ProcessStepped {
+            process,
+            result: RuntimeStepResult::Panic,
+            state,
+            ..
+        } if process == "Worker" && state == "Handled"
+    )));
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::ProcessFailed {
+            process,
+            state,
+            reason: RuntimeFailureReason::Panic,
+            ..
+        } if process == "Worker" && state == "Handled"
+    )));
+    assert!(
+        !host.events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::ProcessStopped {
+                process,
+                ..
+            } if process == "Worker"
+        )),
+        "panic must not be reported as a normal stop"
+    );
+}
+
+#[test]
 fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
     let artifact = valid_artifact();
     let mut host = InMemoryRuntimeHost::default();
@@ -607,6 +676,28 @@ fn valid_artifact() -> MantleArtifact {
         ],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }
+}
+
+fn panic_artifact() -> MantleArtifact {
+    let mut artifact = valid_artifact();
+    artifact.module = "actor_panic_no_replay".to_string();
+    artifact.outputs = Vec::new();
+    artifact.processes[0].transitions[0]
+        .actions
+        .push(ArtifactAction::Send {
+            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            message: MessageId::new(0),
+            payload: None,
+        });
+    artifact.processes[1].mailbox_bound = 2;
+    artifact.processes[1].transitions[0] = ArtifactTransition {
+        message: MessageId::new(0),
+        step_result: StepResult::Panic,
+        next_state: NextState::Value(StateId::new(1)),
+        effects: Vec::new(),
+        actions: Vec::new(),
+    };
+    artifact
 }
 
 fn payload_artifact() -> MantleArtifact {

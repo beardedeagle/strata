@@ -29,6 +29,7 @@ result of the first invalid shape.
 | `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageVariant` or `state: StateType, _`. |
 | `step second parameter must be a message variant pattern or wildcard pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with a message variant or `_`. |
 | `step returns ..., expected ProcResult<...>` | `step` return type is wrong. | Return `ProcResult<StateType>`. |
+| `step body must return Stop..., Continue..., or Panic...` | A `step` returns a bare state value or an unsupported result form. | Return one whole state value inside `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step may-behaviors must be empty` | The `~ [...]` list is not empty. | Use `~ []`. |
 | `step must be deterministic` | `step` uses `@nondet`. | Use `@det`. |
 | `declares effect ... but does not use it` | The effect list is wider than the body. | Remove the unused effect. |
@@ -80,8 +81,9 @@ result of the first invalid shape.
 ## Runtime Errors
 
 Runtime errors are emitted by Mantle after artifact admission starts. Common
-causes include invalid artifacts, blocked trace paths, mailbox exhaustion, trace
-size exhaustion, and dispatch budget exhaustion.
+causes include invalid artifacts, blocked trace paths, mailbox exhaustion,
+explicit `Panic(...)` transition results, trace size exhaustion, and dispatch
+budget exhaustion.
 
 Use the source gate first:
 

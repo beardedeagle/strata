@@ -606,6 +606,7 @@ fn validate_process_ref_type_target(
 enum StaticProcessStatus {
     Running,
     Stopped,
+    Failed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -883,8 +884,15 @@ fn validate_static_runtime_order(
         }
 
         instances[process_index].state = final_state;
-        if transition.step_result() == CheckedStepResult::Stop {
-            instances[process_index].status = StaticProcessStatus::Stopped;
+        match transition.step_result() {
+            CheckedStepResult::Continue => {}
+            CheckedStepResult::Stop => {
+                instances[process_index].status = StaticProcessStatus::Stopped;
+            }
+            CheckedStepResult::Panic => {
+                instances[process_index].status = StaticProcessStatus::Failed;
+                return Ok(());
+            }
         }
         dispatches += 1;
     }

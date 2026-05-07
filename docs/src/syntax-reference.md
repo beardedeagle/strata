@@ -221,8 +221,8 @@ record_value_field =
     ident ":" value_expr
 ```
 
-`init` returns a state value. `step` returns `Stop(value)` or
-`Continue(value)`.
+`init` returns a state value. `step` returns `Continue(value)`, `Stop(value)`,
+or `Panic(value)`.
 
 ## Literals
 

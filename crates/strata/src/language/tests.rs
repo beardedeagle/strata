@@ -7,9 +7,10 @@ use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget,
-    ArtifactValueTemplate, ProcessId, ProcessRefId, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES,
-    MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS,
+    ArtifactValueTemplate, ProcessId, ProcessRefId, StepResult, MAX_ACTIONS_PER_PROCESS,
+    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
+    MAX_VALUE_TEMPLATE_FIELDS,
 };
 
 const HELLO: &str = r#"
@@ -1476,6 +1477,32 @@ fn parses_and_checks_actor_ping() {
 }
 
 #[test]
+fn parses_and_lowers_panic_step_result() {
+    let source = ACTOR_PING.replace("return Stop(Handled);", "return Panic(Handled);");
+
+    let checked = check_source(&source).expect("panic step result should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    assert_eq!(
+        only_transition(worker).step_result(),
+        CheckedStepResult::Panic
+    );
+    assert_eq!(
+        only_transition(worker).next_state(),
+        CheckedNextState::Value(checked_state_id(1))
+    );
+
+    let artifact = lower_to_artifact(&checked, &source).expect("panic should lower");
+    assert_eq!(
+        artifact.processes[1].transitions[0].step_result,
+        StepResult::Panic
+    );
+}
+
+#[test]
 fn parses_and_checks_actor_sequence_step_patterns() {
     let checked = check_source(ACTOR_SEQUENCE).expect("actor sequence should check");
 
@@ -2913,10 +2940,21 @@ fn rejects_bare_concrete_state_return_with_accurate_message() {
     let err = check_source(&source).expect_err("bare state return should be rejected");
 
     let message = err.to_string();
-    assert!(
-        message.contains("step body must return Stop(<state value>) or Continue(<state value>)")
-    );
+    assert!(message.contains(
+        "step body must return Stop(<state value>), Continue(<state value>), or Panic(<state value>)"
+    ));
     assert!(!message.contains("or a concrete state value"));
+}
+
+#[test]
+fn rejects_panic_step_result_with_wrong_state_value() {
+    let source = ACTOR_PING.replace("return Stop(Handled);", "return Panic(MainState);");
+
+    let err = check_source(&source).expect_err("panic must carry a WorkerState value");
+
+    assert!(err
+        .to_string()
+        .contains("value MainState is not a variant of enum WorkerState"));
 }
 
 #[test]

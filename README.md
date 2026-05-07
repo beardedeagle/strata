@@ -107,6 +107,18 @@ reference as `Work(reply_to: ProcessRef<Sink>)`, and sends `Done` through the
 received typed reference. Mantle traces both the runtime `pid` and admitted
 process ID for the transported reference.
 
+Fail-closed actor failure now has source-to-runtime evidence:
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_panic_no_replay.str
+cargo run -p strata --bin strata -- build examples/actor_panic_no_replay.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta
+```
+
+That example returns `Panic(Failed)` after a worker dequeues one of two accepted
+messages. Mantle records the abnormal step and `process_failed` event, exits
+non-zero, and does not replay the consumed message.
+
 ## What Strata Is For
 
 Strata is aimed at programs where the important behavior should be explicit:
@@ -211,6 +223,17 @@ The mdBook under `docs/` is the primary project documentation. Start with
 `docs/src/getting-started.md` for first use, then `docs/src/language-reference.md`
 and `docs/src/syntax-reference.md` for the accepted source surface.
 
+The standard gates select stable Rust explicitly. Nightly is used only by the
+fuzz and Miri recipes, which select it per command. Do not set a repository-wide
+nightly override.
+
+Install the local command runner:
+
+```sh
+rustup toolchain install stable --profile minimal --component rustfmt,clippy
+cargo +stable install just --version 1.50.0 --locked
+```
+
 List available commands:
 
 ```sh
@@ -247,6 +270,7 @@ just test
 just lint
 just build
 just metadata-check
+just toolchain-policy-check
 just docs
 just diff-check
 ```
@@ -260,9 +284,8 @@ just product-gates
 Nightly-only validation is also available for fuzz and Miri smoke coverage:
 
 ```sh
-rustup toolchain install nightly --component miri
-rustup override set nightly
 just install-fuzz-tools
 just fuzz-ci
+just install-miri-tools
 just miri-ci
 ```

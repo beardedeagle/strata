@@ -107,7 +107,8 @@ The current runnable examples are:
 - `examples/actor_sequence.str`;
 - `examples/actor_instances.str`;
 - `examples/actor_payloads.str`;
-- `examples/actor_reply.str`.
+- `examples/actor_reply.str`;
+- `examples/actor_panic_no_replay.str`.
 
 The integration tests in `crates/mantle-runtime/tests/product_gates.rs` mirror
 the same source check, artifact build, and runtime execution sequence:
@@ -118,7 +119,9 @@ cargo run -p strata --bin strata -- build examples/hello.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
 ```
 
-The same pattern applies to the actor examples.
+The same pattern applies to the actor examples. Fail-closed examples still
+check and build, but their runtime gate expects `mantle run` to return non-zero
+after emitting trace evidence.
 
 ## Closure Rule
 

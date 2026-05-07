@@ -4,11 +4,15 @@ A runtime-bearing milestone is not complete until the command a user would run
 succeeds. Documentation and generated artifacts do not replace executable
 source-to-runtime behavior.
 
-The gate shape is always:
+The normal gate shape is:
 
 ```text
 .str source -> strata check -> strata build -> mantle run -> trace
 ```
+
+For fail-closed runtime behavior, the source must still check and build, and
+`mantle run` must fail only after Mantle admits the artifact and emits trace
+evidence for the failure.
 
 The current product gates are:
 
@@ -38,10 +42,16 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
 cargo run -p strata --bin strata -- check examples/actor_reply.str
 cargo run -p strata --bin strata -- build examples/actor_reply.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
+
+cargo run -p strata --bin strata -- check examples/actor_panic_no_replay.str
+cargo run -p strata --bin strata -- build examples/actor_panic_no_replay.str
+# Expected to fail closed after writing actor_panic_no_replay.observability.jsonl.
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta
 ```
 
 Each `mantle run` command must admit the generated `.mta`, execute it, and emit
-an observability trace under `target/strata/`.
+an observability trace under `target/strata/`. Expected-failure gates must
+return non-zero with failure evidence in the trace.
 
 The product-gate integration tests in
 `crates/mantle-runtime/tests/product_gates.rs` mirror this user-facing sequence

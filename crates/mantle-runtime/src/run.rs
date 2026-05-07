@@ -7,8 +7,8 @@ use mantle_artifact::{
 };
 
 use crate::event::{
-    RuntimeEvent, RuntimeEventRecord, RuntimeOutputStream, RuntimeProcessId, RuntimeStepResult,
-    RuntimeStopReason,
+    RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
+    RuntimeStepResult, RuntimeStopReason,
 };
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
@@ -627,16 +627,40 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 .state_label(step.process_id, self.processes[process_index].state)?
                 .to_string(),
         })?;
-        if step_result == StepResult::Stop {
-            self.record_event(RuntimeEvent::ProcessStopped {
-                pid: step.pid,
-                process_id: step.process_id,
-                process: step.process_name.clone(),
-                reason: RuntimeStopReason::Normal,
-            })?;
-            self.processes[process_index].status = ProcessStatus::Stopped;
+        match step_result {
+            StepResult::Continue => Ok(()),
+            StepResult::Stop => {
+                self.record_event(RuntimeEvent::ProcessStopped {
+                    pid: step.pid,
+                    process_id: step.process_id,
+                    process: step.process_name.clone(),
+                    reason: RuntimeStopReason::Normal,
+                })?;
+                self.processes[process_index].status = ProcessStatus::Stopped;
+                Ok(())
+            }
+            StepResult::Panic => {
+                let state_id = self.processes[process_index].state;
+                let state = self
+                    .program
+                    .state_label(step.process_id, state_id)?
+                    .to_string();
+                self.record_event(RuntimeEvent::ProcessFailed {
+                    pid: step.pid,
+                    process_id: step.process_id,
+                    process: step.process_name.clone(),
+                    state_id,
+                    state,
+                    reason: RuntimeFailureReason::Panic,
+                })?;
+                self.processes[process_index].status = ProcessStatus::Failed;
+                self.flush_host()?;
+                Err(Error::new(format!(
+                    "process {} panicked after consuming message {}; message will not be replayed",
+                    step.process_name, step.message_label
+                )))
+            }
         }
-        Ok(())
     }
 
     fn reject_unhandled_messages(&self) -> Result<()> {

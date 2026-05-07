@@ -180,6 +180,7 @@ fn lower_step_result(step_result: CheckedStepResult) -> StepResult {
     match step_result {
         CheckedStepResult::Continue => StepResult::Continue,
         CheckedStepResult::Stop => StepResult::Stop,
+        CheckedStepResult::Panic => StepResult::Panic,
     }
 }
 

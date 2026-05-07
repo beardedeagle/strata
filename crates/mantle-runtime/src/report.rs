@@ -49,4 +49,5 @@ pub struct ProcessReport {
 pub enum ProcessStatus {
     Running,
     Stopped,
+    Failed,
 }
