@@ -169,6 +169,22 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             json_escape(process),
             reason.as_str()
         ),
+        RuntimeEvent::ProcessFailed {
+            pid,
+            process_id,
+            process,
+            state_id,
+            state,
+            reason,
+        } => format!(
+            "{{\"event\":\"process_failed\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"state_id\":{},\"state\":\"{}\",\"reason\":\"{}\"}}",
+            pid.as_u64(),
+            process_id.as_u32(),
+            json_escape(process),
+            state_id.as_u32(),
+            json_escape(state),
+            reason.as_str()
+        ),
     }
 }
 

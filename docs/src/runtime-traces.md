@@ -56,13 +56,14 @@ instances share `process_id` and label metadata but have different `pid` values.
 | `state_updated` | A process state changed to another admitted state value. |
 | `program_output` | A process emitted declared output. |
 | `process_stopped` | A process stopped normally. |
+| `process_failed` | A process failed abnormally after a consumed message. |
 
 ## Artifact Loaded
 
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"5","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"6","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -119,9 +120,9 @@ Example shape:
 {"event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"First","result":"Continue","state_id":1,"state":"SawFirst"}
 ```
 
-`result` is `Continue` or `Stop`. `state_id` and `state` are the transition
-target state. Payload-bearing steps include the same `payload_type` and
-`payload` fields as mailbox events.
+`result` is `Continue`, `Stop`, or `Panic`. `state_id` and `state` are the
+transition target state. Payload-bearing steps include the same `payload_type`
+and `payload` fields as mailbox events.
 
 ## State Updated
 
@@ -154,3 +155,15 @@ Example shape:
 ```
 
 The current stop reason is `normal`.
+
+## Process Failed
+
+Example shape:
+
+```json
+{"event":"process_failed","pid":2,"process_id":1,"process":"Worker","state_id":1,"state":"Failed","reason":"panic"}
+```
+
+`Panic(value)` records a `process_stepped` event with `result:"Panic"`, then a
+`process_failed` event. The dequeued message is already consumed and is not
+replayed. The current failure reason is `panic`.

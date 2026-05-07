@@ -64,6 +64,7 @@ impl CheckedStateId {
 pub(in crate::language) enum CheckedStepResult {
     Continue,
     Stop,
+    Panic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

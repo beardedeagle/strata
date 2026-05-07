@@ -1,0 +1,70 @@
+name: Setup Rust
+description: Install a Rust toolchain and the pinned just runner.
+
+inputs:
+  toolchain:
+    description: Rust toolchain to install.
+    required: true
+  components:
+    description: Optional comma-separated Rust components to install.
+    required: false
+    default: ""
+  profile:
+    description: Rustup installation profile.
+    required: false
+    default: minimal
+  install-just:
+    description: Whether to install the pinned just runner.
+    required: false
+    default: "true"
+  just-version:
+    description: just version to install.
+    required: false
+    default: "1.50.0"
+  install-target-dir:
+    description: Cargo target directory for tool installation builds.
+    required: false
+    default: target/cargo-install
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      shell: bash
+      env:
+        RUST_TOOLCHAIN: ${{ inputs.toolchain }}
+        RUST_COMPONENTS: ${{ inputs.components }}
+        RUST_PROFILE: ${{ inputs.profile }}
+      run: |
+        set -euo pipefail
+
+        if ! command -v rustup >/dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          export PATH="$HOME/.cargo/bin:$PATH"
+        fi
+
+        if [[ -n "${GITHUB_PATH:-}" ]]; then
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
+
+        rustup_args=(toolchain install "$RUST_TOOLCHAIN" --profile "$RUST_PROFILE")
+        if [[ -n "$RUST_COMPONENTS" ]]; then
+          rustup_args+=(--component "$RUST_COMPONENTS")
+        fi
+
+        rustup "${rustup_args[@]}"
+
+    - name: Install stable Rust for tools
+      if: ${{ inputs.install-just == 'true' && inputs.toolchain != 'stable' }}
+      shell: bash
+      run: rustup toolchain install stable --profile minimal
+
+    - name: Install just
+      if: ${{ inputs.install-just == 'true' }}
+      shell: bash
+      env:
+        JUST_VERSION: ${{ inputs.just-version }}
+        CARGO_INSTALL_TARGET_DIR: ${{ inputs.install-target-dir }}
+      run: |
+        set -euo pipefail
+        cargo +stable install just --version "$JUST_VERSION" --locked --target-dir "$CARGO_INSTALL_TARGET_DIR"

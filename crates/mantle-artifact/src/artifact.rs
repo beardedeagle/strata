@@ -19,6 +19,7 @@ use crate::{
 pub enum StepResult {
     Continue,
     Stop,
+    Panic,
 }
 
 impl StepResult {
@@ -26,6 +27,7 @@ impl StepResult {
         match self {
             Self::Continue => "Continue",
             Self::Stop => "Stop",
+            Self::Panic => "Panic",
         }
     }
 
@@ -33,6 +35,7 @@ impl StepResult {
         match value {
             "Continue" => Ok(Self::Continue),
             "Stop" => Ok(Self::Stop),
+            "Panic" => Ok(Self::Panic),
             _ => Err(Error::new(format!("invalid step_result value {value:?}"))),
         }
     }

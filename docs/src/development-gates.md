@@ -9,6 +9,11 @@ The standard local verification bundle is:
 just quality
 ```
 
+This bundle selects stable Rust explicitly through the `Justfile`. It also runs
+`just toolchain-policy-check`, which rejects repository instructions or
+workflow steps that switch the whole checkout to nightly Rust. Nightly-only
+tools must be invoked per command with `+nightly`.
+
 Run the source-to-runtime product gates after changes that affect syntax,
 checking, lowering, artifacts, runtime behavior, diagnostics, examples, or
 acceptance criteria.
@@ -21,8 +26,8 @@ just product-gates
 
 The standard CI workflow installs `just` and calls `just ci-rust` on Linux,
 macOS, and Windows. The Linux quality job calls `just ci-quality`, which runs
-formatting, check, tests, clippy, build, tool metadata validation, mdBook,
-product gates, and diff hygiene.
+formatting, check, tests, clippy, build, tool metadata validation, toolchain
+policy validation, mdBook, product gates, and diff hygiene.
 
 CI uses GitHub-owned, SHA-pinned checkout and cache actions. The cache stores
 Cargo registry/git data and per-job build target directories. It does not cache
@@ -47,7 +52,6 @@ They cover three initial boundaries:
 Useful local commands:
 
 ```sh
-rustup override set nightly
 just install-fuzz-tools
 just fuzz-ci
 ```
@@ -60,8 +64,7 @@ pure or in-memory paths rather than filesystem-specific CLI behavior.
 Useful local commands:
 
 ```sh
-rustup toolchain install nightly --component miri
-rustup override set nightly
+just install-miri-tools
 just miri-ci
 ```
 

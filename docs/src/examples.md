@@ -13,6 +13,8 @@ Read them in this order:
    bindings in actor step signatures.
 6. `actor_reply.str` for transporting typed process references through message
    payloads.
+7. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+   after message dequeue.
 
 ## Hello
 
@@ -140,3 +142,20 @@ Key source ideas:
 - `Work(reply_to: ProcessRef<Sink>)` binds the received reference immutably.
 - `send reply_to Done;` routes by the transported runtime process ID and
   admitted target process ID, not by source labels.
+
+## Actor Panic No Replay
+
+`examples/actor_panic_no_replay.str` admits an explicit abnormal transition.
+`Main` queues two `Ping` messages to `Worker`; `Worker` dequeues one message,
+returns `Panic(Failed)`, records failure evidence, and the consumed message is
+not replayed.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_panic_no_replay.str
+cargo run -p strata --bin strata -- build examples/actor_panic_no_replay.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta
+```
+
+The final command is expected to return non-zero. The runtime trace should show
+two accepted `Ping` messages, one `message_dequeued` for `Worker`, one
+`process_stepped` event with `result:"Panic"`, and one `process_failed` event.

@@ -1,5 +1,10 @@
 set dotenv-load
 
+stable_toolchain := "stable"
+nightly_toolchain := "nightly"
+mdbook_version := "0.5.2"
+cargo_fuzz_version := "0.13.1"
+
 default:
     @just --list
 
@@ -8,24 +13,24 @@ default:
 # =============================================================================
 
 fmt:
-    cargo fmt --all
-    cargo fmt --manifest-path fuzz/Cargo.toml --all
+    cargo +{{stable_toolchain}} fmt --all
+    cargo +{{stable_toolchain}} fmt --manifest-path fuzz/Cargo.toml --all
 
 fmt-check:
-    cargo fmt --all --check
-    cargo fmt --manifest-path fuzz/Cargo.toml --all --check
+    cargo +{{stable_toolchain}} fmt --all --check
+    cargo +{{stable_toolchain}} fmt --manifest-path fuzz/Cargo.toml --all --check
 
 check:
-    cargo check --workspace --all-targets
+    cargo +{{stable_toolchain}} check --workspace --all-targets
 
 test:
-    cargo test --workspace --all-targets
+    cargo +{{stable_toolchain}} test --workspace --all-targets
 
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo +{{stable_toolchain}} clippy --workspace --all-targets -- -D warnings
 
 build:
-    cargo build
+    cargo +{{stable_toolchain}} build
 
 metadata-check:
     #!/usr/bin/env bash
@@ -55,27 +60,97 @@ docs-serve:
 diff-check:
     git diff --check
 
-product-gates: build
-    cargo run -p strata --bin strata -- check examples/hello.str
-    cargo run -p strata --bin strata -- build examples/hello.str
-    cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
-    cargo run -p strata --bin strata -- check examples/actor_ping.str
-    cargo run -p strata --bin strata -- build examples/actor_ping.str
-    cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
-    cargo run -p strata --bin strata -- check examples/actor_sequence.str
-    cargo run -p strata --bin strata -- build examples/actor_sequence.str
-    cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
-    cargo run -p strata --bin strata -- check examples/actor_instances.str
-    cargo run -p strata --bin strata -- build examples/actor_instances.str
-    cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
-    cargo run -p strata --bin strata -- check examples/actor_payloads.str
-    cargo run -p strata --bin strata -- build examples/actor_payloads.str
-    cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
-    cargo run -p strata --bin strata -- check examples/actor_reply.str
-    cargo run -p strata --bin strata -- build examples/actor_reply.str
-    cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
+toolchain-policy-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-quality: fmt-check check test lint metadata-check docs product-gates diff-check
+    paths=(README.md docs .github Justfile)
+    nightly_word="nightly"
+    forbidden_patterns=(
+        "rustup override set ${nightly_word}"
+        "rustup default ${nightly_word}"
+    )
+
+    for pattern in "${forbidden_patterns[@]}"; do
+        if git grep --untracked -n -- "$pattern" -- "${paths[@]}"; then
+            echo "Error: repo toolchain policy forbids '$pattern'." >&2
+            echo "Use stable for standard gates and select nightly per command with +nightly." >&2
+            exit 1
+        fi
+    done
+
+    nightly_cargo_regex='(^|[[:space:]])cargo (fuzz|miri)([[:space:]]|$)'
+    if git grep --untracked -n -E "$nightly_cargo_regex" -- "${paths[@]}"; then
+        echo "Error: nightly-only cargo subcommands must be invoked as cargo +nightly ..." >&2
+        exit 1
+    fi
+
+    fuzz_clippy_regex='(^|[[:space:]])cargo clippy --manifest-path fuzz/Cargo.toml'
+    if git grep --untracked -n -E "$fuzz_clippy_regex" -- "${paths[@]}"; then
+        echo "Error: fuzz clippy must be invoked as cargo +nightly clippy ..." >&2
+        exit 1
+    fi
+
+    echo "Toolchain policy OK: standard gates use stable and nightly gates are explicit."
+
+product-gates: product-success-gates product-failure-gates
+
+product-success-gates: build
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/hello.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/hello.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_ping.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_ping.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_sequence.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_sequence.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_instances.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_instances.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payloads.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payloads.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_reply.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_reply.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
+
+product-failure-gates: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_panic_no_replay.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_panic_no_replay.str
+    trace="target/strata/actor_panic_no_replay.observability.jsonl"
+    run_stderr="$(mktemp)"
+    trap 'rm -f "$run_stderr"' EXIT
+
+    rm -f "$trace"
+    if cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta 2>"$run_stderr"; then
+        echo "Error: actor_panic_no_replay was expected to fail closed." >&2
+        exit 1
+    fi
+    if ! grep -q 'mantle: error: process Worker panicked after consuming message Ping; message will not be replayed' "$run_stderr"; then
+        echo "Error: actor_panic_no_replay failed for an unexpected reason." >&2
+        cat "$run_stderr" >&2
+        exit 1
+    fi
+
+    test -f "$trace"
+    accepted_count="$(grep -c '"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping"' "$trace")"
+    dequeued_count="$(grep -c '"event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping"' "$trace")"
+    if [[ "$accepted_count" != "2" || "$dequeued_count" != "1" ]]; then
+        echo "Error: expected two accepted Worker Ping messages and one dequeue before panic." >&2
+        exit 1
+    fi
+    grep -q '"event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","result":"Panic","state_id":1,"state":"Failed"' "$trace"
+    grep -q '"event":"process_failed","pid":2,"process_id":1,"process":"Worker","state_id":1,"state":"Failed","reason":"panic"' "$trace"
+    if grep -q '"event":"process_stopped","pid":2,"process_id":1,"process":"Worker"' "$trace"; then
+        echo "Error: panic must not be reported as a normal process stop." >&2
+        exit 1
+    fi
+
+quality: fmt-check check test lint metadata-check toolchain-policy-check docs product-gates diff-check
 
 ci-native: quality
 
@@ -123,12 +198,16 @@ install-linux-metadata-tools:
     sudo apt-get install -y jq libxml2-utils
 
 install-docs-tools:
-    cargo install mdbook --version 0.5.2 --locked --target-dir target/cargo-install
+    rustup toolchain install {{stable_toolchain}} --profile minimal
+    cargo +{{stable_toolchain}} install mdbook --version {{mdbook_version}} --locked --target-dir target/cargo-install
 
 install-fuzz-tools:
-    rustup toolchain install stable --profile minimal
-    rustup toolchain install nightly --profile minimal --component clippy
-    cargo +stable install cargo-fuzz --version 0.13.1 --locked --target-dir target/cargo-install
+    rustup toolchain install {{stable_toolchain}} --profile minimal
+    rustup toolchain install {{nightly_toolchain}} --profile minimal --component clippy
+    cargo +{{stable_toolchain}} install cargo-fuzz --version {{cargo_fuzz_version}} --locked --target-dir target/cargo-install
+
+install-miri-tools:
+    rustup toolchain install {{nightly_toolchain}} --profile minimal --component miri
 
 ci-rust: check test build
 
@@ -139,27 +218,27 @@ ci-quality: quality
 # =============================================================================
 
 fuzz-lint:
-    cargo +nightly clippy --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings
+    cargo +{{nightly_toolchain}} clippy --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings
 
 fuzz-build:
-    cargo +nightly fuzz build strata_parse_check_lower
-    cargo +nightly fuzz build mantle_artifact_decode
-    cargo +nightly fuzz build mantle_runtime_from_source
+    cargo +{{nightly_toolchain}} fuzz build strata_parse_check_lower
+    cargo +{{nightly_toolchain}} fuzz build mantle_artifact_decode
+    cargo +{{nightly_toolchain}} fuzz build mantle_runtime_from_source
 
 fuzz-smoke:
-    cargo +nightly fuzz run strata_parse_check_lower -- -runs=256
-    cargo +nightly fuzz run mantle_artifact_decode -- -runs=256
-    cargo +nightly fuzz run mantle_runtime_from_source -- -runs=128
+    cargo +{{nightly_toolchain}} fuzz run strata_parse_check_lower -- -runs=256
+    cargo +{{nightly_toolchain}} fuzz run mantle_artifact_decode -- -runs=256
+    cargo +{{nightly_toolchain}} fuzz run mantle_runtime_from_source -- -runs=128
 
 fuzz-ci: fuzz-build fuzz-lint fuzz-smoke
 
 miri-setup:
-    cargo +nightly miri setup
+    cargo +{{nightly_toolchain}} miri setup
 
 miri-smoke:
-    cargo +nightly miri test -p mantle-artifact artifact_round_trips_and_validates_magic
-    cargo +nightly miri test -p strata parses_and_checks_hello
-    cargo +nightly miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
+    cargo +{{nightly_toolchain}} miri test -p mantle-artifact artifact_round_trips_and_validates_magic
+    cargo +{{nightly_toolchain}} miri test -p strata parses_and_checks_hello
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
 
 miri-ci: miri-setup miri-smoke
 
@@ -245,10 +324,10 @@ build-matrix level target="native" package="all":
     echo "Package: $PACKAGE_DESC"
     if [[ -n "$RUST_TARGET" ]]; then
         echo "Target: $RUST_TARGET"
-        cargo build "${CARGO_ARGS[@]}" "${PACKAGE_ARGS[@]}" --target "$RUST_TARGET"
+        cargo +{{stable_toolchain}} build "${CARGO_ARGS[@]}" "${PACKAGE_ARGS[@]}" --target "$RUST_TARGET"
     else
-        echo "Target: native ($(rustc -vV | awk '/^host:/ { print $2 }'))"
-        cargo build "${CARGO_ARGS[@]}" "${PACKAGE_ARGS[@]}"
+        echo "Target: native ($(rustc +{{stable_toolchain}} -vV | awk '/^host:/ { print $2 }'))"
+        cargo +{{stable_toolchain}} build "${CARGO_ARGS[@]}" "${PACKAGE_ARGS[@]}"
     fi
 
 build-all level="release":

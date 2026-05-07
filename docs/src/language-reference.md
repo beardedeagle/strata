@@ -19,7 +19,7 @@ Mantle artifact internals.
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, payload sends, and payload-binding step patterns. |
-| Transition result | `ProcResult<T>` with `Stop(value)` and `Continue(value)`. |
+| Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
 The current `module` declaration names a source unit. It does not create an
 import namespace, package, library, or visibility boundary yet.
@@ -201,6 +201,7 @@ let worker: ProcessRef<Worker> = spawn Worker;
 send worker Ping;
 return Stop(state);
 return Continue(next_state);
+return Panic(failed_state);
 ```
 
 `emit` records and prints an output literal. Output literals must be non-empty,
@@ -216,7 +217,8 @@ through a received `ProcessRef<T>` payload binding. The message must be accepted
 by the reference target's process message enum. Static validation rejects
 self-spawn, spawning the already-started entry process, duplicate
 process-reference binding in one transition, sends before the reference is
-bound, mailbox overflow, and messages left unhandled after a target stops.
+bound, mailbox overflow, and messages left unhandled after a target stops
+normally.
 
 Payload messages use the variant constructor at the send site:
 
@@ -320,10 +322,14 @@ immutable values travel in runtime message envelopes.
 ```strata
 return Continue(next_state);
 return Stop(final_state);
+return Panic(failed_state);
 ```
 
 `Continue(value)` replaces the process state and keeps the process running.
 `Stop(value)` replaces the process state and terminates the process normally.
+`Panic(value)` replaces the process state, marks the process failed, records
+failure trace evidence, and fails the run without replaying the consumed
+message.
 
 Passing the `state` parameter keeps the current state:
 
@@ -337,6 +343,7 @@ replacement:
 ```strata
 return Continue(WorkerState { phase: Idle });
 return Stop(Handled);
+return Panic(Failed);
 ```
 
 State changes are immutable whole-value transitions. There is no assignment

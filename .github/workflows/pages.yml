@@ -45,19 +45,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pages-cargo-install-
 
-      - name: Install Rust
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v rustup >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
-          fi
-          rustup toolchain install stable --profile minimal
-
-      - name: Install just
-        run: cargo install just --version 1.50.0 --locked --target-dir target/cargo-install
+      - name: Setup stable Rust and just
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: stable
 
       - name: Install docs tools
         run: just install-docs-tools

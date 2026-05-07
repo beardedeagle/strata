@@ -46,22 +46,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-nightly-target-
 
-      - name: Install nightly Rust
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v rustup >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
-          fi
-          rustup toolchain install nightly --profile minimal
-          rustup override set nightly
-
-      - name: Install just
-        run: |
-          rustup toolchain install stable --profile minimal
-          cargo +stable install just --version 1.50.0 --locked --target-dir target/cargo-install
+      - name: Setup stable Rust and just
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: stable
 
       - name: Install cargo-fuzz
         run: just install-fuzz-tools
@@ -97,22 +85,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-nightly-target-
 
-      - name: Install Miri
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v rustup >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
-          fi
-          rustup toolchain install nightly --component miri
-          rustup override set nightly
+      - name: Setup stable Rust and just
+        uses: ./.github/actions/setup-rust
+        with:
+          toolchain: stable
 
-      - name: Install just
-        run: |
-          rustup toolchain install stable --profile minimal
-          cargo +stable install just --version 1.50.0 --locked --target-dir target/cargo-install
+      - name: Install Miri
+        run: just install-miri-tools
 
       - name: Run Miri gate
         run: just miri-ci

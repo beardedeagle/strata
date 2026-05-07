@@ -477,3 +477,90 @@ fn actor_reply_checks_builds_and_runs_on_mantle() {
     assert!(trace.contains(r#""event":"message_accepted","pid":3,"process_id":2,"process":"Sink","message_id":0,"message":"Done","queue_depth":1,"sender_pid":2"#));
     assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work","payload_type":"ProcessRef<Sink>","payload":"ProcessRef<Sink>#3","payload_process_id":2,"payload_pid":3,"result":"Stop","state_id":0,"state":"WorkerState""#));
 }
+
+#[test]
+fn actor_panic_no_replay_checks_builds_and_fails_closed_on_mantle() {
+    let root = workspace_root();
+    ensure_workspace_binaries(&root);
+    let strata = binary_path(&root, "strata");
+    let mantle = binary_path(&root, "mantle");
+
+    let check = Command::new(&strata)
+        .args(["check", "examples/actor_panic_no_replay.str"])
+        .current_dir(&root)
+        .output()
+        .expect("strata check should run");
+    assert!(
+        check.status.success(),
+        "strata check failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let build = Command::new(&strata)
+        .args(["build", "examples/actor_panic_no_replay.str"])
+        .current_dir(&root)
+        .output()
+        .expect("strata build should run");
+    assert!(
+        build.status.success(),
+        "strata build failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let artifact_path = root.join("target/strata/actor_panic_no_replay.mta");
+    assert!(
+        artifact_path.exists(),
+        "expected {}",
+        artifact_path.display()
+    );
+
+    let trace_path = root.join("target/strata/actor_panic_no_replay.observability.jsonl");
+    if trace_path.exists() {
+        std::fs::remove_file(&trace_path).unwrap_or_else(|err| {
+            panic!(
+                "could not remove stale trace {}: {err}",
+                trace_path.display()
+            )
+        });
+    }
+
+    let run = Command::new(&mantle)
+        .args(["run", "target/strata/actor_panic_no_replay.mta"])
+        .current_dir(&root)
+        .output()
+        .expect("mantle run should run");
+    assert!(
+        !run.status.success(),
+        "mantle run should fail closed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains(
+        "mantle: error: process Worker panicked after consuming message Ping; message will not be replayed"
+    ));
+
+    let trace = std::fs::read_to_string(&trace_path)
+        .unwrap_or_else(|err| panic!("expected trace {}: {err}", trace_path.display()));
+    assert_eq!(
+        trace
+            .matches(r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping""#)
+            .count(),
+        2
+    );
+    assert_eq!(
+        trace
+            .matches(r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping""#)
+            .count(),
+        1
+    );
+    assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"Ready","to_state_id":1,"to":"Failed""#));
+    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Ping","result":"Panic","state_id":1,"state":"Failed""#));
+    assert!(trace.contains(r#""event":"process_failed","pid":2,"process_id":1,"process":"Worker","state_id":1,"state":"Failed","reason":"panic""#));
+    assert!(
+        !trace.contains(r#""event":"process_stopped","pid":2,"process_id":1,"process":"Worker""#)
+    );
+}

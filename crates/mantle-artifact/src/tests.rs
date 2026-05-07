@@ -31,6 +31,32 @@ fn artifact_round_trips_and_validates_magic() {
 }
 
 #[test]
+fn artifact_round_trips_panic_step_result() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0].step_result = StepResult::Panic;
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("panic artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains("process.1.transition.0.step_result=Panic"));
+}
+
+#[test]
+fn decode_rejects_unknown_step_result() {
+    let encoded = valid_artifact().encode().replace(
+        "process.1.transition.0.step_result=Stop",
+        "process.1.transition.0.step_result=Crash",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unknown step result should fail");
+
+    assert!(err
+        .to_string()
+        .contains("invalid step_result value \"Crash\""));
+}
+
+#[test]
 fn decode_rejects_unsupported_schema_before_body_fields() {
     let encoded = format!(
         "MTA0\nformat={ARTIFACT_FORMAT}\nschema_version=0\nprocess_count={}\n",

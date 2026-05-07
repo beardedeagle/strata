@@ -93,7 +93,12 @@ replacement state or the current state.
 ```strata
 return Continue(SawFirst);
 return Stop(state);
+return Panic(Failed);
 ```
+
+`Panic(value)` is an abnormal terminal result: Mantle records the replacement
+state and failure evidence, fails the run, and does not replay the consumed
+message.
 
 There is no assignment statement and no field update expression. Record state is
 constructed as a new whole value:

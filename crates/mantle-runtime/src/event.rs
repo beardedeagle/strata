@@ -112,6 +112,14 @@ pub enum RuntimeEvent {
         process: String,
         reason: RuntimeStopReason,
     },
+    ProcessFailed {
+        pid: RuntimeProcessId,
+        process_id: ProcessId,
+        process: String,
+        state_id: StateId,
+        state: String,
+        reason: RuntimeFailureReason,
+    },
 }
 
 #[derive(Debug)]
@@ -159,6 +167,7 @@ impl RuntimeOutputStream {
 pub enum RuntimeStepResult {
     Continue,
     Stop,
+    Panic,
 }
 
 impl RuntimeStepResult {
@@ -166,6 +175,7 @@ impl RuntimeStepResult {
         match self {
             Self::Continue => "Continue",
             Self::Stop => "Stop",
+            Self::Panic => "Panic",
         }
     }
 }
@@ -175,6 +185,7 @@ impl From<StepResult> for RuntimeStepResult {
         match value {
             StepResult::Continue => Self::Continue,
             StepResult::Stop => Self::Stop,
+            StepResult::Panic => Self::Panic,
         }
     }
 }
@@ -188,6 +199,19 @@ impl RuntimeStopReason {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Normal => "normal",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeFailureReason {
+    Panic,
+}
+
+impl RuntimeFailureReason {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Panic => "panic",
         }
     }
 }
