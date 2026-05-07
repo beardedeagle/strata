@@ -13,7 +13,7 @@ Mantle crates are structurally language-neutral. They may carry `source_language
 as opaque artifact metadata, but they must not own Strata source constants,
 Strata output-directory defaults, `.str` examples, or source-to-runtime gates.
 Strata-owned defaults live in `crates/strata`; cross-boundary gates live in
-`crates/source-to-runtime-gates`.
+`crates/strata-mantle-acceptance`.
 
 Artifact type identity is structural in Mantle. Lowering emits a Mantle type
 table and artifact records refer to entries by `TypeId`; Mantle admission and

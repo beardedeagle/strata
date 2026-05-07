@@ -204,8 +204,8 @@ examples/                 runnable Strata examples
 crates/strata/             Strata source checker, builder, and CLI
 crates/mantle-artifact/    Mantle Target Artifact encode/decode/validation
 crates/mantle-runtime/     local Mantle runtime and CLI
-crates/source-to-runtime-gates/
-                          source-to-runtime acceptance tests
+crates/strata-mantle-acceptance/
+                          Strata/Mantle source-to-runtime acceptance tests
 tools/                     editor and MIME metadata
 ```
 

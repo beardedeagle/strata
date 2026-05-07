@@ -40,13 +40,13 @@ fn mantle_crates_do_not_own_strata_surfaces() {
 }
 
 #[test]
-fn source_to_runtime_gates_are_workspace_owned() {
+fn strata_mantle_acceptance_harness_is_workspace_owned() {
     let root = workspace_root();
 
     assert!(
-        root.join("crates/source-to-runtime-gates/tests/source_to_runtime_gates.rs")
+        root.join("crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs")
             .is_file(),
-        "source-to-runtime gates must live in the workspace gate crate"
+        "source-to-runtime gates must live in the workspace acceptance harness"
     );
     assert!(
         !root

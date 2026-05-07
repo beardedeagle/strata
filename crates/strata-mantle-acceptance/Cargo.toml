@@ -1,5 +1,5 @@
 [package]
-name = "source-to-runtime-gates"
+name = "strata-mantle-acceptance"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
@@ -9,5 +9,5 @@ license = "MIT"
 mantle-artifact = { path = "../mantle-artifact" }
 
 [lib]
-name = "source_to_runtime_gates"
+name = "strata_mantle_acceptance"
 path = "src/lib.rs"
