@@ -270,7 +270,7 @@ impl LoadedProcess {
 
     fn validate_state_table(&self) -> Result<()> {
         validate_loaded_ident_field("process debug_name", &self.debug_name)?;
-        validate_loaded_type_field("state_type", &self.state_type)?;
+        validate_loaded_ident_field("state_type", &self.state_type)?;
         if self.state_values.is_empty() || self.state_values.len() > MAX_STATE_VALUES_PER_PROCESS {
             return Err(Error::new(format!(
                 "process {} loaded state_value_count must be between 1 and {MAX_STATE_VALUES_PER_PROCESS}",
@@ -1000,7 +1000,7 @@ fn validate_loaded_artifact_identity(format: &str, schema_version: &str) -> Resu
     }
     if schema_version != ARTIFACT_SCHEMA_VERSION {
         return Err(Error::new(format!(
-            "loaded artifact schema version {schema_version:?}; expected {ARTIFACT_SCHEMA_VERSION:?}"
+            "loaded artifact schema_version {schema_version:?}; expected {ARTIFACT_SCHEMA_VERSION:?}"
         )));
     }
     Ok(())

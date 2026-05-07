@@ -1001,6 +1001,18 @@ mod tests {
     }
 
     #[test]
+    fn runtime_rejects_loaded_invalid_schema_version_with_field_name_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.schema_version = "0".to_string();
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "loaded artifact schema_version \"0\"; expected",
+        );
+    }
+
+    #[test]
     fn runtime_rejects_loaded_control_character_artifact_identity_before_artifact_loaded() {
         let artifact = artifact_with_large_unbound_process_ref_table();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
@@ -1058,6 +1070,18 @@ mod tests {
         assert!(err.contains("\"Bad\\nState\""));
         assert!(!err.contains("Bad\nState"));
         assert!(!err.contains("loaded state value MainState has type"));
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_process_ref_state_type_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].state_type = "ProcessRef<Worker>".to_string();
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "state_type must be an identifier, got \"ProcessRef<Worker>\"",
+        );
     }
 
     #[test]
