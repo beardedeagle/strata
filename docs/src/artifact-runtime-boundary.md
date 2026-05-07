@@ -29,9 +29,11 @@ artifact body.
 
 ## Execution
 
-Mantle loads admitted transitions into indexed runtime tables. A dequeued
-message selects the transition by typed message ID. The runtime then validates
-the loaded transition effect authority before executing any action. Dynamic
+Mantle loads admitted transitions into indexed runtime tables. Before emitting
+`ArtifactLoaded` or executing runtime side effects, Mantle validates loaded
+entry metadata, state tables, transition state targets and templates, outputs,
+process references, sends, payload templates, and transition effect authority.
+A dequeued message selects the transition by typed message ID. Dynamic
 next-state templates resolve to an admitted state ID by typed state value
 identity, not by display label text.
 

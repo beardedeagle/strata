@@ -30,7 +30,7 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
     host: &mut H,
     limits: RunLimits,
 ) -> Result<RuntimeReport> {
-    program.validate_effect_authority()?;
+    program.validate_admission()?;
     let mut run = RuntimeRun::new(
         program,
         host,
@@ -905,7 +905,7 @@ mod tests {
         ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactMessageVariant,
         ArtifactProcess, ArtifactProcessRef, ArtifactStateValue, ArtifactTransition,
         ArtifactValueTemplateField, MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS,
-        STRATA_SOURCE_LANGUAGE, StepResult,
+        MAX_VALUE_TEMPLATE_DEPTH, STRATA_SOURCE_LANGUAGE, StepResult,
     };
 
     #[test]
@@ -946,25 +946,10 @@ mod tests {
             .push(LoadedAction::Emit {
                 output: OutputId::new(0),
             });
-        let mut host = InMemoryRuntimeHost::default();
 
-        let err = run_loaded_program_with_host(&program, &mut host, RunLimits::default())
-            .expect_err("loaded runtime must reject action without admitted effect authority");
-
-        assert!(
-            err.to_string()
-                .contains("process Main transition 0 uses effect emit without admitted authority")
-        );
-        assert!(
-            host.stdout().is_empty(),
-            "effect authority failure must happen before host output"
-        );
-        assert!(
-            !host
-                .events()
-                .iter()
-                .any(|event| matches!(event, RuntimeEvent::ProgramOutput { .. })),
-            "effect authority failure must happen before output trace events"
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 uses effect emit without admitted authority",
         );
     }
 
@@ -974,21 +959,10 @@ mod tests {
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].effect_authority =
             crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
-        let mut host = InMemoryRuntimeHost::default();
 
-        let err = run_loaded_program_with_host(&program, &mut host, RunLimits::default())
-            .expect_err("loaded runtime must reject unused admitted effect authority");
-
-        assert!(
-            err.to_string()
-                .contains("process Main transition 0 admits effect emit but no action uses it")
-        );
-        assert!(
-            !host
-                .events()
-                .iter()
-                .any(|event| matches!(event, RuntimeEvent::StateUpdated { .. })),
-            "effect authority failure must happen before state update trace events"
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 admits effect emit but no action uses it",
         );
     }
 
@@ -1007,25 +981,281 @@ mod tests {
             .push(LoadedAction::Emit {
                 output: OutputId::new(0),
             });
-        let mut host = InMemoryRuntimeHost::default();
 
-        let err = run_loaded_program_with_host(&program, &mut host, RunLimits::default())
-            .expect_err("loaded runtime must reject duplicate admitted effect authority");
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 admits duplicate effect emit",
+        );
+    }
 
-        assert!(
-            err.to_string()
-                .contains("process Main transition 0 admits duplicate effect emit")
+    #[test]
+    fn runtime_rejects_loaded_invalid_artifact_identity_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.format = "unexpected-format".to_string();
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "loaded artifact format unexpected-format; expected mantle-target-artifact",
         );
-        assert!(
-            host.stdout().is_empty(),
-            "effect authority failure must happen before host output"
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_payload_bearing_entry_message_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].message_variants[0].payload_type = Some("StartPayload".to_string());
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "entry message id 0 must not require a payload",
         );
-        assert!(
-            !host
-                .events()
-                .iter()
-                .any(|event| matches!(event, RuntimeEvent::ProgramOutput { .. })),
-            "effect authority failure must happen before output trace events"
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_invalid_message_payload_type_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[1].message_variants[0].payload_type = Some("ProcessRef<>".to_string());
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Worker message payload_type: message payload_type must be a type reference, got \"ProcessRef<>\"",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_invalid_init_state_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].init_state = StateId::new(1);
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main init_state id 1 is not a loaded state value",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_unknown_next_state_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].next_state = NextState::Value(StateId::new(1));
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 next_state id 1 is not a loaded state value",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_unadmitted_template_state_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].next_state =
+            NextState::Template(ArtifactValueTemplate::Literal {
+                ty: "MainState".to_string(),
+                value: "UnadmittedState".to_string(),
+            });
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 next_state_template produced value UnadmittedState not admitted by loaded state table",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].next_state =
+            NextState::Template(ArtifactValueTemplate::Record {
+                ty: "MainState".to_string(),
+                fields: vec![ArtifactValueTemplateField {
+                    name: "item".to_string(),
+                    value: ArtifactValueTemplate::Literal {
+                        ty: "Bad<Type".to_string(),
+                        value: "Item".to_string(),
+                    },
+                }],
+            });
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 next_state_template.field.item.type must be a type reference",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_template_depth_overflow_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].next_state =
+            NextState::Template(record_template_with_depth(MAX_VALUE_TEMPLATE_DEPTH + 2));
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "exceeds maximum value template depth",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_unknown_emit_output_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
+        program.processes[0].transitions[0]
+            .actions
+            .push(LoadedAction::Emit {
+                output: OutputId::new(0),
+            });
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "output id 0 is not loaded",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_invalid_output_text_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.outputs.push(String::new());
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
+        program.processes[0].transitions[0]
+            .actions
+            .push(LoadedAction::Emit {
+                output: OutputId::new(0),
+            });
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "loaded output must be non-empty and contain no control characters",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_spawn_target_mismatch_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Spawn]);
+        program.processes[0].transitions[0]
+            .actions
+            .push(LoadedAction::Spawn {
+                target: ProcessId::new(0),
+                process_ref: ProcessRefId::new(0),
+            });
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 spawn process reference id 0 targets process id 0, expected 1",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_send_before_spawn_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Send]);
+        program.processes[0].transitions[0]
+            .actions
+            .push(LoadedAction::Send {
+                target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+                message: MessageId::new(0),
+                payload: None,
+            });
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 sends through unbound process reference id 0",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_send_missing_payload_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[1].message_variants[0].payload_type = Some("Job".to_string());
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[
+                ArtifactEffect::Spawn,
+                ArtifactEffect::Send,
+            ]);
+        program.processes[0].transitions[0].actions = vec![
+            LoadedAction::Spawn {
+                target: ProcessId::new(1),
+                process_ref: ProcessRefId::new(0),
+            },
+            LoadedAction::Send {
+                target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+                message: MessageId::new(0),
+                payload: None,
+            },
+        ];
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 sends process id 1 message id 0 without required payload",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[1].message_variants[0].payload_type =
+            Some("ProcessRef<Worker>".to_string());
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[
+                ArtifactEffect::Spawn,
+                ArtifactEffect::Send,
+            ]);
+        program.processes[0].transitions[0].actions = vec![
+            LoadedAction::Spawn {
+                target: ProcessId::new(1),
+                process_ref: ProcessRefId::new(0),
+            },
+            LoadedAction::Send {
+                target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+                message: MessageId::new(0),
+                payload: Some(ArtifactValueTemplate::ProcessRef {
+                    ty: "ProcessRef<Worker>".to_string(),
+                    target_process: ProcessId::new(0),
+                    process_ref: ProcessRefId::new(0),
+                }),
+            },
+        ];
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process reference payload type ProcessRef<Worker> targets Worker, expected Main",
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_received_process_ref_send_without_payload_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Send]);
+        program.processes[0].transitions[0]
+            .actions
+            .push(LoadedAction::Send {
+                target: LoadedSendTarget::ReceivedPayload {
+                    ty: "ProcessRef<Worker>".to_string(),
+                    target_process: ProcessId::new(1),
+                },
+                message: MessageId::new(0),
+                payload: None,
+            });
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Main transition 0 send target requires a payload-bearing message",
         );
     }
 
@@ -1213,6 +1443,29 @@ mod tests {
         );
     }
 
+    fn assert_loaded_admission_rejects_before_artifact_loaded(
+        program: &LoadedProgram,
+        expected: &str,
+    ) {
+        let mut host = InMemoryRuntimeHost::default();
+
+        let err = run_loaded_program_with_host(program, &mut host, RunLimits::default())
+            .expect_err("loaded runtime admission should fail closed");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected error containing {expected:?}, got {err}"
+        );
+        assert!(
+            host.stdout().is_empty(),
+            "loaded runtime admission failure must happen before host output"
+        );
+        assert!(
+            host.events().is_empty(),
+            "loaded runtime admission failure must happen before ArtifactLoaded"
+        );
+    }
+
     fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {
         MantleArtifact {
             format: ARTIFACT_FORMAT.to_string(),
@@ -1272,5 +1525,26 @@ mod tests {
             .iter()
             .map(|value| ArtifactStateValue::new(ty, *value))
             .collect()
+    }
+
+    fn record_template_with_depth(depth: usize) -> ArtifactValueTemplate {
+        let mut template = ArtifactValueTemplate::Literal {
+            ty: "Leaf".to_string(),
+            value: "Leaf".to_string(),
+        };
+        for _ in 0..depth {
+            template = ArtifactValueTemplate::Record {
+                ty: "Box".to_string(),
+                fields: vec![ArtifactValueTemplateField {
+                    name: "item".to_string(),
+                    value: template,
+                }],
+            };
+        }
+        match &mut template {
+            ArtifactValueTemplate::Record { ty, .. } => *ty = "MainState".to_string(),
+            _ => unreachable!("depth above zero produces a record"),
+        }
+        template
     }
 }
