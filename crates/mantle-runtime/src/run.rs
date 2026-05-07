@@ -996,8 +996,35 @@ mod tests {
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
-            "loaded artifact format unexpected-format; expected mantle-target-artifact",
+            "loaded artifact format \"unexpected-format\"; expected \"mantle-target-artifact\"",
         );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_control_character_artifact_identity_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.format = "bad\nformat".to_string();
+
+        let err = loaded_admission_error_before_artifact_loaded(&program);
+
+        assert!(err.contains(
+            "loaded artifact format must be non-empty and contain no control characters"
+        ));
+        assert!(err.contains("\"bad\\nformat\""));
+        assert!(!err.contains("bad\nformat"));
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_oversized_artifact_identity_before_artifact_loaded() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.schema_version = "x".repeat(MAX_FIELD_VALUE_BYTES + 1);
+
+        let err = loaded_admission_error_before_artifact_loaded(&program);
+
+        assert!(err.contains("loaded artifact schema_version exceeds maximum length"));
+        assert!(!err.contains(&"x".repeat(256)));
     }
 
     #[test]
@@ -1447,15 +1474,21 @@ mod tests {
         program: &LoadedProgram,
         expected: &str,
     ) {
+        let err = loaded_admission_error_before_artifact_loaded(program);
+
+        assert!(
+            err.contains(expected),
+            "expected error containing {expected:?}, got {err}"
+        );
+    }
+
+    fn loaded_admission_error_before_artifact_loaded(program: &LoadedProgram) -> String {
         let mut host = InMemoryRuntimeHost::default();
 
         let err = run_loaded_program_with_host(program, &mut host, RunLimits::default())
             .expect_err("loaded runtime admission should fail closed");
+        let err = err.to_string();
 
-        assert!(
-            err.to_string().contains(expected),
-            "expected error containing {expected:?}, got {err}"
-        );
         assert!(
             host.stdout().is_empty(),
             "loaded runtime admission failure must happen before host output"
@@ -1464,6 +1497,7 @@ mod tests {
             host.events().is_empty(),
             "loaded runtime admission failure must happen before ArtifactLoaded"
         );
+        err
     }
 
     fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {
