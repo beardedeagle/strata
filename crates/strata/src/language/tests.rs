@@ -6,9 +6,9 @@ use super::checked::{
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
-    ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactValueTemplate, ProcessId,
-    ProcessRefId, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
-    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
+    ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget,
+    ArtifactValueTemplate, ProcessId, ProcessRefId, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES,
+    MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
     MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS,
 };
 
@@ -168,11 +168,18 @@ fn parses_and_checks_hello() {
     assert_eq!(transition.message(), checked_message_id(0));
     assert_eq!(transition.step_result(), CheckedStepResult::Stop);
     assert_eq!(transition.next_state(), CheckedNextState::Current);
+    assert_eq!(transition.effects(), &[Effect::Emit]);
     assert_eq!(
         transition.actions(),
         [CheckedAction::Emit {
             output: checked_output_id(0)
         }]
+    );
+
+    let artifact = lower_to_artifact(&checked, HELLO).expect("hello should lower");
+    assert_eq!(
+        artifact.processes[0].transitions[0].effects,
+        vec![ArtifactEffect::Emit]
     );
 }
 
@@ -1505,8 +1512,20 @@ fn parses_and_checks_actor_sequence_step_patterns() {
 
     let artifact = lower_to_artifact(&checked, ACTOR_SEQUENCE)
         .expect("step patterns should lower to transition records");
+    assert_eq!(
+        artifact.processes[0].transitions[0].effects,
+        vec![ArtifactEffect::Spawn, ArtifactEffect::Send]
+    );
     let worker_artifact = &artifact.processes[1];
     assert_eq!(worker_artifact.transitions.len(), 2);
+    assert_eq!(
+        worker_artifact.transitions[0].effects,
+        vec![ArtifactEffect::Emit]
+    );
+    assert_eq!(
+        worker_artifact.transitions[1].effects,
+        vec![ArtifactEffect::Emit]
+    );
     assert_eq!(
         worker_artifact.transitions[0].message,
         mantle_artifact::MessageId::new(0)

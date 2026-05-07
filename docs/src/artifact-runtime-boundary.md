@@ -20,6 +20,7 @@ execution, the artifact decoder and validator check:
 - unique state values per process;
 - unique process reference names per process;
 - exactly one transition per accepted message;
+- exact transition effect authority for emitted, spawned, and sent actions;
 - transition references to known messages, state values, process references,
   outputs, and process IDs.
 
@@ -31,6 +32,8 @@ artifact body.
 Mantle loads admitted transitions into indexed runtime tables. A dequeued
 message selects the transition by typed message ID. The runtime then applies the
 transition as a whole-value state replacement and executes admitted actions.
+Transition effect metadata is admitted with the artifact and must exactly match
+the action effects that execute.
 
 The current action set covers:
 

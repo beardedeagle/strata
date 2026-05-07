@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
-    write_artifact, ArtifactAction, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
-    ArtifactProcessRef, ArtifactSendTarget, ArtifactTransition, ArtifactValueTemplate,
-    ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
-    STRATA_SOURCE_LANGUAGE,
+    write_artifact, ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactPayload,
+    ArtifactProcess, ArtifactProcessRef, ArtifactSendTarget, ArtifactTransition,
+    ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT,
+    ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
 };
 
 use super::program::LoadedProgram;
@@ -21,6 +21,24 @@ fn runtime_rejects_invalid_artifact_identity() {
     let err = run_artifact(Path::new("target/test/bad.mta"), &artifact)
         .expect_err("invalid artifact must fail closed");
     assert!(err.to_string().contains("unsupported artifact format"));
+}
+
+#[test]
+fn runtime_rejects_action_without_declared_effect() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Spawn];
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect_err("artifact admission should reject undeclared effect");
+
+    assert!(err
+        .to_string()
+        .contains("process Main transition 0 uses effect send but does not declare it"));
+    assert!(
+        host.events().is_empty(),
+        "rejected artifacts must not reach runtime execution"
+    );
 }
 
 #[test]
@@ -447,6 +465,7 @@ fn in_memory_host_preserves_current_next_state() {
             message: MessageId::new(0),
             step_result: StepResult::Stop,
             next_state: NextState::Current,
+            effects: vec![ArtifactEffect::Emit],
             actions: vec![ArtifactAction::Emit {
                 output: OutputId::new(0),
             }],
@@ -529,6 +548,7 @@ fn valid_artifact() -> MantleArtifact {
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
+                    effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
@@ -555,6 +575,7 @@ fn valid_artifact() -> MantleArtifact {
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Value(StateId::new(1)),
+                    effects: vec![ArtifactEffect::Emit],
                     actions: vec![ArtifactAction::Emit {
                         output: OutputId::new(0),
                     }],
@@ -596,6 +617,7 @@ fn payload_artifact() -> MantleArtifact {
                 },
             }],
         }),
+        effects: vec![ArtifactEffect::Emit],
         actions: vec![ArtifactAction::Emit {
             output: OutputId::new(0),
         }],
@@ -629,6 +651,7 @@ fn looping_artifact() -> MantleArtifact {
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
+                    effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
@@ -658,6 +681,7 @@ fn looping_artifact() -> MantleArtifact {
                     message: MessageId::new(0),
                     step_result: StepResult::Continue,
                     next_state: NextState::Current,
+                    effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(2),
@@ -687,6 +711,7 @@ fn looping_artifact() -> MantleArtifact {
                     message: MessageId::new(0),
                     step_result: StepResult::Continue,
                     next_state: NextState::Current,
+                    effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
@@ -734,6 +759,7 @@ fn sequence_artifact() -> MantleArtifact {
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
+                    effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
@@ -773,6 +799,7 @@ fn sequence_artifact() -> MantleArtifact {
                         message: MessageId::new(0),
                         step_result: StepResult::Continue,
                         next_state: NextState::Value(StateId::new(1)),
+                        effects: vec![ArtifactEffect::Emit],
                         actions: vec![ArtifactAction::Emit {
                             output: OutputId::new(0),
                         }],
@@ -781,6 +808,7 @@ fn sequence_artifact() -> MantleArtifact {
                         message: MessageId::new(1),
                         step_result: StepResult::Stop,
                         next_state: NextState::Value(StateId::new(2)),
+                        effects: vec![ArtifactEffect::Emit],
                         actions: vec![ArtifactAction::Emit {
                             output: OutputId::new(1),
                         }],

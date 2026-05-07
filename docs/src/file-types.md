@@ -29,7 +29,7 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=3
+schema_version=4
 source_language=strata
 ```
 
@@ -38,9 +38,10 @@ is not a Strata language release or a compatibility promise.
 
 Executable references and state transitions inside `.mta` use validated table
 IDs and typed transition forms. Process transition records are encoded by
-transition index and carry a `message` ID field. Validation requires one unique
-transition for each accepted message, and runtime selection indexes the admitted
-transition table by typed message ID.
+transition index and carry a `message` ID field plus exact effect authority for
+their actions. Validation requires one unique transition for each accepted
+message, and runtime selection indexes the admitted transition table by typed
+message ID.
 
 Process references are encoded as per-process reference tables. A spawn action
 binds a process-reference ID to a new runtime process instance for the current

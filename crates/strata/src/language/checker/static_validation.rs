@@ -42,6 +42,7 @@ fn validate_transition(
         )));
     }
     validate_next_state(process, transition.message(), transition.next_state())?;
+    validate_transition_effects(process, transition)?;
     let mut spawned_refs = BTreeSet::new();
 
     for action in transition.actions() {
@@ -121,6 +122,46 @@ fn validate_transition(
                     processes,
                 )?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn validate_transition_effects(
+    process: &CheckedProcess,
+    transition: &CheckedTransition,
+) -> Result<()> {
+    let mut declared_effects = BTreeSet::new();
+    for &effect in transition.effects() {
+        if !declared_effects.insert(effect) {
+            return Err(Error::new(format!(
+                "process {} transition {} declares duplicate effect {effect}",
+                process.debug_name(),
+                transition.message().as_u32()
+            )));
+        }
+    }
+
+    let mut used_effects = BTreeSet::new();
+    for action in transition.actions() {
+        let effect = action.effect();
+        if !declared_effects.contains(&effect) {
+            return Err(Error::new(format!(
+                "process {} transition {} uses effect {effect} but does not declare it",
+                process.debug_name(),
+                transition.message().as_u32()
+            )));
+        }
+        used_effects.insert(effect);
+    }
+
+    for effect in &declared_effects {
+        if !used_effects.contains(effect) {
+            return Err(Error::new(format!(
+                "process {} transition {} declares effect {effect} but no action uses it",
+                process.debug_name(),
+                transition.message().as_u32()
+            )));
         }
     }
     Ok(())
@@ -903,10 +944,10 @@ fn process_label(processes: &[CheckedProcess], process_id: CheckedProcessId) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language::ast::{Identifier, TypeRef};
+    use crate::language::ast::{Effect, Identifier, TypeRef};
     use crate::language::checked::{
-        CheckedMessageCase, CheckedMessageVariantId, CheckedProcessParts, CheckedProcessRef,
-        CheckedStateId, CheckedTransitionParts, CheckedValueTemplateField,
+        CheckedMessageCase, CheckedMessageVariantId, CheckedOutputId, CheckedProcessParts,
+        CheckedProcessRef, CheckedStateId, CheckedTransitionParts, CheckedValueTemplateField,
     };
 
     #[test]
@@ -1023,6 +1064,7 @@ mod tests {
                 next_state: CheckedNextState::Template(CheckedValueTemplate::ReceivedPayload {
                     ty: TypeRef::Named(ident("MainState")),
                 }),
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });
@@ -1061,6 +1103,7 @@ mod tests {
                         "UnadmittedState".to_string(),
                     ),
                 )),
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });
@@ -1072,6 +1115,110 @@ mod tests {
         assert!(err.to_string().contains(
             "process Main next_state template produced value UnadmittedState not admitted by state table"
         ));
+    }
+
+    #[test]
+    fn static_validation_rejects_action_without_declared_effect() {
+        let process = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: Vec::new(),
+                actions: vec![CheckedAction::Emit {
+                    output: CheckedOutputId::from_index(0).expect("valid checked output id"),
+                }],
+            })],
+        });
+
+        let err =
+            validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+                .expect_err("missing checked transition effect should fail");
+
+        assert!(err
+            .to_string()
+            .contains("process Main transition 0 uses effect emit but does not declare it"));
+    }
+
+    #[test]
+    fn static_validation_rejects_declared_effect_without_action() {
+        let process = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: vec![Effect::Emit],
+                actions: Vec::new(),
+            })],
+        });
+
+        let err =
+            validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+                .expect_err("unused checked transition effect should fail");
+
+        assert!(err
+            .to_string()
+            .contains("process Main transition 0 declares effect emit but no action uses it"));
+    }
+
+    #[test]
+    fn static_validation_rejects_duplicate_transition_effect() {
+        let process = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: TypeRef::Named(ident("MainState")),
+            state_values: vec!["MainState".to_string()],
+            message_type: TypeRef::Named(ident("MainMsg")),
+            message_cases: vec![CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case")],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: vec![Effect::Emit, Effect::Emit],
+                actions: Vec::new(),
+            })],
+        });
+
+        let err =
+            validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+                .expect_err("duplicate checked transition effect should fail");
+
+        assert!(err
+            .to_string()
+            .contains("process Main transition 0 declares duplicate effect emit"));
     }
 
     #[test]
@@ -1097,6 +1244,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: vec![Effect::Spawn, Effect::Send],
                 actions: vec![
                     CheckedAction::Spawn {
                         target: checked_process_id(1),
@@ -1131,6 +1279,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });
@@ -1167,6 +1316,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: vec![Effect::Send],
                 actions: vec![CheckedAction::Send {
                     target: CheckedSendTarget::ReceivedPayload {
                         ty: TypeRef::Named(ident("Job")),
@@ -1195,6 +1345,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });
@@ -1234,6 +1385,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: vec![Effect::Spawn, Effect::Send],
                 actions: vec![
                     CheckedAction::Spawn {
                         target: checked_process_id(1),
@@ -1269,6 +1421,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });
@@ -1308,6 +1461,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: vec![Effect::Spawn, Effect::Send],
                 actions: vec![
                     CheckedAction::Spawn {
                         target: checked_process_id(1),
@@ -1349,6 +1503,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });
@@ -1398,6 +1553,7 @@ mod tests {
                         },
                     )],
                 }),
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });
@@ -1419,6 +1575,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });
@@ -1458,6 +1615,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
+                effects: vec![Effect::Spawn, Effect::Send],
                 actions: vec![
                     CheckedAction::Spawn {
                         target: checked_process_id(1),
@@ -1500,6 +1658,7 @@ mod tests {
                         },
                     )],
                 }),
+                effects: Vec::new(),
                 actions: Vec::new(),
             })],
         });

@@ -1,5 +1,5 @@
 use mantle_artifact::{
-    source_hash_fnv1a64, ArtifactAction, ArtifactMessageVariant, ArtifactProcess,
+    source_hash_fnv1a64, ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactProcess,
     ArtifactProcessRef, ArtifactSendTarget, ArtifactTransition, ArtifactValueTemplate,
     ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
     ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
@@ -11,6 +11,7 @@ use super::checked::{
     CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget,
     CheckedStateId, CheckedStepResult, CheckedTransition, CheckedValueTemplate,
 };
+use super::Effect;
 
 pub fn lower_to_artifact(
     checked: &CheckedProgram,
@@ -61,7 +62,21 @@ fn lower_transition(transition: &CheckedTransition) -> ArtifactTransition {
         message: lower_message_id(transition.message()),
         step_result: lower_step_result(transition.step_result()),
         next_state: lower_next_state(transition.next_state()),
+        effects: transition
+            .effects()
+            .iter()
+            .copied()
+            .map(lower_effect)
+            .collect(),
         actions: transition.actions().iter().map(lower_action).collect(),
+    }
+}
+
+fn lower_effect(effect: Effect) -> ArtifactEffect {
+    match effect {
+        Effect::Emit => ArtifactEffect::Emit,
+        Effect::Spawn => ArtifactEffect::Spawn,
+        Effect::Send => ArtifactEffect::Send,
     }
 }
 

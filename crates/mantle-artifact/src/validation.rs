@@ -297,6 +297,18 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
             }
             add_field_bytes(
                 &mut encoded_len,
+                &format!("{transition_prefix}.effect_count"),
+                &transition.effects.len().to_string(),
+            )?;
+            for (effect_index, effect) in transition.effects.iter().enumerate() {
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{transition_prefix}.effect.{effect_index}"),
+                    effect.as_str(),
+                )?;
+            }
+            add_field_bytes(
+                &mut encoded_len,
                 &format!("{transition_prefix}.action_count"),
                 &transition.actions.len().to_string(),
             )?;

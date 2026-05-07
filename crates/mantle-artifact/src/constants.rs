@@ -1,6 +1,6 @@
 pub const ARTIFACT_MAGIC: &str = "MTA0";
 pub const ARTIFACT_FORMAT: &str = "mantle-target-artifact";
-pub const ARTIFACT_SCHEMA_VERSION: &str = "3";
+pub const ARTIFACT_SCHEMA_VERSION: &str = "4";
 pub const STRATA_SOURCE_LANGUAGE: &str = "strata";
 pub const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 pub const MAX_ARTIFACT_FIELDS: usize = 16_384;
@@ -13,6 +13,7 @@ pub const MAX_MESSAGE_VARIANTS_PER_PROCESS: usize = 1024;
 pub const MAX_TRANSITIONS_PER_PROCESS: usize = MAX_MESSAGE_VARIANTS_PER_PROCESS;
 pub const MAX_OUTPUT_LITERALS: usize = 4096;
 pub const MAX_ACTIONS_PER_PROCESS: usize = 4096;
+pub const MAX_EFFECTS_PER_TRANSITION: usize = 3;
 pub const MAX_PROCESS_REFS_PER_PROCESS: usize = MAX_ACTIONS_PER_PROCESS;
 pub const MAX_MAILBOX_BOUND: usize = 65_536;
 pub const MAX_VALUE_TEMPLATE_DEPTH: usize = 64;
