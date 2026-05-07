@@ -1,15 +1,17 @@
+use super::ast::EnumVariant;
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition,
+    CheckedTransition, CheckedTypeKind,
 };
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
-    ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget,
+    ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget, ArtifactTypeKind,
     ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
     MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS, ProcessId, ProcessRefId, StepResult,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact,
+    ProcessId, ProcessRefId, StepResult, TypeId,
 };
 
 const HELLO: &str = r#"
@@ -411,9 +413,10 @@ proc Worker mailbox bounded(1) {
     ));
 
     let artifact = lower_to_artifact(&checked, source).expect("payload source should lower");
+    let job = artifact_type_id(&artifact, "Job");
     assert_eq!(
         artifact.processes[1].message_variants,
-        [ArtifactMessageVariant::payload("Assign", "Job")]
+        [ArtifactMessageVariant::payload("Assign", job)]
     );
     assert_eq!(
         artifact_state_labels(&artifact.processes[1]),
@@ -620,9 +623,10 @@ proc Sink mailbox bounded(1) {
     );
 
     let artifact = lower_to_artifact(&checked, source).expect("forwarded payload should lower");
+    let job = artifact_type_id(&artifact, "Job");
     assert_eq!(
         artifact.processes[2].message_variants,
-        [ArtifactMessageVariant::payload("Assign", "Job")]
+        [ArtifactMessageVariant::payload("Assign", job)]
     );
 }
 
@@ -683,11 +687,35 @@ proc Sink mailbox bounded(1) {
 "#;
 
     let checked = check_source(source).expect("process ref payload forwarding should check");
+    let checked_sink_ref = checked
+        .types()
+        .iter()
+        .find(|ty| {
+            ty.kind()
+                == (CheckedTypeKind::ProcessRef {
+                    target: checked_process_id(2),
+                })
+        })
+        .expect("checked type table should contain Sink process reference type");
+    assert_eq!(checked_sink_ref.label(), "__strata_checked_process_ref_2");
+    assert_eq!(
+        checked_sink_ref.kind(),
+        CheckedTypeKind::ProcessRef {
+            target: checked_process_id(2)
+        }
+    );
+    assert_eq!(
+        checked.processes()[1].message_cases()[0]
+            .payload_type()
+            .map(|ty| ty.id()),
+        Some(checked_sink_ref.id())
+    );
     let artifact = lower_to_artifact(&checked, source).expect("process ref payload should lower");
+    let sink_ref = artifact_process_ref_type_id(&artifact, ProcessId::new(2));
 
     assert_eq!(
         artifact.processes[1].message_variants,
-        [ArtifactMessageVariant::payload("Work", "ProcessRef<Sink>")]
+        [ArtifactMessageVariant::payload("Work", sink_ref)]
     );
     assert_eq!(
         artifact.processes[0].transitions[0].actions[2],
@@ -695,7 +723,7 @@ proc Sink mailbox bounded(1) {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
             message: mantle_artifact::MessageId::new(0),
             payload: Some(ArtifactValueTemplate::ProcessRef {
-                ty: "ProcessRef<Sink>".to_string(),
+                ty: sink_ref,
                 target_process: ProcessId::new(2),
                 process_ref: ProcessRefId::new(1),
             }),
@@ -705,12 +733,91 @@ proc Sink mailbox bounded(1) {
         artifact.processes[1].transitions[0].actions[0],
         ArtifactAction::Send {
             target: ArtifactSendTarget::ReceivedPayload {
-                ty: "ProcessRef<Sink>".to_string(),
+                ty: sink_ref,
                 target_process: ProcessId::new(2),
             },
             message: mantle_artifact::MessageId::new(0),
             payload: None,
         }
+    );
+}
+
+#[test]
+fn process_ref_type_label_is_bounded_for_max_length_target_process() {
+    let target = format!("P{}", "a".repeat(MAX_IDENTIFIER_BYTES - 1));
+    let source = format!(
+        r#"
+module process_ref_limit;
+
+record MainState;
+record WorkerState;
+record SinkState;
+enum MainMsg {{ Start }}
+enum WorkerMsg {{ Work(ProcessRef<{target}>) }}
+enum SinkMsg {{ Done }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(1) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return WorkerState;
+    }}
+
+    fn step(state: WorkerState, Work(reply_to: ProcessRef<{target}>)) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+
+proc {target} mailbox bounded(1) {{
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {{
+        return SinkState;
+    }}
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+    );
+
+    let checked = check_source(&source).expect("max-length process-ref target should check");
+    let checked_sink_ref = checked
+        .types()
+        .iter()
+        .find(|ty| {
+            ty.kind()
+                == (CheckedTypeKind::ProcessRef {
+                    target: checked_process_id(2),
+                })
+        })
+        .expect("checked type table should contain bounded process reference type");
+
+    assert_eq!(checked_sink_ref.label(), "__strata_checked_process_ref_2");
+    assert!(checked_sink_ref.label().len() <= MAX_IDENTIFIER_BYTES);
+
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("bounded process ref label should lower");
+    let sink_ref = artifact_process_ref_type_id(&artifact, ProcessId::new(2));
+    assert_eq!(
+        artifact.types[sink_ref.index()].label,
+        checked_sink_ref.label()
     );
 }
 
@@ -2026,6 +2133,18 @@ fn rejects_message_count_above_artifact_limit_during_checking() {
 }
 
 #[test]
+fn rejects_checked_type_count_above_artifact_limit_during_checking() {
+    let module = checked_type_count_overflow_module();
+
+    let err =
+        check_module(module).expect_err("checked type count above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "checked type_count exceeds Mantle artifact limit of {MAX_TYPE_COUNT} types"
+    )));
+}
+
+#[test]
 fn accepts_payload_send_count_above_message_variant_limit_without_case_expansion() {
     let phases = (0..=MAX_MESSAGE_VARIANTS_PER_PROCESS)
         .map(|index| format!("P{index}"))
@@ -3062,6 +3181,27 @@ fn rejects_reserved_proc_result_type_declarations() {
 }
 
 #[test]
+fn rejects_internal_checked_type_label_prefix_declarations() {
+    for source in [
+        HELLO.replace(
+            "record MainState;",
+            "record __strata_checked_process_ref_Main;",
+        ),
+        HELLO.replace(
+            "enum MainMsg { Start }",
+            "enum __strata_checked_process_ref_Main { Start }",
+        ),
+    ] {
+        let err = check_source(&source).expect_err("reserved type label prefix should fail");
+
+        assert!(
+            err.to_string()
+                .contains("uses reserved prefix __strata_checked_")
+        );
+    }
+}
+
+#[test]
 fn rejects_duplicate_enum_variants() {
     let source = HELLO.replace("enum MainMsg { Start }", "enum MainMsg { Start, Start }");
 
@@ -3143,6 +3283,108 @@ proc Worker mailbox bounded(1) {{
 }}
 "#
     )
+}
+
+fn checked_type_count_overflow_module() -> Module {
+    let payload_variants_per_process = MAX_MESSAGE_VARIANTS_PER_PROCESS - 1;
+    let mut process_count = 1usize;
+    while process_count * (payload_variants_per_process + 2) <= MAX_TYPE_COUNT {
+        process_count += 1;
+    }
+    assert!(process_count <= MAX_PROCESS_COUNT);
+
+    let mut records = Vec::new();
+    let mut enums = Vec::new();
+    let mut processes = Vec::new();
+
+    for process_index in 0..process_count {
+        let state_name = format!("State{process_index}");
+        let msg_name = format!("Msg{process_index}");
+        records.push(Record {
+            name: ident(state_name.as_str()),
+            fields: Vec::new(),
+        });
+
+        let mut variants = vec![EnumVariant {
+            name: ident("Start"),
+            payload_type: None,
+        }];
+        for payload_index in 0..payload_variants_per_process {
+            let payload_name = format!("Payload{process_index}_{payload_index}");
+            records.push(Record {
+                name: ident(&payload_name),
+                fields: Vec::new(),
+            });
+            variants.push(EnumVariant {
+                name: ident(format!("M{process_index}_{payload_index}")),
+                payload_type: Some(TypeRef::Named(ident(payload_name))),
+            });
+        }
+        enums.push(Enum {
+            name: ident(msg_name.as_str()),
+            variants,
+        });
+
+        let process_name = if process_index == 0 {
+            "Main".to_string()
+        } else {
+            format!("P{process_index}")
+        };
+        let state_type = TypeRef::Named(ident(state_name.as_str()));
+        processes.push(Process {
+            name: ident(process_name),
+            mailbox_bound: 1,
+            state_type: state_type.clone(),
+            msg_type: TypeRef::Named(ident(msg_name)),
+            init: Function {
+                name: ident("init"),
+                params: Vec::new(),
+                return_type: state_type.clone(),
+                effects: Vec::new(),
+                may: Vec::new(),
+                determinism: Determinism::Det,
+                body: Some(FunctionBlock {
+                    statements: Vec::new(),
+                    returns: ReturnExpr::Value(ValueExpr::Identifier(ident(state_name.as_str()))),
+                }),
+            },
+            steps: vec![Function {
+                name: ident("step"),
+                params: vec![
+                    FunctionParam::Binding(Param {
+                        name: ident("state"),
+                        ty: state_type.clone(),
+                    }),
+                    FunctionParam::Pattern(SignaturePattern::Wildcard),
+                ],
+                return_type: TypeRef::Applied {
+                    constructor: ident("ProcResult"),
+                    args: vec![state_type],
+                },
+                effects: Vec::new(),
+                may: Vec::new(),
+                determinism: Determinism::Det,
+                body: Some(FunctionBlock {
+                    statements: Vec::new(),
+                    returns: ReturnExpr::Call {
+                        name: ident("Stop"),
+                        arg: ValueExpr::Identifier(ident("state")),
+                    },
+                }),
+            }],
+        });
+    }
+
+    Module {
+        name: ident("type_count_overflow"),
+        records,
+        enums,
+        processes,
+    }
+}
+
+fn ident(value: impl Into<String>) -> Identifier {
+    Identifier::new(value).expect("test identifier should be valid")
 }
 
 fn payload_message_label_overflow_source() -> String {
@@ -3268,6 +3510,29 @@ fn artifact_state_labels(process: &mantle_artifact::ArtifactProcess) -> Vec<&str
         .iter()
         .map(|state| state.label.as_str())
         .collect()
+}
+
+fn artifact_type_id(artifact: &MantleArtifact, label: &str) -> TypeId {
+    let index = artifact
+        .types
+        .iter()
+        .position(|ty| ty.label == label)
+        .unwrap_or_else(|| panic!("artifact type {label} should exist"));
+    TypeId::from_index(index).expect("artifact type index should fit")
+}
+
+fn artifact_process_ref_type_id(artifact: &MantleArtifact, target: ProcessId) -> TypeId {
+    let index = artifact
+        .types
+        .iter()
+        .position(|ty| ty.kind == ArtifactTypeKind::ProcessRef { target })
+        .unwrap_or_else(|| {
+            panic!(
+                "artifact process reference type targeting process {} should exist",
+                target.as_u32()
+            )
+        });
+    TypeId::from_index(index).expect("artifact type index should fit")
 }
 
 fn repeated_emit_statements(count: usize, indent: usize) -> String {

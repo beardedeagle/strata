@@ -33,3 +33,4 @@ define_id!(ProcessRefId);
 define_id!(StateId);
 define_id!(MessageId);
 define_id!(OutputId);
+define_id!(TypeId);

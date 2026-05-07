@@ -4,20 +4,18 @@ Strata is an experimental systems language for explicit authority, typed
 concurrency, and runtime-visible execution. Mantle is the runtime target for
 Strata programs.
 
-The current product boundary is source-to-runtime execution:
+The source-to-runtime boundary is executable behavior:
 
 ```text
 .str source -> strata check -> strata build -> .mta artifact -> mantle run
 ```
 
-The repository is early, but the current slices are runnable. A real `.str`
-program can be checked, built into a Mantle Target Artifact, admitted by Mantle,
-and executed with runtime observability.
+The runnable slices carry real `.str` programs through checking, Mantle Target
+Artifact build, Mantle admission, execution, and runtime observability.
 
 If you are new to Strata, start with Getting Started, then Language Concepts,
-then the Hello tutorial. If you already know the shape of the project, use the
-Language Reference and Syntax Reference as the current source-authoring
-contract.
+then the Hello tutorial. Use the Language Reference and Syntax Reference as the
+source-authoring contract.
 
 The documentation in this book tracks accepted behavior, file identities,
 runtime boundaries, and the development gates that must stay green as the

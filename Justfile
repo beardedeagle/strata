@@ -93,9 +93,9 @@ toolchain-policy-check:
 
     echo "Toolchain policy OK: standard gates use stable and nightly gates are explicit."
 
-product-gates: product-success-gates product-failure-gates
+source-to-runtime-gates: source-to-runtime-success-gates source-to-runtime-failure-gates
 
-product-success-gates: build
+source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/hello.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/hello.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
@@ -115,7 +115,7 @@ product-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_reply.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
 
-product-failure-gates: build
+source-to-runtime-failure-gates: build
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -161,7 +161,7 @@ product-failure-gates: build
         exit 1
     fi
 
-quality: fmt-check check test lint metadata-check toolchain-policy-check docs product-gates diff-check
+quality: fmt-check check test lint metadata-check toolchain-policy-check docs source-to-runtime-gates diff-check
 
 ci-native: quality
 

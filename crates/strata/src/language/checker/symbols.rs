@@ -4,6 +4,7 @@ use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, 
 use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
 use super::super::{PROC_RESULT_TYPE, PROCESS_REF_TYPE};
+use super::CHECKED_TYPE_LABEL_PREFIX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Symbol(u32);
@@ -76,6 +77,15 @@ impl MessageResolutionContext<'_> {
 fn reject_reserved_type_name(name: &str, symbol: Symbol, reserved: Symbol) -> Result<()> {
     if symbol == reserved {
         return Err(Error::new(format!("type name {name} is reserved")));
+    }
+    Ok(())
+}
+
+fn reject_internal_type_label_prefix(name: &str) -> Result<()> {
+    if name.starts_with(CHECKED_TYPE_LABEL_PREFIX) {
+        return Err(Error::new(format!(
+            "type name {name} uses reserved prefix {CHECKED_TYPE_LABEL_PREFIX}"
+        )));
     }
     Ok(())
 }
@@ -205,6 +215,7 @@ impl SemanticIndex {
             let symbol = symbols.intern(&record.name)?;
             reject_reserved_type_name(record.name.as_str(), symbol, proc_result_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, process_ref_type)?;
+            reject_internal_type_label_prefix(record.name.as_str())?;
             if records.insert(symbol, index).is_some() {
                 return Err(Error::new(format!(
                     "duplicate record declaration {}",
@@ -227,6 +238,7 @@ impl SemanticIndex {
             let symbol = symbols.intern(&item.name)?;
             reject_reserved_type_name(item.name.as_str(), symbol, proc_result_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, process_ref_type)?;
+            reject_internal_type_label_prefix(item.name.as_str())?;
             if enums.insert(symbol, index).is_some() {
                 return Err(Error::new(format!(
                     "duplicate enum declaration {}",

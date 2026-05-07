@@ -2,12 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mantle_artifact::{validate_payload_value_label, validate_state_value_label};
 
-use super::super::PROCESS_REF_TYPE;
-use super::super::ast::TypeRef;
 use super::super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedValueTemplate,
+    CheckedTransition, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
 };
 use super::super::diagnostic::{Error, Result};
 use super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
@@ -250,7 +248,7 @@ fn validate_next_state(
 fn message_payload_type(
     process: &CheckedProcess,
     message: CheckedMessageId,
-) -> Result<Option<&super::super::ast::TypeRef>> {
+) -> Result<Option<&CheckedTypeRef>> {
     process
         .message_cases()
         .get(message.index())
@@ -266,7 +264,7 @@ fn message_payload_type(
 
 fn validate_value_template_received_type(
     template: &CheckedValueTemplate,
-    received_payload_type: Option<&super::super::ast::TypeRef>,
+    received_payload_type: Option<&CheckedTypeRef>,
 ) -> Result<()> {
     match template {
         CheckedValueTemplate::Literal(_) => Ok(()),
@@ -559,10 +557,12 @@ fn validate_send_target(
                 )));
             };
             if received_type != ty {
+                let target_type = checked_type_diagnostic(processes, ty)?;
+                let received_type = checked_type_diagnostic(processes, received_type)?;
                 return Err(Error::new(format!(
-                    "process {} send target has received payload type {}, expected {}",
+                    "process {} send target has process reference type {}, but current message carries {}",
                     process.debug_name(),
-                    ty,
+                    target_type,
                     received_type
                 )));
             }
@@ -573,33 +573,44 @@ fn validate_send_target(
 
 fn validate_process_ref_type_target(
     processes: &[CheckedProcess],
-    ty: &TypeRef,
+    ty: &CheckedTypeRef,
     target: CheckedProcessId,
 ) -> Result<()> {
-    let TypeRef::Applied { constructor, args } = ty else {
-        return Err(Error::new(format!(
-            "process reference payload type {ty} must be a process reference type"
-        )));
-    };
-    if constructor.as_str() != PROCESS_REF_TYPE || args.len() != 1 {
-        return Err(Error::new(format!(
-            "process reference payload type {ty} must be a process reference type"
-        )));
+    let expected_process = process_by_id(processes, target)?;
+    match ty.kind() {
+        CheckedTypeKind::ProcessRef {
+            target: type_target,
+        } if type_target == target => Ok(()),
+        CheckedTypeKind::ProcessRef {
+            target: type_target,
+        } => {
+            let type_process = process_by_id(processes, type_target)?;
+            let type_name = checked_type_diagnostic(processes, ty)?;
+            Err(Error::new(format!(
+                "process reference payload type {type_name} targets {} (process id {}), expected {} (process id {})",
+                type_process.debug_name(),
+                type_target.as_u32(),
+                expected_process.debug_name(),
+                target.as_u32()
+            )))
+        }
+        CheckedTypeKind::Value => {
+            let type_name = checked_type_diagnostic(processes, ty)?;
+            Err(Error::new(format!(
+                "process reference payload type {type_name} must be a process reference type"
+            )))
+        }
     }
-    let TypeRef::Named(target_name) = &args[0] else {
-        return Err(Error::new(format!(
-            "process reference payload type {ty} must target a declared process"
-        )));
-    };
-    let target_process = process_by_id(processes, target)?;
-    if target_process.debug_name().as_str() != target_name.as_str() {
-        return Err(Error::new(format!(
-            "process reference payload type {ty} targets {}, expected {}",
-            target_name,
-            target_process.debug_name()
-        )));
+}
+
+fn checked_type_diagnostic(processes: &[CheckedProcess], ty: &CheckedTypeRef) -> Result<String> {
+    match ty.kind() {
+        CheckedTypeKind::Value => Ok(ty.label().to_string()),
+        CheckedTypeKind::ProcessRef { target } => {
+            let process = process_by_id(processes, target)?;
+            Ok(format!("ProcessRef<{}>", process.debug_name()))
+        }
     }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -952,7 +963,7 @@ fn process_label(processes: &[CheckedProcess], process_id: CheckedProcessId) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language::ast::{Effect, Identifier, TypeRef};
+    use crate::language::ast::{Effect, Identifier};
     use crate::language::checked::{
         CheckedMessageCase, CheckedMessageVariantId, CheckedOutputId, CheckedProcessParts,
         CheckedProcessRef, CheckedStateId, CheckedStateValue, CheckedTransitionParts,
@@ -1057,9 +1068,9 @@ mod tests {
     fn static_validation_rejects_next_state_received_payload_template_for_unit_message() {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1075,7 +1086,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::ReceivedPayload {
-                    ty: TypeRef::Named(ident("MainState")),
+                    ty: value_type("MainState"),
                 }),
                 effects: Vec::new(),
                 actions: Vec::new(),
@@ -1096,9 +1107,9 @@ mod tests {
     fn static_validation_rejects_static_next_state_template_outside_state_table() {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1115,7 +1126,7 @@ mod tests {
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::Literal(
                     CheckedPayloadValue::new(
-                        TypeRef::Named(ident("MainState")),
+                        value_type("MainState"),
                         "UnadmittedState".to_string(),
                     ),
                 )),
@@ -1137,9 +1148,9 @@ mod tests {
     fn static_validation_rejects_action_without_declared_effect() {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1176,9 +1187,9 @@ mod tests {
     fn static_validation_rejects_declared_effect_without_action() {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1213,9 +1224,9 @@ mod tests {
     fn static_validation_rejects_duplicate_transition_effect() {
         let process = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1250,9 +1261,9 @@ mod tests {
     fn static_validation_rejects_literal_send_payload_with_invalid_label() {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1281,7 +1292,7 @@ mod tests {
                         target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                         message: checked_message_id(0),
                         payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-                            TypeRef::Named(ident("Job")),
+                            value_type("Job"),
                             "Job\n".to_string(),
                         ))),
                     },
@@ -1290,14 +1301,14 @@ mod tests {
         });
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
-            state_type: TypeRef::Named(ident("WorkerState")),
+            state_type: value_type("WorkerState"),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
-            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_type: value_type("WorkerMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Assign".to_string(),
                     CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                    Some(TypeRef::Named(ident("Job"))),
+                    Some(value_type("Job")),
                 )
                 .expect("valid checked message case"),
             ],
@@ -1330,14 +1341,14 @@ mod tests {
     fn static_validation_rejects_received_payload_send_target_with_non_process_ref_type() {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
                     CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                    Some(TypeRef::Named(ident("Job"))),
+                    Some(value_type("Job")),
                 )
                 .expect("valid checked message case"),
             ],
@@ -1351,7 +1362,7 @@ mod tests {
                 effects: vec![Effect::Send],
                 actions: vec![CheckedAction::Send {
                     target: CheckedSendTarget::ReceivedPayload {
-                        ty: TypeRef::Named(ident("Job")),
+                        ty: value_type("Job"),
                         target: checked_process_id(1),
                     },
                     message: checked_message_id(0),
@@ -1361,9 +1372,9 @@ mod tests {
         });
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
-            state_type: TypeRef::Named(ident("WorkerState")),
+            state_type: value_type("WorkerState"),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
-            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_type: value_type("WorkerMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Done".to_string(),
@@ -1401,9 +1412,9 @@ mod tests {
     fn static_validation_rejects_process_ref_template_with_non_process_ref_type() {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1432,7 +1443,7 @@ mod tests {
                         target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                         message: checked_message_id(0),
                         payload: Some(CheckedValueTemplate::ProcessRef {
-                            ty: TypeRef::Named(ident("Job")),
+                            ty: value_type("Job"),
                             target: checked_process_id(1),
                             process_ref: checked_process_ref_id(0),
                         }),
@@ -1442,14 +1453,14 @@ mod tests {
         });
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
-            state_type: TypeRef::Named(ident("WorkerState")),
+            state_type: value_type("WorkerState"),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
-            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_type: value_type("WorkerMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Assign".to_string(),
                     CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                    Some(TypeRef::Named(ident("Job"))),
+                    Some(value_type("Job")),
                 )
                 .expect("valid checked message case"),
             ],
@@ -1479,12 +1490,94 @@ mod tests {
     }
 
     #[test]
+    fn static_validation_formats_process_ref_type_diagnostics_without_internal_labels() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: value_type("MainState"),
+            state_values: checked_state_values("MainState", &["MainState"]),
+            message_type: value_type("MainMsg"),
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
+            process_refs: vec![CheckedProcessRef::new(
+                ident("worker"),
+                checked_process_id(1),
+            )],
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: vec![Effect::Spawn, Effect::Send],
+                actions: vec![
+                    CheckedAction::Spawn {
+                        target: checked_process_id(1),
+                        process_ref: checked_process_ref_id(0),
+                    },
+                    CheckedAction::Send {
+                        target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                        message: checked_message_id(0),
+                        payload: Some(CheckedValueTemplate::ProcessRef {
+                            ty: process_ref_type("Worker"),
+                            target: checked_process_id(0),
+                            process_ref: checked_process_ref_id(0),
+                        }),
+                    },
+                ],
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: value_type("WorkerState"),
+            state_values: checked_state_values("WorkerState", &["WorkerState"]),
+            message_type: value_type("WorkerMsg"),
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Reply".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(process_ref_type("Worker")),
+                )
+                .expect("valid checked message case"),
+            ],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: Vec::new(),
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("process-ref type target mismatch should fail");
+        let message = err.to_string();
+
+        assert!(message.contains(
+            "process reference payload type ProcessRef<Worker> targets Worker (process id 1), expected Main (process id 0)"
+        ));
+        assert!(!message.contains("__strata_checked_process_ref_"));
+    }
+
+    #[test]
     fn static_validation_rejects_nested_process_ref_payload_template() {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1513,7 +1606,7 @@ mod tests {
                         target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                         message: checked_message_id(0),
                         payload: Some(CheckedValueTemplate::Record {
-                            ty: TypeRef::Named(ident("Box")),
+                            ty: value_type("Box"),
                             fields: vec![CheckedValueTemplateField::new(
                                 ident("reply_to"),
                                 CheckedValueTemplate::ProcessRef {
@@ -1529,14 +1622,14 @@ mod tests {
         });
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
-            state_type: TypeRef::Named(ident("WorkerState")),
+            state_type: value_type("WorkerState"),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
-            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_type: value_type("WorkerMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Assign".to_string(),
                     CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                    Some(TypeRef::Named(ident("Box"))),
+                    Some(value_type("Box")),
                 )
                 .expect("valid checked message case"),
             ],
@@ -1569,9 +1662,9 @@ mod tests {
     fn static_validation_rejects_process_ref_next_state_template() {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1590,7 +1683,7 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::Record {
-                    ty: TypeRef::Named(ident("MainState")),
+                    ty: value_type("MainState"),
                     fields: vec![CheckedValueTemplateField::new(
                         ident("reply_to"),
                         CheckedValueTemplate::ProcessRef {
@@ -1606,9 +1699,9 @@ mod tests {
         });
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
-            state_type: TypeRef::Named(ident("WorkerState")),
+            state_type: value_type("WorkerState"),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
-            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_type: value_type("WorkerMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Done".to_string(),
@@ -1646,9 +1739,9 @@ mod tests {
     fn static_validation_rejects_payload_template_next_state_outside_state_table() {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1677,7 +1770,7 @@ mod tests {
                         target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                         message: checked_message_id(0),
                         payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-                            TypeRef::Named(ident("Job")),
+                            value_type("Job"),
                             "Job{phase:Ready}".to_string(),
                         ))),
                     },
@@ -1686,17 +1779,17 @@ mod tests {
         });
         let worker = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Worker"),
-            state_type: TypeRef::Named(ident("WorkerState")),
+            state_type: value_type("WorkerState"),
             state_values: checked_state_values(
                 "WorkerState",
                 &["WorkerState{active:Job{phase:Done}}"],
             ),
-            message_type: TypeRef::Named(ident("WorkerMsg")),
+            message_type: value_type("WorkerMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Assign".to_string(),
                     CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                    Some(TypeRef::Named(ident("Job"))),
+                    Some(value_type("Job")),
                 )
                 .expect("valid checked message case"),
             ],
@@ -1707,11 +1800,11 @@ mod tests {
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::Record {
-                    ty: TypeRef::Named(ident("WorkerState")),
+                    ty: value_type("WorkerState"),
                     fields: vec![CheckedValueTemplateField::new(
                         ident("active"),
                         CheckedValueTemplate::ReceivedPayload {
-                            ty: TypeRef::Named(ident("Job")),
+                            ty: value_type("Job"),
                         },
                     )],
                 }),
@@ -1735,9 +1828,9 @@ mod tests {
     fn checked_process_with_declared_refs(process_ref_count: usize) -> CheckedProcess {
         CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
-            state_type: TypeRef::Named(ident("MainState")),
+            state_type: value_type("MainState"),
             state_values: checked_state_values("MainState", &["MainState"]),
-            message_type: TypeRef::Named(ident("MainMsg")),
+            message_type: value_type("MainMsg"),
             message_cases: vec![
                 CheckedMessageCase::new(
                     "Start".to_string(),
@@ -1761,17 +1854,25 @@ mod tests {
         Identifier::new(value).expect("test identifier should be valid")
     }
 
-    fn process_ref_type(target: &str) -> TypeRef {
-        TypeRef::Applied {
-            constructor: ident(PROCESS_REF_TYPE),
-            args: vec![TypeRef::Named(ident(target))],
-        }
+    fn value_type(label: &str) -> CheckedTypeRef {
+        CheckedTypeRef::test_value(label)
+    }
+
+    fn process_ref_type(target: &str) -> CheckedTypeRef {
+        let target_process = match target {
+            "Worker" => checked_process_id(1),
+            other => panic!("test process ref target {other} is not mapped"),
+        };
+        CheckedTypeRef::test_process_ref(
+            &format!("__strata_checked_process_ref_{}", target_process.as_u32()),
+            target_process,
+        )
     }
 
     fn checked_state_values(ty: &str, values: &[&str]) -> Vec<CheckedStateValue> {
         values
             .iter()
-            .map(|value| CheckedStateValue::new(TypeRef::Named(ident(ty)), (*value).to_string()))
+            .map(|value| CheckedStateValue::new(value_type(ty), (*value).to_string()))
             .collect()
     }
 

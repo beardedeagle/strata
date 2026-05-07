@@ -6,7 +6,8 @@ mod symbols;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
-    MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
+    MAX_ACTIONS_PER_PROCESS, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_TYPE_COUNT,
 };
 
 use super::ast::{
@@ -17,7 +18,8 @@ use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
     CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef,
     CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedSendTarget, CheckedStateId,
-    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedValueTemplate,
+    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeId, CheckedTypeKind,
+    CheckedTypeRef, CheckedValueTemplate,
 };
 use super::diagnostic::{Error, Result};
 use super::{PROC_RESULT_TYPE, PROCESS_REF_TYPE};
@@ -30,11 +32,88 @@ use static_validation::validate_action_references;
 use symbols::SemanticIndex;
 
 const STEP_STATE_PARAMETER_NAME: &str = "state";
+pub(super) const CHECKED_TYPE_LABEL_PREFIX: &str = "__strata_checked_";
+const CHECKED_PROCESS_REF_TYPE_LABEL_PREFIX: &str = "__strata_checked_process_ref_";
 
 #[derive(Debug, Clone, Copy)]
 struct ProcessRefBinding {
     id: CheckedProcessRefId,
     target: CheckedProcessId,
+}
+
+struct ModuleCheckContext<'a> {
+    module: &'a Module,
+    entry_process: CheckedProcessId,
+    semantic_index: &'a SemanticIndex,
+    message_cases: &'a MessageCaseTable,
+}
+
+struct CheckedTypeInterner<'a> {
+    semantic_index: &'a SemanticIndex,
+    entries: Vec<(TypeRef, CheckedTypeRef)>,
+}
+
+impl<'a> CheckedTypeInterner<'a> {
+    fn new(semantic_index: &'a SemanticIndex) -> Self {
+        Self {
+            semantic_index,
+            entries: Vec::new(),
+        }
+    }
+
+    fn intern(&mut self, ty: &TypeRef) -> Result<CheckedTypeRef> {
+        if let Some((_, checked)) = self
+            .entries
+            .iter()
+            .find(|(existing, _)| self.semantic_index.same_type(existing, ty))
+        {
+            return Ok(checked.clone());
+        }
+
+        if self.entries.len() >= MAX_TYPE_COUNT {
+            return Err(Error::new(format!(
+                "checked type_count exceeds Mantle artifact limit of {MAX_TYPE_COUNT} types"
+            )));
+        }
+        let id = CheckedTypeId::from_index(self.entries.len())?;
+        let process_ref_target = self.semantic_index.process_ref_target_type(ty)?;
+        let kind = process_ref_target.map_or(CheckedTypeKind::Value, |target| {
+            CheckedTypeKind::ProcessRef { target }
+        });
+        let checked = CheckedTypeRef::new(id, checked_type_label(ty, process_ref_target)?, kind);
+        self.entries.push((ty.clone(), checked.clone()));
+        Ok(checked)
+    }
+
+    fn into_types(self) -> Vec<CheckedTypeRef> {
+        self.entries
+            .into_iter()
+            .map(|(_, checked)| checked)
+            .collect()
+    }
+}
+
+fn checked_type_label(
+    ty: &TypeRef,
+    process_ref_target: Option<CheckedProcessId>,
+) -> Result<String> {
+    if let Some(target) = process_ref_target {
+        return checked_process_ref_type_label(target);
+    }
+    match ty {
+        TypeRef::Named(name) => Ok(name.to_string()),
+        TypeRef::Applied { constructor, .. } => Ok(constructor.to_string()),
+    }
+}
+
+fn checked_process_ref_type_label(target: CheckedProcessId) -> Result<String> {
+    let label = format!("{CHECKED_PROCESS_REF_TYPE_LABEL_PREFIX}{}", target.as_u32());
+    if label.len() > MAX_IDENTIFIER_BYTES {
+        return Err(Error::new(format!(
+            "checked process reference type label exceeds maximum identifier length of {MAX_IDENTIFIER_BYTES} bytes"
+        )));
+    }
+    Ok(label)
 }
 
 struct ProcessCheckContext<'a> {
@@ -105,6 +184,7 @@ struct StepPayloadParam {
 struct StepPayloadBinding {
     name: Identifier,
     ty: TypeRef,
+    checked_ty: CheckedTypeRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +225,7 @@ impl MessageCaseTable {
         module: &Module,
         entry_process: CheckedProcessId,
         semantic_index: &SemanticIndex,
+        types: &mut CheckedTypeInterner<'_>,
     ) -> Result<Self> {
         reject_payload_entry_message(module, entry_process, semantic_index)?;
         let mut builders = module
@@ -240,6 +321,7 @@ impl MessageCaseTable {
                                 payload.as_ref(),
                                 &bindings,
                                 &process_ref_targets[process_index],
+                                types,
                             )?;
                         }
                     }
@@ -263,7 +345,7 @@ impl MessageCaseTable {
         let mut ids_by_key = BTreeMap::new();
         for builder in builders {
             let process_id = builder.process_id;
-            let cases = builder.logical_cases()?;
+            let cases = builder.logical_cases(types)?;
             for (message_index, case) in cases.iter().enumerate() {
                 let key = MessageCaseKey {
                     process: process_id,
@@ -279,7 +361,7 @@ impl MessageCaseTable {
                     )));
                 }
             }
-            payloads_by_process.push(builder.payload_domains()?);
+            payloads_by_process.push(builder.payload_domains(types)?);
             cases_by_process.push(cases);
         }
 
@@ -369,6 +451,7 @@ impl<'a> MessageCaseBuilder<'a> {
         payload: Option<&ValueExpr>,
         bindings: &[ValueBinding<'_>],
         process_refs: &BTreeMap<Identifier, CheckedProcessId>,
+        types: &mut CheckedTypeInterner<'_>,
     ) -> Result<bool> {
         let variant =
             self.semantic_index
@@ -403,7 +486,8 @@ impl<'a> MessageCaseBuilder<'a> {
                         bindings,
                     )?
                 };
-                Ok(self.insert_payload_case(variant_id, payload_type, label))
+                let checked_type = types.intern(payload_type)?;
+                Ok(self.insert_payload_case(variant_id, checked_type, label))
             }
         }
     }
@@ -411,17 +495,14 @@ impl<'a> MessageCaseBuilder<'a> {
     fn insert_payload_case(
         &mut self,
         variant_id: CheckedMessageVariantId,
-        payload_type: &TypeRef,
+        payload_type: CheckedTypeRef,
         label: String,
     ) -> bool {
         let payloads = self.payload_cases.entry(variant_id).or_default();
         if payloads.contains_key(&label) {
             return false;
         }
-        payloads.insert(
-            label.clone(),
-            CheckedPayloadValue::new(payload_type.clone(), label),
-        );
+        payloads.insert(label.clone(), CheckedPayloadValue::new(payload_type, label));
         true
     }
 
@@ -448,7 +529,10 @@ impl<'a> MessageCaseBuilder<'a> {
         Ok(cases)
     }
 
-    fn logical_cases(&self) -> Result<Vec<CheckedMessageCase>> {
+    fn logical_cases(
+        &self,
+        types: &mut CheckedTypeInterner<'_>,
+    ) -> Result<Vec<CheckedMessageCase>> {
         let msg_enum = self
             .semantic_index
             .enum_decl(self.module, &self.process.msg_type)?;
@@ -460,13 +544,20 @@ impl<'a> MessageCaseBuilder<'a> {
                 CheckedMessageCase::new(
                     variant.name.to_string(),
                     CheckedMessageVariantId::from_index(variant_index)?,
-                    variant.payload_type.clone(),
+                    variant
+                        .payload_type
+                        .as_ref()
+                        .map(|payload_type| types.intern(payload_type))
+                        .transpose()?,
                 )
             })
             .collect()
     }
 
-    fn payload_domains(&self) -> Result<Vec<Vec<CheckedPayloadValue>>> {
+    fn payload_domains(
+        &self,
+        _types: &mut CheckedTypeInterner<'_>,
+    ) -> Result<Vec<Vec<CheckedPayloadValue>>> {
         let msg_enum = self
             .semantic_index
             .enum_decl(self.module, &self.process.msg_type)?;
@@ -538,22 +629,28 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     )?;
 
     let semantic_index = SemanticIndex::build(&module)?;
+    let mut types = CheckedTypeInterner::new(&semantic_index);
     let entry_process = semantic_index
         .process_id_by_name("Main")
         .map_err(|_| Error::new("entry process Main is not declared"))?;
     validate_process_declarations_before_message_cases(&module, &semantic_index)?;
-    let message_cases = MessageCaseTable::build(&module, entry_process, &semantic_index)?;
+    let message_cases =
+        MessageCaseTable::build(&module, entry_process, &semantic_index, &mut types)?;
     let mut outputs = OutputPool::new();
+    let check_context = ModuleCheckContext {
+        module: &module,
+        entry_process,
+        semantic_index: &semantic_index,
+        message_cases: &message_cases,
+    };
     let mut checked_processes = Vec::with_capacity(module.processes.len());
     for (index, process) in module.processes.iter().enumerate() {
         let process_id = CheckedProcessId::from_index(index)?;
         checked_processes.push(check_process(
-            &module,
+            &check_context,
             process,
             process_id,
-            entry_process,
-            &semantic_index,
-            &message_cases,
+            &mut types,
             &mut outputs,
         )?);
     }
@@ -575,6 +672,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         module,
         entry_process,
         entry_message,
+        types: types.into_types(),
         outputs: outputs.into_values(),
         processes: checked_processes,
     }))
@@ -584,6 +682,7 @@ fn validate_process_declarations_before_message_cases(
     module: &Module,
     semantic_index: &SemanticIndex,
 ) -> Result<()> {
+    let mut validation_types = CheckedTypeInterner::new(semantic_index);
     for (process_index, process) in module.processes.iter().enumerate() {
         validate_count(
             &format!("process {} mailbox_bound", process.name),
@@ -604,7 +703,7 @@ fn validate_process_declarations_before_message_cases(
             1,
             MAX_MESSAGE_VARIANTS_PER_PROCESS,
         )?;
-        let _ = StateSpace::new(module, semantic_index, process)?;
+        let _ = StateSpace::new(module, semantic_index, process, &mut validation_types)?;
         let process_id = CheckedProcessId::from_index(process_index)?;
         for step in &process.steps {
             check_step_signature(module, process, process_id, semantic_index, step)?;
@@ -614,12 +713,10 @@ fn validate_process_declarations_before_message_cases(
 }
 
 fn check_process(
-    module: &Module,
+    context: &ModuleCheckContext<'_>,
     process: &Process,
     process_id: CheckedProcessId,
-    entry_process: CheckedProcessId,
-    semantic_index: &SemanticIndex,
-    message_cases: &MessageCaseTable,
+    types: &mut CheckedTypeInterner<'_>,
     outputs: &mut OutputPool,
 ) -> Result<CheckedProcess> {
     validate_count(
@@ -629,7 +726,9 @@ fn check_process(
         MAX_MAILBOX_BOUND,
     )?;
 
-    let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+    let msg_enum = context
+        .semantic_index
+        .enum_decl(context.module, &process.msg_type)?;
     if msg_enum.variants.is_empty() {
         return Err(Error::new(format!(
             "enum {} must declare at least one variant",
@@ -644,30 +743,31 @@ fn check_process(
     )?;
     validate_count(
         &format!("process {} message_case_count", process.name),
-        message_cases.cases_for(process_id)?.len(),
+        context.message_cases.cases_for(process_id)?.len(),
         1,
         MAX_MESSAGE_VARIANTS_PER_PROCESS,
     )?;
 
-    let mut state_space = StateSpace::new(module, semantic_index, process)?;
-    let init_state = check_init(semantic_index, process, &mut state_space)?;
+    let mut state_space = StateSpace::new(context.module, context.semantic_index, process, types)?;
+    let init_state = check_init(context.semantic_index, process, &mut state_space)?;
     let process_context = ProcessCheckContext {
-        module,
+        module: context.module,
         process,
         process_id,
-        entry_process,
-        semantic_index,
-        message_cases,
+        entry_process: context.entry_process,
+        semantic_index: context.semantic_index,
+        message_cases: context.message_cases,
     };
-    let (process_refs, transitions) = check_step(&process_context, &mut state_space, outputs)?;
+    let (process_refs, transitions) =
+        check_step(&process_context, &mut state_space, outputs, types)?;
     let state_values = state_space.into_values()?;
 
     Ok(CheckedProcess::new(CheckedProcessParts {
         debug_name: process.name.clone(),
-        state_type: process.state_type.clone(),
+        state_type: types.intern(&process.state_type)?,
         state_values,
-        message_type: process.msg_type.clone(),
-        message_cases: message_cases.cases_for(process_id)?.to_vec(),
+        message_type: types.intern(&process.msg_type)?,
+        message_cases: context.message_cases.cases_for(process_id)?.to_vec(),
         process_refs,
         mailbox_bound: process.mailbox_bound,
         init_state,
@@ -720,6 +820,7 @@ fn check_step(
     context: &ProcessCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
 ) -> Result<(Vec<CheckedProcessRef>, Vec<CheckedTransition>)> {
     let step_clauses = check_step_clauses(
         context.module,
@@ -735,7 +836,7 @@ fn check_step(
         context.semantic_index,
         &step_clauses,
     )?;
-    let step_context = StepCheckContext {
+    let mut step_context = StepCheckContext {
         module: context.module,
         process: context.process,
         process_id: context.process_id,
@@ -747,9 +848,10 @@ fn check_step(
     let mut transitions = Vec::with_capacity(step_clauses.len());
     for clause in step_clauses {
         let transition = check_step_transition(
-            &step_context,
+            &mut step_context,
             state_space,
             outputs,
+            types,
             StepTransitionInput {
                 variant: clause.variant,
                 message: clause.message,
@@ -858,9 +960,10 @@ fn check_step_clauses<'a>(
                 ))
             })?;
         let payload_binding = match (&clause.payload_param, case.payload_type()) {
-            (Some(param), Some(_)) => Some(StepPayloadBinding {
+            (Some(param), Some(checked_ty)) => Some(StepPayloadBinding {
                 name: param.name.clone(),
                 ty: param.ty.clone(),
+                checked_ty: checked_ty.clone(),
             }),
             _ => None,
         };
@@ -1260,14 +1363,16 @@ fn collect_process_refs_from_block(
 }
 
 fn check_step_transition(
-    context: &StepCheckContext<'_>,
+    context: &mut StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
     input: StepTransitionInput<'_>,
 ) -> Result<CheckedTransition> {
     let payload_template_binding = input.payload_binding.map(|binding| ValueTemplateBinding {
         name: &binding.name,
         ty: &binding.ty,
+        checked_ty: &binding.checked_ty,
     });
     let mut actions = Vec::with_capacity(input.body.statements.len());
     for statement in &input.body.statements {
@@ -1298,6 +1403,7 @@ fn check_step_transition(
                     resolve_checked_send_target(context, input.payload_binding, target)?;
                 let message_id = resolve_send_message_case(
                     context,
+                    types,
                     send_target.target_process,
                     message,
                     payload.as_ref(),
@@ -1334,6 +1440,7 @@ fn check_step_transition(
             let template = checked_value_template_with_binding(
                 context.module,
                 context.semantic_index,
+                types,
                 &context.process.state_type,
                 state_arg,
                 payload_template_binding.as_ref(),
@@ -1393,7 +1500,7 @@ fn resolve_checked_send_target(
                 })?;
             return Ok(ResolvedCheckedSendTarget {
                 target: CheckedSendTarget::ReceivedPayload {
-                    ty: binding.ty.clone(),
+                    ty: binding.checked_ty.clone(),
                     target: target_process,
                 },
                 target_process,
@@ -1412,7 +1519,8 @@ struct CheckedSendMessage {
 }
 
 fn resolve_send_message_case(
-    context: &StepCheckContext<'_>,
+    context: &mut StepCheckContext<'_>,
+    types: &mut CheckedTypeInterner<'_>,
     target_process: CheckedProcessId,
     message: &Identifier,
     payload: Option<&ValueExpr>,
@@ -1444,6 +1552,7 @@ fn resolve_send_message_case(
         }
         (Some(payload_type), Some(payload)) => Some(checked_send_payload_template(
             context,
+            types,
             payload_type,
             payload,
             binding,
@@ -1456,7 +1565,8 @@ fn resolve_send_message_case(
 }
 
 fn checked_send_payload_template(
-    context: &StepCheckContext<'_>,
+    context: &mut StepCheckContext<'_>,
+    types: &mut CheckedTypeInterner<'_>,
     expected_type: &TypeRef,
     payload: &ValueExpr,
     binding: Option<&ValueTemplateBinding<'_>>,
@@ -1475,7 +1585,7 @@ fn checked_send_payload_template(
             if name == binding.name {
                 if binding.ty == expected_type {
                     return Ok(CheckedValueTemplate::ReceivedPayload {
-                        ty: binding.ty.clone(),
+                        ty: binding.checked_ty.clone(),
                     });
                 }
                 return Err(Error::new(format!(
@@ -1500,7 +1610,7 @@ fn checked_send_payload_template(
             )));
         }
         return Ok(CheckedValueTemplate::ProcessRef {
-            ty: expected_type.clone(),
+            ty: types.intern(expected_type)?,
             target: target_process,
             process_ref: process_ref.id,
         });
@@ -1509,6 +1619,7 @@ fn checked_send_payload_template(
     checked_value_template_with_binding(
         context.module,
         context.semantic_index,
+        types,
         expected_type,
         payload,
         binding,

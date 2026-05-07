@@ -228,8 +228,8 @@ fn payload_json(payload: &Option<mantle_artifact::ArtifactPayload>) -> String {
     match payload {
         Some(payload) => {
             let mut json = format!(
-                ",\"payload_type\":\"{}\",\"payload\":\"{}\"",
-                json_escape(&payload.ty),
+                ",\"payload_type_id\":{},\"payload\":\"{}\"",
+                payload.ty.as_u32(),
                 json_escape(&payload.value)
             );
             if let Some(process_ref) = payload.process_ref {
@@ -257,7 +257,7 @@ mod tests {
         let event = RuntimeEvent::ArtifactLoaded {
             format: "mantle-target-artifact".to_string(),
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-            source_language: "strata".to_string(),
+            source_language: "test_frontend".to_string(),
             module: "actor_sequence".to_string(),
             entry_process_id: ProcessId::new(7),
             entry_process: "Main".to_string(),

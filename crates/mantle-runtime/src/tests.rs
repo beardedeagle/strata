@@ -5,13 +5,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
     ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactValueTemplate,
-    ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, STRATA_SOURCE_LANGUAGE, StateId, StepResult, write_artifact,
+    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType,
+    ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, write_artifact,
 };
 
 use super::program::LoadedProgram;
 use super::*;
+
+const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
+const MAIN_STATE: TypeId = TypeId::new(0);
+const MAIN_MSG: TypeId = TypeId::new(1);
+const WORKER_STATE: TypeId = TypeId::new(2);
+const WORKER_MSG: TypeId = TypeId::new(3);
+const JOB: TypeId = TypeId::new(4);
+const HELPER_STATE: TypeId = TypeId::new(5);
+const HELPER_MSG: TypeId = TypeId::new(6);
 
 #[test]
 fn runtime_rejects_invalid_artifact_identity() {
@@ -361,7 +370,7 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
 fn in_memory_host_delivers_payload_envelopes_and_template_state() {
     let artifact = payload_artifact();
     let expected_payload = ArtifactPayload {
-        ty: "Job".to_string(),
+        ty: JOB,
         value: "Job{phase:Ready}".to_string(),
         process_ref: None,
     };
@@ -423,7 +432,7 @@ fn in_memory_host_delivers_payload_envelopes_and_template_state() {
 fn runtime_preflights_template_state_before_process_outputs() {
     let mut artifact = payload_artifact();
     artifact.processes[1].state_values =
-        state_values("WorkerState", &["WorkerState{job:Job{phase:Done}}"]);
+        state_values(WORKER_STATE, &["WorkerState{job:Job{phase:Done}}"]);
     let mut host = InMemoryRuntimeHost::default();
 
     let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
@@ -449,7 +458,7 @@ fn runtime_preflights_template_state_before_process_outputs() {
 fn runtime_rejects_template_state_when_label_matches_but_identity_does_not() {
     let mut artifact = payload_artifact();
     artifact.processes[1].state_values[1] = ArtifactStateValue::with_label(
-        "WorkerState",
+        WORKER_STATE,
         "WorkerState{job:Job{phase:Spoofed}}",
         "WorkerState{job:Job{phase:Ready}}",
     );
@@ -561,9 +570,9 @@ fn in_memory_host_preserves_current_next_state() {
     artifact.entry_message = MessageId::new(0);
     artifact.processes = vec![ArtifactProcess {
         debug_name: "Worker".to_string(),
-        state_type: "WorkerState".to_string(),
-        state_values: state_values("WorkerState", &["Idle", "Handled"]),
-        message_type: "WorkerMsg".to_string(),
+        state_type: WORKER_STATE,
+        state_values: state_values(WORKER_STATE, &["Idle", "Handled"]),
+        message_type: WORKER_MSG,
         message_variants: vec![ArtifactMessageVariant::unit("Ping")],
         process_refs: Vec::new(),
         mailbox_bound: 1,
@@ -637,17 +646,18 @@ fn valid_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
         schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+        source_language: TEST_SOURCE_LANGUAGE.to_string(),
         module: "actor_ping".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
+        types: base_types(),
         outputs: vec!["worker handled Ping".to_string()],
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
-                state_type: "MainState".to_string(),
-                state_values: state_values("MainState", &["MainState"]),
-                message_type: "MainMsg".to_string(),
+                state_type: MAIN_STATE,
+                state_values: state_values(MAIN_STATE, &["MainState"]),
+                message_type: MAIN_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
@@ -675,9 +685,9 @@ fn valid_artifact() -> MantleArtifact {
             },
             ArtifactProcess {
                 debug_name: "Worker".to_string(),
-                state_type: "WorkerState".to_string(),
-                state_values: state_values("WorkerState", &["Idle", "Handled"]),
-                message_type: "WorkerMsg".to_string(),
+                state_type: WORKER_STATE,
+                state_values: state_values(WORKER_STATE, &["Idle", "Handled"]),
+                message_type: WORKER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
@@ -727,30 +737,28 @@ fn payload_artifact() -> MantleArtifact {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
-            ty: "Job".to_string(),
+            ty: JOB,
             value: "Job{phase:Ready}".to_string(),
         }),
     };
-    artifact.processes[1].state_type = "WorkerState".to_string();
+    artifact.processes[1].state_type = WORKER_STATE;
     artifact.processes[1].state_values = state_values(
-        "WorkerState",
+        WORKER_STATE,
         &[
             "WorkerState{job:Job{phase:Done}}",
             "WorkerState{job:Job{phase:Ready}}",
         ],
     );
-    artifact.processes[1].message_type = "WorkerMsg".to_string();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[1].message_type = WORKER_MSG;
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[1].transitions[0] = ArtifactTransition {
         message: MessageId::new(0),
         step_result: StepResult::Stop,
         next_state: NextState::Template(ArtifactValueTemplate::Record {
-            ty: "WorkerState".to_string(),
+            ty: WORKER_STATE,
             fields: vec![ArtifactValueTemplateField {
                 name: "job".to_string(),
-                value: ArtifactValueTemplate::ReceivedPayload {
-                    ty: "Job".to_string(),
-                },
+                value: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
             }],
         }),
         effects: vec![ArtifactEffect::Emit],
@@ -765,17 +773,18 @@ fn looping_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
         schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+        source_language: TEST_SOURCE_LANGUAGE.to_string(),
         module: "looping".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
+        types: base_types(),
         outputs: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
-                state_type: "MainState".to_string(),
-                state_values: state_values("MainState", &["MainState"]),
-                message_type: "MainMsg".to_string(),
+                state_type: MAIN_STATE,
+                state_values: state_values(MAIN_STATE, &["MainState"]),
+                message_type: MAIN_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
@@ -803,9 +812,9 @@ fn looping_artifact() -> MantleArtifact {
             },
             ArtifactProcess {
                 debug_name: "Worker".to_string(),
-                state_type: "WorkerState".to_string(),
-                state_values: state_values("WorkerState", &["WorkerState"]),
-                message_type: "WorkerMsg".to_string(),
+                state_type: WORKER_STATE,
+                state_values: state_values(WORKER_STATE, &["WorkerState"]),
+                message_type: WORKER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "helper".to_string(),
@@ -833,9 +842,9 @@ fn looping_artifact() -> MantleArtifact {
             },
             ArtifactProcess {
                 debug_name: "Helper".to_string(),
-                state_type: "HelperState".to_string(),
-                state_values: state_values("HelperState", &["HelperState"]),
-                message_type: "HelperMsg".to_string(),
+                state_type: HELPER_STATE,
+                state_values: state_values(HELPER_STATE, &["HelperState"]),
+                message_type: HELPER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
@@ -870,10 +879,11 @@ fn sequence_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
         schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+        source_language: TEST_SOURCE_LANGUAGE.to_string(),
         module: "actor_sequence".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
+        types: base_types(),
         outputs: vec![
             "worker handled First".to_string(),
             "worker handled Second".to_string(),
@@ -881,9 +891,9 @@ fn sequence_artifact() -> MantleArtifact {
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
-                state_type: "MainState".to_string(),
-                state_values: state_values("MainState", &["MainState"]),
-                message_type: "MainMsg".to_string(),
+                state_type: MAIN_STATE,
+                state_values: state_values(MAIN_STATE, &["MainState"]),
+                message_type: MAIN_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
@@ -916,9 +926,9 @@ fn sequence_artifact() -> MantleArtifact {
             },
             ArtifactProcess {
                 debug_name: "Worker".to_string(),
-                state_type: "WorkerState".to_string(),
-                state_values: state_values("WorkerState", &["Waiting", "SawFirst", "Done"]),
-                message_type: "WorkerMsg".to_string(),
+                state_type: WORKER_STATE,
+                state_values: state_values(WORKER_STATE, &["Waiting", "SawFirst", "Done"]),
+                message_type: WORKER_MSG,
                 message_variants: vec![
                     ArtifactMessageVariant::unit("First"),
                     ArtifactMessageVariant::unit("Second"),
@@ -952,7 +962,19 @@ fn sequence_artifact() -> MantleArtifact {
     }
 }
 
-fn state_values(ty: &str, values: &[&str]) -> Vec<ArtifactStateValue> {
+fn base_types() -> Vec<ArtifactType> {
+    vec![
+        ArtifactType::value("MainState"),
+        ArtifactType::value("MainMsg"),
+        ArtifactType::value("WorkerState"),
+        ArtifactType::value("WorkerMsg"),
+        ArtifactType::value("Job"),
+        ArtifactType::value("HelperState"),
+        ArtifactType::value("HelperMsg"),
+    ]
+}
+
+fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {
     values
         .iter()
         .map(|value| ArtifactStateValue::new(ty, *value))
@@ -972,5 +994,5 @@ fn unique_artifact_name(name: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after UNIX epoch")
         .as_nanos();
-    format!("strata-{name}-{}-{nanos}.mta", std::process::id())
+    format!("mantle-{name}-{}-{nanos}.mta", std::process::id())
 }

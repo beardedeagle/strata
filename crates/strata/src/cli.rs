@@ -4,7 +4,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use mantle_artifact::{default_artifact_path, write_artifact};
+use mantle_artifact::write_artifact;
 
 use crate::language::{MAX_SOURCE_BYTES, check_source, lower_to_artifact};
 
@@ -131,6 +131,21 @@ fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
     value
         .map(PathBuf::from)
         .ok_or_else(|| Error::new(format!("missing path; usage: {usage}")))
+}
+
+fn default_artifact_path(source_path: &Path) -> Result<PathBuf> {
+    let stem = source_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "source path {} has no UTF-8 file stem",
+                source_path.display()
+            ))
+        })?;
+    Ok(Path::new("target")
+        .join("strata")
+        .join(format!("{stem}.mta")))
 }
 
 fn read_source_file(path: &Path) -> Result<String> {

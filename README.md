@@ -7,15 +7,15 @@ Mantle is the runtime target for Strata programs. Strata source files are
 written as `.str`; the compiler builds language-neutral Mantle Target Artifacts
 as `.mta`; Mantle validates and executes those artifacts.
 
-The project is early, but the shape is deliberate: Strata should make effects,
-authority, process behavior, determinism, and communication protocols visible in
-the program text and checkable before execution. Mantle should execute only what
-the artifact is allowed to do, and it should leave an observability trail that
-can be inspected after the run.
+The shape is deliberate: Strata should make effects, authority, process
+behavior, determinism, and communication protocols visible in the program text
+and checkable before execution. Mantle should execute only what the artifact is
+allowed to do, and it should leave an observability trail that can be inspected
+after the run.
 
-## Current Status
+## Runnable Gates
 
-The first runnable product gate is in place:
+The first source-to-runtime gate:
 
 ```sh
 cargo build
@@ -31,11 +31,11 @@ Mantle prints the emitted output and records the runtime events in:
 target/strata/hello.observability.jsonl
 ```
 
-This is not yet a complete language or a production runtime. It is the first
-source-to-runtime slice: a real `.str` file can be checked, built into `.mta`,
-and executed by Mantle.
+This slice is a source-to-runtime slice, not a complete language or release-ready
+runtime: a real `.str` file can be checked, built into `.mta`, and executed by
+Mantle.
 
-The first actor/runtime gate is also in place:
+The actor/runtime gate:
 
 ```sh
 cargo run -p strata --bin strata -- check examples/actor_ping.str
@@ -51,8 +51,7 @@ runtime trace at:
 target/strata/actor_ping.observability.jsonl
 ```
 
-Multi-step immutable actor execution is now represented by message-keyed
-process transitions:
+Multi-step immutable actor execution uses message-keyed process transitions:
 
 ```sh
 cargo run -p strata --bin strata -- check examples/actor_sequence.str
@@ -69,8 +68,7 @@ records process, message, state, and output IDs in:
 target/strata/actor_sequence.observability.jsonl
 ```
 
-Process references now support multiple runtime instances of one process
-definition:
+Process references support multiple runtime instances of one process definition:
 
 ```sh
 cargo run -p strata --bin strata -- check examples/actor_instances.str
@@ -107,7 +105,7 @@ reference as `Work(reply_to: ProcessRef<Sink>)`, and sends `Done` through the
 received typed reference. Mantle traces both the runtime `pid` and admitted
 process ID for the transported reference.
 
-Fail-closed actor failure now has source-to-runtime evidence:
+Fail-closed actor failure has source-to-runtime evidence:
 
 ```sh
 cargo run -p strata --bin strata -- check examples/actor_panic_no_replay.str
@@ -152,17 +150,18 @@ the same runtime semantics.
 - Fail closed: invalid artifacts, unsupported authority, and unsafe runtime
   states should be rejected rather than silently widened.
 - Language-neutral runtime artifacts: Mantle artifacts identify their format,
-  version, and source language internally.
+  version, and source language internally, and carry executable type identity
+  through Mantle type-table IDs rather than source type strings.
 - Corpus matters: examples, libraries, fixtures, and conformance cases are part
-  of the product, not an afterthought.
+  of the language/runtime, not an afterthought.
 
 ## Corpus And Libraries
 
 New languages do not succeed on syntax alone. They need a durable body of high
 quality code: examples, standard patterns, libraries, tests, rejection cases,
-runtime traces, and migration guides.
+and runtime traces.
 
-Strata and Mantle will therefore grow in two directions:
+Strata and Mantle grow through two tracks:
 
 - native Strata programs and libraries that show the language as it is intended
   to be written;
@@ -175,21 +174,20 @@ idiomatic corpus needed for the language itself.
 
 ## Project Direction
 
-The next milestones are expected to expand the current vertical slices into a
-usable MVP:
+MVP expansion targets:
 
 - richer `.str` parsing and diagnostics;
 - richer actors/processes with typed mailboxes;
 - broader process references plus message send and receive behavior;
 - broader process state transitions;
 - normal termination and failure reporting;
-- explicit effect checking beyond the current `emit`, `spawn`, and `send` slice;
+- explicit effect checking beyond the `emit`, `spawn`, and `send` slice;
 - Mantle runtime traces that prove execution happened inside the runtime;
 - conformance tests and example programs that double as corpus material.
 
-Longer term, Strata and Mantle are intended to cover typed distribution,
-supervision, capability-aware runtime behavior, artifact validation, upgrade
-coordination, and reproducible publication.
+Full-shape targets include typed distribution, supervision,
+capability-aware runtime behavior, artifact validation, upgrade coordination,
+and reproducible publication.
 
 ## File Types
 
@@ -206,7 +204,7 @@ examples/                 runnable Strata examples
 crates/strata/             Strata source checker, builder, and CLI
 crates/mantle-artifact/    Mantle Target Artifact encode/decode/validation
 crates/mantle-runtime/     local Mantle runtime and CLI
-crates/mantle-runtime/tests/product_gates.rs
+crates/source-to-runtime-gates/
                           source-to-runtime acceptance tests
 tools/                     editor and MIME metadata
 ```
@@ -244,7 +242,7 @@ List available commands:
 just --list
 ```
 
-Run the current verification bundle:
+Run the verification bundle:
 
 ```sh
 just quality
@@ -279,10 +277,10 @@ just docs
 just diff-check
 ```
 
-Run the product gate manually:
+Run the source-to-runtime gates manually:
 
 ```sh
-just product-gates
+just source-to-runtime-gates
 ```
 
 Nightly-only validation is also available for fuzz and Miri smoke coverage:

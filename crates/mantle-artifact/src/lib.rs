@@ -11,13 +11,13 @@ mod validation;
 pub use artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
     ArtifactProcessRef, ArtifactProcessRefPayload, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact,
-    NextState, StepResult,
+    ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
+    ArtifactValueTemplateField, MantleArtifact, NextState, StepResult,
 };
 pub use constants::*;
 pub use error::{Error, Result};
-pub use ids::{MessageId, OutputId, ProcessId, ProcessRefId, StateId};
-pub use io::{default_artifact_path, read_artifact, source_hash_fnv1a64, write_artifact};
+pub use ids::{MessageId, OutputId, ProcessId, ProcessRefId, StateId, TypeId};
+pub use io::{read_artifact, source_hash_fnv1a64, write_artifact};
 pub use validation::{
     validate_message_label, validate_payload_value_label, validate_state_value_label,
 };

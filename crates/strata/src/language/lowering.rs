@@ -1,22 +1,82 @@
 use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
     ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactSendTarget,
-    ArtifactStateValue, ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField,
-    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId,
-    STRATA_SOURCE_LANGUAGE, StateId, StepResult, source_hash_fnv1a64,
+    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
+    ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedNextState, CheckedOutputId,
     CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget,
-    CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedValueTemplate,
+    CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId,
+    CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
 };
+
+const STRATA_SOURCE_LANGUAGE: &str = "strata";
+
+struct ArtifactTypeMap {
+    artifacts: Vec<ArtifactType>,
+}
+
+impl ArtifactTypeMap {
+    fn new(checked: &CheckedProgram) -> mantle_artifact::Result<Self> {
+        let artifacts = checked
+            .types()
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| {
+                let id = CheckedTypeId::from_index(index).map_err(|err| {
+                    mantle_artifact::Error::new(format!(
+                        "checked type index {index} cannot lower: {err}"
+                    ))
+                })?;
+                if ty.id() != id {
+                    return Err(mantle_artifact::Error::new(format!(
+                        "checked type table id {} does not match index {index}",
+                        ty.id().as_u32()
+                    )));
+                }
+                Ok(ArtifactType {
+                    label: ty.label().to_string(),
+                    kind: match ty.kind() {
+                        CheckedTypeKind::Value => ArtifactTypeKind::Value,
+                        CheckedTypeKind::ProcessRef { target } => ArtifactTypeKind::ProcessRef {
+                            target: lower_process_id(target),
+                        },
+                    },
+                })
+            })
+            .collect::<mantle_artifact::Result<Vec<_>>>()?;
+        Ok(Self { artifacts })
+    }
+
+    fn artifact_id(&self, ty: &CheckedTypeRef) -> mantle_artifact::Result<TypeId> {
+        self.artifacts.get(ty.id().index()).ok_or_else(|| {
+            mantle_artifact::Error::new(format!(
+                "checked type id {} is not in the checked type table",
+                ty.id().as_u32()
+            ))
+        })?;
+        TypeId::from_index(ty.id().index())
+    }
+
+    fn into_artifact_types(self) -> Vec<ArtifactType> {
+        self.artifacts
+    }
+}
 
 pub fn lower_to_artifact(
     checked: &CheckedProgram,
     source: &str,
 ) -> mantle_artifact::Result<MantleArtifact> {
+    let type_map = ArtifactTypeMap::new(checked)?;
+    let processes = checked
+        .processes()
+        .iter()
+        .map(|process| lower_process(process, &type_map))
+        .collect::<mantle_artifact::Result<Vec<_>>>()?;
     let artifact = MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
         schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
@@ -24,29 +84,33 @@ pub fn lower_to_artifact(
         module: checked.module().name.to_string(),
         entry_process: lower_process_id(checked.entry_process()),
         entry_message: lower_message_id(checked.entry_message()),
+        types: type_map.into_artifact_types(),
         outputs: checked.outputs().to_vec(),
-        processes: checked.processes().iter().map(lower_process).collect(),
+        processes,
         source_hash_fnv1a64: source_hash_fnv1a64(source),
     };
     artifact.validate()?;
     Ok(artifact)
 }
 
-fn lower_process(process: &CheckedProcess) -> ArtifactProcess {
-    ArtifactProcess {
+fn lower_process(
+    process: &CheckedProcess,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<ArtifactProcess> {
+    Ok(ArtifactProcess {
         debug_name: process.debug_name().to_string(),
-        state_type: process.state_type().to_string(),
+        state_type: types.artifact_id(process.state_type())?,
         state_values: process
             .state_values()
             .iter()
-            .map(lower_state_value)
-            .collect(),
-        message_type: process.message_type().to_string(),
+            .map(|value| lower_state_value(value, types))
+            .collect::<mantle_artifact::Result<Vec<_>>>()?,
+        message_type: types.artifact_id(process.message_type())?,
         message_variants: process
             .message_cases()
             .iter()
-            .map(lower_message_variant)
-            .collect(),
+            .map(|message| lower_message_variant(message, types))
+            .collect::<mantle_artifact::Result<Vec<_>>>()?,
         process_refs: process
             .process_refs()
             .iter()
@@ -57,23 +121,34 @@ fn lower_process(process: &CheckedProcess) -> ArtifactProcess {
             .collect(),
         mailbox_bound: process.mailbox_bound(),
         init_state: lower_state_id(process.init_state()),
-        transitions: process.transitions().iter().map(lower_transition).collect(),
-    }
+        transitions: process
+            .transitions()
+            .iter()
+            .map(|transition| lower_transition(transition, types))
+            .collect::<mantle_artifact::Result<Vec<_>>>()?,
+    })
 }
 
-fn lower_transition(transition: &CheckedTransition) -> ArtifactTransition {
-    ArtifactTransition {
+fn lower_transition(
+    transition: &CheckedTransition,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<ArtifactTransition> {
+    Ok(ArtifactTransition {
         message: lower_message_id(transition.message()),
         step_result: lower_step_result(transition.step_result()),
-        next_state: lower_next_state(transition.next_state()),
+        next_state: lower_next_state(transition.next_state(), types)?,
         effects: transition
             .effects()
             .iter()
             .copied()
             .map(lower_effect)
             .collect(),
-        actions: transition.actions().iter().map(lower_action).collect(),
-    }
+        actions: transition
+            .actions()
+            .iter()
+            .map(|action| lower_action(action, types))
+            .collect::<mantle_artifact::Result<Vec<_>>>()?,
+    })
 }
 
 fn lower_effect(effect: Effect) -> ArtifactEffect {
@@ -84,95 +159,125 @@ fn lower_effect(effect: Effect) -> ArtifactEffect {
     }
 }
 
-fn lower_action(action: &CheckedAction) -> ArtifactAction {
+fn lower_action(
+    action: &CheckedAction,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<ArtifactAction> {
     match action {
-        CheckedAction::Emit { output } => ArtifactAction::Emit {
+        CheckedAction::Emit { output } => Ok(ArtifactAction::Emit {
             output: lower_output_id(*output),
-        },
+        }),
         CheckedAction::Spawn {
             target,
             process_ref,
-        } => ArtifactAction::Spawn {
+        } => Ok(ArtifactAction::Spawn {
             target: lower_process_id(*target),
             process_ref: lower_process_ref_id(*process_ref),
-        },
+        }),
         CheckedAction::Send {
             target,
             message,
             payload,
-        } => ArtifactAction::Send {
-            target: lower_send_target(target),
+        } => Ok(ArtifactAction::Send {
+            target: lower_send_target(target, types)?,
             message: lower_message_id(*message),
-            payload: payload.as_ref().map(lower_value_template),
-        },
+            payload: payload
+                .as_ref()
+                .map(|payload| lower_value_template(payload, types))
+                .transpose()?,
+        }),
     }
 }
 
-fn lower_next_state(next_state: CheckedNextState) -> NextState {
+fn lower_next_state(
+    next_state: CheckedNextState,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<NextState> {
     match next_state {
-        CheckedNextState::Current => NextState::Current,
-        CheckedNextState::Value(state) => NextState::Value(lower_state_id(state)),
+        CheckedNextState::Current => Ok(NextState::Current),
+        CheckedNextState::Value(state) => Ok(NextState::Value(lower_state_id(state))),
         CheckedNextState::Template(template) => {
-            NextState::Template(lower_value_template(&template))
+            Ok(NextState::Template(lower_value_template(&template, types)?))
         }
     }
 }
 
-fn lower_message_variant(message: &CheckedMessageCase) -> ArtifactMessageVariant {
-    ArtifactMessageVariant {
+fn lower_message_variant(
+    message: &CheckedMessageCase,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<ArtifactMessageVariant> {
+    Ok(ArtifactMessageVariant {
         label: message.label().to_string(),
-        payload_type: message.payload_type().map(ToString::to_string),
-    }
+        payload_type: message
+            .payload_type()
+            .map(|ty| types.artifact_id(ty))
+            .transpose()?,
+    })
 }
 
-fn lower_state_value(value: &CheckedStateValue) -> ArtifactStateValue {
-    ArtifactStateValue::with_label(
-        value.ty().to_string(),
+fn lower_state_value(
+    value: &CheckedStateValue,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<ArtifactStateValue> {
+    Ok(ArtifactStateValue::with_label(
+        types.artifact_id(value.ty())?,
         value.value().to_string(),
         value.label().to_string(),
-    )
+    ))
 }
 
-fn lower_value_template(template: &CheckedValueTemplate) -> ArtifactValueTemplate {
+fn lower_value_template(
+    template: &CheckedValueTemplate,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<ArtifactValueTemplate> {
     match template {
-        CheckedValueTemplate::Literal(value) => ArtifactValueTemplate::Literal {
-            ty: value.ty().to_string(),
+        CheckedValueTemplate::Literal(value) => Ok(ArtifactValueTemplate::Literal {
+            ty: types.artifact_id(value.ty())?,
             value: value.label().to_string(),
-        },
+        }),
         CheckedValueTemplate::ReceivedPayload { ty } => {
-            ArtifactValueTemplate::ReceivedPayload { ty: ty.to_string() }
+            Ok(ArtifactValueTemplate::ReceivedPayload {
+                ty: types.artifact_id(ty)?,
+            })
         }
         CheckedValueTemplate::ProcessRef {
             ty,
             target,
             process_ref,
-        } => ArtifactValueTemplate::ProcessRef {
-            ty: ty.to_string(),
+        } => Ok(ArtifactValueTemplate::ProcessRef {
+            ty: types.artifact_id(ty)?,
             target_process: lower_process_id(*target),
             process_ref: lower_process_ref_id(*process_ref),
-        },
-        CheckedValueTemplate::Record { ty, fields } => ArtifactValueTemplate::Record {
-            ty: ty.to_string(),
+        }),
+        CheckedValueTemplate::Record { ty, fields } => Ok(ArtifactValueTemplate::Record {
+            ty: types.artifact_id(ty)?,
             fields: fields
                 .iter()
-                .map(|field| ArtifactValueTemplateField {
-                    name: field.name().to_string(),
-                    value: lower_value_template(field.value()),
+                .map(|field| {
+                    Ok(ArtifactValueTemplateField {
+                        name: field.name().to_string(),
+                        value: lower_value_template(field.value(), types)?,
+                    })
                 })
-                .collect(),
-        },
+                .collect::<mantle_artifact::Result<Vec<_>>>()?,
+        }),
     }
 }
 
-fn lower_send_target(target: &CheckedSendTarget) -> ArtifactSendTarget {
+fn lower_send_target(
+    target: &CheckedSendTarget,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<ArtifactSendTarget> {
     match target {
-        CheckedSendTarget::ProcessRef(process_ref) => {
-            ArtifactSendTarget::ProcessRef(lower_process_ref_id(*process_ref))
+        CheckedSendTarget::ProcessRef(process_ref) => Ok(ArtifactSendTarget::ProcessRef(
+            lower_process_ref_id(*process_ref),
+        )),
+        CheckedSendTarget::ReceivedPayload { ty, target } => {
+            Ok(ArtifactSendTarget::ReceivedPayload {
+                ty: types.artifact_id(ty)?,
+                target_process: lower_process_id(*target),
+            })
         }
-        CheckedSendTarget::ReceivedPayload { ty, target } => ArtifactSendTarget::ReceivedPayload {
-            ty: ty.to_string(),
-            target_process: lower_process_id(*target),
-        },
     }
 }
 

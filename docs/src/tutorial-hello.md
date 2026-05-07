@@ -1,7 +1,7 @@
 # Tutorial: Hello
 
-This tutorial walks through the smallest Strata program currently accepted by
-the source-to-runtime gate.
+This tutorial walks through the smallest Strata program accepted by the
+source-to-runtime gate.
 
 The complete source is `examples/hello.str`.
 
@@ -12,7 +12,7 @@ module hello;
 ```
 
 The module declaration names the source unit. It does not import anything and
-does not create a package boundary yet.
+does not create a package boundary.
 
 ## State And Message Types
 
@@ -65,11 +65,11 @@ fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
 }
 ```
 
-`step` receives the current state and handles the `Start` message named in its
+`step` receives the process state and handles the `Start` message named in its
 signature pattern.
 
-The body emits text and then returns `Stop(state)`. Passing `state` keeps the
-current state while stopping normally.
+The body emits text and then returns `Stop(state)`. Passing `state` preserves
+the supplied state while stopping normally.
 
 The effect list is `[emit]` because the body uses exactly one effect.
 

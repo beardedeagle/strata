@@ -57,7 +57,7 @@ jobs:
         run: just ci-rust
 
   quality-docs:
-    name: Quality, docs, and product gates
+    name: Quality, docs, and source-to-runtime gates
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
