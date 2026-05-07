@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, TypeRef};
 use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
-use super::super::{PROCESS_REF_TYPE, PROC_RESULT_TYPE};
+use super::super::{PROC_RESULT_TYPE, PROCESS_REF_TYPE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Symbol(u32);
@@ -458,7 +458,7 @@ impl SemanticIndex {
                 return Err(Error::new(format!(
                     "type {} is not declared as an enum",
                     process.msg_type
-                )))
+                )));
             }
         };
         self.enum_variants

@@ -51,9 +51,10 @@ fn decode_rejects_unknown_step_result() {
 
     let err = MantleArtifact::decode(&encoded).expect_err("unknown step result should fail");
 
-    assert!(err
-        .to_string()
-        .contains("invalid step_result value \"Crash\""));
+    assert!(
+        err.to_string()
+            .contains("invalid step_result value \"Crash\"")
+    );
 }
 
 #[test]
@@ -79,9 +80,10 @@ fn decode_reports_duplicate_fields() {
 
     let err = MantleArtifact::decode(&encoded).expect_err("duplicate field should fail");
 
-    assert!(err
-        .to_string()
-        .contains("duplicate artifact field \"process.0.debug_name\""));
+    assert!(
+        err.to_string()
+            .contains("duplicate artifact field \"process.0.debug_name\"")
+    );
 }
 
 #[test]
@@ -91,9 +93,10 @@ fn decode_reports_unknown_fields() {
 
     let err = MantleArtifact::decode(&encoded).expect_err("unknown field should fail");
 
-    assert!(err
-        .to_string()
-        .contains("unknown artifact field \"process.0.transition.0.action.0.extra\""));
+    assert!(
+        err.to_string()
+            .contains("unknown artifact field \"process.0.transition.0.action.0.extra\"")
+    );
 }
 
 #[test]
@@ -105,9 +108,10 @@ fn decode_rejects_unbounded_process_count_before_allocation() {
 
     let err = MantleArtifact::decode(&encoded).expect_err("process count should be bounded");
 
-    assert!(err
-        .to_string()
-        .contains("process_count must be no greater than"));
+    assert!(
+        err.to_string()
+            .contains("process_count must be no greater than")
+    );
 }
 
 #[test]
@@ -122,9 +126,10 @@ fn decode_rejects_unbounded_nested_counts_before_allocation() {
 
     let err = MantleArtifact::decode(&encoded).expect_err("state value count should be bounded");
 
-    assert!(err
-        .to_string()
-        .contains("process.0.state_value_count must be no greater than"));
+    assert!(
+        err.to_string()
+            .contains("process.0.state_value_count must be no greater than")
+    );
 }
 
 #[test]
@@ -150,9 +155,10 @@ fn validate_rejects_invalid_source_language_identifier() {
         .validate()
         .expect_err("invalid source language should fail");
 
-    assert!(err
-        .to_string()
-        .contains("artifact field source_language must be an identifier"));
+    assert!(
+        err.to_string()
+            .contains("artifact field source_language must be an identifier")
+    );
 }
 
 #[test]
@@ -274,9 +280,10 @@ fn validate_rejects_missing_required_send_payload() {
         .validate()
         .expect_err("missing send payload should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Main sends process id 1 message id 0 without required payload"));
+    assert!(
+        err.to_string()
+            .contains("process Main sends process id 1 message id 0 without required payload")
+    );
 }
 
 #[test]
@@ -317,9 +324,10 @@ fn validate_rejects_send_payload_type_mismatch() {
         .validate()
         .expect_err("wrong payload type should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Main transition 0 send payload has type OtherJob, expected Job"));
+    assert!(
+        err.to_string()
+            .contains("process Main transition 0 send payload has type OtherJob, expected Job")
+    );
 }
 
 #[test]
@@ -519,9 +527,10 @@ fn validate_state_value_label_defines_artifact_metadata_boundary() {
 
     let oversized = "a".repeat(MAX_FIELD_VALUE_BYTES + 1);
     let err = validate_state_value_label(&oversized).expect_err("oversized label should fail");
-    assert!(err
-        .to_string()
-        .contains("state value exceeds maximum length"));
+    assert!(
+        err.to_string()
+            .contains("state value exceeds maximum length")
+    );
 }
 
 #[test]
@@ -549,9 +558,10 @@ fn validate_payload_value_label_defines_artifact_metadata_boundary() {
 
     let oversized = "a".repeat(MAX_FIELD_VALUE_BYTES + 1);
     let err = validate_payload_value_label(&oversized).expect_err("oversized label should fail");
-    assert!(err
-        .to_string()
-        .contains("payload value exceeds maximum length"));
+    assert!(
+        err.to_string()
+            .contains("payload value exceeds maximum length")
+    );
 }
 
 #[test]
@@ -564,9 +574,10 @@ fn validate_rejects_encoded_artifacts_above_size_limit() {
         .validate()
         .expect_err("encoded artifact size should be bounded");
 
-    assert!(err
-        .to_string()
-        .contains("encoded artifact exceeds maximum size"));
+    assert!(
+        err.to_string()
+            .contains("encoded artifact exceeds maximum size")
+    );
 }
 
 #[test]
@@ -602,9 +613,10 @@ fn validate_rejects_action_without_declared_effect() {
         .validate()
         .expect_err("send without declared send effect should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Main transition 0 uses effect send but does not declare it"));
+    assert!(
+        err.to_string()
+            .contains("process Main transition 0 uses effect send but does not declare it")
+    );
 }
 
 #[test]
@@ -618,9 +630,10 @@ fn validate_rejects_declared_effect_without_action() {
         .validate()
         .expect_err("unused declared effect should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker transition 0 declares effect send but no action uses it"));
+    assert!(
+        err.to_string()
+            .contains("process Worker transition 0 declares effect send but no action uses it")
+    );
 }
 
 #[test]
@@ -632,9 +645,10 @@ fn validate_rejects_duplicate_transition_effect() {
         .validate()
         .expect_err("duplicate transition effect should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker transition 0 declares duplicate effect emit"));
+    assert!(
+        err.to_string()
+            .contains("process Worker transition 0 declares duplicate effect emit")
+    );
 }
 
 #[test]
@@ -664,9 +678,10 @@ fn validate_rejects_unknown_send_message() {
         .validate()
         .expect_err("unknown send message should fail");
 
-    assert!(err
-        .to_string()
-        .contains("sends message id 1 not accepted by process id 1"));
+    assert!(
+        err.to_string()
+            .contains("sends message id 1 not accepted by process id 1")
+    );
 }
 
 #[test]
@@ -684,9 +699,10 @@ fn validate_rejects_unknown_send_process_ref() {
         .validate()
         .expect_err("unknown send process ref should fail");
 
-    assert!(err
-        .to_string()
-        .contains("references undefined process reference id 99"));
+    assert!(
+        err.to_string()
+            .contains("references undefined process reference id 99")
+    );
 }
 
 #[test]
@@ -701,9 +717,10 @@ fn validate_rejects_duplicate_process_ref_name() {
         .validate()
         .expect_err("duplicate process reference name should fail");
 
-    assert!(err
-        .to_string()
-        .contains("duplicate process reference worker"));
+    assert!(
+        err.to_string()
+            .contains("duplicate process reference worker")
+    );
 }
 
 #[test]
@@ -718,9 +735,10 @@ fn validate_rejects_process_ref_targeting_entry_process() {
         .validate()
         .expect_err("process reference targeting entry process should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker process reference main targets entry process id 0"));
+    assert!(
+        err.to_string()
+            .contains("process Worker process reference main targets entry process id 0")
+    );
 }
 
 #[test]
@@ -735,9 +753,10 @@ fn validate_rejects_process_ref_targeting_same_process() {
         .validate()
         .expect_err("process reference targeting same process should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker process reference self_ref targets itself"));
+    assert!(
+        err.to_string()
+            .contains("process Worker process reference self_ref targets itself")
+    );
 }
 
 #[test]
@@ -752,9 +771,10 @@ fn validate_rejects_spawn_process_ref_target_mismatch() {
         .validate()
         .expect_err("spawn process reference target mismatch should fail");
 
-    assert!(err
-        .to_string()
-        .contains("spawn process reference id 0 targets process id 0, expected 1"));
+    assert!(
+        err.to_string()
+            .contains("spawn process reference id 0 targets process id 0, expected 1")
+    );
 }
 
 #[test]
@@ -771,9 +791,10 @@ fn validate_rejects_duplicate_spawn_process_ref_with_transition_context() {
         .validate()
         .expect_err("duplicate spawn process reference should fail");
 
-    assert!(err
-        .to_string()
-        .contains("duplicates process reference id 0 within message transition 0"));
+    assert!(
+        err.to_string()
+            .contains("duplicates process reference id 0 within message transition 0")
+    );
 }
 
 #[test]
@@ -799,9 +820,10 @@ fn validate_rejects_unknown_spawn_target() {
         .validate()
         .expect_err("unknown spawn target should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process reference worker targets undefined process id 99"));
+    assert!(
+        err.to_string()
+            .contains("process reference worker targets undefined process id 99")
+    );
 }
 
 #[test]
@@ -827,9 +849,10 @@ fn validate_rejects_unknown_entry_process_id() {
         .validate()
         .expect_err("unknown entry process id should fail");
 
-    assert!(err
-        .to_string()
-        .contains("entry process id 99 is not defined"));
+    assert!(
+        err.to_string()
+            .contains("entry process id 99 is not defined")
+    );
 }
 
 #[test]
@@ -842,9 +865,10 @@ fn validate_rejects_payload_bearing_entry_message() {
         .validate()
         .expect_err("entry payload message should fail");
 
-    assert!(err
-        .to_string()
-        .contains("entry message id 0 must not require a payload"));
+    assert!(
+        err.to_string()
+            .contains("entry message id 0 must not require a payload")
+    );
 }
 
 #[test]
@@ -856,9 +880,10 @@ fn validate_rejects_unknown_next_state_value_id() {
         .validate()
         .expect_err("unknown next state value should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker transition next_state id 99 is not a valid state value"));
+    assert!(
+        err.to_string()
+            .contains("process Worker transition next_state id 99 is not a valid state value")
+    );
 }
 
 #[test]
@@ -925,9 +950,10 @@ fn validate_rejects_missing_transition_for_message() {
         .validate()
         .expect_err("missing transition should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker transition_count must equal message_count"));
+    assert!(
+        err.to_string()
+            .contains("process Worker transition_count must equal message_count")
+    );
 }
 
 #[test]
@@ -943,9 +969,10 @@ fn validate_rejects_duplicate_transition_message() {
         .validate()
         .expect_err("duplicate transition should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker declares duplicate transition for message id 0"));
+    assert!(
+        err.to_string()
+            .contains("process Worker declares duplicate transition for message id 0")
+    );
 }
 
 #[test]
@@ -957,9 +984,10 @@ fn validate_rejects_unknown_transition_message() {
         .validate()
         .expect_err("unknown transition message should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker transition message id 1 is not accepted"));
+    assert!(
+        err.to_string()
+            .contains("process Worker transition message id 1 is not accepted")
+    );
 }
 
 #[test]
@@ -971,9 +999,10 @@ fn validate_rejects_duplicate_process_debug_names() {
         .validate()
         .expect_err("duplicate debug labels should fail");
 
-    assert!(err
-        .to_string()
-        .contains("duplicate process debug_name Main"));
+    assert!(
+        err.to_string()
+            .contains("duplicate process debug_name Main")
+    );
 }
 
 #[test]

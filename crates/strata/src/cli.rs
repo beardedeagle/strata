@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use mantle_artifact::{default_artifact_path, write_artifact};
 
-use crate::language::{check_source, lower_to_artifact, MAX_SOURCE_BYTES};
+use crate::language::{MAX_SOURCE_BYTES, check_source, lower_to_artifact};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -421,9 +421,11 @@ mod tests {
         let Error::Artifact(artifact_err) = err else {
             panic!("expected artifact lowering error, got {err}");
         };
-        assert!(artifact_err
-            .to_string()
-            .contains("encoded artifact exceeds maximum size"));
+        assert!(
+            artifact_err
+                .to_string()
+                .contains("encoded artifact exceeds maximum size")
+        );
     }
 
     fn oversized_artifact_source() -> String {

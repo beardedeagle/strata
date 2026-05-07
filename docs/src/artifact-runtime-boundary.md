@@ -30,12 +30,13 @@ artifact body.
 ## Execution
 
 Mantle loads admitted transitions into indexed runtime tables. A dequeued
-message selects the transition by typed message ID. The runtime then applies the
-transition as a whole-value state replacement and executes admitted actions.
-Dynamic next-state templates resolve to an admitted state ID by typed state
-value identity, not by display label text.
-Transition effect metadata is admitted with the artifact and must exactly match
-the action effects that execute.
+message selects the transition by typed message ID. The runtime then validates
+the loaded transition effect authority before executing any action. Dynamic
+next-state templates resolve to an admitted state ID by typed state value
+identity, not by display label text.
+
+Transition effect metadata is admitted with the artifact, loaded as runtime
+effect authority, and must exactly match the action effects that execute.
 
 The current action set covers:
 

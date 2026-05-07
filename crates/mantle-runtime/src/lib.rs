@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use mantle_artifact::{read_artifact, MantleArtifact, Result};
+use mantle_artifact::{MantleArtifact, Result, read_artifact};
 
 mod cli;
 mod event;
@@ -19,15 +19,15 @@ pub use event::{
 };
 pub use host::{InMemoryRuntimeHost, RuntimeHost};
 pub use limits::{
-    RunLimits, DEFAULT_MAX_DISPATCHES, DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
-    DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES,
+    DEFAULT_MAX_DISPATCHES, DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES,
+    DEFAULT_MAX_TRACE_BYTES, RunLimits,
 };
 pub use report::{
     MessageDelivery, ProcessReport, ProcessStatus, RunReport, RuntimeReport, SpawnReport,
 };
 pub use run::run_artifact_with_host;
 
-use host::{prepare_trace_file, JsonlTraceHost};
+use host::{JsonlTraceHost, prepare_trace_file};
 use program::LoadedProgram;
 use run::run_loaded_program_with_host;
 

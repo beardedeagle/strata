@@ -8,11 +8,11 @@ use crate::validation::{
     validate_unique_message_variant_list, validate_unique_state_value_list, validate_value_label,
 };
 use crate::{
-    Error, MessageId, OutputId, ProcessId, ProcessRefId, Result, StateId, ARTIFACT_FORMAT,
-    ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION,
-    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
-    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS,
+    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, Error, MAX_ACTIONS_PER_PROCESS,
+    MAX_EFFECTS_PER_TRANSITION, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH,
+    MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId, ProcessRefId, Result, StateId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1434,7 +1434,7 @@ fn decode_action(fields: &mut ArtifactFields, action_prefix: &str) -> Result<Art
                 value => {
                     return Err(Error::new(format!(
                         "invalid {payload_key} value {value:?}; expected \"none\" or \"template\""
-                    )))
+                    )));
                 }
             };
             Ok(ArtifactAction::Send {

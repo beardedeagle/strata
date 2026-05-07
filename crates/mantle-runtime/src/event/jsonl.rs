@@ -247,7 +247,7 @@ fn payload_json(payload: &Option<mantle_artifact::ArtifactPayload>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use mantle_artifact::{MessageId, OutputId, ProcessId, ARTIFACT_SCHEMA_VERSION};
+    use mantle_artifact::{ARTIFACT_SCHEMA_VERSION, MessageId, OutputId, ProcessId};
 
     use super::*;
     use crate::{RuntimeEvent, RuntimeOutputStream, RuntimeProcessId};

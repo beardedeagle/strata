@@ -1,0 +1,34 @@
+module effect_authority_missing;
+
+record MainState;
+enum MainMsg { Start }
+enum WorkerState { Idle }
+enum WorkerMsg { Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Ping;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

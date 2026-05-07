@@ -20,11 +20,11 @@ use super::checked::{
     CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedValueTemplate,
 };
 use super::diagnostic::{Error, Result};
-use super::{PROCESS_REF_TYPE, PROC_RESULT_TYPE};
+use super::{PROC_RESULT_TYPE, PROCESS_REF_TYPE};
 use outputs::OutputPool;
 use state_space::{
-    canonical_source_value_with_bindings, checked_value_template_with_binding,
-    source_value_uses_binding, StateSpace, ValueBinding, ValueTemplateBinding,
+    StateSpace, ValueBinding, ValueTemplateBinding, canonical_source_value_with_bindings,
+    checked_value_template_with_binding, source_value_uses_binding,
 };
 use static_validation::validate_action_references;
 use symbols::SemanticIndex;
@@ -1323,7 +1323,7 @@ fn check_step_transition(
         _ => {
             return Err(Error::new(
                 "step body must return Stop(<state value>), Continue(<state value>), or Panic(<state value>)",
-            ))
+            ));
         }
     };
     let next_state = if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
@@ -1434,13 +1434,13 @@ fn resolve_send_message_case(
             return Err(Error::new(format!(
                 "process {} sends payload to message {}, which does not accept one",
                 context.process.name, variant_decl.name
-            )))
+            )));
         }
         (Some(_), None) => {
             return Err(Error::new(format!(
                 "process {} sends message {} without required payload",
                 context.process.name, variant_decl.name
-            )))
+            )));
         }
         (Some(payload_type), Some(payload)) => Some(checked_send_payload_template(
             context,

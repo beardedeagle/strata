@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use mantle_runtime::{run_artifact_with_host, InMemoryRuntimeHost, RunLimits};
+use mantle_runtime::{InMemoryRuntimeHost, RunLimits, run_artifact_with_host};
 
 const FUZZ_RUN_LIMITS: RunLimits = RunLimits {
     max_dispatches: 128,

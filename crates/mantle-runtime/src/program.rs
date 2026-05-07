@@ -1,9 +1,11 @@
 use mantle_artifact::{
-    ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
+    ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
     ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactValueTemplate, Error,
     MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId,
     StepResult,
 };
+
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedProgram {
@@ -217,6 +219,7 @@ fn load_transitions_by_message(process: &ArtifactProcess) -> Result<Vec<LoadedTr
 pub(crate) struct LoadedTransition {
     pub(crate) step_result: StepResult,
     pub(crate) next_state: NextState,
+    pub(crate) effect_authority: LoadedEffectAuthority,
     pub(crate) actions: Vec<LoadedAction>,
 }
 
@@ -225,12 +228,66 @@ impl LoadedTransition {
         Self {
             step_result: transition.step_result,
             next_state: transition.next_state.clone(),
+            effect_authority: LoadedEffectAuthority::from_artifact(&transition.effects),
             actions: transition
                 .actions
                 .iter()
                 .map(LoadedAction::from_artifact)
                 .collect(),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedEffectAuthority {
+    effects: Vec<ArtifactEffect>,
+}
+
+impl LoadedEffectAuthority {
+    pub(crate) fn from_artifact(effects: &[ArtifactEffect]) -> Self {
+        Self {
+            effects: effects.to_vec(),
+        }
+    }
+
+    pub(crate) fn validate_actions(
+        &self,
+        process_name: &str,
+        message: MessageId,
+        actions: &[LoadedAction],
+    ) -> Result<()> {
+        let mut admitted = BTreeSet::new();
+        for &effect in &self.effects {
+            if !admitted.insert(effect) {
+                return Err(Error::new(format!(
+                    "process {process_name} transition {} admits duplicate effect {effect}",
+                    message.as_u32()
+                )));
+            }
+        }
+
+        let mut used = BTreeSet::new();
+        for action in actions {
+            let effect = action.effect();
+            if !admitted.contains(&effect) {
+                return Err(Error::new(format!(
+                    "process {process_name} transition {} uses effect {effect} without admitted authority",
+                    message.as_u32()
+                )));
+            }
+            used.insert(effect);
+        }
+
+        for effect in &admitted {
+            if !used.contains(effect) {
+                return Err(Error::new(format!(
+                    "process {process_name} transition {} admits effect {effect} but no action uses it",
+                    message.as_u32()
+                )));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -260,6 +317,14 @@ pub(crate) enum LoadedSendTarget {
 }
 
 impl LoadedAction {
+    fn effect(&self) -> ArtifactEffect {
+        match self {
+            Self::Emit { .. } => ArtifactEffect::Emit,
+            Self::Spawn { .. } => ArtifactEffect::Spawn,
+            Self::Send { .. } => ArtifactEffect::Send,
+        }
+    }
+
     fn from_artifact(action: &ArtifactAction) -> Self {
         match action {
             ArtifactAction::Emit { output } => Self::Emit { output: *output },

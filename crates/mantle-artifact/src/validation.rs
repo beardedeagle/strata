@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactValueTemplate, Error, MantleArtifact, NextState, Result, ARTIFACT_MAGIC,
-    MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_TYPE_REF_BYTES,
+    ARTIFACT_MAGIC, ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactStateValue,
+    ArtifactValueTemplate, Error, MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    MAX_TYPE_REF_BYTES, MantleArtifact, NextState, Result,
 };
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {

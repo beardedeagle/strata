@@ -1,5 +1,5 @@
-use super::diagnostic::{Error, Result};
 use super::MAX_TOKEN_COUNT;
+use super::diagnostic::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum TokenKind {
