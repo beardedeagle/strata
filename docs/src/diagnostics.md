@@ -32,8 +32,9 @@ result of the first invalid shape.
 | `step body must return Stop..., Continue..., or Panic...` | A `step` returns a bare state value or an unsupported result form. | Return one whole state value inside `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step may-behaviors must be empty` | The `~ [...]` list is not empty. | Use `~ []`. |
 | `step must be deterministic` | `step` uses `@nondet`. | Use `@det`. |
+| `uses effect ... but does not declare it` | The body performs `emit`, `spawn`, or `send` without matching effect authority. | Add the exact used effect to `! [...]` or remove the statement. |
 | `declares effect ... but does not use it` | The effect list is wider than the body. | Remove the unused effect. |
-| `uses effect ... but does not declare it` | The body uses an undeclared effect. | Add the effect to `! [...]`. |
+| `declares duplicate effect` | The effect list repeats one authority. | Keep each effect at most once. |
 
 ## Message Handling Errors
 

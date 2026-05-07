@@ -479,6 +479,47 @@ fn actor_reply_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn effect_authority_missing_fails_source_check_before_build() {
+    let root = workspace_root();
+    ensure_workspace_binaries(&root);
+    let strata = binary_path(&root, "strata");
+    let artifact_path = root.join("target/strata/effect_authority_missing.mta");
+    if artifact_path.exists() {
+        std::fs::remove_file(&artifact_path).unwrap_or_else(|err| {
+            panic!(
+                "could not remove stale artifact {}: {err}",
+                artifact_path.display()
+            )
+        });
+    }
+
+    let check = Command::new(&strata)
+        .args(["check", "examples/failures/effect_authority_missing.str"])
+        .current_dir(&root)
+        .output()
+        .expect("strata check should run");
+
+    assert!(
+        !check.status.success(),
+        "strata check should reject missing effect authority\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&check.stderr)
+            .contains("step uses effect send but does not declare it"),
+        "unexpected diagnostic\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        !artifact_path.exists(),
+        "source check failure must not create {}",
+        artifact_path.display()
+    );
+}
+
+#[test]
 fn actor_panic_no_replay_checks_builds_and_fails_closed_on_mantle() {
     let root = workspace_root();
     ensure_workspace_binaries(&root);

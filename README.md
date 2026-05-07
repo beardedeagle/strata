@@ -223,8 +223,9 @@ The mdBook under `docs/` is the primary project documentation. Start with
 `docs/src/getting-started.md` for first use, then `docs/src/language-reference.md`
 and `docs/src/syntax-reference.md` for the accepted source surface.
 
-The standard gates select stable Rust explicitly. Nightly is used only by the
-fuzz and Miri recipes, which select it per command. Do not set a repository-wide
+The workspace uses Rust Edition 2024 and requires Rust 1.85 or newer. The
+standard gates select stable Rust explicitly. Nightly is used only by the fuzz
+and Miri recipes, which select it per command. Do not set a repository-wide
 nightly override.
 
 Install the local command runner:
@@ -233,6 +234,9 @@ Install the local command runner:
 rustup toolchain install stable --profile minimal --component rustfmt,clippy
 cargo +stable install just --version 1.50.0 --locked
 ```
+
+The `1.50.0` value is the pinned `just` command runner version, not the Rust
+compiler version.
 
 List available commands:
 

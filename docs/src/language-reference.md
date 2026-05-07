@@ -252,8 +252,9 @@ target process ID. Source names remain diagnostics and trace metadata.
 
 ## Effects
 
-The `! [...]` effect list must exactly match the effects used by each `step`
-clause. Missing effects and unused declared effects are both rejected.
+The `! [...]` effect list is source-level authority for the runtime effects used
+by each `step` clause. It must exactly match the clause actions. Missing,
+duplicate, and unused declared effects are rejected before lowering.
 
 | Effect | Statement |
 | --- | --- |

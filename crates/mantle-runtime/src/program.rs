@@ -1,5 +1,5 @@
 use mantle_artifact::{
-    ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
+    ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
     ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactValueTemplate, Error,
     MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId,
     StepResult,
@@ -104,6 +104,13 @@ impl LoadedProgram {
             .map(String::as_str)
             .ok_or_else(|| Error::new(format!("output id {} is not loaded", output_id.as_u32())))
     }
+
+    pub(crate) fn validate_effect_authority(&self) -> Result<()> {
+        for process in &self.processes {
+            process.validate_effect_authority()?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +153,17 @@ impl LoadedProcess {
                 message.as_u32()
             ))
         })
+    }
+
+    fn validate_effect_authority(&self) -> Result<()> {
+        for (message_index, transition) in self.transitions.iter().enumerate() {
+            transition.effect_authority.validate_actions(
+                &self.debug_name,
+                MessageId::from_index(message_index)?,
+                &transition.actions,
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -217,6 +235,7 @@ fn load_transitions_by_message(process: &ArtifactProcess) -> Result<Vec<LoadedTr
 pub(crate) struct LoadedTransition {
     pub(crate) step_result: StepResult,
     pub(crate) next_state: NextState,
+    pub(crate) effect_authority: LoadedEffectAuthority,
     pub(crate) actions: Vec<LoadedAction>,
 }
 
@@ -225,11 +244,76 @@ impl LoadedTransition {
         Self {
             step_result: transition.step_result,
             next_state: transition.next_state.clone(),
+            effect_authority: LoadedEffectAuthority::from_artifact(&transition.effects),
             actions: transition
                 .actions
                 .iter()
                 .map(LoadedAction::from_artifact)
                 .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedEffectAuthority {
+    effects: Vec<ArtifactEffect>,
+}
+
+impl LoadedEffectAuthority {
+    pub(crate) fn from_artifact(effects: &[ArtifactEffect]) -> Self {
+        Self {
+            effects: effects.to_vec(),
+        }
+    }
+
+    pub(crate) fn validate_actions(
+        &self,
+        process_name: &str,
+        message: MessageId,
+        actions: &[LoadedAction],
+    ) -> Result<()> {
+        let mut admitted = [false; 3];
+        for &effect in &self.effects {
+            let index = Self::effect_index(effect);
+            if admitted[index] {
+                return Err(Error::new(format!(
+                    "process {process_name} transition {} admits duplicate effect {effect}",
+                    message.as_u32()
+                )));
+            }
+            admitted[index] = true;
+        }
+
+        let mut used = [false; 3];
+        for action in actions {
+            let effect = action.effect();
+            let index = Self::effect_index(effect);
+            if !admitted[index] {
+                return Err(Error::new(format!(
+                    "process {process_name} transition {} uses effect {effect} without admitted authority",
+                    message.as_u32()
+                )));
+            }
+            used[index] = true;
+        }
+
+        for &effect in &self.effects {
+            if !used[Self::effect_index(effect)] {
+                return Err(Error::new(format!(
+                    "process {process_name} transition {} admits effect {effect} but no action uses it",
+                    message.as_u32()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn effect_index(effect: ArtifactEffect) -> usize {
+        match effect {
+            ArtifactEffect::Emit => 0,
+            ArtifactEffect::Spawn => 1,
+            ArtifactEffect::Send => 2,
         }
     }
 }
@@ -260,6 +344,14 @@ pub(crate) enum LoadedSendTarget {
 }
 
 impl LoadedAction {
+    fn effect(&self) -> ArtifactEffect {
+        match self {
+            Self::Emit { .. } => ArtifactEffect::Emit,
+            Self::Spawn { .. } => ArtifactEffect::Spawn,
+            Self::Send { .. } => ArtifactEffect::Send,
+        }
+    }
+
     fn from_artifact(action: &ArtifactAction) -> Self {
         match action {
             ArtifactAction::Emit { output } => Self::Emit { output: *output },

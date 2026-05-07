@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use mantle_artifact::{Error, Result};
 
-use crate::{run_artifact_path, ProcessStatus};
+use crate::{ProcessStatus, run_artifact_path};
 
 pub fn mantle_main<I>(args: I) -> Result<()>
 where

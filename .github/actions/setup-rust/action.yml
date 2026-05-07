@@ -1,5 +1,5 @@
 name: Setup Rust
-description: Install a Rust toolchain and the pinned just runner.
+description: Install a Rust toolchain and the pinned just command runner.
 
 inputs:
   toolchain:
@@ -18,7 +18,7 @@ inputs:
     required: false
     default: "true"
   just-version:
-    description: just version to install.
+    description: just command runner version to install. This is not the Rust compiler version.
     required: false
     default: "1.50.0"
   install-target-dir:

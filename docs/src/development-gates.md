@@ -9,10 +9,11 @@ The standard local verification bundle is:
 just quality
 ```
 
-This bundle selects stable Rust explicitly through the `Justfile`. It also runs
-`just toolchain-policy-check`, which rejects repository instructions or
-workflow steps that switch the whole checkout to nightly Rust. Nightly-only
-tools must be invoked per command with `+nightly`.
+This bundle selects stable Rust explicitly through the `Justfile`. The workspace
+requires Rust 1.85 or newer for Edition 2024. The bundle also runs `just
+toolchain-policy-check`, which rejects repository instructions or workflow
+steps that switch the whole checkout to nightly Rust. Nightly-only tools must be
+invoked per command with `+nightly`.
 
 Run the source-to-runtime product gates after changes that affect syntax,
 checking, lowering, artifacts, runtime behavior, diagnostics, examples, or

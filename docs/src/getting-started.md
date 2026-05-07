@@ -5,9 +5,9 @@ program.
 
 ## Prerequisites
 
-Install stable Rust with Cargo. Standard repository gates select stable
-explicitly; nightly is reserved for fuzz and Miri recipes that opt into it per
-command.
+Install stable Rust 1.85 or newer with Cargo. The workspace uses Rust Edition
+2024. Standard repository gates select stable explicitly; nightly is reserved
+for fuzz and Miri recipes that opt into it per command.
 
 Useful local tools:
 
@@ -16,6 +16,9 @@ rustup toolchain install stable --profile minimal --component rustfmt,clippy
 cargo +stable install just --version 1.50.0 --locked
 cargo +stable install mdbook --version 0.5.2 --locked
 ```
+
+The `1.50.0` value above is the pinned `just` command runner version, not the
+Rust compiler version.
 
 The standard `just quality` gate runs documentation and metadata checks on every
 local platform. Install `jq`, `xmllint`, and `mdbook` before using that bundle.

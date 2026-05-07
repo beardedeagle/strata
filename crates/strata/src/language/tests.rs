@@ -7,10 +7,9 @@ use super::lexer::{Lexer, TokenKind};
 use super::*;
 use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget,
-    ArtifactValueTemplate, ProcessId, ProcessRefId, StepResult, MAX_ACTIONS_PER_PROCESS,
-    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_VALUE_TEMPLATE_FIELDS,
+    ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS, ProcessId, ProcessRefId, StepResult,
 };
 
 const HELLO: &str = r#"
@@ -724,9 +723,10 @@ fn rejects_send_missing_required_message_payload() {
 
     let err = check_source(&source).expect_err("missing message payload should fail");
 
-    assert!(err
-        .to_string()
-        .contains("message Assign requires a payload"));
+    assert!(
+        err.to_string()
+            .contains("message Assign requires a payload")
+    );
 }
 
 #[test]
@@ -735,9 +735,10 @@ fn rejects_payload_for_unit_message_variant() {
 
     let err = check_source(&source).expect_err("payload on unit message should fail");
 
-    assert!(err
-        .to_string()
-        .contains("message Ping does not accept a payload"));
+    assert!(
+        err.to_string()
+            .contains("message Ping does not accept a payload")
+    );
 }
 
 #[test]
@@ -766,9 +767,10 @@ fn rejects_wildcard_payload_binding() {
 
     let err = parse_source(&source).expect_err("wildcard payload binding should fail");
 
-    assert!(err
-        .to_string()
-        .contains("wildcard step patterns cannot bind payloads"));
+    assert!(
+        err.to_string()
+            .contains("wildcard step patterns cannot bind payloads")
+    );
 }
 
 #[test]
@@ -832,9 +834,10 @@ proc Sink mailbox bounded(1) {
 
     let err = check_source(source).expect_err("forwarded payload type mismatch should fail");
 
-    assert!(err
-        .to_string()
-        .contains("value binding job has type Job, expected OtherJob"));
+    assert!(
+        err.to_string()
+            .contains("value binding job has type Job, expected OtherJob")
+    );
 }
 
 #[test]
@@ -909,9 +912,10 @@ proc Other mailbox bounded(1) {
 
     let err = check_source(source).expect_err("wrong process ref payload should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process reference payload sink targets process id 2, expected 3"));
+    assert!(
+        err.to_string()
+            .contains("process reference payload sink targets process id 2, expected 3")
+    );
 }
 
 #[test]
@@ -957,9 +961,10 @@ proc Worker mailbox bounded(1) {
 
     let err = check_source(source).expect_err("non-ref send target should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker send target job is not a process reference payload"));
+    assert!(
+        err.to_string()
+            .contains("process Worker send target job is not a process reference payload")
+    );
 }
 
 #[test]
@@ -971,9 +976,10 @@ fn rejects_step_payload_binding_with_wrong_type() {
 
     let err = check_source(&source).expect_err("wrong payload binding type should fail");
 
-    assert!(err
-        .to_string()
-        .contains("step pattern payload job has type MainState, expected Job"));
+    assert!(
+        err.to_string()
+            .contains("step pattern payload job has type MainState, expected Job")
+    );
 }
 
 #[test]
@@ -985,9 +991,10 @@ fn rejects_payload_binding_named_like_value_constructor() {
 
     let err = check_source(&source).expect_err("constructor-like payload binding should fail");
 
-    assert!(err
-        .to_string()
-        .contains("payload binding Job conflicts with a declared type or value constructor"));
+    assert!(
+        err.to_string()
+            .contains("payload binding Job conflicts with a declared type or value constructor")
+    );
 }
 
 #[test]
@@ -1050,9 +1057,10 @@ proc Sink mailbox bounded(1) {
 
     let err = check_source(source).expect_err("local binding shadowing should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process reference job conflicts with payload binding"));
+    assert!(
+        err.to_string()
+            .contains("process reference job conflicts with payload binding")
+    );
 }
 
 #[test]
@@ -1176,9 +1184,11 @@ proc Sink mailbox bounded(1) {
 
     let err = check_source(source).expect_err("invalid step signature should fail first");
 
-    assert!(err
-        .to_string()
-        .contains("step second parameter must be a message variant pattern or wildcard pattern"));
+    assert!(
+        err.to_string().contains(
+            "step second parameter must be a message variant pattern or wildcard pattern"
+        )
+    );
 }
 
 #[test]
@@ -1310,9 +1320,10 @@ proc Main mailbox bounded(1) {
 
     let err = check_source(source).expect_err("payload entry message should fail");
 
-    assert!(err
-        .to_string()
-        .contains("entry message Start must not require a payload"));
+    assert!(
+        err.to_string()
+            .contains("entry message Start must not require a payload")
+    );
 }
 
 #[test]
@@ -1340,9 +1351,10 @@ proc Main mailbox bounded(1) {
 
     let err = check_source(source).expect_err("state payload variant should fail");
 
-    assert!(err
-        .to_string()
-        .contains("state enum MainState variant Idle must not declare a payload"));
+    assert!(
+        err.to_string()
+            .contains("state enum MainState variant Idle must not declare a payload")
+    );
 }
 
 #[test]
@@ -1427,9 +1439,10 @@ proc Main mailbox bounded(1) {
 
     let err = check_source(source).expect_err("reserved state value should fail");
 
-    assert!(err
-        .to_string()
-        .contains("state value state conflicts with reserved step state parameter name"));
+    assert!(
+        err.to_string()
+            .contains("state value state conflicts with reserved step state parameter name")
+    );
 }
 
 #[test]
@@ -1627,9 +1640,10 @@ fn rejects_unknown_step_message_pattern() {
 
     let err = check_source(&source).expect_err("unknown step pattern should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker step pattern message Unknown is not accepted"));
+    assert!(
+        err.to_string()
+            .contains("process Worker step pattern message Unknown is not accepted")
+    );
 }
 
 #[test]
@@ -1646,9 +1660,10 @@ fn rejects_missing_step_message_pattern() {
 
     let err = check_source(&source).expect_err("missing step pattern should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker must declare step pattern for message Second"));
+    assert!(
+        err.to_string()
+            .contains("process Worker must declare step pattern for message Second")
+    );
 }
 
 #[test]
@@ -1660,9 +1675,10 @@ fn rejects_duplicate_step_message_pattern() {
 
     let err = check_source(&source).expect_err("duplicate step pattern should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker declares duplicate step pattern for message First"));
+    assert!(
+        err.to_string()
+            .contains("process Worker declares duplicate step pattern for message First")
+    );
 }
 
 #[test]
@@ -1679,9 +1695,10 @@ fn rejects_duplicate_wildcard_step_pattern() {
 
     let err = check_source(&source).expect_err("duplicate wildcard pattern should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker declares duplicate wildcard step pattern"));
+    assert!(
+        err.to_string()
+            .contains("process Worker declares duplicate wildcard step pattern")
+    );
 }
 
 #[test]
@@ -1707,9 +1724,10 @@ fn rejects_unreachable_wildcard_step_pattern() {
 
     let err = check_source(&source).expect_err("unreachable wildcard pattern should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker wildcard step pattern is unreachable"));
+    assert!(
+        err.to_string()
+            .contains("process Worker wildcard step pattern is unreachable")
+    );
 }
 
 #[test]
@@ -1721,9 +1739,11 @@ fn rejects_typed_msg_step_parameter() {
 
     let err = check_source(&source).expect_err("typed message parameter should fail");
 
-    assert!(err
-        .to_string()
-        .contains("step second parameter must be a message variant pattern or wildcard pattern"));
+    assert!(
+        err.to_string().contains(
+            "step second parameter must be a message variant pattern or wildcard pattern"
+        )
+    );
 }
 
 #[test]
@@ -1732,9 +1752,10 @@ fn rejects_step_pattern_invalid_next_state() {
 
     let err = check_source(&source).expect_err("invalid next state should fail");
 
-    assert!(err
-        .to_string()
-        .contains("value UnknownState is not a variant of enum WorkerState"));
+    assert!(
+        err.to_string()
+            .contains("value UnknownState is not a variant of enum WorkerState")
+    );
 }
 
 #[test]
@@ -1857,9 +1878,10 @@ fn rejects_missing_main_entry_process() {
 
     let err = check_source(&source).expect_err("missing Main should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("entry process Main is not declared"));
+    assert!(
+        err.to_string()
+            .contains("entry process Main is not declared")
+    );
 }
 
 #[test]
@@ -1920,9 +1942,10 @@ fn rejects_zero_mailbox_bound_with_shared_count_diagnostic() {
 
     let err = check_module(module).expect_err("zero mailbox bound should fail");
 
-    assert!(err
-        .to_string()
-        .contains("process Main mailbox_bound must be greater than zero"));
+    assert!(
+        err.to_string()
+            .contains("process Main mailbox_bound must be greater than zero")
+    );
 }
 
 #[test]
@@ -1956,9 +1979,10 @@ fn rejects_empty_state_enum_with_enum_diagnostic() {
 
     let err = check_source(&source).expect_err("empty state enum should fail");
 
-    assert!(err
-        .to_string()
-        .contains("enum MainState must declare at least one variant"));
+    assert!(
+        err.to_string()
+            .contains("enum MainState must declare at least one variant")
+    );
 }
 
 #[test]
@@ -2212,9 +2236,10 @@ fn rejects_excessive_type_nesting() {
 
     let err = parse_source(&source).expect_err("excessive type nesting should fail");
 
-    assert!(err
-        .to_string()
-        .contains("type nesting exceeds maximum depth"));
+    assert!(
+        err.to_string()
+            .contains("type nesting exceeds maximum depth")
+    );
 }
 
 #[test]
@@ -2250,9 +2275,10 @@ proc Main mailbox bounded(1) {
 "#;
 
     let err = check_source(source).expect_err("undeclared emit should be rejected");
-    assert!(err
-        .to_string()
-        .contains("step uses effect emit but does not declare it"));
+    assert!(
+        err.to_string()
+            .contains("step uses effect emit but does not declare it")
+    );
 }
 
 #[test]
@@ -2261,9 +2287,46 @@ fn rejects_spawn_without_declared_effect() {
 
     let err = check_source(&source).expect_err("undeclared spawn should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("step uses effect spawn but does not declare it"));
+    assert!(
+        err.to_string()
+            .contains("step uses effect spawn but does not declare it")
+    );
+}
+
+#[test]
+fn rejects_send_without_declared_effect() {
+    let source = ACTOR_PING.replace("! [spawn, send]", "! [spawn]");
+
+    let err = check_source(&source).expect_err("undeclared send should be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("step uses effect send but does not declare it")
+    );
+}
+
+#[test]
+fn rejects_unused_declared_effect() {
+    let source = HELLO.replace("! [emit]", "! [emit, send]");
+
+    let err = check_source(&source).expect_err("unused declared effect should be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("step declares effect send but does not use it")
+    );
+}
+
+#[test]
+fn rejects_duplicate_declared_effect() {
+    let source = HELLO.replace("! [emit]", "! [emit, emit]");
+
+    let err = check_source(&source).expect_err("duplicate declared effect should be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("step declares duplicate effect emit")
+    );
 }
 
 #[test]
@@ -2360,9 +2423,10 @@ fn rejects_mutable_record_field_declarations() {
 
     let err = parse_source(&source).expect_err("mutable record fields should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("record fields are immutable; mutable field declarations are not supported"));
+    assert!(
+        err.to_string()
+            .contains("record fields are immutable; mutable field declarations are not supported")
+    );
 }
 
 #[test]
@@ -2374,9 +2438,10 @@ fn rejects_security_declarations_instead_of_erasing_source() {
 
     let err = parse_source(&source).expect_err("security declarations should not be skipped");
 
-    assert!(err
-        .to_string()
-        .contains("security declarations are not supported"));
+    assert!(
+        err.to_string()
+            .contains("security declarations are not supported")
+    );
 }
 
 #[test]
@@ -2425,9 +2490,10 @@ fn rejects_assignment_syntax_in_record_values() {
 
     let err = parse_source(&source).expect_err("record value assignment should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("record value fields use ':'; assignment syntax is not supported"));
+    assert!(
+        err.to_string()
+            .contains("record value fields use ':'; assignment syntax is not supported")
+    );
 }
 
 #[test]
@@ -2520,9 +2586,10 @@ fn rejects_duplicate_process_ref_on_same_path() {
 
     let err = check_source(&source).expect_err("duplicate process reference should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("duplicates process reference id 0"));
+    assert!(
+        err.to_string()
+            .contains("duplicates process reference id 0")
+    );
 }
 
 #[test]
@@ -2544,9 +2611,10 @@ fn rejects_spawn_without_process_ref() {
 
     let err = parse_source(&source).expect_err("standalone spawn should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("expected emit, let, send, or return statement"));
+    assert!(
+        err.to_string()
+            .contains("expected emit, let, send, or return statement")
+    );
 }
 
 #[test]
@@ -2555,9 +2623,10 @@ fn rejects_send_to_process_definition_name() {
 
     let err = check_source(&source).expect_err("send to process definition should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("process Main sends to undeclared process reference Worker"));
+    assert!(
+        err.to_string()
+            .contains("process Main sends to undeclared process reference Worker")
+    );
 }
 
 #[test]
@@ -2570,9 +2639,10 @@ fn rejects_process_ref_named_like_step_parameter() {
     let err = check_source(&source)
         .expect_err("step parameter process reference name should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("process Main process reference state conflicts with a step parameter name"));
+    assert!(
+        err.to_string()
+            .contains("process Main process reference state conflicts with a step parameter name")
+    );
 }
 
 #[test]
@@ -2585,9 +2655,10 @@ fn rejects_process_ref_named_like_process_declaration() {
     let err = check_source(&source)
         .expect_err("process declaration process reference name should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("process Main process reference Worker conflicts with a process declaration"));
+    assert!(
+        err.to_string()
+            .contains("process Main process reference Worker conflicts with a process declaration")
+    );
 }
 
 #[test]
@@ -2661,9 +2732,10 @@ fn rejects_send_before_static_spawn() {
 
     let err = check_source(&source).expect_err("send before spawn should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("sends through unbound process reference id 0 within message transition 0"));
+    assert!(
+        err.to_string()
+            .contains("sends through unbound process reference id 0 within message transition 0")
+    );
 }
 
 #[test]
@@ -2799,9 +2871,10 @@ fn rejects_process_ref_type_with_undeclared_process_target() {
 
     let err = check_source(&source).expect_err("undeclared process ref target should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("process Main process reference worker targets undeclared process Unknown"));
+    assert!(
+        err.to_string()
+            .contains("process Main process reference worker targets undeclared process Unknown")
+    );
 }
 
 #[test]
@@ -2815,9 +2888,10 @@ fn rejects_send_without_static_spawn() {
 
     let err = check_source(&source).expect_err("send without spawn should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("sends to undeclared process reference worker"));
+    assert!(
+        err.to_string()
+            .contains("sends to undeclared process reference worker")
+    );
 }
 
 #[test]
@@ -2829,9 +2903,10 @@ fn rejects_mailbox_overflow_through_process_ref() {
 
     let err = check_source(&source).expect_err("mailbox overflow should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("sends to Worker, but its mailbox would exceed bound 1"));
+    assert!(
+        err.to_string()
+            .contains("sends to Worker, but its mailbox would exceed bound 1")
+    );
 }
 
 #[test]
@@ -2840,9 +2915,10 @@ fn rejects_unhandled_message_after_process_ref_target_stops() {
 
     let err = check_source(&source).expect_err("message left after stop should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("process Worker would retain 1 unhandled message(s)"));
+    assert!(
+        err.to_string()
+            .contains("process Worker would retain 1 unhandled message(s)")
+    );
 }
 
 #[test]
@@ -2851,9 +2927,10 @@ fn rejects_send_to_unknown_message() {
 
     let err = check_source(&source).expect_err("unknown message should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("sends message Unknown not accepted by Worker"));
+    assert!(
+        err.to_string()
+            .contains("sends message Unknown not accepted by Worker")
+    );
 }
 
 #[test]
@@ -2916,9 +2993,10 @@ proc Helper mailbox bounded(1) {
 
     let err = check_source(source).expect_err("spawn loop should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("static runtime process instance limit exceeded"));
+    assert!(
+        err.to_string()
+            .contains("static runtime process instance limit exceeded")
+    );
 }
 
 #[test]
@@ -2928,9 +3006,10 @@ fn rejects_emit_output_too_large_for_artifacts() {
 
     let err = check_source(&source).expect_err("oversized emit output should fail");
 
-    assert!(err
-        .to_string()
-        .contains("output literal exceeds maximum length"));
+    assert!(
+        err.to_string()
+            .contains("output literal exceeds maximum length")
+    );
 }
 
 #[test]
@@ -2952,9 +3031,10 @@ fn rejects_panic_step_result_with_wrong_state_value() {
 
     let err = check_source(&source).expect_err("panic must carry a WorkerState value");
 
-    assert!(err
-        .to_string()
-        .contains("value MainState is not a variant of enum WorkerState"));
+    assert!(
+        err.to_string()
+            .contains("value MainState is not a variant of enum WorkerState")
+    );
 }
 
 #[test]
@@ -2963,9 +3043,10 @@ fn rejects_step_proc_result_with_wrong_state_argument() {
 
     let err = check_source(&source).expect_err("wrong ProcResult argument should fail");
 
-    assert!(err
-        .to_string()
-        .contains("step returns ProcResult<MainMsg>, expected ProcResult<MainState>"));
+    assert!(
+        err.to_string()
+            .contains("step returns ProcResult<MainMsg>, expected ProcResult<MainState>")
+    );
 }
 
 #[test]
@@ -2986,9 +3067,10 @@ fn rejects_duplicate_enum_variants() {
 
     let err = check_source(&source).expect_err("duplicate variant should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("duplicate variant in enum MainMsg declaration Start"));
+    assert!(
+        err.to_string()
+            .contains("duplicate variant in enum MainMsg declaration Start")
+    );
 }
 
 #[test]
@@ -2997,9 +3079,10 @@ fn rejects_record_enum_type_name_collision() {
 
     let err = check_source(&source).expect_err("type name collision should be rejected");
 
-    assert!(err
-        .to_string()
-        .contains("duplicate type declaration MainState used by record and enum"));
+    assert!(
+        err.to_string()
+            .contains("duplicate type declaration MainState used by record and enum")
+    );
 }
 
 #[test]

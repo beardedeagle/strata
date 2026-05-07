@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use crate::{Error, MantleArtifact, Result, MAX_ARTIFACT_BYTES};
+use crate::{Error, MAX_ARTIFACT_BYTES, MantleArtifact, Result};
 
 pub fn default_artifact_path(source_path: &Path) -> Result<PathBuf> {
     let stem = source_path

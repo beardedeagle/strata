@@ -1,16 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{validate_state_value_label, MAX_STATE_VALUES_PER_PROCESS};
+use mantle_artifact::{MAX_STATE_VALUES_PER_PROCESS, validate_state_value_label};
 
+use super::super::MAX_VALUE_NESTING;
 use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
 use super::super::checked::{
     CheckedPayloadValue, CheckedStateId, CheckedStateValue, CheckedValueTemplate,
     CheckedValueTemplateField,
 };
 use super::super::diagnostic::{Error, Result};
-use super::super::MAX_VALUE_NESTING;
-use super::symbols::SemanticIndex;
 use super::STEP_STATE_PARAMETER_NAME;
+use super::symbols::SemanticIndex;
 
 pub(super) struct StateSpace<'module> {
     module: &'module Module,
@@ -483,9 +483,10 @@ mod tests {
             .resolve_state_value(&semantic_index, &value)
             .expect_err("excessive AST value nesting should fail");
 
-        assert!(err
-            .to_string()
-            .contains("value nesting exceeds maximum depth"));
+        assert!(
+            err.to_string()
+                .contains("value nesting exceeds maximum depth")
+        );
     }
 
     #[test]

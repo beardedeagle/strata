@@ -122,8 +122,19 @@ product-failure-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_panic_no_replay.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_panic_no_replay.str
     trace="target/strata/actor_panic_no_replay.observability.jsonl"
+    effect_authority_stderr="$(mktemp)"
     run_stderr="$(mktemp)"
-    trap 'rm -f "$run_stderr"' EXIT
+    trap 'rm -f "$effect_authority_stderr" "$run_stderr"' EXIT
+
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/effect_authority_missing.str 2>"$effect_authority_stderr"; then
+        echo "Error: effect_authority_missing was expected to fail source effect authority checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'step uses effect send but does not declare it' "$effect_authority_stderr"; then
+        echo "Error: effect_authority_missing failed for an unexpected reason." >&2
+        cat "$effect_authority_stderr" >&2
+        exit 1
+    fi
 
     rm -f "$trace"
     if cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta 2>"$run_stderr"; then

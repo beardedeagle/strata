@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use mantle_artifact::{
-    validate_payload_value_label, ArtifactPayload, ArtifactProcessRefPayload,
-    ArtifactValueTemplate, Error, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, Result, StateId, StepResult,
+    ArtifactPayload, ArtifactProcessRefPayload, ArtifactValueTemplate, Error, MantleArtifact,
+    MessageId, NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
+    validate_payload_value_label,
 };
 
 use crate::event::{
@@ -30,6 +30,7 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
     host: &mut H,
     limits: RunLimits,
 ) -> Result<RuntimeReport> {
+    program.validate_effect_authority()?;
     let mut run = RuntimeRun::new(
         program,
         host,
@@ -901,10 +902,10 @@ mod tests {
         DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES,
     };
     use mantle_artifact::{
-        ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactStateValue,
-        ArtifactTransition, ArtifactValueTemplateField, StepResult, ARTIFACT_FORMAT,
-        ARTIFACT_SCHEMA_VERSION, MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS,
-        STRATA_SOURCE_LANGUAGE,
+        ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactMessageVariant,
+        ArtifactProcess, ArtifactProcessRef, ArtifactStateValue, ArtifactTransition,
+        ArtifactValueTemplateField, MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS,
+        STRATA_SOURCE_LANGUAGE, StepResult,
     };
 
     #[test]
@@ -932,6 +933,99 @@ mod tests {
                 .process_refs
                 .len(),
             MAX_PROCESS_REFS_PER_PROCESS
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_action_without_effect_authority_before_emit() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.outputs.push("forbidden output".to_string());
+        program.processes[0].transitions[0]
+            .actions
+            .push(LoadedAction::Emit {
+                output: OutputId::new(0),
+            });
+        let mut host = InMemoryRuntimeHost::default();
+
+        let err = run_loaded_program_with_host(&program, &mut host, RunLimits::default())
+            .expect_err("loaded runtime must reject action without admitted effect authority");
+
+        assert!(
+            err.to_string()
+                .contains("process Main transition 0 uses effect emit without admitted authority")
+        );
+        assert!(
+            host.stdout().is_empty(),
+            "effect authority failure must happen before host output"
+        );
+        assert!(
+            !host
+                .events()
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::ProgramOutput { .. })),
+            "effect authority failure must happen before output trace events"
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_unused_effect_authority_before_state_update() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
+        let mut host = InMemoryRuntimeHost::default();
+
+        let err = run_loaded_program_with_host(&program, &mut host, RunLimits::default())
+            .expect_err("loaded runtime must reject unused admitted effect authority");
+
+        assert!(
+            err.to_string()
+                .contains("process Main transition 0 admits effect emit but no action uses it")
+        );
+        assert!(
+            !host
+                .events()
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::StateUpdated { .. })),
+            "effect authority failure must happen before state update trace events"
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_loaded_duplicate_effect_authority_before_emit() {
+        let artifact = artifact_with_large_unbound_process_ref_table();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.outputs.push("forbidden output".to_string());
+        program.processes[0].transitions[0].effect_authority =
+            crate::program::LoadedEffectAuthority::from_artifact(&[
+                ArtifactEffect::Emit,
+                ArtifactEffect::Emit,
+            ]);
+        program.processes[0].transitions[0]
+            .actions
+            .push(LoadedAction::Emit {
+                output: OutputId::new(0),
+            });
+        let mut host = InMemoryRuntimeHost::default();
+
+        let err = run_loaded_program_with_host(&program, &mut host, RunLimits::default())
+            .expect_err("loaded runtime must reject duplicate admitted effect authority");
+
+        assert!(
+            err.to_string()
+                .contains("process Main transition 0 admits duplicate effect emit")
+        );
+        assert!(
+            host.stdout().is_empty(),
+            "effect authority failure must happen before host output"
+        );
+        assert!(
+            !host
+                .events()
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::ProgramOutput { .. })),
+            "effect authority failure must happen before output trace events"
         );
     }
 
@@ -1033,9 +1127,10 @@ mod tests {
             )
             .expect_err("unspawned process ref payload should fail closed");
 
-        assert!(err
-            .to_string()
-            .contains("runtime process 99 is not spawned"));
+        assert!(
+            err.to_string()
+                .contains("runtime process 99 is not spawned")
+        );
     }
 
     #[test]
@@ -1112,9 +1207,10 @@ mod tests {
         let err = evaluate_runtime_template(&template, Some(&received), &step, &BTreeMap::new())
             .expect_err("oversized record payload labels should fail closed");
 
-        assert!(err
-            .to_string()
-            .contains("payload value exceeds maximum length"));
+        assert!(
+            err.to_string()
+                .contains("payload value exceeds maximum length")
+        );
     }
 
     fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {

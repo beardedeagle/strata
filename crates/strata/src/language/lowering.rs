@@ -1,17 +1,17 @@
 use mantle_artifact::{
-    source_hash_fnv1a64, ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactProcess,
-    ArtifactProcessRef, ArtifactSendTarget, ArtifactStateValue, ArtifactTransition,
-    ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT,
-    ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
+    ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactSendTarget,
+    ArtifactStateValue, ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField,
+    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId,
+    STRATA_SOURCE_LANGUAGE, StateId, StepResult, source_hash_fnv1a64,
 };
 
+use super::Effect;
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedNextState, CheckedOutputId,
     CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget,
     CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedValueTemplate,
 };
-use super::Effect;
 
 pub fn lower_to_artifact(
     checked: &CheckedProgram,

@@ -43,6 +43,9 @@ cargo run -p strata --bin strata -- check examples/actor_reply.str
 cargo run -p strata --bin strata -- build examples/actor_reply.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
 
+# Expected to fail during source checking before build/lowering.
+cargo run -p strata --bin strata -- check examples/failures/effect_authority_missing.str
+
 cargo run -p strata --bin strata -- check examples/actor_panic_no_replay.str
 cargo run -p strata --bin strata -- build examples/actor_panic_no_replay.str
 # Expected to fail closed after writing actor_panic_no_replay.observability.jsonl.

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mantle_artifact::{validate_payload_value_label, validate_state_value_label};
 
+use super::super::PROCESS_REF_TYPE;
 use super::super::ast::TypeRef;
 use super::super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess,
@@ -9,7 +10,6 @@ use super::super::checked::{
     CheckedTransition, CheckedValueTemplate,
 };
 use super::super::diagnostic::{Error, Result};
-use super::super::PROCESS_REF_TYPE;
 use super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
 
 pub(super) fn validate_action_references(
@@ -979,9 +979,10 @@ mod tests {
         );
         let err = resolve_static_process_ref(&process, &process_refs, checked_process_ref_id(0))
             .expect_err("declared but unbound sparse process reference should fail");
-        assert!(err
-            .to_string()
-            .contains("sends to unbound process reference id 0"));
+        assert!(
+            err.to_string()
+                .contains("sends to unbound process reference id 0")
+        );
     }
 
     #[test]
@@ -1033,9 +1034,10 @@ mod tests {
         let err = static_process_index_for_pid(&instances, missing_pid)
             .expect_err("unspawned static pid should be rejected");
 
-        assert!(err
-            .to_string()
-            .contains("static runtime process id 2 is not spawned"));
+        assert!(
+            err.to_string()
+                .contains("static runtime process id 2 is not spawned")
+        );
     }
 
     #[test]
@@ -1058,12 +1060,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: CheckedStateId::from_index(0).expect("valid checked state id"),
@@ -1082,9 +1086,10 @@ mod tests {
             validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
                 .expect_err("received payload template on unit message should fail");
 
-        assert!(err
-            .to_string()
-            .contains("received payload template requires a payload-bearing message"));
+        assert!(
+            err.to_string()
+                .contains("received payload template requires a payload-bearing message")
+        );
     }
 
     #[test]
@@ -1094,12 +1099,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1133,12 +1140,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1157,9 +1166,10 @@ mod tests {
             validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
                 .expect_err("missing checked transition effect should fail");
 
-        assert!(err
-            .to_string()
-            .contains("process Main transition 0 uses effect emit but does not declare it"));
+        assert!(
+            err.to_string()
+                .contains("process Main transition 0 uses effect emit but does not declare it")
+        );
     }
 
     #[test]
@@ -1169,12 +1179,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1191,9 +1203,10 @@ mod tests {
             validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
                 .expect_err("unused checked transition effect should fail");
 
-        assert!(err
-            .to_string()
-            .contains("process Main transition 0 declares effect emit but no action uses it"));
+        assert!(
+            err.to_string()
+                .contains("process Main transition 0 declares effect emit but no action uses it")
+        );
     }
 
     #[test]
@@ -1203,12 +1216,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1225,9 +1240,10 @@ mod tests {
             validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
                 .expect_err("duplicate checked transition effect should fail");
 
-        assert!(err
-            .to_string()
-            .contains("process Main transition 0 declares duplicate effect emit"));
+        assert!(
+            err.to_string()
+                .contains("process Main transition 0 declares duplicate effect emit")
+        );
     }
 
     #[test]
@@ -1237,12 +1253,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: vec![CheckedProcessRef::new(
                 ident("worker"),
                 checked_process_id(1),
@@ -1275,12 +1293,14 @@ mod tests {
             state_type: TypeRef::Named(ident("WorkerState")),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Assign".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                Some(TypeRef::Named(ident("Job"))),
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Assign".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(TypeRef::Named(ident("Job"))),
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1300,9 +1320,10 @@ mod tests {
         )
         .expect_err("invalid literal payload label should fail");
 
-        assert!(err
-            .to_string()
-            .contains("payload value must be non-empty and contain no control characters"));
+        assert!(
+            err.to_string()
+                .contains("payload value must be non-empty and contain no control characters")
+        );
     }
 
     #[test]
@@ -1312,12 +1333,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                Some(TypeRef::Named(ident("Job"))),
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(TypeRef::Named(ident("Job"))),
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1341,12 +1364,14 @@ mod tests {
             state_type: TypeRef::Named(ident("WorkerState")),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Done".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Done".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1366,9 +1391,10 @@ mod tests {
         )
         .expect_err("non-process-ref received send target should fail");
 
-        assert!(err
-            .to_string()
-            .contains("process reference payload type Job must be a process reference type"));
+        assert!(
+            err.to_string()
+                .contains("process reference payload type Job must be a process reference type")
+        );
     }
 
     #[test]
@@ -1378,12 +1404,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: vec![CheckedProcessRef::new(
                 ident("worker"),
                 checked_process_id(1),
@@ -1417,12 +1445,14 @@ mod tests {
             state_type: TypeRef::Named(ident("WorkerState")),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Assign".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                Some(TypeRef::Named(ident("Job"))),
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Assign".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(TypeRef::Named(ident("Job"))),
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1442,9 +1472,10 @@ mod tests {
         )
         .expect_err("non-process-ref process ref template should fail");
 
-        assert!(err
-            .to_string()
-            .contains("process reference payload type Job must be a process reference type"));
+        assert!(
+            err.to_string()
+                .contains("process reference payload type Job must be a process reference type")
+        );
     }
 
     #[test]
@@ -1454,12 +1485,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: vec![CheckedProcessRef::new(
                 ident("worker"),
                 checked_process_id(1),
@@ -1499,12 +1532,14 @@ mod tests {
             state_type: TypeRef::Named(ident("WorkerState")),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Assign".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                Some(TypeRef::Named(ident("Box"))),
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Assign".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(TypeRef::Named(ident("Box"))),
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1524,9 +1559,10 @@ mod tests {
         )
         .expect_err("nested process ref template should fail");
 
-        assert!(err
-            .to_string()
-            .contains("process reference payload templates must be direct message payloads"));
+        assert!(
+            err.to_string()
+                .contains("process reference payload templates must be direct message payloads")
+        );
     }
 
     #[test]
@@ -1536,12 +1572,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: vec![CheckedProcessRef::new(
                 ident("worker"),
                 checked_process_id(1),
@@ -1571,12 +1609,14 @@ mod tests {
             state_type: TypeRef::Named(ident("WorkerState")),
             state_values: checked_state_values("WorkerState", &["WorkerState"]),
             message_type: TypeRef::Named(ident("WorkerMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Done".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Done".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1596,9 +1636,10 @@ mod tests {
         )
         .expect_err("process ref next-state template should fail");
 
-        assert!(err
-            .to_string()
-            .contains("process reference templates are not valid next-state values"));
+        assert!(
+            err.to_string()
+                .contains("process reference templates are not valid next-state values")
+        );
     }
 
     #[test]
@@ -1608,12 +1649,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: vec![CheckedProcessRef::new(
                 ident("worker"),
                 checked_process_id(1),
@@ -1649,12 +1692,14 @@ mod tests {
                 &["WorkerState{active:Job{phase:Done}}"],
             ),
             message_type: TypeRef::Named(ident("WorkerMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Assign".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                Some(TypeRef::Named(ident("Job"))),
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Assign".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(TypeRef::Named(ident("Job"))),
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: Vec::new(),
             mailbox_bound: 1,
             init_state: checked_state_id(0),
@@ -1693,12 +1738,14 @@ mod tests {
             state_type: TypeRef::Named(ident("MainState")),
             state_values: checked_state_values("MainState", &["MainState"]),
             message_type: TypeRef::Named(ident("MainMsg")),
-            message_cases: vec![CheckedMessageCase::new(
-                "Start".to_string(),
-                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
-                None,
-            )
-            .expect("valid checked message case")],
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
             process_refs: (0..process_ref_count)
                 .map(|index| {
                     CheckedProcessRef::new(ident(&format!("worker_{index}")), checked_process_id(1))

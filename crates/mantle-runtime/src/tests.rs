@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
-    write_artifact, ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactPayload,
-    ArtifactProcess, ArtifactProcessRef, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTransition, ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact,
-    MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT,
-    ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
+    ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
+    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactValueTemplate,
+    ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, STRATA_SOURCE_LANGUAGE, StateId, StepResult, write_artifact,
 };
 
 use super::program::LoadedProgram;
@@ -32,9 +32,10 @@ fn runtime_rejects_action_without_declared_effect() {
     let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
         .expect_err("artifact admission should reject undeclared effect");
 
-    assert!(err
-        .to_string()
-        .contains("process Main transition 0 uses effect send but does not declare it"));
+    assert!(
+        err.to_string()
+            .contains("process Main transition 0 uses effect send but does not declare it")
+    );
     assert!(
         host.events().is_empty(),
         "rejected artifacts must not reach runtime execution"
@@ -100,9 +101,10 @@ fn runtime_rejects_dispatch_budget_exhaustion() {
     )
     .expect_err("looping artifact should hit the dispatch budget");
 
-    assert!(err
-        .to_string()
-        .contains("runtime dispatch budget exceeded after 3 process step(s)"));
+    assert!(
+        err.to_string()
+            .contains("runtime dispatch budget exceeded after 3 process step(s)")
+    );
 
     let _ = fs::remove_file(trace_path);
 }
@@ -116,9 +118,10 @@ fn runtime_limits_reject_zero_runtime_processes() {
     .validate()
     .expect_err("zero runtime process limit should fail closed");
 
-    assert!(err
-        .to_string()
-        .contains("max_runtime_processes must be greater than zero"));
+    assert!(
+        err.to_string()
+            .contains("max_runtime_processes must be greater than zero")
+    );
 }
 
 #[test]
@@ -136,9 +139,10 @@ fn runtime_rejects_runtime_process_limit_before_spawning_child() {
     )
     .expect_err("runtime process limit should fail before spawning Worker");
 
-    assert!(err
-        .to_string()
-        .contains("runtime process instance limit exceeded at 1 process instance(s)"));
+    assert!(
+        err.to_string()
+            .contains("runtime process instance limit exceeded at 1 process instance(s)")
+    );
     assert!(!host.events().iter().any(|event| {
         matches!(
             event,
@@ -163,9 +167,10 @@ fn runtime_rejects_trace_limit_exhaustion() {
     )
     .expect_err("small trace limit should fail closed");
 
-    assert!(err
-        .to_string()
-        .contains("runtime trace exceeded maximum size of 8 bytes"));
+    assert!(
+        err.to_string()
+            .contains("runtime trace exceeded maximum size of 8 bytes")
+    );
 
     let _ = fs::remove_file(trace_path);
 }
@@ -186,9 +191,10 @@ fn runtime_rejects_emitted_output_limit_exhaustion() {
     )
     .expect_err("small emitted output limit should fail closed");
 
-    assert!(err
-        .to_string()
-        .contains("emitted output exceeded maximum size"));
+    assert!(
+        err.to_string()
+            .contains("emitted output exceeded maximum size")
+    );
 
     let _ = fs::remove_file(trace_path);
 }
@@ -206,12 +212,14 @@ fn actor_artifact_spawns_sends_updates_state_and_stops() {
     assert_eq!(report.spawned_processes.len(), 2);
     assert_eq!(report.delivered_messages.len(), 2);
     assert_eq!(report.emitted_outputs, ["worker handled Ping"]);
-    assert!(report
-        .processes
-        .iter()
-        .any(|process| process.process == "Worker"
-            && process.state == "Handled"
-            && process.status == ProcessStatus::Stopped));
+    assert!(
+        report
+            .processes
+            .iter()
+            .any(|process| process.process == "Worker"
+                && process.state == "Handled"
+                && process.status == ProcessStatus::Stopped)
+    );
 
     let trace = fs::read_to_string(&trace_path).expect("runtime trace should be readable");
     assert!(trace.contains(r#""event":"process_spawned""#));
@@ -308,10 +316,11 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
     assert_eq!(report.delivered_messages.len(), 2);
     assert_eq!(report.emitted_outputs, ["worker handled Ping"]);
     assert_eq!(host.stdout(), ["worker handled Ping"]);
-    assert!(host
-        .events()
-        .iter()
-        .any(|event| matches!(event, RuntimeEvent::ArtifactLoaded { .. })));
+    assert!(
+        host.events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::ArtifactLoaded { .. }))
+    );
     assert!(host.events().iter().any(|event| matches!(
         event,
         RuntimeEvent::ProcessSpawned {
@@ -362,17 +371,21 @@ fn in_memory_host_delivers_payload_envelopes_and_template_state() {
         .expect("payload artifact should run through in-memory host");
 
     assert_eq!(report.emitted_outputs, ["worker assigned job"]);
-    assert!(report
-        .delivered_messages
-        .iter()
-        .any(|delivery| delivery.process == "Worker"
-            && delivery.message == "Assign(Job{phase:Ready})"));
-    assert!(report
-        .processes
-        .iter()
-        .any(|process| process.process == "Worker"
-            && process.state == "WorkerState{job:Job{phase:Ready}}"
-            && process.status == ProcessStatus::Stopped));
+    assert!(
+        report
+            .delivered_messages
+            .iter()
+            .any(|delivery| delivery.process == "Worker"
+                && delivery.message == "Assign(Job{phase:Ready})")
+    );
+    assert!(
+        report
+            .processes
+            .iter()
+            .any(|process| process.process == "Worker"
+                && process.state == "WorkerState{job:Job{phase:Ready}}"
+                && process.status == ProcessStatus::Stopped)
+    );
     assert!(host.events().iter().any(|event| matches!(
         event,
         RuntimeEvent::MessageAccepted {
@@ -466,12 +479,14 @@ fn in_memory_host_selects_transitions_by_message_id() {
         report.emitted_outputs,
         ["worker handled First", "worker handled Second"]
     );
-    assert!(report
-        .processes
-        .iter()
-        .any(|process| process.process == "Worker"
-            && process.state == "Done"
-            && process.status == ProcessStatus::Stopped));
+    assert!(
+        report
+            .processes
+            .iter()
+            .any(|process| process.process == "Worker"
+                && process.state == "Done"
+                && process.status == ProcessStatus::Stopped)
+    );
     assert!(host.events().iter().any(|event| matches!(
         event,
         RuntimeEvent::ProcessStepped {
@@ -568,10 +583,12 @@ fn in_memory_host_preserves_current_next_state() {
     let report = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
         .expect("current next state should preserve runtime state");
 
-    assert!(report
-        .processes
-        .iter()
-        .any(|process| process.process == "Worker" && process.state == "Handled"));
+    assert!(
+        report
+            .processes
+            .iter()
+            .any(|process| process.process == "Worker" && process.state == "Handled")
+    );
     assert!(
         !host
             .events()
@@ -596,9 +613,10 @@ fn in_memory_host_rejects_trace_limit_exhaustion() {
     )
     .expect_err("small trace limit should fail for in-memory hosts");
 
-    assert!(err
-        .to_string()
-        .contains("runtime trace exceeded maximum size of 8 bytes"));
+    assert!(
+        err.to_string()
+            .contains("runtime trace exceeded maximum size of 8 bytes")
+    );
     assert!(
         host.events().is_empty(),
         "host should not receive an event that exceeds the trace budget"
@@ -609,9 +627,10 @@ fn in_memory_host_rejects_trace_limit_exhaustion() {
 fn runtime_process_id_rejects_zero() {
     let err = RuntimeProcessId::from_u64(0).expect_err("zero runtime pid should be invalid");
 
-    assert!(err
-        .to_string()
-        .contains("runtime process id must be greater than zero"));
+    assert!(
+        err.to_string()
+            .contains("runtime process id must be greater than zero")
+    );
 }
 
 fn valid_artifact() -> MantleArtifact {
