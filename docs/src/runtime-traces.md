@@ -62,7 +62,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"3","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"4","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:

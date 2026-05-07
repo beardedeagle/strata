@@ -1,6 +1,6 @@
 use mantle_artifact::validate_message_label;
 
-use super::ast::{Identifier, Module, TypeRef};
+use super::ast::{Effect, Identifier, Module, TypeRef};
 use super::diagnostic::{Error, Result};
 
 macro_rules! define_checked_id {
@@ -249,6 +249,16 @@ pub(in crate::language) enum CheckedAction {
     },
 }
 
+impl CheckedAction {
+    pub(in crate::language) fn effect(&self) -> Effect {
+        match self {
+            Self::Emit { .. } => Effect::Emit,
+            Self::Spawn { .. } => Effect::Spawn,
+            Self::Send { .. } => Effect::Send,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) enum CheckedSendTarget {
     ProcessRef(CheckedProcessRefId),
@@ -263,6 +273,7 @@ pub(in crate::language) struct CheckedTransition {
     message: CheckedMessageId,
     step_result: CheckedStepResult,
     next_state: CheckedNextState,
+    effects: Vec<Effect>,
     actions: Vec<CheckedAction>,
 }
 
@@ -272,6 +283,7 @@ impl CheckedTransition {
             message: parts.message,
             step_result: parts.step_result,
             next_state: parts.next_state,
+            effects: parts.effects,
             actions: parts.actions,
         }
     }
@@ -288,6 +300,10 @@ impl CheckedTransition {
         self.next_state.clone()
     }
 
+    pub(in crate::language) fn effects(&self) -> &[Effect] {
+        &self.effects
+    }
+
     pub(in crate::language) fn actions(&self) -> &[CheckedAction] {
         &self.actions
     }
@@ -297,6 +313,7 @@ pub(in crate::language) struct CheckedTransitionParts {
     pub message: CheckedMessageId,
     pub step_result: CheckedStepResult,
     pub next_state: CheckedNextState,
+    pub effects: Vec<Effect>,
     pub actions: Vec<CheckedAction>,
 }
 

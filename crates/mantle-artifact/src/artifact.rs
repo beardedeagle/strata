@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::fmt;
 
 use crate::fields::ArtifactFields;
 use crate::validation::{
@@ -8,8 +9,8 @@ use crate::validation::{
 };
 use crate::{
     Error, MessageId, OutputId, ProcessId, ProcessRefId, Result, StateId, ARTIFACT_FORMAT,
-    ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
+    ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION,
+    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
     MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS,
 };
@@ -34,6 +35,38 @@ impl StepResult {
             "Stop" => Ok(Self::Stop),
             _ => Err(Error::new(format!("invalid step_result value {value:?}"))),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ArtifactEffect {
+    Emit,
+    Spawn,
+    Send,
+}
+
+impl ArtifactEffect {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Emit => "emit",
+            Self::Spawn => "spawn",
+            Self::Send => "send",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self> {
+        match value {
+            "emit" => Ok(Self::Emit),
+            "spawn" => Ok(Self::Spawn),
+            "send" => Ok(Self::Send),
+            _ => Err(Error::new(format!("invalid effect value {value:?}"))),
+        }
+    }
+}
+
+impl fmt::Display for ArtifactEffect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -150,6 +183,16 @@ impl MantleArtifact {
                     );
                 }
                 encoded.push_str(&format!(
+                    "{transition_prefix}.effect_count={}\n",
+                    transition.effects.len()
+                ));
+                for (effect_index, effect) in transition.effects.iter().enumerate() {
+                    encoded.push_str(&format!(
+                        "{transition_prefix}.effect.{effect_index}={}\n",
+                        effect.as_str()
+                    ));
+                }
+                encoded.push_str(&format!(
                     "{transition_prefix}.action_count={}\n",
                     transition.actions.len()
                 ));
@@ -232,6 +275,16 @@ impl MantleArtifact {
             let mut transitions = Vec::with_capacity(transition_count);
             for transition_index in 0..transition_count {
                 let transition_prefix = format!("{prefix}.transition.{transition_index}");
+                let effect_count = fields.take_bounded_usize(
+                    &format!("{transition_prefix}.effect_count"),
+                    0,
+                    MAX_EFFECTS_PER_TRANSITION,
+                )?;
+                let mut effects = Vec::with_capacity(effect_count);
+                for effect_index in 0..effect_count {
+                    let key = format!("{transition_prefix}.effect.{effect_index}");
+                    effects.push(ArtifactEffect::parse(&fields.take_required(&key)?)?);
+                }
                 let action_count = fields.take_bounded_usize(
                     &format!("{transition_prefix}.action_count"),
                     0,
@@ -248,6 +301,7 @@ impl MantleArtifact {
                     step_result: fields
                         .take_step_result(&format!("{transition_prefix}.step_result"))?,
                     next_state: decode_next_state(&mut fields, &transition_prefix)?,
+                    effects,
                     actions,
                 });
             }
@@ -561,9 +615,29 @@ impl ArtifactProcess {
             }
         }
         for transition in &self.transitions {
+            let declared_effects = transition.validate_effects(&self.debug_name)?;
             let mut spawned_refs = BTreeSet::new();
+            let mut used_effects = BTreeSet::new();
             for action in &transition.actions {
+                let action_effect = action.effect();
+                if !declared_effects.contains(&action_effect) {
+                    return Err(Error::new(format!(
+                        "process {} transition {} uses effect {action_effect} but does not declare it",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
+                used_effects.insert(action_effect);
                 self.validate_action_reference(artifact, transition, &mut spawned_refs, action)?;
+            }
+            for declared_effect in &declared_effects {
+                if !used_effects.contains(declared_effect) {
+                    return Err(Error::new(format!(
+                        "process {} transition {} declares effect {declared_effect} but no action uses it",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
             }
         }
         Ok(())
@@ -1013,7 +1087,29 @@ pub struct ArtifactTransition {
     pub message: MessageId,
     pub step_result: StepResult,
     pub next_state: NextState,
+    pub effects: Vec<ArtifactEffect>,
     pub actions: Vec<ArtifactAction>,
+}
+
+impl ArtifactTransition {
+    fn validate_effects(&self, process_debug_name: &str) -> Result<BTreeSet<ArtifactEffect>> {
+        validate_count(
+            "effect_count",
+            self.effects.len(),
+            0,
+            MAX_EFFECTS_PER_TRANSITION,
+        )?;
+        let mut effects = BTreeSet::new();
+        for &effect in &self.effects {
+            if !effects.insert(effect) {
+                return Err(Error::new(format!(
+                    "process {process_debug_name} transition {} declares duplicate effect {effect}",
+                    self.message.as_u32()
+                )));
+            }
+        }
+        Ok(effects)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1030,6 +1126,16 @@ pub enum ArtifactAction {
         message: MessageId,
         payload: Option<ArtifactValueTemplate>,
     },
+}
+
+impl ArtifactAction {
+    fn effect(&self) -> ArtifactEffect {
+        match self {
+            Self::Emit { .. } => ArtifactEffect::Emit,
+            Self::Spawn { .. } => ArtifactEffect::Spawn,
+            Self::Send { .. } => ArtifactEffect::Send,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

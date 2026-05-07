@@ -16,6 +16,9 @@ fn artifact_round_trips_and_validates_magic() {
     assert!(encoded.contains("process.1.transition.0.next_state=value"));
     assert!(encoded.contains("process.1.transition.0.next_state_value=1"));
     assert!(encoded.contains("process.0.process_ref.0.target_process=1"));
+    assert!(encoded.contains("process.0.transition.0.effect_count=2"));
+    assert!(encoded.contains("process.0.transition.0.effect.0=spawn"));
+    assert!(encoded.contains("process.0.transition.0.effect.1=send"));
     assert!(encoded.contains("process.0.transition.0.action.0.target_process=1"));
     assert!(encoded.contains("process.0.transition.0.action.0.process_ref=0"));
     assert!(encoded.contains("process.0.transition.0.action.1.target_process_ref=0"));
@@ -313,6 +316,7 @@ fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
             value: "Job".to_string(),
         }),
     }];
+    artifact.processes[1].transitions[0].effects = vec![ArtifactEffect::Send];
 
     let err = artifact
         .validate()
@@ -400,6 +404,7 @@ fn validate_rejects_received_payload_send_target_type_mismatch() {
             process_ref: ProcessRefId::new(0),
         }),
     }];
+    artifact.processes[1].transitions[0].effects = vec![ArtifactEffect::Send];
 
     let err = artifact
         .validate()
@@ -546,6 +551,7 @@ fn validate_rejects_aggregate_process_action_count_above_limit() {
         message: MessageId::new(1),
         step_result: StepResult::Stop,
         next_state: NextState::Current,
+        effects: vec![ArtifactEffect::Emit],
         actions: emit_actions((MAX_ACTIONS_PER_PROCESS / 2) + 1),
     });
 
@@ -556,6 +562,62 @@ fn validate_rejects_aggregate_process_action_count_above_limit() {
     assert!(err.to_string().contains(&format!(
         "action_count must be no greater than {MAX_ACTIONS_PER_PROCESS}"
     )));
+}
+
+#[test]
+fn validate_rejects_action_without_declared_effect() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Spawn];
+
+    let err = artifact
+        .validate()
+        .expect_err("send without declared send effect should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Main transition 0 uses effect send but does not declare it"));
+}
+
+#[test]
+fn validate_rejects_declared_effect_without_action() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0]
+        .effects
+        .push(ArtifactEffect::Send);
+
+    let err = artifact
+        .validate()
+        .expect_err("unused declared effect should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker transition 0 declares effect send but no action uses it"));
+}
+
+#[test]
+fn validate_rejects_duplicate_transition_effect() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0].effects = vec![ArtifactEffect::Emit, ArtifactEffect::Emit];
+
+    let err = artifact
+        .validate()
+        .expect_err("duplicate transition effect should fail");
+
+    assert!(err
+        .to_string()
+        .contains("process Worker transition 0 declares duplicate effect emit"));
+}
+
+#[test]
+fn decode_rejects_unknown_transition_effect() {
+    let encoded = valid_artifact().encode().replace(
+        "process.0.transition.0.effect.1=send",
+        "process.0.transition.0.effect.1=write",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unknown effect should fail");
+
+    assert!(err.to_string().contains("invalid effect value \"write\""));
 }
 
 #[test]
@@ -990,6 +1052,7 @@ fn valid_artifact() -> MantleArtifact {
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
+                    effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
                     actions: vec![
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
@@ -1016,6 +1079,7 @@ fn valid_artifact() -> MantleArtifact {
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Value(StateId::new(1)),
+                    effects: vec![ArtifactEffect::Emit],
                     actions: vec![ArtifactAction::Emit {
                         output: OutputId::new(0),
                     }],

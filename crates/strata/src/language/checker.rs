@@ -78,6 +78,14 @@ struct StepClause<'a> {
     body: &'a FunctionBlock,
 }
 
+struct StepTransitionInput<'a> {
+    variant: CheckedMessageVariantId,
+    message: CheckedMessageId,
+    payload_binding: Option<&'a StepPayloadBinding>,
+    body: &'a FunctionBlock,
+    declared_effects: &'a [Effect],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StepSignaturePattern {
     Variant {
@@ -742,10 +750,13 @@ fn check_step(
             &step_context,
             state_space,
             outputs,
-            clause.variant,
-            clause.message,
-            clause.payload_binding.as_ref(),
-            clause.body,
+            StepTransitionInput {
+                variant: clause.variant,
+                message: clause.message,
+                payload_binding: clause.payload_binding.as_ref(),
+                body: clause.body,
+                declared_effects: &clause.step.effects,
+            },
         )?;
         let used_effects =
             transition
@@ -1252,17 +1263,14 @@ fn check_step_transition(
     context: &StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
-    variant: CheckedMessageVariantId,
-    message: CheckedMessageId,
-    payload_binding: Option<&StepPayloadBinding>,
-    block: &FunctionBlock,
+    input: StepTransitionInput<'_>,
 ) -> Result<CheckedTransition> {
-    let payload_template_binding = payload_binding.map(|binding| ValueTemplateBinding {
+    let payload_template_binding = input.payload_binding.map(|binding| ValueTemplateBinding {
         name: &binding.name,
         ty: &binding.ty,
     });
-    let mut actions = Vec::with_capacity(block.statements.len());
-    for statement in &block.statements {
+    let mut actions = Vec::with_capacity(input.body.statements.len());
+    for statement in &input.body.statements {
         match statement {
             Statement::Emit(text) => {
                 actions.push(CheckedAction::Emit {
@@ -1286,7 +1294,8 @@ fn check_step_transition(
                 message,
                 payload,
             } => {
-                let send_target = resolve_checked_send_target(context, payload_binding, target)?;
+                let send_target =
+                    resolve_checked_send_target(context, input.payload_binding, target)?;
                 let message_id = resolve_send_message_case(
                     context,
                     send_target.target_process,
@@ -1303,7 +1312,7 @@ fn check_step_transition(
         }
     }
 
-    let (step_result, state_arg) = match &block.returns {
+    let (step_result, state_arg) = match &input.body.returns {
         ReturnExpr::Call { name, arg } if name.as_str() == "Stop" => (CheckedStepResult::Stop, arg),
         ReturnExpr::Call { name, arg } if name.as_str() == "Continue" => {
             (CheckedStepResult::Continue, arg)
@@ -1317,7 +1326,7 @@ fn check_step_transition(
     let next_state = if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
     {
         CheckedNextState::Current
-    } else if let Some(binding) = payload_binding {
+    } else if let Some(binding) = input.payload_binding {
         if source_value_uses_binding(state_arg, &binding.name) {
             let template = checked_value_template_with_binding(
                 context.module,
@@ -1329,7 +1338,7 @@ fn check_step_transition(
             populate_payload_template_state_values(
                 context,
                 state_space,
-                variant,
+                input.variant,
                 state_arg,
                 binding,
             )?;
@@ -1344,9 +1353,10 @@ fn check_step_transition(
     };
 
     Ok(CheckedTransition::new(CheckedTransitionParts {
-        message,
+        message: input.message,
         step_result,
         next_state,
+        effects: input.declared_effects.to_vec(),
         actions,
     }))
 }
@@ -1576,16 +1586,6 @@ fn process_ref_type_target(
             process.name, process_ref, target
         ))
     })
-}
-
-impl CheckedAction {
-    fn effect(&self) -> Effect {
-        match self {
-            Self::Emit { .. } => Effect::Emit,
-            Self::Spawn { .. } => Effect::Spawn,
-            Self::Send { .. } => Effect::Send,
-        }
-    }
 }
 
 fn total_action_count(transitions: &[CheckedTransition]) -> Result<usize> {
