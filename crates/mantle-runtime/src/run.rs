@@ -938,7 +938,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_action_without_effect_authority_before_emit() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.outputs.push("forbidden output".to_string());
         program.processes[0].transitions[0]
@@ -955,7 +955,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_unused_effect_authority_before_state_update() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].effect_authority =
             crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
@@ -968,7 +968,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_duplicate_effect_authority_before_emit() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.outputs.push("forbidden output".to_string());
         program.processes[0].transitions[0].effect_authority =
@@ -990,7 +990,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_invalid_artifact_identity_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.format = "unexpected-format".to_string();
 
@@ -1002,7 +1002,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_invalid_schema_version_with_field_name_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.schema_version = "0".to_string();
 
@@ -1014,7 +1014,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_control_character_artifact_identity_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.format = "bad\nformat".to_string();
 
@@ -1029,7 +1029,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_oversized_artifact_identity_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.schema_version = "x".repeat(MAX_FIELD_VALUE_BYTES + 1);
 
@@ -1041,7 +1041,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_control_character_process_name_before_duplicate_check() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].debug_name = "bad\nprocess".to_string();
         program.processes[1].debug_name = "bad\nprocess".to_string();
@@ -1056,7 +1056,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_control_character_state_type_before_mismatch_diagnostic() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].state_values[0].ty = "Bad\nState".to_string();
 
@@ -1074,7 +1074,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_process_ref_state_type_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].state_type = "ProcessRef<Worker>".to_string();
 
@@ -1086,7 +1086,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_payload_bearing_entry_message_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].message_variants[0].payload_type = Some("StartPayload".to_string());
 
@@ -1098,7 +1098,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_invalid_message_payload_type_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[1].message_variants[0].payload_type = Some("ProcessRef<>".to_string());
 
@@ -1110,7 +1110,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_invalid_init_state_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].init_state = StateId::new(1);
 
@@ -1122,7 +1122,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_unknown_next_state_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].next_state = NextState::Value(StateId::new(1));
 
@@ -1134,7 +1134,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_unadmitted_template_state_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].next_state =
             NextState::Template(ArtifactValueTemplate::Literal {
@@ -1150,7 +1150,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].next_state =
             NextState::Template(ArtifactValueTemplate::Record {
@@ -1172,7 +1172,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_template_depth_overflow_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].next_state =
             NextState::Template(record_template_with_depth(MAX_VALUE_TEMPLATE_DEPTH + 2));
@@ -1185,7 +1185,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_unknown_emit_output_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].effect_authority =
             crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
@@ -1203,7 +1203,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_invalid_output_text_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.outputs.push(String::new());
         program.processes[0].transitions[0].effect_authority =
@@ -1222,7 +1222,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_spawn_target_mismatch_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].effect_authority =
             crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Spawn]);
@@ -1241,7 +1241,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_send_before_spawn_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].effect_authority =
             crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Send]);
@@ -1261,7 +1261,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_send_missing_payload_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[1].message_variants[0].payload_type = Some("Job".to_string());
         program.processes[0].transitions[0].effect_authority =
@@ -1289,7 +1289,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[1].message_variants[0].payload_type =
             Some("ProcessRef<Worker>".to_string());
@@ -1322,7 +1322,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_loaded_received_process_ref_send_without_payload_before_artifact_loaded() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].effect_authority =
             crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Send]);
@@ -1345,7 +1345,7 @@ mod tests {
 
     #[test]
     fn runtime_process_lookup_indexes_by_pid() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         let mut host = InMemoryRuntimeHost::default();
         let mut run = RuntimeRun::new(
@@ -1379,7 +1379,7 @@ mod tests {
 
     #[test]
     fn runtime_process_lookup_rejects_unspawned_pid() {
-        let artifact = artifact_with_large_unbound_process_ref_table();
+        let artifact = artifact_with_unbound_worker_process_ref();
         let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         let mut host = InMemoryRuntimeHost::default();
         let mut run = RuntimeRun::new(
@@ -1402,7 +1402,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_unspawned_process_ref_payload() {
-        let mut artifact = artifact_with_large_unbound_process_ref_table();
+        let mut artifact = artifact_with_unbound_worker_process_ref();
         artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
             "Ping",
             "ProcessRef<Worker>",
@@ -1449,7 +1449,7 @@ mod tests {
 
     #[test]
     fn runtime_rejects_process_ref_payload_target_type_mismatch() {
-        let mut artifact = artifact_with_large_unbound_process_ref_table();
+        let mut artifact = artifact_with_unbound_worker_process_ref();
         artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
             "Ping",
             "ProcessRef<Worker>",
@@ -1557,12 +1557,12 @@ mod tests {
         err
     }
 
-    fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {
+    fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
         MantleArtifact {
             format: ARTIFACT_FORMAT.to_string(),
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
             source_language: STRATA_SOURCE_LANGUAGE.to_string(),
-            module: "large_process_ref_table".to_string(),
+            module: "unbound_worker_process_ref".to_string(),
             entry_process: ProcessId::new(0),
             entry_message: MessageId::new(0),
             outputs: Vec::new(),
@@ -1573,12 +1573,10 @@ mod tests {
                     state_values: state_values("MainState", &["MainState"]),
                     message_type: "MainMsg".to_string(),
                     message_variants: vec![ArtifactMessageVariant::unit("Start")],
-                    process_refs: (0..MAX_PROCESS_REFS_PER_PROCESS)
-                        .map(|index| ArtifactProcessRef {
-                            debug_name: format!("worker_{index}"),
-                            target: ProcessId::new(1),
-                        })
-                        .collect(),
+                    process_refs: vec![ArtifactProcessRef {
+                        debug_name: "worker".to_string(),
+                        target: ProcessId::new(1),
+                    }],
                     mailbox_bound: 1,
                     init_state: StateId::new(0),
                     transitions: vec![ArtifactTransition {
@@ -1609,6 +1607,18 @@ mod tests {
             ],
             source_hash_fnv1a64: "0000000000000000".to_string(),
         }
+    }
+
+    fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {
+        let mut artifact = artifact_with_unbound_worker_process_ref();
+        artifact.module = "large_process_ref_table".to_string();
+        artifact.processes[0].process_refs = (0..MAX_PROCESS_REFS_PER_PROCESS)
+            .map(|index| ArtifactProcessRef {
+                debug_name: format!("worker_{index}"),
+                target: ProcessId::new(1),
+            })
+            .collect();
+        artifact
     }
 
     fn state_values(ty: &str, values: &[&str]) -> Vec<ArtifactStateValue> {
