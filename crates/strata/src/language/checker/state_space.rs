@@ -4,7 +4,8 @@ use mantle_artifact::{validate_state_value_label, MAX_STATE_VALUES_PER_PROCESS};
 
 use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
 use super::super::checked::{
-    CheckedPayloadValue, CheckedStateId, CheckedValueTemplate, CheckedValueTemplateField,
+    CheckedPayloadValue, CheckedStateId, CheckedStateValue, CheckedValueTemplate,
+    CheckedValueTemplateField,
 };
 use super::super::diagnostic::{Error, Result};
 use super::super::MAX_VALUE_NESTING;
@@ -15,7 +16,7 @@ pub(super) struct StateSpace<'module> {
     module: &'module Module,
     process_name: &'module Identifier,
     state_type: &'module TypeRef,
-    values: Vec<String>,
+    values: Vec<CheckedStateValue>,
 }
 
 pub(super) struct ValueBinding<'a> {
@@ -37,7 +38,10 @@ impl<'module> StateSpace<'module> {
     ) -> Result<Self> {
         if let Ok(record) = semantic_index.record_decl(module, &process.state_type) {
             let values = if record.fields.is_empty() {
-                vec![record.name.to_string()]
+                vec![CheckedStateValue::new(
+                    process.state_type.clone(),
+                    record.name.to_string(),
+                )]
             } else {
                 Vec::new()
             };
@@ -67,7 +71,9 @@ impl<'module> StateSpace<'module> {
         let values = enum_decl
             .variants
             .iter()
-            .map(|variant| variant.name.to_string())
+            .map(|variant| {
+                CheckedStateValue::new(process.state_type.clone(), variant.name.to_string())
+            })
             .collect();
         Ok(Self {
             module,
@@ -99,7 +105,10 @@ impl<'module> StateSpace<'module> {
             bindings,
             0,
         )?;
-        if let Some(index) = self.values.iter().position(|candidate| candidate == &label) {
+        let state_value = CheckedStateValue::new(self.state_type.clone(), label);
+        if let Some(index) = self.values.iter().position(|candidate| {
+            candidate.ty() == state_value.ty() && candidate.value() == state_value.value()
+        }) {
             return CheckedStateId::from_index(index);
         }
         if self.values.len() >= MAX_STATE_VALUES_PER_PROCESS {
@@ -108,11 +117,11 @@ impl<'module> StateSpace<'module> {
                 self.process_name
             )));
         }
-        self.values.push(label);
+        self.values.push(state_value);
         CheckedStateId::from_index(self.values.len() - 1)
     }
 
-    pub(super) fn into_values(self) -> Result<Vec<String>> {
+    pub(super) fn into_values(self) -> Result<Vec<CheckedStateValue>> {
         validate_state_value_count(self.process_name, self.values.len())?;
         reject_reserved_state_values(self.process_name, &self.values)?;
         Ok(self.values)
@@ -412,10 +421,13 @@ fn validate_state_value_count(process_name: &Identifier, count: usize) -> Result
     Ok(())
 }
 
-fn reject_reserved_state_values(process_name: &Identifier, state_values: &[String]) -> Result<()> {
+fn reject_reserved_state_values(
+    process_name: &Identifier,
+    state_values: &[CheckedStateValue],
+) -> Result<()> {
     if state_values
         .iter()
-        .any(|value| value == STEP_STATE_PARAMETER_NAME)
+        .any(|value| value.label() == STEP_STATE_PARAMETER_NAME)
     {
         return Err(Error::new(format!(
             "process {} state value {} conflicts with reserved step state parameter name",
@@ -443,7 +455,9 @@ mod tests {
         let mut state_space =
             StateSpace::new(&module, &semantic_index, process).expect("state space should build");
         state_space.values = (0..MAX_STATE_VALUES_PER_PROCESS)
-            .map(|index| format!("State{index}"))
+            .map(|index| {
+                CheckedStateValue::new(TypeRef::Named(ident("MainState")), format!("State{index}"))
+            })
             .collect();
 
         let err = state_space

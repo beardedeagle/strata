@@ -115,6 +115,42 @@ impl CheckedPayloadValue {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedStateValue {
+    ty: TypeRef,
+    value: String,
+    label: String,
+}
+
+impl CheckedStateValue {
+    pub(in crate::language) fn new(ty: TypeRef, value: String) -> Self {
+        Self {
+            ty,
+            label: value.clone(),
+            value,
+        }
+    }
+
+    pub(in crate::language) fn ty(&self) -> &TypeRef {
+        &self.ty
+    }
+
+    pub(in crate::language) fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub(in crate::language) fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub(in crate::language) fn has_same_identity_as_payload(
+        &self,
+        payload: &CheckedPayloadValue,
+    ) -> bool {
+        self.ty == *payload.ty() && self.value == payload.label()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::language) struct CheckedProcessRefPayload {
     target: CheckedProcessId,
@@ -321,7 +357,7 @@ pub(in crate::language) struct CheckedTransitionParts {
 pub(in crate::language) struct CheckedProcess {
     debug_name: Identifier,
     state_type: TypeRef,
-    state_values: Vec<String>,
+    state_values: Vec<CheckedStateValue>,
     message_type: TypeRef,
     message_cases: Vec<CheckedMessageCase>,
     process_refs: Vec<CheckedProcessRef>,
@@ -353,7 +389,7 @@ impl CheckedProcess {
         &self.state_type
     }
 
-    pub(in crate::language) fn state_values(&self) -> &[String] {
+    pub(in crate::language) fn state_values(&self) -> &[CheckedStateValue] {
         &self.state_values
     }
 
@@ -385,7 +421,7 @@ impl CheckedProcess {
 pub(in crate::language) struct CheckedProcessParts {
     pub debug_name: Identifier,
     pub state_type: TypeRef,
-    pub state_values: Vec<String>,
+    pub state_values: Vec<CheckedStateValue>,
     pub message_type: TypeRef,
     pub message_cases: Vec<CheckedMessageCase>,
     pub process_refs: Vec<CheckedProcessRef>,

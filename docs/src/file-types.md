@@ -29,7 +29,7 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=4
+schema_version=5
 source_language=strata
 ```
 
@@ -42,6 +42,10 @@ transition index and carry a `message` ID field plus exact effect authority for
 their actions. Validation requires one unique transition for each accepted
 message, and runtime selection indexes the admitted transition table by typed
 message ID.
+
+State value tables carry a type, typed value identity, and display label for
+each admitted state. Mantle admission and runtime next-state resolution use the
+type and value identity. Labels remain trace and diagnostic metadata.
 
 Process references are encoded as per-process reference tables. A spawn action
 binds a process-reference ID to a new runtime process instance for the current

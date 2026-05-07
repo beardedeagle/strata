@@ -12,6 +12,9 @@ fn artifact_round_trips_and_validates_magic() {
     assert_eq!(decoded, artifact);
     assert!(encoded.contains(&format!("schema_version={ARTIFACT_SCHEMA_VERSION}")));
     assert!(encoded.contains("entry_process=0"));
+    assert!(encoded.contains("process.1.state_value.1.type=WorkerState"));
+    assert!(encoded.contains("process.1.state_value.1.value=Handled"));
+    assert!(encoded.contains("process.1.state_value.1.label=Handled"));
     assert!(encoded.contains("process.0.transition.0.next_state=current"));
     assert!(encoded.contains("process.1.transition.0.next_state=value"));
     assert!(encoded.contains("process.1.transition.0.next_state_value=1"));
@@ -129,10 +132,10 @@ fn validate_rejects_invalid_source_language_identifier() {
 #[test]
 fn validate_accepts_structured_state_value_labels() {
     let mut artifact = valid_artifact();
-    artifact.processes[0].state_values = vec![
-        "MainState{phase:Idle}".to_string(),
-        "MainState{phase:Handled}".to_string(),
-    ];
+    artifact.processes[0].state_values = state_values(
+        "MainState",
+        &["MainState{phase:Idle}", "MainState{phase:Handled}"],
+    );
     artifact.processes[0].transitions[0].next_state = NextState::Value(StateId::new(1));
 
     artifact
@@ -851,6 +854,41 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
 }
 
 #[test]
+fn validate_rejects_state_value_type_mismatch() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].state_values[1] =
+        ArtifactStateValue::with_label("OtherState", "HandledIdentity", "HandledLabel");
+
+    let err = artifact
+        .validate()
+        .expect_err("state value type mismatch should fail");
+
+    assert!(err.to_string().contains(
+        "process Worker state value HandledIdentity (label HandledLabel) has type OtherState, expected WorkerState"
+    ));
+}
+
+#[test]
+fn validate_rejects_next_state_template_when_label_matches_but_identity_does_not() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].state_values[1] =
+        ArtifactStateValue::with_label("WorkerState", "Spoofed", "Handled");
+    artifact.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Literal {
+            ty: "WorkerState".to_string(),
+            value: "Handled".to_string(),
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("state labels must not admit mismatched typed values");
+
+    assert!(err.to_string().contains(
+        "process Worker transition 0 next_state_template produced value Handled not admitted by state table"
+    ));
+}
+
+#[test]
 fn validate_rejects_missing_transition_for_message() {
     let mut artifact = valid_artifact();
     artifact.processes[1]
@@ -1039,7 +1077,7 @@ fn valid_artifact() -> MantleArtifact {
             ArtifactProcess {
                 debug_name: "Main".to_string(),
                 state_type: "MainState".to_string(),
-                state_values: vec!["MainState".to_string()],
+                state_values: state_values("MainState", &["MainState"]),
                 message_type: "MainMsg".to_string(),
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
@@ -1069,7 +1107,7 @@ fn valid_artifact() -> MantleArtifact {
             ArtifactProcess {
                 debug_name: "Worker".to_string(),
                 state_type: "WorkerState".to_string(),
-                state_values: vec!["Idle".to_string(), "Handled".to_string()],
+                state_values: state_values("WorkerState", &["Idle", "Handled"]),
                 message_type: "WorkerMsg".to_string(),
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: Vec::new(),
@@ -1088,6 +1126,13 @@ fn valid_artifact() -> MantleArtifact {
         ],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }
+}
+
+fn state_values(ty: &str, values: &[&str]) -> Vec<ArtifactStateValue> {
+    values
+        .iter()
+        .map(|value| ArtifactStateValue::new(ty, *value))
+        .collect()
 }
 
 fn emit_actions(count: usize) -> Vec<ArtifactAction> {

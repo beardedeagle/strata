@@ -549,16 +549,16 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         template: &ArtifactValueTemplate,
     ) -> Result<StateId> {
-        let value = template.evaluate(step.payload.as_ref())?;
+        let value = template.evaluate_state_value(step.payload.as_ref())?;
         let process = self.program.process(step.process_id)?;
         let state_index = process
             .state_values
             .iter()
-            .position(|state| state == &value.value)
+            .position(|state| state.ty == value.ty && state.value == value.value)
             .ok_or_else(|| {
                 Error::new(format!(
                     "process {} next_state template produced value {} not admitted by state table",
-                    step.process_name, value.value
+                    step.process_name, value.label
                 ))
             })?;
         StateId::from_index(state_index)
@@ -877,9 +877,10 @@ mod tests {
         DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES,
     };
     use mantle_artifact::{
-        ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactTransition,
-        ArtifactValueTemplateField, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
-        MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS, STRATA_SOURCE_LANGUAGE,
+        ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactStateValue,
+        ArtifactTransition, ArtifactValueTemplateField, StepResult, ARTIFACT_FORMAT,
+        ARTIFACT_SCHEMA_VERSION, MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS,
+        STRATA_SOURCE_LANGUAGE,
     };
 
     #[test]
@@ -1105,7 +1106,7 @@ mod tests {
                 ArtifactProcess {
                     debug_name: "Main".to_string(),
                     state_type: "MainState".to_string(),
-                    state_values: vec!["MainState".to_string()],
+                    state_values: state_values("MainState", &["MainState"]),
                     message_type: "MainMsg".to_string(),
                     message_variants: vec![ArtifactMessageVariant::unit("Start")],
                     process_refs: (0..MAX_PROCESS_REFS_PER_PROCESS)
@@ -1127,7 +1128,7 @@ mod tests {
                 ArtifactProcess {
                     debug_name: "Worker".to_string(),
                     state_type: "WorkerState".to_string(),
-                    state_values: vec!["Idle".to_string()],
+                    state_values: state_values("WorkerState", &["Idle"]),
                     message_type: "WorkerMsg".to_string(),
                     message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                     process_refs: Vec::new(),
@@ -1144,5 +1145,12 @@ mod tests {
             ],
             source_hash_fnv1a64: "0000000000000000".to_string(),
         }
+    }
+
+    fn state_values(ty: &str, values: &[&str]) -> Vec<ArtifactStateValue> {
+        values
+            .iter()
+            .map(|value| ArtifactStateValue::new(ty, *value))
+            .collect()
     }
 }

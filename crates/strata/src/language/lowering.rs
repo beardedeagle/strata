@@ -1,15 +1,15 @@
 use mantle_artifact::{
     source_hash_fnv1a64, ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactProcess,
-    ArtifactProcessRef, ArtifactSendTarget, ArtifactTransition, ArtifactValueTemplate,
-    ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION,
-    STRATA_SOURCE_LANGUAGE,
+    ArtifactProcessRef, ArtifactSendTarget, ArtifactStateValue, ArtifactTransition,
+    ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, StateId, StepResult, ARTIFACT_FORMAT,
+    ARTIFACT_SCHEMA_VERSION, STRATA_SOURCE_LANGUAGE,
 };
 
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedNextState, CheckedOutputId,
     CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget,
-    CheckedStateId, CheckedStepResult, CheckedTransition, CheckedValueTemplate,
+    CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedValueTemplate,
 };
 use super::Effect;
 
@@ -36,7 +36,11 @@ fn lower_process(process: &CheckedProcess) -> ArtifactProcess {
     ArtifactProcess {
         debug_name: process.debug_name().to_string(),
         state_type: process.state_type().to_string(),
-        state_values: process.state_values().to_vec(),
+        state_values: process
+            .state_values()
+            .iter()
+            .map(lower_state_value)
+            .collect(),
         message_type: process.message_type().to_string(),
         message_variants: process
             .message_cases()
@@ -119,6 +123,14 @@ fn lower_message_variant(message: &CheckedMessageCase) -> ArtifactMessageVariant
         label: message.label().to_string(),
         payload_type: message.payload_type().map(ToString::to_string),
     }
+}
+
+fn lower_state_value(value: &CheckedStateValue) -> ArtifactStateValue {
+    ArtifactStateValue::with_label(
+        value.ty().to_string(),
+        value.value().to_string(),
+        value.label().to_string(),
+    )
 }
 
 fn lower_value_template(template: &CheckedValueTemplate) -> ArtifactValueTemplate {
