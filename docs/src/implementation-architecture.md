@@ -10,7 +10,7 @@ required for writing simple Strata programs.
 | `crates/strata` | Strata CLI, parser, AST, checker, checked IR, and lowering. |
 | `crates/mantle-artifact` | Mantle Target Artifact encode, decode, validation, limits, and typed artifact IDs. |
 | `crates/mantle-runtime` | Mantle admission, runtime process state, mailboxes, dispatch, output, and traces. |
-| `crates/source-to-runtime-gates` | Workspace-owned `.str` to `.mta` to Mantle execution product gates and boundary ownership checks. |
+| `crates/source-to-runtime-gates` | Workspace-owned `.str` to `.mta` to Mantle execution gates and boundary ownership checks. |
 | `examples` | Runnable Strata programs used by source-to-runtime gates. |
 | `fuzz` | Fuzz targets for parser/checker/lowering, artifact decode, and runtime admission paths. |
 | `tools` | Editor and MIME metadata. |
@@ -77,7 +77,7 @@ Mantle owns:
 - action execution;
 - runtime traces.
 
-Workspace product gates own the cross-boundary proof that a Strata program can
+Workspace source-to-runtime gates own the cross-boundary proof that a Strata program can
 be checked, lowered, admitted by Mantle, executed, and traced.
 
 Do not move source-only assumptions into Mantle as trusted runtime behavior.
@@ -107,7 +107,7 @@ A source-facing feature usually needs changes across several layers:
 Parser acceptance alone is not enough. If another layer can construct or admit
 the same invalid state, that layer needs its own validation.
 
-## Existing Product Gates
+## Existing Source-To-Runtime Gates
 
 The runnable examples are:
 
@@ -120,7 +120,7 @@ The runnable examples are:
 - `examples/actor_panic_no_replay.str`.
 
 The integration tests in
-`crates/source-to-runtime-gates/tests/product_gates.rs` mirror the same source
+`crates/source-to-runtime-gates/tests/source_to_runtime_gates.rs` mirror the same source
 check, artifact build, and runtime execution sequence:
 
 ```sh

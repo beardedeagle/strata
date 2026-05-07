@@ -18,7 +18,7 @@ Read them in this order:
 
 ## Hello
 
-`examples/hello.str` is the first source-to-runtime product gate. It checks,
+`examples/hello.str` is the first source-to-runtime gate. It checks,
 builds, runs, emits `hello from Strata`, and records an observability trace.
 
 ```sh

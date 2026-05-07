@@ -118,7 +118,7 @@ just quality
 For the source-to-runtime acceptance examples only:
 
 ```sh
-just product-gates
+just source-to-runtime-gates
 ```
 
 For the docs only:

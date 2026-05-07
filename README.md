@@ -15,7 +15,7 @@ after the run.
 
 ## Runnable Gates
 
-The first runnable product gate:
+The first source-to-runtime gate:
 
 ```sh
 cargo build
@@ -31,7 +31,7 @@ Mantle prints the emitted output and records the runtime events in:
 target/strata/hello.observability.jsonl
 ```
 
-This slice is a source-to-runtime slice, not a complete language or production
+This slice is a source-to-runtime slice, not a complete language or release-ready
 runtime: a real `.str` file can be checked, built into `.mta`, and executed by
 Mantle.
 
@@ -153,7 +153,7 @@ the same runtime semantics.
   version, and source language internally, and carry executable type identity
   through Mantle type-table IDs rather than source type strings.
 - Corpus matters: examples, libraries, fixtures, and conformance cases are part
-  of the product, not an afterthought.
+  of the language/runtime, not an afterthought.
 
 ## Corpus And Libraries
 
@@ -277,10 +277,10 @@ just docs
 just diff-check
 ```
 
-Run the product gate manually:
+Run the source-to-runtime gates manually:
 
 ```sh
-just product-gates
+just source-to-runtime-gates
 ```
 
 Nightly-only validation is also available for fuzz and Miri smoke coverage:

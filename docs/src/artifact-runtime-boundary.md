@@ -11,9 +11,9 @@ runtime dispatch must use loaded typed IDs.
 
 Mantle crates are structurally language-neutral. They may carry `source_language`
 as opaque artifact metadata, but they must not own Strata source constants,
-Strata output-directory defaults, `.str` examples, or source-to-runtime product
-gates. Strata-owned defaults live in `crates/strata`; cross-boundary product
-gates live in `crates/source-to-runtime-gates`.
+Strata output-directory defaults, `.str` examples, or source-to-runtime gates.
+Strata-owned defaults live in `crates/strata`; cross-boundary gates live in
+`crates/source-to-runtime-gates`.
 
 Artifact type identity is structural in Mantle. Lowering emits a Mantle type
 table and artifact records refer to entries by `TypeId`; Mantle admission and
@@ -68,4 +68,4 @@ trace budget exhaustion.
 Runtime traces are line-delimited JSON. They include labels for readability and
 numeric IDs for process, message, state, payload type, and output identity. A
 trace is evidence of runtime execution, not a substitute for running the
-product gate.
+source-to-runtime gate.

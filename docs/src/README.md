@@ -4,7 +4,7 @@ Strata is an experimental systems language for explicit authority, typed
 concurrency, and runtime-visible execution. Mantle is the runtime target for
 Strata programs.
 
-The product boundary is source-to-runtime execution:
+The source-to-runtime boundary is executable behavior:
 
 ```text
 .str source -> strata check -> strata build -> .mta artifact -> mantle run

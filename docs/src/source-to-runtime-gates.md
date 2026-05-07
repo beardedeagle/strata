@@ -14,7 +14,7 @@ For fail-closed runtime behavior, the source must check and build, and
 `mantle run` must fail only after Mantle admits the artifact and emits trace
 evidence for the failure.
 
-The product gates are:
+The source-to-runtime gates are:
 
 ```sh
 cargo build
@@ -56,10 +56,10 @@ Each `mantle run` command must admit the generated `.mta`, execute it, and emit
 an observability trace under `target/strata/`. Expected-failure gates must
 return non-zero with failure evidence in the trace.
 
-The product-gate integration tests in
-`crates/source-to-runtime-gates/tests/product_gates.rs` mirror this user-facing
+The source-to-runtime gate integration tests in
+`crates/source-to-runtime-gates/tests/source_to_runtime_gates.rs` mirror this user-facing
 sequence and should stay aligned with the examples. They live outside
-Mantle-owned crates because these gates prove the Strata/Mantle product path,
+Mantle-owned crates because these gates prove the Strata/Mantle execution path,
 not Mantle runtime ownership of Strata source behavior.
 
 When adding a new user-visible language or runtime behavior, add or update an
