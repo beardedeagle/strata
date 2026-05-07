@@ -1,7 +1,7 @@
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition,
+    CheckedTransition, CheckedTypeKind,
 };
 use super::lexer::{Lexer, TokenKind};
 use super::*;
@@ -9,7 +9,8 @@ use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget,
     ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
     MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS, ProcessId, ProcessRefId, StepResult,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, ProcessId,
+    ProcessRefId, StepResult, TypeId,
 };
 
 const HELLO: &str = r#"
@@ -411,9 +412,10 @@ proc Worker mailbox bounded(1) {
     ));
 
     let artifact = lower_to_artifact(&checked, source).expect("payload source should lower");
+    let job = artifact_type_id(&artifact, "Job");
     assert_eq!(
         artifact.processes[1].message_variants,
-        [ArtifactMessageVariant::payload("Assign", "Job")]
+        [ArtifactMessageVariant::payload("Assign", job)]
     );
     assert_eq!(
         artifact_state_labels(&artifact.processes[1]),
@@ -620,9 +622,10 @@ proc Sink mailbox bounded(1) {
     );
 
     let artifact = lower_to_artifact(&checked, source).expect("forwarded payload should lower");
+    let job = artifact_type_id(&artifact, "Job");
     assert_eq!(
         artifact.processes[2].message_variants,
-        [ArtifactMessageVariant::payload("Assign", "Job")]
+        [ArtifactMessageVariant::payload("Assign", job)]
     );
 }
 
@@ -683,11 +686,29 @@ proc Sink mailbox bounded(1) {
 "#;
 
     let checked = check_source(source).expect("process ref payload forwarding should check");
+    let checked_sink_ref = checked
+        .types()
+        .iter()
+        .find(|ty| ty.label() == "ProcessRef_Sink")
+        .expect("checked type table should contain Sink process reference type");
+    assert_eq!(
+        checked_sink_ref.kind(),
+        CheckedTypeKind::ProcessRef {
+            target: checked_process_id(2)
+        }
+    );
+    assert_eq!(
+        checked.processes()[1].message_cases()[0]
+            .payload_type()
+            .map(|ty| ty.id()),
+        Some(checked_sink_ref.id())
+    );
     let artifact = lower_to_artifact(&checked, source).expect("process ref payload should lower");
+    let sink_ref = artifact_type_id(&artifact, "ProcessRef_Sink");
 
     assert_eq!(
         artifact.processes[1].message_variants,
-        [ArtifactMessageVariant::payload("Work", "ProcessRef<Sink>")]
+        [ArtifactMessageVariant::payload("Work", sink_ref)]
     );
     assert_eq!(
         artifact.processes[0].transitions[0].actions[2],
@@ -695,7 +716,7 @@ proc Sink mailbox bounded(1) {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
             message: mantle_artifact::MessageId::new(0),
             payload: Some(ArtifactValueTemplate::ProcessRef {
-                ty: "ProcessRef<Sink>".to_string(),
+                ty: sink_ref,
                 target_process: ProcessId::new(2),
                 process_ref: ProcessRefId::new(1),
             }),
@@ -705,7 +726,7 @@ proc Sink mailbox bounded(1) {
         artifact.processes[1].transitions[0].actions[0],
         ArtifactAction::Send {
             target: ArtifactSendTarget::ReceivedPayload {
-                ty: "ProcessRef<Sink>".to_string(),
+                ty: sink_ref,
                 target_process: ProcessId::new(2),
             },
             message: mantle_artifact::MessageId::new(0),
@@ -3268,6 +3289,15 @@ fn artifact_state_labels(process: &mantle_artifact::ArtifactProcess) -> Vec<&str
         .iter()
         .map(|state| state.label.as_str())
         .collect()
+}
+
+fn artifact_type_id(artifact: &MantleArtifact, label: &str) -> TypeId {
+    let index = artifact
+        .types
+        .iter()
+        .position(|ty| ty.label == label)
+        .unwrap_or_else(|| panic!("artifact type {label} should exist"));
+    TypeId::from_index(index).expect("artifact type index should fit")
 }
 
 fn repeated_emit_statements(count: usize, indent: usize) -> String {

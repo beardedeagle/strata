@@ -1,7 +1,7 @@
 # Syntax Reference
 
-This page gives a compact grammar-style view of the current accepted source
-syntax. The Language Reference explains the same surface in prose.
+This page gives a compact grammar-style view of the accepted source syntax. The
+Language Reference explains the same surface in prose.
 
 The notation is informal:
 
@@ -122,8 +122,8 @@ determinism =
     "@det" | "@nondet"
 ```
 
-Buildable source currently accepts bodies for `init` and `step` only. It
-requires deterministic functions and empty may-behavior lists.
+Buildable source accepts bodies for `init` and `step` only. It requires
+deterministic functions and empty may-behavior lists.
 
 ## Function Bodies
 
@@ -201,7 +201,7 @@ type_ref =
   | ident "<" type_ref ("," type_ref)* ","? ">"
 ```
 
-The built-in generic types currently accepted by checking are
+The built-in generic types accepted by checking are
 `ProcResult<StateType>` as a `step` return type and
 `ProcessRef<ProcessName>` in spawn bindings, message payload declarations, and
 payload-binding step patterns.
@@ -226,7 +226,7 @@ or `Panic(value)`.
 
 ## Literals
 
-The current literal surface is intentionally narrow:
+The literal surface is intentionally narrow:
 
 - decimal numbers are accepted for mailbox bounds;
 - string literals are accepted for `emit`;

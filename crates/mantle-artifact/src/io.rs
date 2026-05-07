@@ -1,23 +1,8 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::{Error, MAX_ARTIFACT_BYTES, MantleArtifact, Result};
-
-pub fn default_artifact_path(source_path: &Path) -> Result<PathBuf> {
-    let stem = source_path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| {
-            Error::new(format!(
-                "source path {} has no UTF-8 file stem",
-                source_path.display()
-            ))
-        })?;
-    Ok(Path::new("target")
-        .join("strata")
-        .join(format!("{stem}.mta")))
-}
 
 pub fn write_artifact(path: &Path, artifact: &MantleArtifact) -> Result<()> {
     artifact.validate()?;
@@ -141,6 +126,7 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[cfg(unix)]
     #[test]
@@ -171,7 +157,7 @@ mod tests {
             .expect("system clock should be after UNIX epoch")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "strata-artifact-{name}-{}-{nanos}.mta",
+            "mantle-artifact-{name}-{}-{nanos}.mta",
             std::process::id()
         ))
     }

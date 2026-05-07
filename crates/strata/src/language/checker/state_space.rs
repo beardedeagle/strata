@@ -5,10 +5,11 @@ use mantle_artifact::{MAX_STATE_VALUES_PER_PROCESS, validate_state_value_label};
 use super::super::MAX_VALUE_NESTING;
 use super::super::ast::{Identifier, Module, Process, Record, TypeRef, ValueExpr};
 use super::super::checked::{
-    CheckedPayloadValue, CheckedStateId, CheckedStateValue, CheckedValueTemplate,
+    CheckedPayloadValue, CheckedStateId, CheckedStateValue, CheckedTypeRef, CheckedValueTemplate,
     CheckedValueTemplateField,
 };
 use super::super::diagnostic::{Error, Result};
+use super::CheckedTypeInterner;
 use super::STEP_STATE_PARAMETER_NAME;
 use super::symbols::SemanticIndex;
 
@@ -16,6 +17,7 @@ pub(super) struct StateSpace<'module> {
     module: &'module Module,
     process_name: &'module Identifier,
     state_type: &'module TypeRef,
+    checked_state_type: CheckedTypeRef,
     values: Vec<CheckedStateValue>,
 }
 
@@ -28,6 +30,7 @@ pub(super) struct ValueBinding<'a> {
 pub(super) struct ValueTemplateBinding<'a> {
     pub(super) name: &'a Identifier,
     pub(super) ty: &'a TypeRef,
+    pub(super) checked_ty: &'a CheckedTypeRef,
 }
 
 impl<'module> StateSpace<'module> {
@@ -35,11 +38,13 @@ impl<'module> StateSpace<'module> {
         module: &'module Module,
         semantic_index: &SemanticIndex,
         process: &'module Process,
+        types: &mut CheckedTypeInterner<'_>,
     ) -> Result<Self> {
+        let checked_state_type = types.intern(&process.state_type)?;
         if let Ok(record) = semantic_index.record_decl(module, &process.state_type) {
             let values = if record.fields.is_empty() {
                 vec![CheckedStateValue::new(
-                    process.state_type.clone(),
+                    checked_state_type.clone(),
                     record.name.to_string(),
                 )]
             } else {
@@ -49,6 +54,7 @@ impl<'module> StateSpace<'module> {
                 module,
                 process_name: &process.name,
                 state_type: &process.state_type,
+                checked_state_type,
                 values,
             });
         }
@@ -72,13 +78,14 @@ impl<'module> StateSpace<'module> {
             .variants
             .iter()
             .map(|variant| {
-                CheckedStateValue::new(process.state_type.clone(), variant.name.to_string())
+                CheckedStateValue::new(checked_state_type.clone(), variant.name.to_string())
             })
             .collect();
         Ok(Self {
             module,
             process_name: &process.name,
             state_type: &process.state_type,
+            checked_state_type,
             values,
         })
     }
@@ -105,7 +112,7 @@ impl<'module> StateSpace<'module> {
             bindings,
             0,
         )?;
-        let state_value = CheckedStateValue::new(self.state_type.clone(), label);
+        let state_value = CheckedStateValue::new(self.checked_state_type.clone(), label);
         if let Some(index) = self.values.iter().position(|candidate| {
             candidate.ty() == state_value.ty() && candidate.value() == state_value.value()
         }) {
@@ -151,11 +158,20 @@ pub(super) fn source_value_uses_binding(value: &ValueExpr, binding: &Identifier)
 pub(super) fn checked_value_template_with_binding(
     module: &Module,
     semantic_index: &SemanticIndex,
+    types: &mut CheckedTypeInterner<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,
     binding: Option<&ValueTemplateBinding<'_>>,
 ) -> Result<CheckedValueTemplate> {
-    checked_value_template(module, semantic_index, expected_type, value, binding, 0)
+    checked_value_template(
+        module,
+        semantic_index,
+        types,
+        expected_type,
+        value,
+        binding,
+        0,
+    )
 }
 
 fn canonical_value(
@@ -216,6 +232,7 @@ fn canonical_value(
 fn checked_value_template(
     module: &Module,
     semantic_index: &SemanticIndex,
+    types: &mut CheckedTypeInterner<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,
     binding: Option<&ValueTemplateBinding<'_>>,
@@ -231,7 +248,7 @@ fn checked_value_template(
         if name == binding.name {
             if semantic_index.same_type(binding.ty, expected_type) {
                 return Ok(CheckedValueTemplate::ReceivedPayload {
-                    ty: binding.ty.clone(),
+                    ty: binding.checked_ty.clone(),
                 });
             }
             return Err(Error::new(format!(
@@ -244,18 +261,19 @@ fn checked_value_template(
     if binding.is_none_or(|binding| !source_value_uses_binding(value, binding.name)) {
         let label = canonical_value(module, semantic_index, expected_type, value, &[], depth)?;
         return Ok(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-            expected_type.clone(),
+            types.intern(expected_type)?,
             label,
         )));
     }
 
     let record = semantic_index.record_decl(module, expected_type)?;
-    checked_record_template(module, semantic_index, record, value, binding, depth)
+    checked_record_template(module, semantic_index, types, record, value, binding, depth)
 }
 
 fn checked_record_template(
     module: &Module,
     semantic_index: &SemanticIndex,
+    types: &mut CheckedTypeInterner<'_>,
     record: &Record,
     value: &ValueExpr,
     binding: Option<&ValueTemplateBinding<'_>>,
@@ -311,12 +329,20 @@ fn checked_record_template(
         };
         fields.push(CheckedValueTemplateField::new(
             field.name.clone(),
-            checked_value_template(module, semantic_index, &field.ty, value, binding, depth + 1)?,
+            checked_value_template(
+                module,
+                semantic_index,
+                types,
+                &field.ty,
+                value,
+                binding,
+                depth + 1,
+            )?,
         ));
     }
 
     Ok(CheckedValueTemplate::Record {
-        ty: TypeRef::Named(record.name.clone()),
+        ty: types.intern(&TypeRef::Named(record.name.clone()))?,
         fields,
     })
 }
@@ -452,11 +478,15 @@ mod tests {
         let semantic_index =
             SemanticIndex::build(&module).expect("test module should index successfully");
         let process = &module.processes[0];
-        let mut state_space =
-            StateSpace::new(&module, &semantic_index, process).expect("state space should build");
+        let mut types = CheckedTypeInterner::new(&semantic_index);
+        let mut state_space = StateSpace::new(&module, &semantic_index, process, &mut types)
+            .expect("state space should build");
         state_space.values = (0..MAX_STATE_VALUES_PER_PROCESS)
             .map(|index| {
-                CheckedStateValue::new(TypeRef::Named(ident("MainState")), format!("State{index}"))
+                CheckedStateValue::new(
+                    CheckedTypeRef::test_value("MainState"),
+                    format!("State{index}"),
+                )
             })
             .collect();
 
@@ -475,8 +505,9 @@ mod tests {
         let semantic_index =
             SemanticIndex::build(&module).expect("recursive state module should index");
         let process = &module.processes[0];
-        let mut state_space =
-            StateSpace::new(&module, &semantic_index, process).expect("state space should build");
+        let mut types = CheckedTypeInterner::new(&semantic_index);
+        let mut state_space = StateSpace::new(&module, &semantic_index, process, &mut types)
+            .expect("state space should build");
         let value = nested_record_value(MAX_VALUE_NESTING + 1);
 
         let err = state_space
@@ -495,8 +526,9 @@ mod tests {
         let semantic_index =
             SemanticIndex::build(&module).expect("test module should index successfully");
         let process = &module.processes[0];
-        let mut state_space =
-            StateSpace::new(&module, &semantic_index, process).expect("state space should build");
+        let mut types = CheckedTypeInterner::new(&semantic_index);
+        let mut state_space = StateSpace::new(&module, &semantic_index, process, &mut types)
+            .expect("state space should build");
         let value = ValueExpr::Record(RecordValue {
             name: ident("MainState"),
             fields: Vec::new(),

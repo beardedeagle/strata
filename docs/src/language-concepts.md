@@ -3,10 +3,9 @@
 Strata is a source language for explicit state, explicit effects, typed
 messages, and runtime-observable process execution.
 
-The current implementation is intentionally small. It is still a language
-surface: a `.str` file declares source-level records, enums, processes, message
-types, state types, and process transitions. Mantle executes the admitted
-artifact produced from that source.
+The implementation is intentionally small. The `.str` source surface declares
+source-level records, enums, processes, message types, state types, and process
+transitions. Mantle executes the admitted artifact produced from that source.
 
 ## Source Versus Runtime
 
@@ -88,7 +87,7 @@ fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ 
 ## State
 
 Process state is immutable at the source level. A transition returns a whole
-replacement state or the current state.
+replacement state or the supplied state.
 
 ```strata
 return Continue(SawFirst);
@@ -109,7 +108,7 @@ return Continue(WorkerState { phase: Idle });
 
 ## Effects
 
-Effects must be visible in the function signature. The current effects are:
+Effects must be visible in the function signature. The effects are:
 
 - `emit`;
 - `spawn`;
@@ -137,8 +136,8 @@ Function signatures include determinism and may-behavior positions:
 ! [effects] ~ [may_behaviors] @det
 ```
 
-The current buildable source requires `~ [] @det`. The parser recognizes
-`@nondet`, but accepted buildable programs are deterministic today.
+Buildable source requires `~ [] @det`. The parser recognizes `@nondet`, but
+accepted buildable programs are deterministic.
 
 ## Execution Shape
 

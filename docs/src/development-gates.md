@@ -59,8 +59,8 @@ just fuzz-ci
 
 ## Miri
 
-Miri runs on nightly Rust. The current Miri gate is a smoke suite focused on
-pure or in-memory paths rather than filesystem-specific CLI behavior.
+Miri runs on nightly Rust. The Miri gate is a smoke suite focused on pure or
+in-memory paths rather than filesystem-specific CLI behavior.
 
 Useful local commands:
 
@@ -69,6 +69,6 @@ just install-miri-tools
 just miri-ci
 ```
 
-Every future slice that changes user-facing syntax, artifact schema, runtime
-behavior, diagnostics, examples, or acceptance gates should update this book and
-pass `mdbook build docs`.
+Every slice that changes user-facing syntax, artifact schema, runtime behavior,
+diagnostics, examples, or acceptance gates should update this book and pass
+`mdbook build docs`.

@@ -3,5 +3,6 @@ resolver = "3"
 members = [
     "crates/mantle-artifact",
     "crates/mantle-runtime",
+    "crates/source-to-runtime-gates",
     "crates/strata",
 ]

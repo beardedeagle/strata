@@ -35,6 +35,7 @@ IDs are for stable runtime identity:
 - `process_id`, the admitted process definition ID;
 - `message_id`, the admitted message case ID;
 - `state_id`, the admitted typed state value ID;
+- `payload_type_id`, the admitted artifact type ID when a payload is present;
 - `output_id`, the admitted output literal ID.
 
 Do not treat labels as runtime dispatch keys. Runtime execution uses admitted
@@ -48,12 +49,12 @@ instances share `process_id` and label metadata but have different `pid` values.
 
 | Event | Meaning |
 | --- | --- |
-| `artifact_loaded` | Mantle admitted an artifact and loaded its entry metadata. |
-| `process_spawned` | A runtime process instance was created. |
-| `message_accepted` | A message was accepted into a process mailbox. |
+| `artifact_loaded` | Mantle admits an artifact and loads its entry metadata. |
+| `process_spawned` | Mantle creates a runtime process instance. |
+| `message_accepted` | Mantle accepts a message into a process mailbox. |
 | `message_dequeued` | A process dequeued a message for handling. |
 | `process_stepped` | A transition ran for a message. |
-| `state_updated` | A process state changed to another admitted state value. |
+| `state_updated` | A process state changes to another admitted state value. |
 | `program_output` | A process emitted declared output. |
 | `process_stopped` | A process stopped normally. |
 | `process_failed` | A process failed abnormally after a consumed message. |
@@ -63,7 +64,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"6","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"7","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -96,20 +97,21 @@ Example shape:
 message selected for the next transition.
 
 Payload-bearing messages keep the stable admitted message label and add
-`payload_type` plus `payload` fields:
+`payload_type_id` plus `payload` fields:
 
 ```json
-{"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type":"Job","payload":"Job{phase:Ready}","queue_depth":1,"sender_pid":1}
+{"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type_id":2,"payload":"Job{phase:Ready}","queue_depth":1,"sender_pid":1}
 ```
 
-Runtime dispatch still uses the numeric `message_id`; labels and payload values
-are trace metadata.
+Runtime dispatch uses the numeric `message_id`; labels and payload values are
+trace metadata. Payload type identity is the numeric ID from the admitted
+artifact type table, not a source type string.
 
 When a payload is a transported process reference, the trace also includes the
 admitted target process ID and runtime process ID:
 
 ```json
-{"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work","payload_type":"ProcessRef<Sink>","payload":"ProcessRef<Sink>#3","payload_process_id":2,"payload_pid":3,"queue_depth":1,"sender_pid":1}
+{"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work","payload_type_id":2,"payload":"type2#3","payload_process_id":2,"payload_pid":3,"queue_depth":1,"sender_pid":1}
 ```
 
 ## Process Stepped
@@ -121,8 +123,8 @@ Example shape:
 ```
 
 `result` is `Continue`, `Stop`, or `Panic`. `state_id` and `state` are the
-transition target state. Payload-bearing steps include the same `payload_type`
-and `payload` fields as mailbox events.
+transition target state. Payload-bearing steps include the same
+`payload_type_id` and `payload` fields as mailbox events.
 
 ## State Updated
 
@@ -154,7 +156,7 @@ Example shape:
 {"event":"process_stopped","pid":2,"process_id":1,"process":"Worker","reason":"normal"}
 ```
 
-The current stop reason is `normal`.
+The stop reason is `normal`.
 
 ## Process Failed
 
@@ -166,4 +168,4 @@ Example shape:
 
 `Panic(value)` records a `process_stepped` event with `result:"Panic"`, then a
 `process_failed` event. The dequeued message is already consumed and is not
-replayed. The current failure reason is `panic`.
+replayed. The failure reason is `panic`.

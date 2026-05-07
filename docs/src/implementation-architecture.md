@@ -1,7 +1,7 @@
 # Implementation Architecture
 
-This page maps the current source-to-runtime implementation for contributors.
-It is not required for writing simple Strata programs.
+This page maps the source-to-runtime implementation for contributors. It is not
+required for writing simple Strata programs.
 
 ## Crate Layout
 
@@ -10,6 +10,7 @@ It is not required for writing simple Strata programs.
 | `crates/strata` | Strata CLI, parser, AST, checker, checked IR, and lowering. |
 | `crates/mantle-artifact` | Mantle Target Artifact encode, decode, validation, limits, and typed artifact IDs. |
 | `crates/mantle-runtime` | Mantle admission, runtime process state, mailboxes, dispatch, output, and traces. |
+| `crates/source-to-runtime-gates` | Workspace-owned `.str` to `.mta` to Mantle execution product gates and boundary ownership checks. |
 | `examples` | Runnable Strata programs used by source-to-runtime gates. |
 | `fuzz` | Fuzz targets for parser/checker/lowering, artifact decode, and runtime admission paths. |
 | `tools` | Editor and MIME metadata. |
@@ -29,8 +30,10 @@ source text
 
 The parser accepts source shape. The checker assigns source-visible meaning,
 resolves names, validates process/message/state rules, and produces checked IR.
-It also resolves process reference names to typed reference IDs. Lowering
-converts checked IR into Mantle artifact tables.
+It resolves process reference names and source type references into checked IDs,
+including checked type identities for value and process-reference payloads.
+Lowering converts checked IR into Mantle artifact tables by mapping checked
+process, message, state, output, and type IDs to artifact IDs.
 
 ## Runtime Path
 
@@ -47,7 +50,8 @@ artifact text
 ```
 
 Mantle must validate artifacts before execution. Runtime dispatch uses loaded
-typed IDs, not source strings.
+typed IDs, not source strings. Payload and state type identity is admitted
+through Mantle type-table IDs; source type labels are metadata only.
 
 ## Important Boundaries
 
@@ -63,7 +67,7 @@ Strata owns:
 Lowering owns:
 
 - conversion from checked Strata IR into Mantle artifact records;
-- mapping checked process, message, state, and output IDs to artifact IDs.
+- mapping checked process, message, state, type, and output IDs to artifact IDs.
 
 Mantle owns:
 
@@ -73,9 +77,14 @@ Mantle owns:
 - action execution;
 - runtime traces.
 
+Workspace product gates own the cross-boundary proof that a Strata program can
+be checked, lowered, admitted by Mantle, executed, and traced.
+
 Do not move source-only assumptions into Mantle as trusted runtime behavior.
 Do not make Mantle dispatch through labels that exist only for diagnostics or
 trace readability.
+Do not move Strata source constants, default output paths, examples, or
+source-to-runtime gates into Mantle-owned crates.
 
 ## Adding A Language Feature
 
@@ -100,7 +109,7 @@ the same invalid state, that layer needs its own validation.
 
 ## Existing Product Gates
 
-The current runnable examples are:
+The runnable examples are:
 
 - `examples/hello.str`;
 - `examples/actor_ping.str`;
@@ -110,8 +119,9 @@ The current runnable examples are:
 - `examples/actor_reply.str`;
 - `examples/actor_panic_no_replay.str`.
 
-The integration tests in `crates/mantle-runtime/tests/product_gates.rs` mirror
-the same source check, artifact build, and runtime execution sequence:
+The integration tests in
+`crates/source-to-runtime-gates/tests/product_gates.rs` mirror the same source
+check, artifact build, and runtime execution sequence:
 
 ```sh
 cargo run -p strata --bin strata -- check examples/hello.str
@@ -119,9 +129,9 @@ cargo run -p strata --bin strata -- build examples/hello.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
 ```
 
-The same pattern applies to the actor examples. Fail-closed examples still
-check and build, but their runtime gate expects `mantle run` to return non-zero
-after emitting trace evidence.
+The same pattern applies to the actor examples. Fail-closed examples check and
+build, but their runtime gate expects `mantle run` to return non-zero after
+emitting trace evidence.
 
 ## Closure Rule
 
@@ -132,4 +142,4 @@ diagnostics, examples, or gates should update this book and pass:
 just quality
 ```
 
-Docs explain the contract; runnable gates prove it still works.
+Docs explain the contract; runnable gates prove the behavior.

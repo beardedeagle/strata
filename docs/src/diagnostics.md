@@ -23,7 +23,7 @@ result of the first invalid shape.
 | `entry process Main is not declared` | The program has no `Main` process. | Add `proc Main ...`. |
 | `process ... must declare type State` | A process is missing its state alias. | Add `type State = StateType;`. |
 | `process ... must declare type Msg` | A process is missing its message alias. | Add `type Msg = MessageEnum;`. |
-| `unsupported process function` | A process declares a function other than `init` or `step`. | Move the logic into `init` or `step`; general functions are not available yet. |
+| `unsupported process function` | A process declares a function other than `init` or `step`. | Move the logic into `init` or `step`; general functions are not available. |
 | `init must declare no parameters` | `init` has parameters. | Use `fn init() -> StateType ...`. |
 | `init body must not perform statements` | `init` uses `emit`, `spawn`, or `send`. | Return only the initial state. |
 | `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageVariant` or `state: StateType, _`. |

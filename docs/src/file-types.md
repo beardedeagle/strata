@@ -21,43 +21,50 @@ text/x-strata
 `.mta` files are Mantle Target Artifacts. They are executable inputs to Mantle,
 not Strata source and not proof or evidence artifacts.
 
-The extension is intentionally language-neutral. Strata can emit `.mta`; a
-future frontend can emit `.mta` too. Mantle must decide whether an artifact is
+The extension is intentionally language-neutral. Strata can emit `.mta`; other
+frontends can emit `.mta` too. Mantle must decide whether an artifact is
 admissible from its internal header and validation data, not from the filename.
 
 Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=6
+schema_version=7
 source_language=strata
 ```
 
-The schema version identifies the currently admitted `.mta` encoding shape. It
-is not a Strata language release or a compatibility promise.
+The schema version identifies the admitted `.mta` encoding shape. It is not a
+Strata language release or a stability guarantee.
 
-Executable references and state transitions inside `.mta` use validated table
-IDs and typed transition forms. Process transition records are encoded by
-transition index and carry a `message` ID field plus exact effect authority for
-their actions. Validation requires one unique transition for each accepted
-message, and runtime selection indexes the admitted transition table by typed
-message ID.
+Executable references, type identity, and state transitions inside `.mta` use
+validated table IDs and typed transition forms. Process transition records are
+encoded by transition index and carry a `message` ID field plus exact effect
+authority for their actions. Validation requires one unique transition for each
+accepted message, and runtime selection indexes the admitted transition table by
+typed message ID.
 
-State value tables carry a type, typed value identity, and display label for
+Artifact type identity is carried by a Mantle type table. Process
+`state_type_id`, `message_type_id`, message `payload_type_id`, payload template
+`type_id`, state value `type_id`, and received-payload send-target
+`target_payload_type_id` fields refer to that table by numeric `TypeId`. Type
+labels are metadata only; Mantle does not parse source type strings such as
+process-reference spellings to decide runtime behavior.
+
+State value tables carry a type ID, typed value identity, and display label for
 each admitted state. Mantle admission and runtime next-state resolution use the
-type and value identity. Labels remain trace and diagnostic metadata.
+type ID and value identity. Labels remain trace and diagnostic metadata.
 
 Process references are encoded as per-process reference tables. A spawn action
-binds a process-reference ID to a new runtime process instance for the current
-transition. A send action targets either a process-reference ID or a received
+binds a process-reference ID to a runtime process instance for the transition.
+A send action targets either a process-reference ID or a received
 typed process-reference payload plus a message ID. Reference debug names remain
 metadata; runtime delivery uses admitted IDs and runtime process instance IDs.
 
-Message variants may carry an optional payload type. Send actions may carry an
-immutable payload value template, and Mantle delivers the evaluated value in a
-runtime message envelope. Process-reference payloads carry the admitted target
-process ID and runtime process ID. Message dispatch still uses admitted typed
-IDs, not payload text or source labels.
+Message variants may carry an optional payload type ID. Send actions may carry
+an immutable payload value template, and Mantle delivers the evaluated value in
+a runtime message envelope. Process-reference payloads carry the admitted target
+process ID and runtime process ID. Message dispatch uses admitted typed IDs,
+not payload text or source labels.
 
 Each transition's `action_count` is bounded during decode before allocation.
 Validation also caps the aggregate action count across all transitions for a

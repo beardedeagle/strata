@@ -52,7 +52,7 @@ cargo build
 
 This builds the Strata CLI and Mantle runtime CLI. The executable filenames are
 platform-specific, so the commands below use Cargo to run the right binary on
-the current platform.
+the local platform.
 
 ## Check A Strata Program
 

@@ -5,8 +5,8 @@ use crate::validation::validate_count;
 use crate::{
     ARTIFACT_MAGIC, Error, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FIELDS, MAX_FIELD_VALUE_BYTES,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MessageId, OutputId, ProcessId,
-    ProcessRefId, Result, StateId,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT, MessageId,
+    OutputId, ProcessId, ProcessRefId, Result, StateId, TypeId,
 };
 
 pub(crate) struct ArtifactFields {
@@ -101,6 +101,21 @@ impl ArtifactFields {
 
     pub(crate) fn take_output_id(&mut self, key: &str) -> Result<OutputId> {
         OutputId::from_index(self.take_bounded_usize(key, 0, MAX_OUTPUT_LITERALS - 1)?)
+    }
+
+    pub(crate) fn take_type_id(&mut self, key: &str) -> Result<TypeId> {
+        TypeId::from_index(self.take_bounded_usize(key, 0, MAX_TYPE_COUNT - 1)?)
+    }
+
+    pub(crate) fn take_optional_type_id(&mut self, key: &str) -> Result<Option<TypeId>> {
+        let Some(value) = self.take_optional(key) else {
+            return Ok(None);
+        };
+        let index = value
+            .parse::<usize>()
+            .map_err(|_| Error::new(format!("invalid {key} value {value:?}")))?;
+        validate_count(key, index, 0, MAX_TYPE_COUNT - 1)?;
+        Ok(Some(TypeId::from_index(index)?))
     }
 
     pub(crate) fn take_step_result(&mut self, key: &str) -> Result<StepResult> {

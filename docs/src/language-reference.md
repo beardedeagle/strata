@@ -1,12 +1,12 @@
 # Language Reference
 
-This page documents the Strata source surface accepted by the current buildable
-slice. It is an authoring reference for `.str` programs, not a description of
+This page documents the Strata source surface accepted by the buildable slice.
+It is an authoring reference for `.str` programs, not a description of
 Mantle artifact internals.
 
-## Current Surface
+## Source Surface
 
-| Area | Available Today |
+| Area | Accepted Surface |
 | --- | --- |
 | Source unit | One `module name;` declaration per file. |
 | Top-level declarations | `record`, `enum`, and `proc`. |
@@ -21,8 +21,8 @@ Mantle artifact internals.
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, payload sends, and payload-binding step patterns. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
-The current `module` declaration names a source unit. It does not create an
-import namespace, package, library, or visibility boundary yet.
+The `module` declaration names a source unit. It does not create an import
+namespace, package, library, or visibility boundary.
 
 ## Source Unit
 
@@ -142,8 +142,7 @@ enum WorkerMsg {
 
 Enums used as process state or message types must declare at least one variant.
 Duplicate variants are rejected. Payload variants are accepted for process
-message enums. State enum payload variants are rejected in the current buildable
-slice.
+message enums. State enum payload variants are rejected in the buildable slice.
 
 ## Processes
 
@@ -173,7 +172,7 @@ pattern or by one wildcard pattern.
 
 ## Function Signatures
 
-The current function signature shape is:
+The accepted function signature shape is:
 
 ```strata
 fn name(params...) -> ReturnType ! [effects] ~ [may_behaviors] @det {
@@ -181,15 +180,15 @@ fn name(params...) -> ReturnType ! [effects] ~ [may_behaviors] @det {
 }
 ```
 
-Buildable source currently requires:
+Buildable source requires:
 
 | Function | Required Shape |
 | --- | --- |
 | `init` | No parameters, returns the process state type, uses `! [] ~ [] @det`. |
 | `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
 
-The parser recognizes `@nondet`, but buildable source currently rejects it.
-The may-behavior list after `~` must currently be empty.
+The parser recognizes `@nondet`, but buildable source rejects it. The
+may-behavior list after `~` must be empty.
 
 ## Statements
 
@@ -209,12 +208,13 @@ must not contain control characters, and do not support string escapes in this
 slice.
 
 `spawn` starts another declared process and returns an immutable typed process
-reference. The reference binding is local to the current transition and must be
+reference. The reference binding is local to the transition and must be
 typed as `ProcessRef<TargetProcess>`.
 
-`send` queues a message through a previously spawned process reference or
-through a received `ProcessRef<T>` payload binding. The message must be accepted
-by the reference target's process message enum. Static validation rejects
+`send` queues a message through a process reference spawned in the same
+transition or through a received `ProcessRef<T>` payload binding. The message
+must be accepted by the reference target's process message enum. Static
+validation rejects
 self-spawn, spawning the already-started entry process, duplicate
 process-reference binding in one transition, sends before the reference is
 bound, mailbox overflow, and messages left unhandled after a target stops
@@ -247,8 +247,8 @@ fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<Work
 }
 ```
 
-Runtime dispatch still uses the transported runtime process ID and admitted
-target process ID. Source names remain diagnostics and trace metadata.
+Runtime dispatch uses the transported runtime process ID and admitted target
+process ID. Source names remain diagnostics and trace metadata.
 
 ## Effects
 
@@ -262,8 +262,8 @@ duplicate, and unused declared effects are rejected before lowering.
 | `spawn` | `let worker: ProcessRef<Worker> = spawn Worker;` |
 | `send` | `send worker Ping;` or `send reply_to Done;` |
 
-`init` cannot perform statements in the current buildable slice and therefore
-uses an empty effect list.
+`init` cannot perform statements in the buildable slice and therefore uses an
+empty effect list.
 
 ## Step Patterns
 
@@ -311,7 +311,7 @@ Every accepted message variant must resolve to exactly one clause. Explicit
 variant clauses handle their named variants. One wildcard clause may cover
 variants that do not have explicit clauses. Duplicate explicit clauses,
 duplicate wildcard clauses, missing coverage, and unreachable wildcard clauses
-are rejected. Signature patterns are compile-time dispatch only: Mantle still
+are rejected. Signature patterns are compile-time dispatch only: Mantle
 dequeues one message at a time and dispatches by typed message ID.
 Payload-bearing variants keep one stable admitted message case, and their
 immutable values travel in runtime message envelopes.
@@ -332,7 +332,7 @@ return Panic(failed_state);
 failure trace evidence, and fails the run without replaying the consumed
 message.
 
-Passing the `state` parameter keeps the current state:
+Passing the `state` parameter preserves the supplied state:
 
 ```strata
 return Stop(state);
@@ -350,7 +350,7 @@ return Panic(Failed);
 State changes are immutable whole-value transitions. There is no assignment
 statement and no source-visible field mutation.
 
-## Current Limits
+## Limits
 
 The buildable source slice enforces bounded sizes:
 
@@ -369,4 +369,4 @@ The buildable source slice enforces bounded sizes:
 | Type nesting | 32 |
 | Value nesting | 32 |
 
-These limits are part of the current admitted artifact and runtime boundary.
+These limits are part of the admitted artifact and runtime boundary.

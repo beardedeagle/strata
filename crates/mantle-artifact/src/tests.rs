@@ -3,6 +3,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
+const MAIN_STATE: TypeId = TypeId::new(0);
+const MAIN_MSG: TypeId = TypeId::new(1);
+const WORKER_STATE: TypeId = TypeId::new(2);
+const WORKER_MSG: TypeId = TypeId::new(3);
+const JOB: TypeId = TypeId::new(4);
+const OTHER_JOB: TypeId = TypeId::new(5);
+const BOX: TypeId = TypeId::new(6);
+const MAIN_PAYLOAD: TypeId = TypeId::new(7);
+const PROCESS_REF_MAIN: TypeId = TypeId::new(8);
+const PROCESS_REF_WORKER: TypeId = TypeId::new(9);
+
 #[test]
 fn artifact_round_trips_and_validates_magic() {
     let artifact = valid_artifact();
@@ -12,7 +24,8 @@ fn artifact_round_trips_and_validates_magic() {
     assert_eq!(decoded, artifact);
     assert!(encoded.contains(&format!("schema_version={ARTIFACT_SCHEMA_VERSION}")));
     assert!(encoded.contains("entry_process=0"));
-    assert!(encoded.contains("process.1.state_value.1.type=WorkerState"));
+    assert!(encoded.contains("type.2.label=WorkerState"));
+    assert!(encoded.contains("process.1.state_value.1.type_id=2"));
     assert!(encoded.contains("process.1.state_value.1.value=Handled"));
     assert!(encoded.contains("process.1.state_value.1.label=Handled"));
     assert!(encoded.contains("process.0.transition.0.next_state=current"));
@@ -133,7 +146,7 @@ fn decode_rejects_unbounded_nested_counts_before_allocation() {
 }
 
 #[test]
-fn validate_accepts_non_strata_source_language() {
+fn validate_accepts_language_neutral_source_language() {
     let mut artifact = valid_artifact();
     artifact.source_language = "lattice".to_string();
 
@@ -165,7 +178,7 @@ fn validate_rejects_invalid_source_language_identifier() {
 fn validate_accepts_structured_state_value_labels() {
     let mut artifact = valid_artifact();
     artifact.processes[0].state_values = state_values(
-        "MainState",
+        MAIN_STATE,
         &["MainState{phase:Idle}", "MainState{phase:Handled}"],
     );
     artifact.processes[0].transitions[0].next_state = NextState::Value(StateId::new(1));
@@ -185,12 +198,12 @@ fn validate_accepts_structured_state_value_labels() {
 #[test]
 fn validate_accepts_payload_message_metadata() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
-            ty: "Job".to_string(),
+            ty: JOB,
             value: "Job{phase:Ready}".to_string(),
         }),
     };
@@ -208,73 +221,79 @@ fn validate_accepts_payload_message_metadata() {
 }
 
 #[test]
-fn validate_accepts_process_ref_type_at_boundary() {
-    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES - 1));
-    let value = format!("ProcessRef<{target}>");
+fn validate_accepts_process_ref_type_id_at_boundary() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
+        "Assign",
+        PROCESS_REF_WORKER,
+    )];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::ProcessRef {
+            ty: PROCESS_REF_WORKER,
+            target_process: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        }),
+    };
 
-    assert_eq!(target.len(), MAX_IDENTIFIER_BYTES);
-    assert_eq!(value.len(), MAX_TYPE_REF_BYTES);
+    artifact
+        .validate()
+        .expect("process reference type IDs should validate through the type table");
+}
 
-    super::validation::validate_type_field("message payload_type", &value)
-        .expect("bounded process reference type should validate");
-    assert_eq!(
-        super::validation::process_ref_type_target(&value),
-        Some(target.as_str())
+#[test]
+fn validate_rejects_invalid_type_label_identifier() {
+    let mut artifact = valid_artifact();
+    artifact.types[JOB.index()].label = "not-valid".to_string();
+
+    let err = artifact
+        .validate()
+        .expect_err("invalid type metadata label should fail");
+
+    assert!(
+        err.to_string()
+            .contains("artifact field type.4.label must be an identifier")
     );
 }
 
 #[test]
-fn validate_rejects_named_type_above_identifier_limit() {
-    let oversized = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
-
-    assert_eq!(oversized.len(), MAX_IDENTIFIER_BYTES + 1);
-
-    let err = super::validation::validate_type_field("message payload_type", &oversized)
-        .expect_err("oversized named type should fail");
-
-    assert!(err.to_string().contains(&format!(
-        "artifact field message payload_type exceeds maximum type identifier length of {MAX_IDENTIFIER_BYTES} bytes"
-    )));
-}
-
-#[test]
-fn validate_rejects_process_ref_target_above_identifier_limit() {
-    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
-    let value = format!("ProcessRef<{target}>");
-
-    assert_eq!(target.len(), MAX_IDENTIFIER_BYTES + 1);
-    assert_eq!(value.len(), MAX_TYPE_REF_BYTES + 1);
-
-    let err = super::validation::validate_type_field("message payload_type", &value)
-        .expect_err("oversized process reference type should fail");
-
-    assert!(err.to_string().contains(&format!(
-        "artifact field message payload_type exceeds maximum type length of {MAX_TYPE_REF_BYTES} bytes"
-    )));
-    assert_eq!(super::validation::process_ref_type_target(&value), None);
-}
-
-#[test]
-fn validate_rejects_message_payload_type_above_type_ref_limit() {
+fn validate_rejects_unknown_type_table_target_process() {
     let mut artifact = valid_artifact();
-    let target = format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES));
-    let payload_type = format!("ProcessRef<{target}>");
-    artifact.processes[1].message_variants =
-        vec![ArtifactMessageVariant::payload("Assign", payload_type)];
+    artifact.types[PROCESS_REF_WORKER.index()].kind = ArtifactTypeKind::ProcessRef {
+        target: ProcessId::new(99),
+    };
 
     let err = artifact
         .validate()
-        .expect_err("oversized message payload type should fail artifact validation");
+        .expect_err("process reference type target should be bounded");
 
-    assert!(err.to_string().contains(&format!(
-        "artifact field message payload_type exceeds maximum type length of {MAX_TYPE_REF_BYTES} bytes"
-    )));
+    assert!(
+        err.to_string()
+            .contains("type id 9 targets undefined process id 99")
+    );
+}
+
+#[test]
+fn validate_rejects_unknown_message_payload_type_id() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants =
+        vec![ArtifactMessageVariant::payload("Assign", TypeId::new(99))];
+
+    let err = artifact
+        .validate()
+        .expect_err("unknown message payload type should fail artifact validation");
+
+    assert!(
+        err.to_string()
+            .contains("artifact type id 99 is not defined")
+    );
 }
 
 #[test]
 fn validate_rejects_missing_required_send_payload() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
 
     let err = artifact
         .validate()
@@ -293,7 +312,7 @@ fn validate_rejects_payload_for_unit_message_variant() {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
-            ty: "Job".to_string(),
+            ty: JOB,
             value: "Job{phase:Ready}".to_string(),
         }),
     };
@@ -310,12 +329,12 @@ fn validate_rejects_payload_for_unit_message_variant() {
 #[test]
 fn validate_rejects_send_payload_type_mismatch() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
-            ty: "OtherJob".to_string(),
+            ty: OTHER_JOB,
             value: "OtherJob{phase:Ready}".to_string(),
         }),
     };
@@ -326,30 +345,30 @@ fn validate_rejects_send_payload_type_mismatch() {
 
     assert!(
         err.to_string()
-            .contains("process Main transition 0 send payload has type OtherJob, expected Job")
+            .contains("process Main transition 0 send payload has type id 5, expected 4")
     );
 }
 
 #[test]
 fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
-            ty: "Job".to_string(),
+            ty: JOB,
             value: "Job".to_string(),
         }),
     };
     artifact.processes[1].transitions[0].actions = vec![ArtifactAction::Send {
         target: ArtifactSendTarget::ReceivedPayload {
-            ty: "Job".to_string(),
+            ty: JOB,
             target_process: ProcessId::new(1),
         },
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
-            ty: "Job".to_string(),
+            ty: JOB,
             value: "Job".to_string(),
         }),
     }];
@@ -360,19 +379,19 @@ fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
         .expect_err("received payload send target must require ProcessRef type");
 
     assert!(err.to_string().contains(
-        "artifact field send target payload type must be a process reference type, got \"Job\""
+        "artifact field send target payload type type id 4 must be a process reference type"
     ));
 }
 
 #[test]
 fn validate_rejects_process_ref_template_with_non_process_ref_type() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
-            ty: "Job".to_string(),
+            ty: JOB,
             target_process: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
         }),
@@ -383,22 +402,20 @@ fn validate_rejects_process_ref_template_with_non_process_ref_type() {
         .expect_err("process reference payload template must require ProcessRef type");
 
     assert!(err.to_string().contains(
-        "artifact field process reference payload type must be a process reference type, got \"Job\""
+        "artifact field process reference payload type type id 4 must be a process reference type"
     ));
 }
 
 #[test]
 fn validate_rejects_process_ref_template_target_type_mismatch() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
-        "Assign",
-        "ProcessRef<Main>",
-    )];
+    artifact.processes[1].message_variants =
+        vec![ArtifactMessageVariant::payload("Assign", PROCESS_REF_MAIN)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
-            ty: "ProcessRef<Main>".to_string(),
+            ty: PROCESS_REF_MAIN,
             target_process: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
         }),
@@ -409,7 +426,7 @@ fn validate_rejects_process_ref_template_target_type_mismatch() {
         .expect_err("process reference type target mismatch should fail");
 
     assert!(err.to_string().contains(
-        "artifact field process reference payload type ProcessRef<Main> targets Main, expected Worker"
+        "artifact field process reference payload type type id 8 targets process id 0, expected 1"
     ));
 }
 
@@ -418,25 +435,25 @@ fn validate_rejects_received_payload_send_target_type_mismatch() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
         "Assign",
-        "ProcessRef<Worker>",
+        PROCESS_REF_WORKER,
     )];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
-            ty: "ProcessRef<Worker>".to_string(),
+            ty: PROCESS_REF_WORKER,
             target_process: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
         }),
     };
     artifact.processes[1].transitions[0].actions = vec![ArtifactAction::Send {
         target: ArtifactSendTarget::ReceivedPayload {
-            ty: "ProcessRef<Worker>".to_string(),
+            ty: PROCESS_REF_WORKER,
             target_process: ProcessId::new(0),
         },
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
-            ty: "ProcessRef<Worker>".to_string(),
+            ty: PROCESS_REF_WORKER,
             target_process: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
         }),
@@ -448,23 +465,23 @@ fn validate_rejects_received_payload_send_target_type_mismatch() {
         .expect_err("received process reference target mismatch should fail");
 
     assert!(err.to_string().contains(
-        "artifact field send target payload type ProcessRef<Worker> targets Worker, expected Main"
+        "artifact field send target payload type type id 9 targets process id 1, expected 0"
     ));
 }
 
 #[test]
 fn validate_rejects_nested_process_ref_payload_template() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Box")];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", BOX)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Record {
-            ty: "Box".to_string(),
+            ty: BOX,
             fields: vec![ArtifactValueTemplateField {
                 name: "reply_to".to_string(),
                 value: ArtifactValueTemplate::ProcessRef {
-                    ty: "ProcessRef<Worker>".to_string(),
+                    ty: PROCESS_REF_WORKER,
                     target_process: ProcessId::new(1),
                     process_ref: ProcessRefId::new(0),
                 },
@@ -484,13 +501,11 @@ fn validate_rejects_nested_process_ref_payload_template() {
 #[test]
 fn validate_rejects_received_payload_template_without_payload_message() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", "Job")];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
-        payload: Some(ArtifactValueTemplate::ReceivedPayload {
-            ty: "Job".to_string(),
-        }),
+        payload: Some(ArtifactValueTemplate::ReceivedPayload { ty: JOB }),
     };
 
     let err = artifact
@@ -859,7 +874,7 @@ fn validate_rejects_unknown_entry_process_id() {
 fn validate_rejects_payload_bearing_entry_message() {
     let mut artifact = valid_artifact();
     artifact.processes[0].message_variants[0] =
-        ArtifactMessageVariant::payload("Start", "MainPayload");
+        ArtifactMessageVariant::payload("Start", MAIN_PAYLOAD);
 
     let err = artifact
         .validate()
@@ -891,7 +906,7 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
     let mut artifact = valid_artifact();
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Literal {
-            ty: "WorkerState".to_string(),
+            ty: WORKER_STATE,
             value: "Missing".to_string(),
         });
 
@@ -908,14 +923,14 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
 fn validate_rejects_state_value_type_mismatch() {
     let mut artifact = valid_artifact();
     artifact.processes[1].state_values[1] =
-        ArtifactStateValue::with_label("OtherState", "HandledIdentity", "HandledLabel");
+        ArtifactStateValue::with_label(OTHER_JOB, "HandledIdentity", "HandledLabel");
 
     let err = artifact
         .validate()
         .expect_err("state value type mismatch should fail");
 
     assert!(err.to_string().contains(
-        "process Worker state value HandledIdentity (label HandledLabel) has type OtherState, expected WorkerState"
+        "process Worker state value HandledIdentity (label HandledLabel) has type id 5, expected 2"
     ));
 }
 
@@ -923,10 +938,10 @@ fn validate_rejects_state_value_type_mismatch() {
 fn validate_rejects_next_state_template_when_label_matches_but_identity_does_not() {
     let mut artifact = valid_artifact();
     artifact.processes[1].state_values[1] =
-        ArtifactStateValue::with_label("WorkerState", "Spoofed", "Handled");
+        ArtifactStateValue::with_label(WORKER_STATE, "Spoofed", "Handled");
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Literal {
-            ty: "WorkerState".to_string(),
+            ty: WORKER_STATE,
             value: "Handled".to_string(),
         });
 
@@ -1123,17 +1138,29 @@ fn valid_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
         schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+        source_language: TEST_SOURCE_LANGUAGE.to_string(),
         module: "actor_ping".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
+        types: vec![
+            ArtifactType::value("MainState"),
+            ArtifactType::value("MainMsg"),
+            ArtifactType::value("WorkerState"),
+            ArtifactType::value("WorkerMsg"),
+            ArtifactType::value("Job"),
+            ArtifactType::value("OtherJob"),
+            ArtifactType::value("Box"),
+            ArtifactType::value("MainPayload"),
+            ArtifactType::process_ref("ProcessRef_Main", ProcessId::new(0)),
+            ArtifactType::process_ref("ProcessRef_Worker", ProcessId::new(1)),
+        ],
         outputs: vec!["worker handled Ping".to_string()],
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
-                state_type: "MainState".to_string(),
-                state_values: state_values("MainState", &["MainState"]),
-                message_type: "MainMsg".to_string(),
+                state_type: MAIN_STATE,
+                state_values: state_values(MAIN_STATE, &["MainState"]),
+                message_type: MAIN_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
@@ -1161,9 +1188,9 @@ fn valid_artifact() -> MantleArtifact {
             },
             ArtifactProcess {
                 debug_name: "Worker".to_string(),
-                state_type: "WorkerState".to_string(),
-                state_values: state_values("WorkerState", &["Idle", "Handled"]),
-                message_type: "WorkerMsg".to_string(),
+                state_type: WORKER_STATE,
+                state_values: state_values(WORKER_STATE, &["Idle", "Handled"]),
+                message_type: WORKER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
@@ -1183,7 +1210,7 @@ fn valid_artifact() -> MantleArtifact {
     }
 }
 
-fn state_values(ty: &str, values: &[&str]) -> Vec<ArtifactStateValue> {
+fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {
     values
         .iter()
         .map(|value| ArtifactStateValue::new(ty, *value))
@@ -1212,5 +1239,5 @@ fn unique_artifact_name(name: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after UNIX epoch")
         .as_nanos();
-    format!("strata-{name}-{}-{nanos}.mta", std::process::id())
+    format!("mantle-{name}-{}-{nanos}.mta", std::process::id())
 }

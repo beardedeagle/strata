@@ -241,21 +241,28 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let Some(payload) = &envelope.payload else {
             return Ok(());
         };
-        let expected_target = process_ref_type_target(&payload.ty);
-        let Some(process_ref) = payload.process_ref else {
-            if expected_target.is_some() {
+        let expected_target = self
+            .program
+            .process_ref_target_for_type_id("payload type", payload.ty);
+        let (expected_target, process_ref) = match (expected_target, payload.process_ref) {
+            (Ok(expected_target), Some(process_ref)) => (expected_target, process_ref),
+            (Ok(_), None) => {
                 return Err(Error::new(format!(
-                    "payload type {} requires process reference runtime metadata",
-                    payload.ty
+                    "payload type id {} requires process reference runtime metadata",
+                    payload.ty.as_u32()
                 )));
             }
-            return Ok(());
-        };
-        let Some(expected_target) = expected_target else {
-            return Err(Error::new(format!(
-                "payload type {} must not carry process reference runtime metadata",
-                payload.ty
-            )));
+            (Err(_), Some(_)) => {
+                return Err(Error::new(format!(
+                    "payload type id {} must not carry process reference runtime metadata",
+                    payload.ty.as_u32()
+                )));
+            }
+            (Err(_), None) => {
+                self.program
+                    .validate_value_type("payload type", payload.ty)?;
+                return Ok(());
+            }
         };
         let process_index =
             self.process_index_for_pid(RuntimeProcessId::from_u64(process_ref.pid)?)?;
@@ -268,11 +275,12 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 referenced.process_id.as_u32()
             )));
         }
-        let target_process = self.program.process(process_ref.target_process)?;
-        if target_process.debug_name != expected_target {
+        if process_ref.target_process != expected_target {
             return Err(Error::new(format!(
-                "payload process reference metadata targets {}, expected {} for type {}",
-                target_process.debug_name, expected_target, payload.ty
+                "payload process reference metadata targets process id {}, expected {} for type id {}",
+                process_ref.target_process.as_u32(),
+                expected_target.as_u32(),
+                payload.ty.as_u32()
             )));
         }
         Ok(())
@@ -398,6 +406,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 let pid = self.resolve_send_target(local_process_refs, step, target)?;
                 let prepared_payload = match payload {
                     Some(payload) => Some(evaluate_runtime_template(
+                        self.program,
                         payload,
                         step.payload.as_ref(),
                         step,
@@ -430,8 +439,9 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 })?;
                 if payload.ty != *ty {
                     return Err(Error::new(format!(
-                        "received process reference send target has type {}, expected {}",
-                        payload.ty, ty
+                        "received process reference send target has type id {}, expected {}",
+                        payload.ty.as_u32(),
+                        ty.as_u32()
                     )));
                 }
                 let process_ref = payload.process_ref.ok_or_else(|| {
@@ -550,7 +560,9 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         template: &ArtifactValueTemplate,
     ) -> Result<StateId> {
-        let value = template.evaluate_state_value(step.payload.as_ref())?;
+        let value = self
+            .program
+            .evaluate_state_value(template, step.payload.as_ref())?;
         let process = self.program.process(step.process_id)?;
         let state_index = process
             .state_values
@@ -678,23 +690,6 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     }
 }
 
-fn process_ref_type_target(ty: &str) -> Option<&str> {
-    ty.strip_prefix("ProcessRef<")
-        .and_then(|value| value.strip_suffix('>'))
-        .filter(|target| is_artifact_ident(target))
-}
-
-fn is_artifact_ident(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return false;
-    }
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-}
-
 struct ProcessInstance {
     pid: RuntimeProcessId,
     process_id: ProcessId,
@@ -767,11 +762,11 @@ impl RuntimeMessageEnvelope {
             (Some(expected_type), Some(payload)) => {
                 if payload.ty != expected_type {
                     return Err(Error::new(format!(
-                        "message id {} for process id {} payload has type {}, expected {}",
+                        "message id {} for process id {} payload has type id {}, expected {}",
                         self.message.as_u32(),
                         process_id.as_u32(),
-                        payload.ty,
-                        expected_type
+                        payload.ty.as_u32(),
+                        expected_type.as_u32()
                     )));
                 }
                 Ok(())
@@ -816,6 +811,7 @@ impl ActiveStep {
 }
 
 fn evaluate_runtime_template(
+    program: &LoadedProgram,
     template: &ArtifactValueTemplate,
     received_payload: Option<&ArtifactPayload>,
     step: &ActiveStep,
@@ -823,7 +819,7 @@ fn evaluate_runtime_template(
 ) -> Result<ArtifactPayload> {
     match template {
         ArtifactValueTemplate::Literal { ty, value } => Ok(ArtifactPayload {
-            ty: ty.clone(),
+            ty: *ty,
             value: value.clone(),
             process_ref: None,
         }),
@@ -833,8 +829,9 @@ fn evaluate_runtime_template(
             })?;
             if payload.ty != *ty {
                 return Err(Error::new(format!(
-                    "received payload has type {}, expected {}",
-                    payload.ty, ty
+                    "received payload has type id {}, expected {}",
+                    payload.ty.as_u32(),
+                    ty.as_u32()
                 )));
             }
             Ok(payload.clone())
@@ -852,8 +849,8 @@ fn evaluate_runtime_template(
                 ))
             })?;
             Ok(ArtifactPayload {
-                ty: ty.clone(),
-                value: format!("{ty}#{}", pid.as_u64()),
+                ty: *ty,
+                value: format!("type{}#{}", ty.as_u32(), pid.as_u64()),
                 process_ref: Some(ArtifactProcessRefPayload {
                     target_process: *target_process,
                     pid: pid.as_u64(),
@@ -861,16 +858,22 @@ fn evaluate_runtime_template(
             })
         }
         ArtifactValueTemplate::Record { ty, fields } => {
+            let type_label = program.type_label(*ty)?;
             let mut parts = Vec::with_capacity(fields.len());
             for field in fields {
-                let value =
-                    evaluate_runtime_template(&field.value, received_payload, step, process_refs)?;
+                let value = evaluate_runtime_template(
+                    program,
+                    &field.value,
+                    received_payload,
+                    step,
+                    process_refs,
+                )?;
                 parts.push(format!("{}:{}", field.name, value.value));
             }
-            let value = format!("{ty}{{{}}}", parts.join(","));
+            let value = format!("{type_label}{{{}}}", parts.join(","));
             validate_payload_value_label(&value)?;
             Ok(ArtifactPayload {
-                ty: ty.clone(),
+                ty: *ty,
                 value,
                 process_ref: None,
             })
@@ -903,10 +906,21 @@ mod tests {
     };
     use mantle_artifact::{
         ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactMessageVariant,
-        ArtifactProcess, ArtifactProcessRef, ArtifactStateValue, ArtifactTransition,
+        ArtifactProcess, ArtifactProcessRef, ArtifactStateValue, ArtifactTransition, ArtifactType,
         ArtifactValueTemplateField, MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS,
-        MAX_VALUE_TEMPLATE_DEPTH, STRATA_SOURCE_LANGUAGE, StepResult,
+        MAX_VALUE_TEMPLATE_DEPTH, StepResult, TypeId,
     };
+
+    const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
+    const MAIN_STATE: TypeId = TypeId::new(0);
+    const MAIN_MSG: TypeId = TypeId::new(1);
+    const WORKER_STATE: TypeId = TypeId::new(2);
+    const WORKER_MSG: TypeId = TypeId::new(3);
+    const JOB: TypeId = TypeId::new(4);
+    const BOX: TypeId = TypeId::new(5);
+    const LEAF: TypeId = TypeId::new(6);
+    const START_PAYLOAD: TypeId = TypeId::new(7);
+    const PROCESS_REF_WORKER: TypeId = TypeId::new(8);
 
     #[test]
     fn loaded_program_stores_large_process_ref_tables_without_runtime_instance_maps() {
@@ -1058,15 +1072,11 @@ mod tests {
     fn runtime_rejects_loaded_control_character_state_type_before_mismatch_diagnostic() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-        program.processes[0].state_values[0].ty = "Bad\nState".to_string();
+        program.types[MAIN_STATE.index()].label = "Bad\nState".to_string();
 
         let err = loaded_admission_error_before_artifact_loaded(&program);
 
-        assert!(
-            err.contains(
-                "process Main state value type: state value type must be a type reference"
-            )
-        );
+        assert!(err.contains("type.0.label must be an identifier"));
         assert!(err.contains("\"Bad\\nState\""));
         assert!(!err.contains("Bad\nState"));
         assert!(!err.contains("loaded state value MainState has type"));
@@ -1076,11 +1086,11 @@ mod tests {
     fn runtime_rejects_loaded_process_ref_state_type_before_artifact_loaded() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-        program.processes[0].state_type = "ProcessRef<Worker>".to_string();
+        program.processes[0].state_type = PROCESS_REF_WORKER;
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
-            "state_type must be an identifier, got \"ProcessRef<Worker>\"",
+            "state_type type id 8 must be a value type",
         );
     }
 
@@ -1088,7 +1098,7 @@ mod tests {
     fn runtime_rejects_loaded_payload_bearing_entry_message_before_artifact_loaded() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-        program.processes[0].message_variants[0].payload_type = Some("StartPayload".to_string());
+        program.processes[0].message_variants[0].payload_type = Some(START_PAYLOAD);
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
@@ -1100,11 +1110,11 @@ mod tests {
     fn runtime_rejects_loaded_invalid_message_payload_type_before_artifact_loaded() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-        program.processes[1].message_variants[0].payload_type = Some("ProcessRef<>".to_string());
+        program.processes[1].message_variants[0].payload_type = Some(TypeId::new(99));
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
-            "process Worker message payload_type: message payload_type must be a type reference, got \"ProcessRef<>\"",
+            "process Worker message payload_type: loaded type id 99 is not loaded",
         );
     }
 
@@ -1138,7 +1148,7 @@ mod tests {
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].next_state =
             NextState::Template(ArtifactValueTemplate::Literal {
-                ty: "MainState".to_string(),
+                ty: MAIN_STATE,
                 value: "UnadmittedState".to_string(),
             });
 
@@ -1154,11 +1164,11 @@ mod tests {
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[0].transitions[0].next_state =
             NextState::Template(ArtifactValueTemplate::Record {
-                ty: "MainState".to_string(),
+                ty: MAIN_STATE,
                 fields: vec![ArtifactValueTemplateField {
                     name: "item".to_string(),
                     value: ArtifactValueTemplate::Literal {
-                        ty: "Bad<Type".to_string(),
+                        ty: TypeId::new(99),
                         value: "Item".to_string(),
                     },
                 }],
@@ -1166,7 +1176,7 @@ mod tests {
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
-            "process Main transition 0 next_state_template.field.item.type must be a type reference",
+            "loaded type id 99 is not loaded",
         );
     }
 
@@ -1263,7 +1273,7 @@ mod tests {
     fn runtime_rejects_loaded_send_missing_payload_before_artifact_loaded() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-        program.processes[1].message_variants[0].payload_type = Some("Job".to_string());
+        program.processes[1].message_variants[0].payload_type = Some(JOB);
         program.processes[0].transitions[0].effect_authority =
             crate::program::LoadedEffectAuthority::from_artifact(&[
                 ArtifactEffect::Spawn,
@@ -1291,8 +1301,7 @@ mod tests {
     fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_loaded() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-        program.processes[1].message_variants[0].payload_type =
-            Some("ProcessRef<Worker>".to_string());
+        program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
         program.processes[0].transitions[0].effect_authority =
             crate::program::LoadedEffectAuthority::from_artifact(&[
                 ArtifactEffect::Spawn,
@@ -1307,7 +1316,7 @@ mod tests {
                 target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
                 message: MessageId::new(0),
                 payload: Some(ArtifactValueTemplate::ProcessRef {
-                    ty: "ProcessRef<Worker>".to_string(),
+                    ty: PROCESS_REF_WORKER,
                     target_process: ProcessId::new(0),
                     process_ref: ProcessRefId::new(0),
                 }),
@@ -1316,7 +1325,7 @@ mod tests {
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
-            "process reference payload type ProcessRef<Worker> targets Worker, expected Main",
+            "process reference payload type type id 8 targets process id 1, expected 0",
         );
     }
 
@@ -1330,7 +1339,7 @@ mod tests {
             .actions
             .push(LoadedAction::Send {
                 target: LoadedSendTarget::ReceivedPayload {
-                    ty: "ProcessRef<Worker>".to_string(),
+                    ty: PROCESS_REF_WORKER,
                     target_process: ProcessId::new(1),
                 },
                 message: MessageId::new(0),
@@ -1403,10 +1412,8 @@ mod tests {
     #[test]
     fn runtime_rejects_unspawned_process_ref_payload() {
         let mut artifact = artifact_with_unbound_worker_process_ref();
-        artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
-            "Ping",
-            "ProcessRef<Worker>",
-        )];
+        artifact.processes[1].message_variants =
+            vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)];
         let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         let mut host = InMemoryRuntimeHost::default();
         let mut run = RuntimeRun::new(
@@ -1429,8 +1436,8 @@ mod tests {
                 RuntimeMessageEnvelope::new(
                     MessageId::new(0),
                     Some(ArtifactPayload {
-                        ty: "ProcessRef<Worker>".to_string(),
-                        value: "ProcessRef<Worker>#99".to_string(),
+                        ty: PROCESS_REF_WORKER,
+                        value: "type8#99".to_string(),
                         process_ref: Some(ArtifactProcessRefPayload {
                             target_process: ProcessId::new(1),
                             pid: 99,
@@ -1450,10 +1457,8 @@ mod tests {
     #[test]
     fn runtime_rejects_process_ref_payload_target_type_mismatch() {
         let mut artifact = artifact_with_unbound_worker_process_ref();
-        artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
-            "Ping",
-            "ProcessRef<Worker>",
-        )];
+        artifact.processes[1].message_variants =
+            vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)];
         let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         let mut host = InMemoryRuntimeHost::default();
         let mut run = RuntimeRun::new(
@@ -1476,8 +1481,8 @@ mod tests {
                 RuntimeMessageEnvelope::new(
                     MessageId::new(0),
                     Some(ArtifactPayload {
-                        ty: "ProcessRef<Worker>".to_string(),
-                        value: "ProcessRef<Worker>#1".to_string(),
+                        ty: PROCESS_REF_WORKER,
+                        value: "type8#1".to_string(),
                         process_ref: Some(ArtifactProcessRefPayload {
                             target_process: ProcessId::new(0),
                             pid: main_pid.as_u64(),
@@ -1488,24 +1493,24 @@ mod tests {
             )
             .expect_err("process ref target type mismatch should fail closed");
 
-        assert!(err
-            .to_string()
-            .contains("payload process reference metadata targets Main, expected Worker for type ProcessRef<Worker>"));
+        assert!(err.to_string().contains(
+            "payload process reference metadata targets process id 0, expected 1 for type id 8"
+        ));
     }
 
     #[test]
     fn runtime_rejects_oversized_record_payload_template_value() {
+        let artifact = artifact_with_unbound_worker_process_ref();
+        let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         let template = ArtifactValueTemplate::Record {
-            ty: "Box".to_string(),
+            ty: BOX,
             fields: vec![ArtifactValueTemplateField {
                 name: "item".to_string(),
-                value: ArtifactValueTemplate::ReceivedPayload {
-                    ty: "Job".to_string(),
-                },
+                value: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
             }],
         };
         let received = ArtifactPayload {
-            ty: "Job".to_string(),
+            ty: JOB,
             value: "a".repeat(MAX_FIELD_VALUE_BYTES),
             process_ref: None,
         };
@@ -1518,8 +1523,14 @@ mod tests {
             payload: Some(received.clone()),
         };
 
-        let err = evaluate_runtime_template(&template, Some(&received), &step, &BTreeMap::new())
-            .expect_err("oversized record payload labels should fail closed");
+        let err = evaluate_runtime_template(
+            &program,
+            &template,
+            Some(&received),
+            &step,
+            &BTreeMap::new(),
+        )
+        .expect_err("oversized record payload labels should fail closed");
 
         assert!(
             err.to_string()
@@ -1561,17 +1572,29 @@ mod tests {
         MantleArtifact {
             format: ARTIFACT_FORMAT.to_string(),
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-            source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+            source_language: TEST_SOURCE_LANGUAGE.to_string(),
             module: "unbound_worker_process_ref".to_string(),
             entry_process: ProcessId::new(0),
             entry_message: MessageId::new(0),
+            types: vec![
+                ArtifactType::value("MainState"),
+                ArtifactType::value("MainMsg"),
+                ArtifactType::value("WorkerState"),
+                ArtifactType::value("WorkerMsg"),
+                ArtifactType::value("Job"),
+                ArtifactType::value("Box"),
+                ArtifactType::value("Leaf"),
+                ArtifactType::value("StartPayload"),
+                ArtifactType::process_ref("ProcessRef_Worker", ProcessId::new(1)),
+                ArtifactType::process_ref("ProcessRef_Main", ProcessId::new(0)),
+            ],
             outputs: Vec::new(),
             processes: vec![
                 ArtifactProcess {
                     debug_name: "Main".to_string(),
-                    state_type: "MainState".to_string(),
-                    state_values: state_values("MainState", &["MainState"]),
-                    message_type: "MainMsg".to_string(),
+                    state_type: MAIN_STATE,
+                    state_values: state_values(MAIN_STATE, &["MainState"]),
+                    message_type: MAIN_MSG,
                     message_variants: vec![ArtifactMessageVariant::unit("Start")],
                     process_refs: vec![ArtifactProcessRef {
                         debug_name: "worker".to_string(),
@@ -1589,9 +1612,9 @@ mod tests {
                 },
                 ArtifactProcess {
                     debug_name: "Worker".to_string(),
-                    state_type: "WorkerState".to_string(),
-                    state_values: state_values("WorkerState", &["Idle"]),
-                    message_type: "WorkerMsg".to_string(),
+                    state_type: WORKER_STATE,
+                    state_values: state_values(WORKER_STATE, &["Idle"]),
+                    message_type: WORKER_MSG,
                     message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                     process_refs: Vec::new(),
                     mailbox_bound: 1,
@@ -1621,7 +1644,7 @@ mod tests {
         artifact
     }
 
-    fn state_values(ty: &str, values: &[&str]) -> Vec<ArtifactStateValue> {
+    fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {
         values
             .iter()
             .map(|value| ArtifactStateValue::new(ty, *value))
@@ -1630,12 +1653,12 @@ mod tests {
 
     fn record_template_with_depth(depth: usize) -> ArtifactValueTemplate {
         let mut template = ArtifactValueTemplate::Literal {
-            ty: "Leaf".to_string(),
+            ty: LEAF,
             value: "Leaf".to_string(),
         };
         for _ in 0..depth {
             template = ArtifactValueTemplate::Record {
-                ty: "Box".to_string(),
+                ty: BOX,
                 fields: vec![ArtifactValueTemplateField {
                     name: "item".to_string(),
                     value: template,
@@ -1643,7 +1666,7 @@ mod tests {
             };
         }
         match &mut template {
-            ArtifactValueTemplate::Record { ty, .. } => *ty = "MainState".to_string(),
+            ArtifactValueTemplate::Record { ty, .. } => *ty = MAIN_STATE,
             _ => unreachable!("depth above zero produces a record"),
         }
         template

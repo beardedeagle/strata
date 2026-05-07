@@ -211,7 +211,7 @@ mod tests {
             .expect("system clock should be after UNIX epoch")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "strata-runtime-trace-{name}-{}-{nanos}.observability.jsonl",
+            "mantle-runtime-trace-{name}-{}-{nanos}.observability.jsonl",
             std::process::id()
         ))
     }

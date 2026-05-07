@@ -140,8 +140,8 @@ fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit
 }
 ```
 
-The payload binding is immutable and local to the transition. Mantle still
-executes typed message IDs; payload values travel in runtime message envelopes
+The payload binding is immutable and local to the transition. Mantle executes
+typed message IDs; payload values travel in runtime message envelopes
 and appear in traces as payload metadata on the stable `Assign` message label.
 
 Process references can also travel as typed payloads:

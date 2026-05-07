@@ -9,6 +9,17 @@ This separation keeps names, metadata, and runtime identity from collapsing into
 one surface. Source names are useful for diagnostics and traces, but executable
 runtime dispatch must use loaded typed IDs.
 
+Mantle crates are structurally language-neutral. They may carry `source_language`
+as opaque artifact metadata, but they must not own Strata source constants,
+Strata output-directory defaults, `.str` examples, or source-to-runtime product
+gates. Strata-owned defaults live in `crates/strata`; cross-boundary product
+gates live in `crates/source-to-runtime-gates`.
+
+Artifact type identity is structural in Mantle. Lowering emits a Mantle type
+table and artifact records refer to entries by `TypeId`; Mantle admission and
+runtime execution do not parse source type spellings or `ProcessRef<...>` text
+to decide behavior. Type labels remain diagnostics and trace metadata only.
+
 ## Admission
 
 Mantle admits artifacts through validation, not filename trust. Before
@@ -16,13 +27,14 @@ execution, the artifact decoder and validator check:
 
 - artifact magic, format, schema version, and source language;
 - bounded process, message, state, output, transition, and action counts;
+- bounded type table entries and type-kind targets;
 - unique process debug names;
 - unique typed state value identities per process;
 - unique process reference names per process;
 - exactly one transition per accepted message;
 - exact transition effect authority for emitted, spawned, and sent actions;
-- transition references to known messages, state values, process references,
-  outputs, and process IDs.
+- transition references to known messages, state values, type IDs, process
+  references, outputs, and process IDs.
 
 Decode-time bounds must happen before allocation when counts come from the
 artifact body.
@@ -40,7 +52,7 @@ identity, not by display label text.
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect authority, and must exactly match the action effects that execute.
 
-The current action set covers:
+The action set covers:
 
 - emitting declared output;
 - spawning a declared process through a process reference;
@@ -54,5 +66,6 @@ trace budget exhaustion.
 ## Observability
 
 Runtime traces are line-delimited JSON. They include labels for readability and
-numeric IDs for process, message, state, and output identity. A trace is
-evidence of runtime execution, not a substitute for running the product gate.
+numeric IDs for process, message, state, payload type, and output identity. A
+trace is evidence of runtime execution, not a substitute for running the
+product gate.
