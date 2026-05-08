@@ -923,6 +923,29 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
 }
 
 #[test]
+fn validate_rejects_process_ref_payload_enum_next_state_template() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants[0] =
+        ArtifactMessageVariant::payload("Route", PROCESS_REF_WORKER);
+    artifact.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::EnumVariant {
+            ty: WORKER_STATE,
+            variant: "Routed".to_string(),
+            payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
+                ty: PROCESS_REF_WORKER,
+            }),
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("process ref payload next-state template should fail");
+
+    assert!(err.to_string().contains(
+        "process Worker transition 0 next_state_template.payload process reference template must be a direct message payload"
+    ));
+}
+
+#[test]
 fn validate_rejects_state_value_type_mismatch() {
     let mut artifact = valid_artifact();
     artifact.processes[1].state_values[1] =

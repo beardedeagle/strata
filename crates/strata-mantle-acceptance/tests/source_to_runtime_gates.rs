@@ -701,6 +701,45 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn state_payload_enum_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/state_payload_enum.str",
+        "target/strata/state_payload_enum.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("worker entered payload state"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+
+    let artifact = gate.read_artifact("target/strata/state_payload_enum.mta");
+    let worker = &artifact.processes[1];
+    assert_eq!(worker.state_values[0].label, "Idle");
+    assert_eq!(worker.state_values[1].label, "Working(Job{phase:Ready})");
+    assert_eq!(
+        worker.transitions[0].next_state,
+        mantle_artifact::NextState::Template(ArtifactValueTemplate::EnumVariant {
+            ty: value_type_id(&artifact, "WorkerState"),
+            variant: "Working".to_string(),
+            payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
+                ty: value_type_id(&artifact, "Job"),
+            }),
+        })
+    );
+
+    let job_type = value_type_id(&artifact, "Job");
+    let payload_type = format!(r#""payload_type_id":{}"#, job_type.as_u32());
+    let trace = gate.read_trace("state_payload_enum");
+    assert!(trace.contains(&format!(
+        r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}""#
+    )));
+    assert!(trace.contains(
+        r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"Idle","to_state_id":1,"to":"Working(Job{phase:Ready})""#
+    ));
+}
+
+#[test]
 fn actor_reply_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run("examples/actor_reply.str", "target/strata/actor_reply.mta");

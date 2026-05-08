@@ -67,16 +67,17 @@ impl<'module> StateSpace<'module> {
             )));
         }
         for variant in &enum_decl.variants {
-            if variant.payload_type.is_some() {
+            if variant.name.as_str() == STEP_STATE_PARAMETER_NAME {
                 return Err(Error::new(format!(
-                    "state enum {} variant {} must not declare a payload in this slice",
-                    enum_decl.name, variant.name
+                    "process {} state value {} conflicts with reserved step state parameter name",
+                    process.name, STEP_STATE_PARAMETER_NAME
                 )));
             }
         }
         let values = enum_decl
             .variants
             .iter()
+            .filter(|variant| variant.payload_type.is_none())
             .map(|variant| {
                 CheckedStateValue::new(checked_state_type.clone(), variant.name.to_string())
             })
@@ -188,6 +189,14 @@ fn canonical_value(
         return Err(Error::new(format!(
             "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
         )));
+    }
+    if semantic_index
+        .process_ref_target_type(expected_type)?
+        .is_some()
+    {
+        return Err(Error::new(
+            "process reference payloads are not valid state values",
+        ));
     }
     if let ValueExpr::Identifier(name) = value {
         if let Some(binding) = bindings.iter().find(|binding| binding.name == name) {

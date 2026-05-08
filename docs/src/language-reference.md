@@ -162,7 +162,8 @@ enum WorkerMsg {
 
 Enums used as process state or message types must declare at least one variant.
 Duplicate variants are rejected. Payload variants are accepted for process
-message enums. State enum payload variants are rejected in the buildable slice.
+state and message enums. Process state payloads remain immutable whole-state
+values admitted through typed state IDs.
 
 ## Processes
 
@@ -456,6 +457,7 @@ replacement:
 
 ```strata
 return Continue(WorkerState { phase: Idle });
+return Continue(Working(Job { phase: Ready }));
 return Stop(Handled);
 return Panic(Failed);
 ```

@@ -1174,6 +1174,26 @@ mod tests {
     }
 
     #[test]
+    fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_loaded() {
+        let artifact = artifact_with_unbound_worker_process_ref();
+        let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+        program.processes[1].transitions[0].next_state =
+            NextState::Template(ArtifactValueTemplate::EnumVariant {
+                ty: WORKER_STATE,
+                variant: "Routed".to_string(),
+                payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
+                    ty: PROCESS_REF_WORKER,
+                }),
+            });
+
+        assert_loaded_admission_rejects_before_artifact_loaded(
+            &program,
+            "process Worker transition 0 next_state_template.payload process reference template must be a direct message payload",
+        );
+    }
+
+    #[test]
     fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

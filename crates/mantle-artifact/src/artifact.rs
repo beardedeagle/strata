@@ -1244,6 +1244,16 @@ impl ArtifactValueTemplate {
                         received_payload_type.as_u32()
                     )));
                 }
+                if expected_type.is_none()
+                    && matches!(
+                        artifact.type_entry(*ty)?.kind,
+                        ArtifactTypeKind::ProcessRef { .. }
+                    )
+                {
+                    return Err(Error::new(format!(
+                        "{field} process reference template must be a direct message payload"
+                    )));
+                }
                 Ok(())
             }
             Self::ProcessRef {

@@ -135,7 +135,8 @@ Example shape:
 ```
 
 State updates are whole-value replacements. The trace records the previous and
-new admitted state values.
+new admitted state values, including payload-bearing enum state values such as
+`Working(Job{phase:Ready})`.
 
 ## Program Output
 
