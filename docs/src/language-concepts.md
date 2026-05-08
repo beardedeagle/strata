@@ -110,10 +110,10 @@ fn state_for(mode: StartupMode) -> MainState ! [] ~ [] @det {
 }
 ```
 
-Source helpers are immutable value producers. They declare no effects, perform
-no statements, use `~ [] @det`, and return whole values. A process-local helper
-can encapsulate non-message-handling value construction for `init`, `step`
-results, and send payloads.
+Source helpers are immutable value producers. They perform no statements, use
+`! [] ~ [] @det`, and return whole values. A process-local helper can
+encapsulate non-message-handling value construction for `init`, `step` results,
+and send payloads.
 
 ## State
 
