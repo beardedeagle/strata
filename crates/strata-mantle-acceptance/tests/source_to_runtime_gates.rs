@@ -51,8 +51,13 @@ impl GateHarness {
     }
 
     fn build(&self, source: &str, artifact: &str) {
+        self.remove_artifact(artifact);
         assert_success(
-            self.command(&self.strata, ["build", source], "strata build"),
+            self.command(
+                &self.strata,
+                ["build", source, "--output", artifact],
+                "strata build",
+            ),
             "strata build",
         );
         assert!(
@@ -619,16 +624,17 @@ fn effect_authority_missing_fails_source_check_before_build() {
 #[test]
 fn mantle_run_rejects_authority_mismatched_artifacts_before_trace() {
     let gate = GateHarness::new();
+    let seed_artifact_path = "target/strata/authority_admission_seed.mta";
 
     gate.check("examples/hello.str");
-    gate.build("examples/hello.str", "target/strata/hello.mta");
+    gate.build("examples/hello.str", seed_artifact_path);
 
     for case in AUTHORITY_ADMISSION_CASES {
         let invalid_artifact_path = format!("target/strata/{}.mta", case.stem);
         gate.remove_artifact(&invalid_artifact_path);
         gate.remove_trace(case.stem);
 
-        let artifact = gate.read_artifact("target/strata/hello.mta");
+        let artifact = gate.read_artifact(seed_artifact_path);
         let encoded_artifact = case.mutation.invalid_encoded_artifact(artifact);
         gate.write_unvalidated_encoded_artifact(&invalid_artifact_path, &encoded_artifact);
 
