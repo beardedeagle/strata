@@ -80,7 +80,7 @@ result of the first invalid shape.
 | `payload has type ..., expected ...` | A runtime envelope or artifact payload template carries the wrong value type. | Match the payload value type to the target message variant. |
 | `payload ... exceeds maximum length` | A payload value label is too large for the artifact or runtime trace boundary. | Use a smaller payload value or split the payload into smaller fields/messages. |
 | `payload ... is not a bound process reference` | A `ProcessRef<T>` payload send uses a value that is not a process reference. | Pass an immutable process reference binding or received `ProcessRef<T>` payload. |
-| `process reference template must be a direct message payload` | A process reference payload is nested inside a record, enum, or next-state template. | Send `ProcessRef<T>` only as the direct payload of a message that declares `ProcessRef<T>`. |
+| `process references must be direct message payloads` / `process reference template must be a direct message payload` | A process reference payload is nested inside a record, enum, or next-state template. | Send `ProcessRef<T>` only as the direct payload of a message that declares `ProcessRef<T>`. |
 
 ## Match Errors
 

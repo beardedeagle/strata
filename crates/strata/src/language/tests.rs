@@ -2039,6 +2039,71 @@ fn rejects_received_process_ref_payload_state_constructor() {
 }
 
 #[test]
+fn rejects_nested_process_ref_message_payload_with_direct_payload_diagnostic() {
+    let source = r#"
+module nested_process_ref_payload;
+
+record MainState;
+record WorkerState;
+record SinkState;
+enum Envelope { Forward(ProcessRef<Sink>) }
+enum MainMsg { Start }
+enum WorkerMsg { Route(Envelope) }
+enum SinkMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Route(Forward(sink));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Route(env: Envelope)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("nested process refs in payloads should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process references must be direct message payloads"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_assignment_style_payload_state_construction() {
     let source = STATE_PAYLOAD_ENUM.replace(
         "return Stop(Working(job));",

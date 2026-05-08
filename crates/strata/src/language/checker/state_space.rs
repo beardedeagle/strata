@@ -33,6 +33,21 @@ pub(super) struct ValueTemplateBinding<'a> {
     pub(super) checked_ty: &'a CheckedTypeRef,
 }
 
+#[derive(Clone, Copy)]
+enum CanonicalValueContext {
+    StateValue,
+    SourceValue,
+}
+
+impl CanonicalValueContext {
+    fn process_ref_error(self) -> Error {
+        match self {
+            Self::StateValue => Error::new("process reference payloads are not valid state values"),
+            Self::SourceValue => Error::new("process references must be direct message payloads"),
+        }
+    }
+}
+
 impl<'module> StateSpace<'module> {
     pub(super) fn new(
         module: &'module Module,
@@ -111,6 +126,7 @@ impl<'module> StateSpace<'module> {
             self.state_type,
             value,
             bindings,
+            CanonicalValueContext::StateValue,
             0,
         )?;
         let state_value = CheckedStateValue::new(self.checked_state_type.clone(), label);
@@ -143,7 +159,15 @@ pub(super) fn canonical_source_value_with_bindings(
     value: &ValueExpr,
     bindings: &[ValueBinding<'_>],
 ) -> Result<String> {
-    canonical_value(module, semantic_index, expected_type, value, bindings, 0)
+    canonical_value(
+        module,
+        semantic_index,
+        expected_type,
+        value,
+        bindings,
+        CanonicalValueContext::SourceValue,
+        0,
+    )
 }
 
 pub(super) fn source_value_uses_binding(value: &ValueExpr, binding: &Identifier) -> bool {
@@ -183,6 +207,7 @@ fn canonical_value(
     expected_type: &TypeRef,
     value: &ValueExpr,
     bindings: &[ValueBinding<'_>],
+    context: CanonicalValueContext,
     depth: usize,
 ) -> Result<String> {
     if depth > MAX_VALUE_NESTING {
@@ -194,9 +219,7 @@ fn canonical_value(
         .process_ref_target_type(expected_type)?
         .is_some()
     {
-        return Err(Error::new(
-            "process reference payloads are not valid state values",
-        ));
+        return Err(context.process_ref_error());
     }
     if let ValueExpr::Identifier(name) = value {
         if let Some(binding) = bindings.iter().find(|binding| binding.name == name) {
@@ -215,7 +238,15 @@ fn canonical_value(
         )));
     }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
-        return canonical_record_value(module, semantic_index, record, value, bindings, depth);
+        return canonical_record_value(
+            module,
+            semantic_index,
+            record,
+            value,
+            bindings,
+            context,
+            depth,
+        );
     }
 
     canonical_enum_value(
@@ -224,6 +255,7 @@ fn canonical_value(
         expected_type,
         value,
         bindings,
+        context,
         depth,
     )
 }
@@ -234,6 +266,7 @@ fn canonical_enum_value(
     expected_type: &TypeRef,
     value: &ValueExpr,
     bindings: &[ValueBinding<'_>],
+    context: CanonicalValueContext,
     depth: usize,
 ) -> Result<String> {
     let enum_decl = semantic_index.enum_decl(module, expected_type)?;
@@ -279,6 +312,7 @@ fn canonical_enum_value(
                 payload_type,
                 payload,
                 bindings,
+                context,
                 depth + 1,
             )?;
             let value = format!("{name}({payload})");
@@ -327,7 +361,15 @@ fn checked_value_template(
     }
 
     if binding.is_none_or(|binding| !source_value_uses_binding(value, binding.name)) {
-        let label = canonical_value(module, semantic_index, expected_type, value, &[], depth)?;
+        let label = canonical_value(
+            module,
+            semantic_index,
+            expected_type,
+            value,
+            &[],
+            CanonicalValueContext::SourceValue,
+            depth,
+        )?;
         return Ok(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
             types.intern(expected_type)?,
             label,
@@ -478,6 +520,7 @@ fn canonical_record_value(
     record: &Record,
     value: &ValueExpr,
     bindings: &[ValueBinding<'_>],
+    context: CanonicalValueContext,
     depth: usize,
 ) -> Result<String> {
     if let ValueExpr::Record(value) = value {
@@ -547,6 +590,7 @@ fn canonical_record_value(
             &field.ty,
             value,
             bindings,
+            context,
             depth + 1,
         )?;
         parts.push(format!("{}:{field_value}", field.name));

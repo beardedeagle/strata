@@ -1971,7 +1971,13 @@ fn resolve_source_enum_payload_value(
         )));
     };
     let payload = resolve_source_value_expr(scope, payload_type, payload, bindings, depth + 1)?;
-    check_source_value_type(scope, payload_type, &payload, bindings)?;
+    if scope
+        .semantic_index
+        .process_ref_target_type(payload_type)?
+        .is_none()
+    {
+        check_source_value_type(scope, payload_type, &payload, bindings)?;
+    }
     Ok(ValueExpr::EnumVariant {
         name: name.clone(),
         payload: Box::new(payload),
