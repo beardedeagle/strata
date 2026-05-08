@@ -2604,6 +2604,26 @@ proc Main mailbox bounded(1) {"#,
 }
 
 #[test]
+fn rejects_module_source_function_call_to_process_local_helper() {
+    let source = FUNCTION_MATCH.replace(
+        "proc Main mailbox bounded(1) {",
+        r#"fn invalid_module_helper(mode: StartupMode) -> MainState ! [] ~ [] @det {
+    return state_for(mode);
+}
+
+proc Main mailbox bounded(1) {"#,
+    );
+
+    let err =
+        check_source(&source).expect_err("module source function should not see process helpers");
+
+    assert!(
+        err.to_string()
+            .contains("function state_for is not declared")
+    );
+}
+
+#[test]
 fn rejects_source_function_undeclared_parameter_type() {
     let source = FUNCTION_MATCH.replace(
         "proc Main mailbox bounded(1) {",

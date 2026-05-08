@@ -245,7 +245,7 @@ struct PatternCheckContext<'a> {
 #[derive(Debug, Clone, Copy)]
 struct SourceFunctionScope<'a> {
     module: &'a Module,
-    process: &'a Process,
+    process_name: Option<&'a Identifier>,
     process_functions: &'a [Function],
     semantic_index: &'a SemanticIndex,
 }
@@ -536,7 +536,7 @@ impl<'a> MessageCaseBuilder<'a> {
             (Some(payload_type), Some(payload)) => {
                 let function_scope = SourceFunctionScope {
                     module: self.module,
-                    process: self.process,
+                    process_name: Some(&self.process.name),
                     process_functions: &self.process.functions,
                     semantic_index: self.semantic_index,
                 };
@@ -887,7 +887,7 @@ fn check_init(
 
     let function_scope = SourceFunctionScope {
         module,
-        process,
+        process_name: Some(&process.name),
         process_functions: &process.functions,
         semantic_index,
     };
@@ -895,16 +895,22 @@ fn check_init(
         return Err(Error::new("init must have a body for buildable source"));
     };
     match body {
-        FunctionBody::Block(body) => {
-            check_init_return_block(&function_scope, state_space, body, None, "init body")
-        }
+        FunctionBody::Block(body) => check_init_return_block(
+            process,
+            &function_scope,
+            state_space,
+            body,
+            None,
+            "init body",
+        ),
         FunctionBody::Match(match_body) => {
-            check_init_match(&function_scope, state_space, match_body)
+            check_init_match(process, &function_scope, state_space, match_body)
         }
     }
 }
 
 fn check_init_match(
+    process: &Process,
     scope: &SourceFunctionScope<'_>,
     state_space: &mut StateSpace<'_>,
     match_body: &super::ast::Match,
@@ -920,7 +926,7 @@ fn check_init_match(
         &scrutinee_type,
         &match_body.scrutinee,
     )?;
-    let subject = format!("process {}", scope.process.name);
+    let subject = format!("process {}", process.name);
     let pattern_context = PatternCheckContext {
         module: scope.module,
         semantic_index: scope.semantic_index,
@@ -940,8 +946,13 @@ fn check_init_match(
             TypedMatchPattern::Variant { binding, .. } => binding.as_ref(),
             TypedMatchPattern::Wildcard => None,
         };
-        let state =
-            resolve_init_return_block_value(scope, arm.body, payload_binding, "init match arm")?;
+        let state = resolve_init_return_block_value(
+            process,
+            scope,
+            arm.body,
+            payload_binding,
+            "init match arm",
+        )?;
         match arm.pattern {
             TypedMatchPattern::Variant { variant, .. } if variant == selected_variant => {
                 selected_state = Some(state);
@@ -956,24 +967,26 @@ fn check_init_match(
     let state = selected_state.or(wildcard_state).ok_or_else(|| {
         Error::new(format!(
             "process {} init match has no arm for scrutinee {}",
-            scope.process.name, match_body.scrutinee
+            process.name, match_body.scrutinee
         ))
     })?;
     state_space.resolve_state_value(scope.semantic_index, &state)
 }
 
 fn check_init_return_block(
+    process: &Process,
     scope: &SourceFunctionScope<'_>,
     state_space: &mut StateSpace<'_>,
     body: &FunctionBlock,
     payload_binding: Option<&PatternPayloadParam>,
     context: &str,
 ) -> Result<CheckedStateId> {
-    let value = resolve_init_return_block_value(scope, body, payload_binding, context)?;
+    let value = resolve_init_return_block_value(process, scope, body, payload_binding, context)?;
     state_space.resolve_state_value(scope.semantic_index, &value)
 }
 
 fn resolve_init_return_block_value(
+    process: &Process,
     scope: &SourceFunctionScope<'_>,
     body: &FunctionBlock,
     payload_binding: Option<&PatternPayloadParam>,
@@ -995,16 +1008,16 @@ fn resolve_init_return_block_value(
         name: &binding.name,
         ty: &binding.ty,
     });
-    let value = resolve_source_value_expr(scope, &scope.process.state_type, &value, binding, 0)?;
+    let value = resolve_source_value_expr(scope, &process.state_type, &value, binding, 0)?;
     if let Some(binding) = payload_binding {
         if source_value_uses_binding(&value, &binding.name) {
             return Err(Error::new(format!(
                 "process {} {context} cannot use payload binding {} in returned state",
-                scope.process.name, binding.name
+                process.name, binding.name
             )));
         }
     }
-    check_source_value_type(scope, &scope.process.state_type, &value, binding)?;
+    check_source_value_type(scope, &process.state_type, &value, binding)?;
     Ok(value)
 }
 
@@ -1374,18 +1387,12 @@ fn validate_binding_source_function_body(
         }
     }?;
 
-    let Some(process_for_scope) = process.or_else(|| module.processes.first()) else {
-        return Err(Error::new(format!(
-            "{owner} function {} cannot validate body without a process context",
-            function.name
-        )));
-    };
     let process_functions = process
         .map(|process| process.functions.as_slice())
         .unwrap_or(&[]);
     let scope = SourceFunctionScope {
         module,
-        process: process_for_scope,
+        process_name: process.map(|process| &process.name),
         process_functions,
         semantic_index,
     };
@@ -1414,15 +1421,9 @@ fn validate_pattern_source_function_group(
     let process_functions = process
         .map(|process| process.functions.as_slice())
         .unwrap_or(&[]);
-    let Some(process_for_scope) = process.or_else(|| module.processes.first()) else {
-        return Err(Error::new(format!(
-            "{owner} function {} cannot validate patterns without a process context",
-            first.name
-        )));
-    };
     let scope = SourceFunctionScope {
         module,
-        process: process_for_scope,
+        process_name: process.map(|process| &process.name),
         process_functions,
         semantic_index,
     };
@@ -1618,7 +1619,7 @@ fn source_function_body_scope<'a>(
     {
         SourceFunctionScope {
             module: scope.module,
-            process: scope.process,
+            process_name: None,
             process_functions: &[],
             semantic_index: scope.semantic_index,
         }
@@ -1912,13 +1913,20 @@ fn source_function_group<'a>(
 
     match (local.is_empty(), module.is_empty()) {
         (false, false) => Err(Error::new(format!(
-            "process {} function {name} conflicts with module function {name}",
-            scope.process.name
+            "{} function {name} conflicts with module function {name}",
+            source_function_scope_label(scope)
         ))),
         (false, true) => Ok(local),
         (true, false) => Ok(module),
         (true, true) => Err(Error::new(format!("function {name} is not declared"))),
     }
+}
+
+fn source_function_scope_label(scope: &SourceFunctionScope<'_>) -> String {
+    scope
+        .process_name
+        .map(|name| format!("process {name}"))
+        .unwrap_or_else(|| "module".to_string())
 }
 
 fn resolve_binding_source_function_call(
@@ -3049,7 +3057,7 @@ fn check_step_transition(
     });
     let function_scope = SourceFunctionScope {
         module: context.module,
-        process: context.process,
+        process_name: Some(&context.process.name),
         process_functions: &context.process.functions,
         semantic_index: context.semantic_index,
     };
@@ -3248,7 +3256,7 @@ fn resolve_send_message_case(
             let resolved_payload = {
                 let function_scope = SourceFunctionScope {
                     module: context.module,
-                    process: context.process,
+                    process_name: Some(&context.process.name),
                     process_functions: &context.process.functions,
                     semantic_index: context.semantic_index,
                 };
