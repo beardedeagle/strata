@@ -178,18 +178,18 @@ pub struct Function {
     pub effects: Vec<Effect>,
     pub may: Vec<Identifier>,
     pub determinism: Determinism,
-    pub body: Option<FunctionBlock>,
+    pub body: Option<FunctionBody>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FunctionParam {
     Binding(Param),
-    Pattern(SignaturePattern),
+    Pattern(Pattern),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SignaturePattern {
-    Variant {
+pub enum Pattern {
+    Constructor {
         name: Identifier,
         binding: Option<Param>,
     },
@@ -197,9 +197,27 @@ pub enum SignaturePattern {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionBody {
+    Block(FunctionBlock),
+    Match(Match),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionBlock {
     pub statements: Vec<Statement>,
     pub returns: ReturnExpr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Match {
+    pub scrutinee: Identifier,
+    pub arms: Vec<MatchArm>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: FunctionBlock,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -66,7 +66,7 @@ fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
 ```
 
 `step` receives the process state and handles the `Start` message named in its
-signature pattern.
+parameter pattern.
 
 The body emits text and then returns `Stop(state)`. Passing `state` preserves
 the supplied state while stopping normally.

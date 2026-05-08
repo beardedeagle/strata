@@ -11,8 +11,8 @@ use mantle_artifact::{
 };
 
 use super::ast::{
-    Determinism, Effect, EnumVariant, Function, FunctionBlock, FunctionParam, Identifier, Module,
-    Param, Process, ReturnExpr, SignaturePattern, Statement, TypeRef, ValueExpr,
+    Determinism, Effect, EnumVariant, Function, FunctionBlock, FunctionBody, FunctionParam,
+    Identifier, Module, Param, Pattern, Process, ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
@@ -148,6 +148,11 @@ struct StepBodyClause<'a> {
     payload_param: Option<StepPayloadParam>,
 }
 
+struct StepDiscoveryClause<'a> {
+    pattern: StepPattern,
+    body: &'a FunctionBlock,
+}
+
 #[derive(Debug, Clone)]
 struct StepClause<'a> {
     step: &'a Function,
@@ -166,12 +171,24 @@ struct StepTransitionInput<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum StepSignaturePattern {
+enum StepPattern {
     Variant {
         message: CheckedMessageVariantId,
         binding: Option<StepPayloadParam>,
     },
     Wildcard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StepDispatchForm {
+    ParameterPattern(StepPattern),
+    BodyMatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepDispatchStyle {
+    ParameterPattern,
+    BodyMatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -268,61 +285,53 @@ impl MessageCaseTable {
                 let process_id = CheckedProcessId::from_index(process_index)?;
                 let sender_cases = &case_snapshots[process_index];
                 for step in &process.steps {
-                    let Some(body) = &step.body else {
-                        continue;
-                    };
-                    let Some(pattern) = resolve_step_message_pattern(
-                        module,
-                        process,
-                        process_id,
-                        semantic_index,
-                        step,
-                    )?
-                    else {
-                        continue;
-                    };
-                    for sender_case in matching_message_cases(
-                        sender_cases,
-                        &pattern,
-                        &explicit_step_variants[process_index],
-                    ) {
-                        let bindings = payload_value_bindings(&pattern, sender_case);
-                        for statement in &body.statements {
-                            let Statement::Send {
-                                target,
-                                message,
-                                payload,
-                            } = statement
-                            else {
-                                continue;
-                            };
-                            let target_process_id = resolve_send_target_process_for_discovery(
-                                process,
-                                semantic_index,
-                                &process_ref_targets[process_index],
-                                &pattern,
-                                target,
-                            )?;
-                            let target_variant = semantic_index.message_id_for_process(
-                                module,
-                                process.name.as_str(),
-                                target_process_id,
-                                message,
-                            )?;
-                            let builder =
-                                builders.get_mut(target_process_id.index()).ok_or_else(|| {
-                                    Error::new(format!(
-                                        "process id {} is not declared",
-                                        target_process_id.as_u32()
-                                    ))
-                                })?;
-                            changed |= builder.add_payload_case(
-                                target_variant,
-                                payload.as_ref(),
-                                &bindings,
-                                &process_ref_targets[process_index],
-                                types,
-                            )?;
+                    for clause in
+                        step_discovery_clauses(module, process, process_id, semantic_index, step)?
+                    {
+                        for sender_case in matching_message_cases(
+                            sender_cases,
+                            &clause.pattern,
+                            &explicit_step_variants[process_index],
+                        ) {
+                            let bindings = payload_value_bindings(&clause.pattern, sender_case);
+                            for statement in &clause.body.statements {
+                                let Statement::Send {
+                                    target,
+                                    message,
+                                    payload,
+                                } = statement
+                                else {
+                                    continue;
+                                };
+                                let target_process_id = resolve_send_target_process_for_discovery(
+                                    process,
+                                    semantic_index,
+                                    &process_ref_targets[process_index],
+                                    &clause.pattern,
+                                    target,
+                                )?;
+                                let target_variant = semantic_index.message_id_for_process(
+                                    module,
+                                    process.name.as_str(),
+                                    target_process_id,
+                                    message,
+                                )?;
+                                let builder = builders
+                                    .get_mut(target_process_id.index())
+                                    .ok_or_else(|| {
+                                        Error::new(format!(
+                                            "process id {} is not declared",
+                                            target_process_id.as_u32()
+                                        ))
+                                    })?;
+                                changed |= builder.add_payload_case(
+                                    target_variant,
+                                    payload.as_ref(),
+                                    &bindings,
+                                    &process_ref_targets[process_index],
+                                    types,
+                                )?;
+                            }
                         }
                     }
                 }
@@ -706,7 +715,7 @@ fn validate_process_declarations_before_message_cases(
         let _ = StateSpace::new(module, semantic_index, process, &mut validation_types)?;
         let process_id = CheckedProcessId::from_index(process_index)?;
         for step in &process.steps {
-            check_step_signature(module, process, process_id, semantic_index, step)?;
+            check_step_shape(module, process, process_id, semantic_index, step)?;
         }
     }
     Ok(())
@@ -797,8 +806,10 @@ fn check_init(
         return Err(Error::new("init must be deterministic"));
     }
 
-    let Some(body) = &init.body else {
-        return Err(Error::new("init must have a body for buildable source"));
+    let Some(FunctionBody::Block(body)) = &init.body else {
+        return Err(Error::new(
+            "init must have a body block for buildable source",
+        ));
     };
     if !body.statements.is_empty() {
         return Err(Error::new(
@@ -893,38 +904,72 @@ fn check_step_clauses<'a>(
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
     let mut explicit_clauses = vec![None; msg_enum.variants.len()];
     let mut wildcard_clause = None;
+    let mut dispatch_style = None;
+    let mut match_body_seen = false;
 
     for step in &process.steps {
-        let pattern = check_step_signature(module, process, process_id, semantic_index, step)?;
         let Some(body) = &step.body else {
             return Err(Error::new("step must have a body for buildable source"));
         };
-        match pattern {
-            StepSignaturePattern::Variant { message, binding } => {
-                let clause = StepBodyClause {
-                    step,
-                    body,
-                    payload_param: binding,
+        match check_step_shape(module, process, process_id, semantic_index, step)? {
+            StepDispatchForm::ParameterPattern(pattern) => {
+                set_step_dispatch_style(
+                    process,
+                    &mut dispatch_style,
+                    StepDispatchStyle::ParameterPattern,
+                )?;
+                let FunctionBody::Block(body) = body else {
+                    return Err(Error::new("step parameter pattern must use a block body"));
                 };
-                if explicit_clauses[message.index()].replace(clause).is_some() {
-                    return Err(Error::new(format!(
-                        "process {} declares duplicate step pattern for message {}",
-                        process.name,
-                        msg_enum.variants[message.index()].name
-                    )));
-                }
+                insert_step_body_clause(
+                    process,
+                    &msg_enum.variants,
+                    &mut explicit_clauses,
+                    &mut wildcard_clause,
+                    pattern,
+                    StepBodyClause {
+                        step,
+                        body,
+                        payload_param: None,
+                    },
+                )?;
             }
-            StepSignaturePattern::Wildcard => {
-                let clause = StepBodyClause {
-                    step,
-                    body,
-                    payload_param: None,
-                };
-                if wildcard_clause.replace(clause).is_some() {
+            StepDispatchForm::BodyMatch => {
+                set_step_dispatch_style(
+                    process,
+                    &mut dispatch_style,
+                    StepDispatchStyle::BodyMatch,
+                )?;
+                if match_body_seen {
                     return Err(Error::new(format!(
-                        "process {} declares duplicate wildcard step pattern",
+                        "process {} declares duplicate match step body",
                         process.name
                     )));
+                }
+                match_body_seen = true;
+                let FunctionBody::Match(match_body) = body else {
+                    return Err(Error::new("match step must use a match body"));
+                };
+                for arm in &match_body.arms {
+                    let pattern = check_step_pattern(
+                        module,
+                        process,
+                        process_id,
+                        semantic_index,
+                        &arm.pattern,
+                    )?;
+                    insert_step_body_clause(
+                        process,
+                        &msg_enum.variants,
+                        &mut explicit_clauses,
+                        &mut wildcard_clause,
+                        pattern,
+                        StepBodyClause {
+                            step,
+                            body: &arm.body,
+                            payload_param: None,
+                        },
+                    )?;
                 }
             }
         }
@@ -980,6 +1025,132 @@ fn check_step_clauses<'a>(
     Ok(clauses)
 }
 
+fn insert_step_body_clause<'a>(
+    process: &Process,
+    message_variants: &[EnumVariant],
+    explicit_clauses: &mut [Option<StepBodyClause<'a>>],
+    wildcard_clause: &mut Option<StepBodyClause<'a>>,
+    pattern: StepPattern,
+    mut clause: StepBodyClause<'a>,
+) -> Result<()> {
+    match pattern {
+        StepPattern::Variant { message, binding } => {
+            clause.payload_param = binding;
+            if explicit_clauses[message.index()].replace(clause).is_some() {
+                return Err(Error::new(format!(
+                    "process {} declares duplicate step pattern for message {}",
+                    process.name,
+                    message_variants[message.index()].name
+                )));
+            }
+        }
+        StepPattern::Wildcard => {
+            if wildcard_clause.replace(clause).is_some() {
+                return Err(Error::new(format!(
+                    "process {} declares duplicate wildcard step pattern",
+                    process.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn set_step_dispatch_style(
+    process: &Process,
+    dispatch_style: &mut Option<StepDispatchStyle>,
+    next: StepDispatchStyle,
+) -> Result<()> {
+    if let Some(existing) = dispatch_style {
+        if *existing != next {
+            return Err(Error::new(format!(
+                "process {} cannot mix match step bodies with step parameter patterns",
+                process.name
+            )));
+        }
+    } else {
+        *dispatch_style = Some(next);
+    }
+    Ok(())
+}
+
+fn step_discovery_clauses<'a>(
+    module: &Module,
+    process: &'a Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    step: &'a Function,
+) -> Result<Vec<StepDiscoveryClause<'a>>> {
+    let Some(body) = &step.body else {
+        return Ok(Vec::new());
+    };
+    match check_step_shape(module, process, process_id, semantic_index, step)? {
+        StepDispatchForm::ParameterPattern(pattern) => {
+            let FunctionBody::Block(body) = body else {
+                return Err(Error::new("step parameter pattern must use a block body"));
+            };
+            Ok(vec![StepDiscoveryClause { pattern, body }])
+        }
+        StepDispatchForm::BodyMatch => {
+            let FunctionBody::Match(match_body) = body else {
+                return Err(Error::new("match step must use a match body"));
+            };
+            match_body
+                .arms
+                .iter()
+                .map(|arm| {
+                    Ok(StepDiscoveryClause {
+                        pattern: check_step_pattern(
+                            module,
+                            process,
+                            process_id,
+                            semantic_index,
+                            &arm.pattern,
+                        )?,
+                        body: &arm.body,
+                    })
+                })
+                .collect()
+        }
+    }
+}
+
+fn collect_step_blocks(step: &Function) -> Vec<&FunctionBlock> {
+    match &step.body {
+        Some(FunctionBody::Block(body)) => vec![body],
+        Some(FunctionBody::Match(match_body)) => {
+            match_body.arms.iter().map(|arm| &arm.body).collect()
+        }
+        None => Vec::new(),
+    }
+}
+
+fn check_step_match_scrutinee_parameter<'a>(
+    process: &Process,
+    step: &'a Function,
+    match_scrutinee: &Identifier,
+) -> Result<&'a Param> {
+    let Some(FunctionParam::Binding(message_param)) = step.params.get(1) else {
+        return Err(Error::new(format!(
+            "process {} match step must declare a typed message parameter",
+            process.name
+        )));
+    };
+    if message_param.name.as_str() == STEP_STATE_PARAMETER_NAME {
+        return Err(Error::new(format!(
+            "process {} message parameter {} conflicts with a step parameter name",
+            process.name, message_param.name
+        )));
+    }
+    if message_param.name != *match_scrutinee {
+        return Err(Error::new(format!(
+            "process {} match scrutinee {} must be the step message parameter {}",
+            process.name, match_scrutinee, message_param.name
+        )));
+    }
+    Ok(message_param)
+}
+
 fn collect_explicit_step_variants(
     module: &Module,
     process: &Process,
@@ -988,16 +1159,10 @@ fn collect_explicit_step_variants(
 ) -> Result<BTreeSet<CheckedMessageVariantId>> {
     let mut variants = BTreeSet::new();
     for step in &process.steps {
-        if step.body.is_none() {
-            continue;
-        }
-        let Some(pattern) =
-            resolve_step_message_pattern(module, process, process_id, semantic_index, step)?
-        else {
-            continue;
-        };
-        if let StepSignaturePattern::Variant { message, .. } = pattern {
-            variants.insert(message);
+        for clause in step_discovery_clauses(module, process, process_id, semantic_index, step)? {
+            if let StepPattern::Variant { message, .. } = clause.pattern {
+                variants.insert(message);
+            }
         }
     }
     Ok(variants)
@@ -1005,25 +1170,25 @@ fn collect_explicit_step_variants(
 
 fn matching_message_cases<'a>(
     cases: &'a [DiscoveredMessageCase],
-    pattern: &StepSignaturePattern,
+    pattern: &StepPattern,
     explicit_variants: &BTreeSet<CheckedMessageVariantId>,
 ) -> Vec<&'a DiscoveredMessageCase> {
     cases
         .iter()
         .filter(|case| match pattern {
-            StepSignaturePattern::Variant { message, .. } => case.variant() == *message,
-            StepSignaturePattern::Wildcard => !explicit_variants.contains(&case.variant()),
+            StepPattern::Variant { message, .. } => case.variant() == *message,
+            StepPattern::Wildcard => !explicit_variants.contains(&case.variant()),
         })
         .collect()
 }
 
 fn payload_value_bindings<'a>(
-    pattern: &'a StepSignaturePattern,
+    pattern: &'a StepPattern,
     case: &'a DiscoveredMessageCase,
 ) -> Vec<ValueBinding<'a>> {
     match (pattern, case.payload()) {
         (
-            StepSignaturePattern::Variant {
+            StepPattern::Variant {
                 binding: Some(param),
                 ..
             },
@@ -1041,13 +1206,13 @@ fn resolve_send_target_process_for_discovery(
     process: &Process,
     semantic_index: &SemanticIndex,
     process_refs: &BTreeMap<Identifier, CheckedProcessId>,
-    pattern: &StepSignaturePattern,
+    pattern: &StepPattern,
     target: &Identifier,
 ) -> Result<CheckedProcessId> {
     if let Some(target_process) = process_refs.get(target) {
         return Ok(*target_process);
     }
-    if let StepSignaturePattern::Variant {
+    if let StepPattern::Variant {
         binding: Some(param),
         ..
     } = pattern
@@ -1069,38 +1234,35 @@ fn resolve_send_target_process_for_discovery(
     )))
 }
 
-fn resolve_step_message_pattern(
+fn check_step_pattern(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
-    step: &Function,
-) -> Result<Option<StepSignaturePattern>> {
-    let Some(FunctionParam::Pattern(message_pattern)) = step.params.get(1) else {
-        return Ok(None);
-    };
+    message_pattern: &Pattern,
+) -> Result<StepPattern> {
     match message_pattern {
-        SignaturePattern::Variant { name, binding } => {
+        Pattern::Constructor { name, binding } => {
             let message = semantic_index.message_id_for_step_pattern(module, process_id, name)?;
             let variant = semantic_index.message_variant(module, process_id, message)?;
             let payload_param =
                 check_step_payload_pattern(process, semantic_index, variant, binding.as_ref())?;
-            Ok(Some(StepSignaturePattern::Variant {
+            Ok(StepPattern::Variant {
                 message,
                 binding: payload_param,
-            }))
+            })
         }
-        SignaturePattern::Wildcard => Ok(Some(StepSignaturePattern::Wildcard)),
+        Pattern::Wildcard => Ok(StepPattern::Wildcard),
     }
 }
 
-fn check_step_signature(
+fn check_step_shape(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     step: &Function,
-) -> Result<StepSignaturePattern> {
+) -> Result<StepDispatchForm> {
     if step.params.len() != 2 {
         return Err(Error::new(
             "step must declare state parameter and message pattern",
@@ -1120,12 +1282,6 @@ fn check_step_signature(
             process.state_type
         )));
     }
-    if !matches!(&step.params[1], FunctionParam::Pattern(_)) {
-        return Err(Error::new(
-            "step second parameter must be a message variant pattern or wildcard pattern",
-        ));
-    }
-
     if !semantic_index.is_proc_result_of(&step.return_type, &process.state_type) {
         return Err(Error::new(format!(
             "step returns {}, expected {}",
@@ -1140,13 +1296,30 @@ fn check_step_signature(
         return Err(Error::new("step must be deterministic"));
     }
 
-    resolve_step_message_pattern(module, process, process_id, semantic_index, step)?.ok_or_else(
-        || {
-            Error::new(
-                "step second parameter must be a message variant pattern or wildcard pattern",
-            )
-        },
-    )
+    if let Some(FunctionBody::Match(match_body)) = &step.body {
+        let message_param =
+            check_step_match_scrutinee_parameter(process, step, &match_body.scrutinee)?;
+        if !semantic_index.same_type(&message_param.ty, &process.msg_type) {
+            return Err(Error::new(format!(
+                "process {} message parameter {} has type {}, expected {}",
+                process.name, message_param.name, message_param.ty, process.msg_type
+            )));
+        }
+        return Ok(StepDispatchForm::BodyMatch);
+    }
+
+    let FunctionParam::Pattern(message_pattern) = &step.params[1] else {
+        return Err(Error::new(
+            "step second parameter must be a message constructor pattern or wildcard pattern",
+        ));
+    };
+    Ok(StepDispatchForm::ParameterPattern(check_step_pattern(
+        module,
+        process,
+        process_id,
+        semantic_index,
+        message_pattern,
+    )?))
 }
 
 fn check_step_payload_pattern(
@@ -1241,34 +1414,33 @@ fn collect_message_case_process_refs(
 ) -> Result<BTreeMap<Identifier, CheckedProcessId>> {
     let mut refs = BTreeMap::new();
     for step in &process.steps {
-        let Some(body) = &step.body else {
-            continue;
-        };
-        for statement in &body.statements {
-            let Statement::LetProcessRef { name, ty, target } = statement else {
-                continue;
-            };
-            validate_process_ref_name(process, semantic_index, name)?;
-            let annotated_target = process_ref_type_target(process, semantic_index, name, ty)?;
-            let target_id = semantic_index.process_id(target)?;
-            if annotated_target != target_id {
-                return Err(Error::new(format!(
-                    "process {} process reference {} has type {ty} but spawns {}",
-                    process.name, name, target
-                )));
-            }
-            if target_id == process_id {
-                return Err(Error::new(format!(
-                    "process {} spawns itself, which is not supported",
-                    process.name
-                )));
-            }
-            let existing = refs.insert(name.clone(), target_id);
-            if existing.is_some_and(|existing| existing != target_id) {
-                return Err(Error::new(format!(
-                    "process {} process reference {} is bound to multiple process definitions",
-                    process.name, name
-                )));
+        for body in collect_step_blocks(step) {
+            for statement in &body.statements {
+                let Statement::LetProcessRef { name, ty, target } = statement else {
+                    continue;
+                };
+                validate_process_ref_name(process, semantic_index, name)?;
+                let annotated_target = process_ref_type_target(process, semantic_index, name, ty)?;
+                let target_id = semantic_index.process_id(target)?;
+                if annotated_target != target_id {
+                    return Err(Error::new(format!(
+                        "process {} process reference {} has type {ty} but spawns {}",
+                        process.name, name, target
+                    )));
+                }
+                if target_id == process_id {
+                    return Err(Error::new(format!(
+                        "process {} spawns itself, which is not supported",
+                        process.name
+                    )));
+                }
+                let existing = refs.insert(name.clone(), target_id);
+                if existing.is_some_and(|existing| existing != target_id) {
+                    return Err(Error::new(format!(
+                        "process {} process reference {} is bound to multiple process definitions",
+                        process.name, name
+                    )));
+                }
             }
         }
     }

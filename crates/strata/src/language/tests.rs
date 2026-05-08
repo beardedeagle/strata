@@ -208,7 +208,7 @@ fn parses_step_return_type_as_structured_type_ref() {
                 name: Identifier::new("state").expect("state identifier"),
                 ty: TypeRef::Named(Identifier::new("MainState").expect("MainState identifier")),
             }),
-            FunctionParam::Pattern(SignaturePattern::Variant {
+            FunctionParam::Pattern(Pattern::Constructor {
                 name: Identifier::new("Start").expect("Start identifier"),
                 binding: None,
             }),
@@ -266,7 +266,7 @@ proc Worker mailbox bounded(3) {
         .expect("Worker should parse");
     assert_eq!(
         worker.steps[1].params[1],
-        FunctionParam::Pattern(SignaturePattern::Wildcard)
+        FunctionParam::Pattern(Pattern::Wildcard)
     );
 
     let checked = check_module(module).expect("wildcard step pattern should check");
@@ -329,6 +329,221 @@ fn checks_wildcard_only_step_pattern() {
 }
 
 #[test]
+fn parses_checks_and_lowers_match_step_body() {
+    let source = r#"
+module actor_match;
+
+record MainState;
+enum MainMsg { Start }
+enum WorkerState { Waiting, SawFirst, Done }
+enum WorkerMsg { First, Second }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker First;
+        send worker Second;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Waiting;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            First => {
+                emit "worker matched First";
+                return Continue(SawFirst);
+            }
+            Second => {
+                emit "worker matched Second";
+                return Stop(Done);
+            }
+        }
+    }
+}
+"#;
+
+    let module = parse_source(source).expect("match source should parse");
+    let worker = module
+        .processes
+        .iter()
+        .find(|process| process.name.as_str() == "Worker")
+        .expect("Worker should parse");
+    let Some(FunctionBody::Match(match_body)) = &worker.steps[0].body else {
+        panic!("Worker step should parse as a match body");
+    };
+    assert_eq!(match_body.scrutinee.as_str(), "msg");
+    assert_eq!(match_body.arms.len(), 2);
+
+    let checked = check_module(module).expect("match source should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    assert_eq!(worker.transitions().len(), 2);
+    assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
+    assert_eq!(
+        worker.transitions()[0].next_state(),
+        CheckedNextState::Value(checked_state_id(1))
+    );
+    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
+    assert_eq!(
+        worker.transitions()[1].next_state(),
+        CheckedNextState::Value(checked_state_id(2))
+    );
+    assert_eq!(
+        checked.outputs(),
+        ["worker matched First", "worker matched Second"]
+    );
+
+    let artifact = lower_to_artifact(&checked, source).expect("match should lower");
+    let worker_artifact = &artifact.processes[1];
+    assert_eq!(worker_artifact.transitions.len(), 2);
+    assert_eq!(
+        worker_artifact.transitions[0].message,
+        mantle_artifact::MessageId::new(0)
+    );
+    assert_eq!(
+        worker_artifact.transitions[1].message,
+        mantle_artifact::MessageId::new(1)
+    );
+}
+
+#[test]
+fn match_step_body_accepts_wildcard_arm() {
+    let source = ACTOR_SEQUENCE.replace(
+        r#"fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled First";
+        return Continue(SawFirst);
+    }
+
+    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            First => {
+                emit "worker handled First";
+                return Continue(SawFirst);
+            }
+            _ => {
+                emit "worker handled Second";
+                return Stop(Done);
+            }
+        }
+    }"#,
+    );
+
+    let checked = check_source(&source).expect("match wildcard should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+
+    assert_eq!(worker.transitions().len(), 2);
+    assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
+    assert_eq!(
+        worker.transitions()[0].next_state(),
+        CheckedNextState::Value(checked_state_id(1))
+    );
+    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
+    assert_eq!(
+        worker.transitions()[1].next_state(),
+        CheckedNextState::Value(checked_state_id(2))
+    );
+
+    let artifact = lower_to_artifact(&checked, &source).expect("wildcard match should lower");
+    let worker_artifact = &artifact.processes[1];
+    assert_eq!(worker_artifact.transitions.len(), 2);
+    assert_eq!(
+        worker_artifact.transitions[0].effects,
+        [ArtifactEffect::Emit]
+    );
+    assert_eq!(
+        worker_artifact.transitions[1].effects,
+        [ArtifactEffect::Emit]
+    );
+}
+
+#[test]
+fn match_step_body_binds_payload_immutably() {
+    let source = r#"
+module actor_match_payloads;
+
+record MainState;
+record Job { phase: JobPhase }
+record WorkerState { job: Job }
+enum MainMsg { Start }
+enum JobPhase { Ready, Done }
+enum WorkerMsg { Assign(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { job: Job { phase: Done } };
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match msg {
+            Assign(job: Job) => {
+                return Stop(WorkerState { job: job });
+            }
+        }
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("payload match should check");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        checked_state_labels(worker),
+        [
+            "WorkerState{job:Job{phase:Done}}",
+            "WorkerState{job:Job{phase:Ready}}"
+        ]
+    );
+    assert!(matches!(
+        only_transition(worker).next_state(),
+        CheckedNextState::Template(_)
+    ));
+}
+
+#[test]
 fn parses_checks_and_lowers_message_payload_step_binding() {
     let source = r#"
 module actor_payloads;
@@ -377,7 +592,7 @@ proc Worker mailbox bounded(1) {
         .expect("Worker should parse");
     assert_eq!(
         worker.steps[0].params[1],
-        FunctionParam::Pattern(SignaturePattern::Variant {
+        FunctionParam::Pattern(Pattern::Constructor {
             name: Identifier::new("Assign").expect("Assign identifier"),
             binding: Some(Param {
                 name: Identifier::new("job").expect("job identifier"),
@@ -876,7 +1091,7 @@ fn rejects_wildcard_payload_binding() {
 
     assert!(
         err.to_string()
-            .contains("wildcard step patterns cannot bind payloads")
+            .contains("wildcard patterns cannot bind payloads")
     );
 }
 
@@ -1291,11 +1506,9 @@ proc Sink mailbox bounded(1) {
 
     let err = check_source(source).expect_err("invalid step signature should fail first");
 
-    assert!(
-        err.to_string().contains(
-            "step second parameter must be a message variant pattern or wildcard pattern"
-        )
-    );
+    assert!(err.to_string().contains(
+        "step second parameter must be a message constructor pattern or wildcard pattern"
+    ));
 }
 
 #[test]
@@ -1846,10 +2059,173 @@ fn rejects_typed_msg_step_parameter() {
 
     let err = check_source(&source).expect_err("typed message parameter should fail");
 
+    assert!(err.to_string().contains(
+        "step second parameter must be a message constructor pattern or wildcard pattern"
+    ));
+}
+
+#[test]
+fn rejects_match_with_wrong_target() {
+    let source = ACTOR_PING.replace(
+        r#"fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match state {
+            Ping => {
+                emit "worker handled Ping";
+                return Stop(Handled);
+            }
+        }
+    }"#,
+    );
+
+    let err = check_source(&source).expect_err("wrong match scrutinee should fail");
+
     assert!(
         err.to_string().contains(
-            "step second parameter must be a message variant pattern or wildcard pattern"
+            "process Worker match scrutinee state must be the step message parameter msg"
         )
+    );
+}
+
+#[test]
+fn rejects_match_with_wrong_message_parameter_type() {
+    let source = ACTOR_PING.replace(
+        r#"fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }"#,
+        r#"fn step(state: WorkerState, msg: MainMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            Ping => {
+                emit "worker handled Ping";
+                return Stop(Handled);
+            }
+        }
+    }"#,
+    );
+
+    let err = check_source(&source).expect_err("wrong message parameter type should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker message parameter msg has type MainMsg, expected WorkerMsg")
+    );
+}
+
+#[test]
+fn rejects_missing_match_arm() {
+    let source = ACTOR_SEQUENCE.replace(
+        r#"fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled First";
+        return Continue(SawFirst);
+    }
+
+    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            First => {
+                emit "worker handled First";
+                return Continue(SawFirst);
+            }
+        }
+    }"#,
+    );
+
+    let err = check_source(&source).expect_err("missing match arm should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker must declare step pattern for message Second")
+    );
+}
+
+#[test]
+fn rejects_duplicate_match_arm() {
+    let source = ACTOR_SEQUENCE.replace(
+        r#"fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled First";
+        return Continue(SawFirst);
+    }
+
+    fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            First => {
+                emit "worker handled First";
+                return Continue(SawFirst);
+            }
+            First => {
+                emit "worker handled First again";
+                return Stop(Done);
+            }
+        }
+    }"#,
+    );
+
+    let err = check_source(&source).expect_err("duplicate match arm should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker declares duplicate step pattern for message First")
+    );
+}
+
+#[test]
+fn rejects_unknown_match_arm() {
+    let source = ACTOR_PING.replace(
+        r#"fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            Unknown => {
+                emit "worker handled Ping";
+                return Stop(Handled);
+            }
+        }
+    }"#,
+    );
+
+    let err = check_source(&source).expect_err("unknown match arm should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker step pattern message Unknown is not accepted")
+    );
+}
+
+#[test]
+fn rejects_mixed_parameter_pattern_and_match_dispatch() {
+    let source = ACTOR_SEQUENCE.replace(
+        r#"fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Second";
+        return Stop(Done);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            Second => {
+                emit "worker handled Second";
+                return Stop(Done);
+            }
+        }
+    }"#,
+    );
+
+    let err = check_source(&source).expect_err("mixed step dispatch should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker cannot mix match step bodies with step parameter patterns")
     );
 }
 
@@ -1866,23 +2242,101 @@ fn rejects_step_pattern_invalid_next_state() {
 }
 
 #[test]
-fn rejects_message_match_body_syntax() {
+fn rejects_match_arm_comma_separator() {
     let source = ACTOR_PING.replace(
-        r#"emit "worker handled Ping";
-        return Stop(Handled);"#,
-        r#"match msg {
+        r#"fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            Ping => {
+                emit "worker handled Ping";
+                return Stop(Handled);
+            },
+        }
+    }"#,
+    );
+
+    let err = parse_source(&source).expect_err("comma-separated match arms should fail");
+
+    assert!(
+        err.to_string()
+            .contains("match arms are block-delimited and must not use comma separators")
+    );
+}
+
+#[test]
+fn rejects_match_body_in_init_for_buildable_source() {
+    let source = ACTOR_PING.replace(
+        r#"fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }"#,
+        r#"fn init() -> WorkerState ! [] ~ [] @det {
+        match Idle {
+            Idle => {
+                return Idle;
+            }
+        }
+    }"#,
+    );
+
+    let module = parse_source(&source).expect("init match body should parse");
+    let err = check_module(module).expect_err("init match body should fail checking");
+
+    assert!(
+        err.to_string()
+            .contains("init must have a body block for buildable source")
+    );
+}
+
+#[test]
+fn rejects_trailing_statement_after_match_body() {
+    let source = ACTOR_PING.replace(
+        r#"fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
             Ping => {
                 emit "worker handled Ping";
                 return Stop(Handled);
             }
-        }"#,
+        }
+        return Stop(Handled);
+    }"#,
     );
 
-    let err = parse_source(&source).expect_err("message match body should fail");
+    let err = parse_source(&source).expect_err("trailing statement after match should fail");
 
-    assert!(err.to_string().contains(
-        "message match bodies are not supported; declare one step clause per message variant"
-    ));
+    assert!(
+        err.to_string()
+            .contains("match body must be the whole function body in this source slice")
+    );
+}
+
+#[test]
+fn rejects_nested_match_body_syntax() {
+    let source = ACTOR_PING.replace(
+        r#"emit "worker handled Ping";
+        return Stop(Handled);"#,
+        r#"emit "before match";
+        match msg {
+            Ping => {
+                emit "worker handled Ping";
+                return Stop(Handled);
+            }
+        }
+        return Stop(Handled);"#,
+    );
+
+    let err = parse_source(&source).expect_err("nested match body should fail");
+
+    assert!(
+        err.to_string()
+            .contains("match body must be the whole function body in this source slice")
+    );
 }
 
 #[test]
@@ -3343,10 +3797,10 @@ fn checked_type_count_overflow_module() -> Module {
                 effects: Vec::new(),
                 may: Vec::new(),
                 determinism: Determinism::Det,
-                body: Some(FunctionBlock {
+                body: Some(FunctionBody::Block(FunctionBlock {
                     statements: Vec::new(),
                     returns: ReturnExpr::Value(ValueExpr::Identifier(ident(state_name.as_str()))),
-                }),
+                })),
             },
             steps: vec![Function {
                 name: ident("step"),
@@ -3355,7 +3809,7 @@ fn checked_type_count_overflow_module() -> Module {
                         name: ident("state"),
                         ty: state_type.clone(),
                     }),
-                    FunctionParam::Pattern(SignaturePattern::Wildcard),
+                    FunctionParam::Pattern(Pattern::Wildcard),
                 ],
                 return_type: TypeRef::Applied {
                     constructor: ident("ProcResult"),
@@ -3364,13 +3818,13 @@ fn checked_type_count_overflow_module() -> Module {
                 effects: Vec::new(),
                 may: Vec::new(),
                 determinism: Determinism::Det,
-                body: Some(FunctionBlock {
+                body: Some(FunctionBody::Block(FunctionBlock {
                     statements: Vec::new(),
                     returns: ReturnExpr::Call {
                         name: ident("Stop"),
                         arg: ValueExpr::Identifier(ident("state")),
                     },
-                }),
+                })),
             }],
         });
     }

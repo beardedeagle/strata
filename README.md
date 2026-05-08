@@ -68,6 +68,17 @@ records process, message, state, and output IDs in:
 target/strata/actor_sequence.observability.jsonl
 ```
 
+The same message-keyed transitions can be authored with a whole-body match:
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_match.str
+cargo run -p strata --bin strata -- build examples/actor_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
+```
+
+That example uses `match msg` as an authoring form while lowering to typed
+Mantle transition IDs, not runtime source-string dispatch.
+
 Process references support multiple runtime instances of one process definition:
 
 ```sh
@@ -88,8 +99,8 @@ cargo run -p strata --bin strata -- build examples/actor_payloads.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
 ```
 
-That example sends `Assign(Job { phase: Ready })`, binds the payload in the
-worker `step` signature as `Assign(job: Job)`, and returns a whole replacement
+That example sends `Assign(Job { phase: Ready })`, binds the payload with a
+`step` parameter pattern as `Assign(job: Job)`, and returns a whole replacement
 state containing the bound payload value.
 
 Process references can travel as typed immutable payloads:

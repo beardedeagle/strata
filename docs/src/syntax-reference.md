@@ -81,8 +81,10 @@ message_alias =
 
 The aliases and functions may appear in any order. `State`, `Msg`, and `init`
 must each appear exactly once. Each message variant must resolve to exactly one
-`step` clause, either through an explicit variant pattern or through one
-wildcard pattern. Other process members are rejected.
+`step` clause, either through an explicit constructor pattern, through one
+wildcard pattern, or through one match step body. A process cannot mix step
+parameter patterns with a match step body in this slice. Other process members
+are rejected.
 
 ## Functions
 
@@ -99,12 +101,12 @@ params =
 
 function_param =
     param_binding
-  | signature_pattern
+  | pattern
 
 param_binding =
     ident ":" type_ref
 
-signature_pattern =
+pattern =
     ident
   | ident "(" ident ":" type_ref ")"
   | "_"
@@ -131,17 +133,28 @@ deterministic functions and empty may-behavior lists.
 function_body =
     ";"
   | "{" block_body "}"
+  | "{" match_body "}"
 
 block_body =
     statement* return_statement
+
+match_body =
+    "match" ident "{" match_arm+ "}"
+
+match_arm =
+    pattern "=>" "{" block_body "}"
 ```
 
-Buildable source requires bodies. `init` uses no parameters. Each `step` uses
-`state: StateType` followed by one message-variant or wildcard signature
-pattern:
+Patterns are source-level binding and decomposition syntax. This source slice
+admits constructor patterns, constructor payload bindings, and `_` wildcards;
+the first buildable semantic consumer is actor `step` message dispatch.
+
+Buildable source requires bodies. `init` uses no parameters. Each
+parameter-pattern `step` uses `state: StateType` followed by one message
+constructor or wildcard pattern:
 
 ```text
-step_function =
+parameter_pattern_step_function =
     "fn" "step" "(" "state" ":" type_ref ","
         (ident | ident "(" ident ":" type_ref ")" | "_") ")"
     "->" "ProcResult" "<" type_ref ">"
@@ -150,12 +163,27 @@ step_function =
 ```
 
 The first `type_ref` must name the process state type. An `ident` after the
-comma is a message variant accepted by the process message type. A payload
+comma is a message constructor accepted by the process message type. A payload
 pattern such as `Assign(job: Job)` binds the received payload as an immutable
 transition-local value. `_` is a wildcard pattern that covers accepted variants
 without explicit clauses.
-Signature patterns are accepted only for actor `step` message dispatch in this
-slice.
+
+A match `step` uses a typed message parameter and a whole-body
+`match` over that parameter:
+
+```text
+match_step_function =
+    "fn" "step" "(" "state" ":" type_ref "," ident ":" type_ref ")"
+    "->" "ProcResult" "<" type_ref ">"
+    "!" effect_list "~" "[]" "@det"
+    "{" match_body "}"
+```
+
+Each match arm uses the same pattern syntax as parameter-pattern dispatch. The
+match scrutinee must be the typed message parameter in the current buildable
+step subset. Match arms are block-delimited and do not use comma separators.
+The step effect list applies to every generated transition, so each arm must
+use exactly the declared effects.
 
 ## Statements
 
