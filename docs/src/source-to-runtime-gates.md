@@ -47,6 +47,10 @@ cargo run -p strata --bin strata -- check examples/function_payload_match.str
 cargo run -p strata --bin strata -- build examples/function_payload_match.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/function_payload_match.mta
 
+cargo run -p strata --bin strata -- check examples/state_payload_enum.str
+cargo run -p strata --bin strata -- build examples/state_payload_enum.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
+
 cargo run -p strata --bin strata -- check examples/actor_instances.str
 cargo run -p strata --bin strata -- build examples/actor_instances.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta

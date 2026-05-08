@@ -2,7 +2,7 @@ use super::ast::EnumVariant;
 use super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedTypeKind,
+    CheckedTransition, CheckedTypeKind, CheckedValueTemplate,
 };
 use super::lexer::{Lexer, TokenKind};
 use super::*;
@@ -68,6 +68,8 @@ proc Main mailbox bounded(1) {
 const FUNCTION_MATCH: &str = include_str!("../../../../examples/function_match.str");
 const FUNCTION_PAYLOAD_MATCH: &str =
     include_str!("../../../../examples/function_payload_match.str");
+const STATE_PAYLOAD_ENUM: &str = include_str!("../../../../examples/state_payload_enum.str");
+const ACTOR_REPLY: &str = include_str!("../../../../examples/actor_reply.str");
 
 const ACTOR_PING: &str = r#"
 module actor_ping;
@@ -1838,33 +1840,282 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
-fn rejects_state_enum_payload_variant() {
-    let source = r#"
-module state_payload;
+fn checks_payload_state_enum_values() {
+    let checked = check_source(STATE_PAYLOAD_ENUM).expect("payload state enum should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker process should be checked");
 
-record Job;
-enum MainState { Idle(Job) }
+    assert_eq!(
+        checked_state_labels(worker),
+        ["Idle", "Working(Job{phase:Ready})"]
+    );
+    assert_eq!(worker.init_state(), checked_state_id(0));
+    match only_transition(worker).next_state() {
+        CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        }) => {
+            assert_eq!(&ty, worker.state_type());
+            assert_eq!(variant.as_str(), "Working");
+            assert_eq!(
+                *payload,
+                CheckedValueTemplate::ReceivedPayload {
+                    ty: worker.message_cases()[0]
+                        .payload_type()
+                        .expect("Assign should carry Job")
+                        .clone(),
+                }
+            );
+        }
+        next_state => panic!("expected payload enum next-state template, got {next_state:?}"),
+    }
+}
+
+#[test]
+fn checks_concrete_payload_state_enum_init_value() {
+    let source = STATE_PAYLOAD_ENUM
+        .replace("fn init() -> WorkerState ! [] ~ [] @det {\n        return Idle;\n    }", "fn init() -> WorkerState ! [] ~ [] @det {\n        return Working(Job { phase: Ready });\n    }")
+        .replace("return Stop(Working(job));", "return Stop(Idle);");
+
+    let checked = check_source(&source).expect("concrete payload state enum init should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker process should be checked");
+
+    assert_eq!(
+        checked_state_labels(worker),
+        ["Idle", "Working(Job{phase:Ready})"]
+    );
+    assert_eq!(worker.init_state(), checked_state_id(1));
+    assert_eq!(
+        only_transition(worker).next_state(),
+        CheckedNextState::Value(checked_state_id(0))
+    );
+}
+
+#[test]
+fn rejects_payload_state_constructor_without_payload_value() {
+    let source = STATE_PAYLOAD_ENUM.replace("return Stop(Working(job));", "return Stop(Working);");
+
+    let err =
+        check_source(&source).expect_err("payload state constructor without payload should fail");
+
+    assert!(err.to_string().contains(
+        "enum variant Working requires a payload and cannot be used as a fieldless value"
+    ));
+}
+
+#[test]
+fn rejects_fieldless_state_constructor_with_payload_value() {
+    let source =
+        STATE_PAYLOAD_ENUM.replace("return Stop(Working(job));", "return Stop(Idle(job));");
+
+    let err =
+        check_source(&source).expect_err("fieldless state constructor with payload should fail");
+
+    assert!(
+        err.to_string()
+            .contains("enum variant Idle does not accept a payload")
+    );
+}
+
+#[test]
+fn rejects_payload_state_constructor_with_wrong_payload_type() {
+    let source =
+        STATE_PAYLOAD_ENUM.replace("return Stop(Working(job));", "return Stop(Working(Ready));");
+
+    let err = check_source(&source).expect_err("wrong state payload type should fail");
+
+    assert!(
+        err.to_string()
+            .contains("record state type Job must be constructed with Job { ... }")
+    );
+}
+
+#[test]
+fn rejects_unknown_payload_state_constructor() {
+    let source =
+        STATE_PAYLOAD_ENUM.replace("return Stop(Working(job));", "return Stop(Missing(job));");
+
+    let err = check_source(&source).expect_err("unknown state constructor should fail");
+
+    assert!(
+        err.to_string()
+            .contains("value Missing is not a variant of enum WorkerState")
+    );
+}
+
+#[test]
+fn rejects_process_ref_payload_state_constructor() {
+    let source = r#"
+module state_process_ref_payload;
+
+record MainState;
 enum MainMsg { Start }
+enum WorkerState { Idle, Routed(ProcessRef<Sink>) }
+enum WorkerMsg { Start }
+record SinkState;
+enum SinkMsg { Ping }
 
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
     fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Start;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
         return Idle;
     }
 
-    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+    fn step(state: WorkerState, Start) -> ProcResult<WorkerState> ! [spawn] ~ [] @det {
+        let sink: ProcessRef<Sink> = spawn Sink;
+        return Stop(Routed(sink));
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Ping) -> ProcResult<SinkState> ! [] ~ [] @det {
         return Stop(state);
     }
 }
 "#;
 
-    let err = check_source(source).expect_err("state payload variant should fail");
+    let err = check_source(source).expect_err("process refs in state payloads should fail");
 
     assert!(
         err.to_string()
-            .contains("state enum MainState variant Idle must not declare a payload")
+            .contains("process reference payloads are not valid state values"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_received_process_ref_payload_state_constructor() {
+    let source = ACTOR_REPLY
+        .replace(
+            "record WorkerState;",
+            "enum WorkerState { Idle, Routed(ProcessRef<Sink>) }",
+        )
+        .replace("return WorkerState;", "return Idle;")
+        .replace(
+            "send reply_to Done;\n        return Stop(state);",
+            "send reply_to Done;\n        return Stop(Routed(reply_to));",
+        );
+
+    let err =
+        check_source(&source).expect_err("received process refs in state payloads should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process reference payloads are not valid state values"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_nested_process_ref_message_payload_with_direct_payload_diagnostic() {
+    let source = r#"
+module nested_process_ref_payload;
+
+record MainState;
+record WorkerState;
+record SinkState;
+enum Envelope { Forward(ProcessRef<Sink>) }
+enum MainMsg { Start }
+enum WorkerMsg { Route(Envelope) }
+enum SinkMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Route(Forward(sink));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Route(env: Envelope)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("nested process refs in payloads should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process references must be direct message payloads"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_assignment_style_payload_state_construction() {
+    let source = STATE_PAYLOAD_ENUM.replace(
+        "return Stop(Working(job));",
+        "return Stop(Working(Job { phase = Ready }));",
+    );
+
+    let err =
+        parse_source(&source).expect_err("assignment in payload state construction should fail");
+
+    assert!(
+        err.to_string()
+            .contains("record value fields use ':'; assignment syntax is not supported")
     );
 }
 

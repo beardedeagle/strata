@@ -1,0 +1,49 @@
+module state_payload_enum;
+
+record MainState;
+record Job {
+    phase: JobPhase,
+}
+enum JobPhase {
+    Ready,
+    Done,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Idle,
+    Working(Job),
+}
+enum WorkerMsg {
+    Assign(Job),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker entered payload state";
+        return Stop(Working(job));
+    }
+}

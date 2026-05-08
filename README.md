@@ -115,6 +115,18 @@ That example constructs payload-bearing enum values in immutable source helper
 returns, matches them through signature patterns and whole-body matches, and
 lowers dynamic received payload wrapping into a Mantle value template.
 
+Process state enums can carry typed immutable payloads:
+
+```sh
+cargo run -p strata --bin strata -- check examples/state_payload_enum.str
+cargo run -p strata --bin strata -- build examples/state_payload_enum.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
+```
+
+That example admits `Idle` and `Working(Job { phase: Ready })` as typed state
+values, then lowers a received payload state transition into a Mantle value
+template that must resolve to the admitted state table before execution.
+
 Process references support multiple runtime instances of one process definition:
 
 ```sh

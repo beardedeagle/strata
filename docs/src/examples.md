@@ -14,15 +14,16 @@ Read them in this order:
    pattern matching outside actor dispatch.
 7. `function_payload_match.str` for payload-bearing enum construction and
    matching in normal source helpers.
-8. `actor_instances.str` for multiple runtime instances of one process
+8. `state_payload_enum.str` for payload-bearing process state enum transitions.
+9. `actor_instances.str` for multiple runtime instances of one process
    definition.
-9. `actor_payloads.str` for typed message payloads and immutable payload
+10. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-10. `actor_payload_match.str` for the same payload binding through a whole-body
+11. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-11. `actor_reply.str` for transporting typed process references through message
+12. `actor_reply.str` for transporting typed process references through message
    payloads.
-12. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+13. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -178,6 +179,28 @@ Key source ideas:
   payload inside the selected arm.
 - `state_for(Assigned(job))` proves a process-local helper can wrap a received
   immutable payload into a source enum value before lowering.
+
+## State Payload Enum
+
+`examples/state_payload_enum.str` admits payload-bearing process state enum
+values. It starts a worker in fieldless `Idle`, receives an immutable `Job`
+payload, and transitions to `Working(Job { phase: Ready })`.
+
+```sh
+cargo run -p strata --bin strata -- check examples/state_payload_enum.str
+cargo run -p strata --bin strata -- build examples/state_payload_enum.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
+```
+
+Key source ideas:
+
+- `enum WorkerState { Idle, Working(Job) }` declares a payload-bearing state
+  variant.
+- `return Stop(Working(job));` constructs a whole replacement state from an
+  immutable received payload.
+- Mantle receives a next-state value template and admits the resulting
+  `Working(Job{phase:Ready})` only because it is present in the typed state
+  table.
 
 ## Actor Instances
 

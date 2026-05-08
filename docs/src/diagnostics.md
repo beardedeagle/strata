@@ -80,6 +80,7 @@ result of the first invalid shape.
 | `payload has type ..., expected ...` | A runtime envelope or artifact payload template carries the wrong value type. | Match the payload value type to the target message variant. |
 | `payload ... exceeds maximum length` | A payload value label is too large for the artifact or runtime trace boundary. | Use a smaller payload value or split the payload into smaller fields/messages. |
 | `payload ... is not a bound process reference` | A `ProcessRef<T>` payload send uses a value that is not a process reference. | Pass an immutable process reference binding or received `ProcessRef<T>` payload. |
+| `process references must be direct message payloads` / `process reference template must be a direct message payload` | A process reference payload is nested inside a record, enum, or next-state template. | Send `ProcessRef<T>` only as the direct payload of a message that declares `ProcessRef<T>`. |
 
 ## Match Errors
 
@@ -100,6 +101,7 @@ result of the first invalid shape.
 | `value ... is not a variant of enum ...` | A returned enum value does not belong to the expected enum. | Return a variant from the process state enum. |
 | `record constructor ... does not match expected record ...` | A record value constructor does not match the expected state type. | Construct the expected record type. |
 | `record value fields use ':'` | A record value used assignment syntax. | Use `field: value`, not `field = value`. |
+| `process reference payloads are not valid state values` / `process reference templates are not valid next-state values` | A state value or next-state template tries to embed runtime process authority. | Keep process references in direct message payloads; process states must be immutable data values. |
 | `state value state conflicts` | A state enum variant is named `state`. | Rename the variant. |
 
 ## Process And Mailbox Errors

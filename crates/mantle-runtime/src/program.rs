@@ -1006,6 +1006,16 @@ impl LoadedTemplateAdmission<'_> {
                 received_payload_type.as_u32()
             )));
         }
+        if !self.allow_direct_process_ref
+            && matches!(
+                self.program.type_entry(ty)?.kind,
+                ArtifactTypeKind::ProcessRef { .. }
+            )
+        {
+            return Err(Error::new(format!(
+                "{field} process reference template must be a direct message payload"
+            )));
+        }
         Ok(())
     }
 

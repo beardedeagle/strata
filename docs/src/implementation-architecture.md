@@ -119,6 +119,7 @@ The runnable examples are:
 - `examples/init_match.str`;
 - `examples/function_match.str`;
 - `examples/function_payload_match.str`;
+- `examples/state_payload_enum.str`;
 - `examples/actor_instances.str`;
 - `examples/actor_payloads.str`;
 - `examples/actor_payload_match.str`;

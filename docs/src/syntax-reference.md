@@ -56,8 +56,8 @@ enum_variant =
 ```
 
 Enums used as process state or message types must have at least one variant.
-Payload variants are accepted for process message enums. State enum payload
-variants are rejected in this slice.
+Payload variants are accepted for process state and message enums. State enum
+payload constructors create immutable whole-state values.
 
 ## Processes
 

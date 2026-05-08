@@ -374,7 +374,18 @@ fn validate_value_template_process_refs(
 
 fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) -> Result<()> {
     match template {
-        CheckedValueTemplate::Literal(_) | CheckedValueTemplate::ReceivedPayload { .. } => Ok(()),
+        CheckedValueTemplate::Literal(value) => {
+            if value.process_ref_payload().is_some() {
+                return Err(process_ref_next_state_error());
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::ReceivedPayload { ty } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            Ok(())
+        }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference templates are not valid next-state values",
         )),
@@ -388,6 +399,10 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
             Ok(())
         }
     }
+}
+
+fn process_ref_next_state_error() -> Error {
+    Error::new("process reference templates are not valid next-state values")
 }
 
 fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate) -> bool {
@@ -420,6 +435,11 @@ fn evaluate_checked_template(
                     payload.ty(),
                     ty
                 )));
+            }
+            if payload.process_ref_payload().is_some() {
+                return Err(Error::new(
+                    "process reference payloads are not valid state values",
+                ));
             }
             Ok(payload.clone())
         }
@@ -1776,6 +1796,76 @@ mod tests {
     }
 
     #[test]
+    fn static_validation_rejects_process_ref_payload_enum_next_state_template() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: value_type("MainState"),
+            state_values: checked_state_values("MainState", &["MainState"]),
+            message_type: value_type("MainMsg"),
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: Vec::new(),
+                actions: Vec::new(),
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: value_type("WorkerState"),
+            state_values: checked_state_values("WorkerState", &["Idle"]),
+            message_type: value_type("WorkerMsg"),
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Route".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(process_ref_type("Worker")),
+                )
+                .expect("valid checked message case"),
+            ],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
+                    ty: value_type("WorkerState"),
+                    variant: ident("Routed"),
+                    payload: Box::new(CheckedValueTemplate::ReceivedPayload {
+                        ty: process_ref_type("Worker"),
+                    }),
+                }),
+                effects: Vec::new(),
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("process ref payload enum next-state template should fail");
+
+        assert!(
+            err.to_string()
+                .contains("process reference templates are not valid next-state values")
+        );
+    }
+
+    #[test]
     fn static_validation_rejects_payload_template_next_state_outside_state_table() {
         let main = CheckedProcess::new(CheckedProcessParts {
             debug_name: ident("Main"),
@@ -1862,6 +1952,91 @@ mod tests {
 
         assert!(err.to_string().contains(
             "process Worker next_state template produced value WorkerState{active:Job{phase:Ready}} not admitted by state table"
+        ));
+    }
+
+    #[test]
+    fn static_validation_rejects_payload_enum_template_next_state_outside_state_table() {
+        let main = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Main"),
+            state_type: value_type("MainState"),
+            state_values: checked_state_values("MainState", &["MainState"]),
+            message_type: value_type("MainMsg"),
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Start".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    None,
+                )
+                .expect("valid checked message case"),
+            ],
+            process_refs: vec![CheckedProcessRef::new(
+                ident("worker"),
+                checked_process_id(1),
+            )],
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Current,
+                effects: vec![Effect::Spawn, Effect::Send],
+                actions: vec![
+                    CheckedAction::Spawn {
+                        target: checked_process_id(1),
+                        process_ref: checked_process_ref_id(0),
+                    },
+                    CheckedAction::Send {
+                        target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                        message: checked_message_id(0),
+                        payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+                            value_type("Job"),
+                            "Job{phase:Ready}".to_string(),
+                        ))),
+                    },
+                ],
+            })],
+        });
+        let worker = CheckedProcess::new(CheckedProcessParts {
+            debug_name: ident("Worker"),
+            state_type: value_type("WorkerState"),
+            state_values: checked_state_values("WorkerState", &["Idle"]),
+            message_type: value_type("WorkerMsg"),
+            message_cases: vec![
+                CheckedMessageCase::new(
+                    "Assign".to_string(),
+                    CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                    Some(value_type("Job")),
+                )
+                .expect("valid checked message case"),
+            ],
+            process_refs: Vec::new(),
+            mailbox_bound: 1,
+            init_state: checked_state_id(0),
+            transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                message: checked_message_id(0),
+                step_result: CheckedStepResult::Stop,
+                next_state: CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
+                    ty: value_type("WorkerState"),
+                    variant: ident("Working"),
+                    payload: Box::new(CheckedValueTemplate::ReceivedPayload {
+                        ty: value_type("Job"),
+                    }),
+                }),
+                effects: Vec::new(),
+                actions: Vec::new(),
+            })],
+        });
+
+        let err = validate_action_references(
+            &[main, worker],
+            &checked_process_id(0),
+            &checked_message_id(0),
+        )
+        .expect_err("unadmitted payload-derived enum state should fail");
+
+        assert!(err.to_string().contains(
+            "process Worker next_state template produced value Working(Job{phase:Ready}) not admitted by state table"
         ));
     }
 
