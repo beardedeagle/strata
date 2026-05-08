@@ -29,7 +29,7 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=7
+schema_version=8
 source_language=strata
 ```
 

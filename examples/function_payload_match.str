@@ -1,0 +1,90 @@
+module function_payload_match;
+
+record MainState {
+    signature: WorkStatus,
+    body: WorkStatus,
+}
+record Job {
+    phase: JobPhase,
+}
+record WorkerState {
+    work: Work,
+}
+enum JobPhase {
+    Ready,
+    Done,
+}
+enum Work {
+    Empty,
+    Assigned(Job),
+}
+enum WorkStatus {
+    Idle,
+    Active(Job),
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerMsg {
+    Assign(Job),
+}
+
+fn status_sig(Assigned(job: Job)) -> WorkStatus ! [] ~ [] @det {
+    return Active(job);
+}
+
+fn status_sig(Empty) -> WorkStatus ! [] ~ [] @det {
+    return Idle;
+}
+
+fn status_body(work: Work) -> WorkStatus ! [] ~ [] @det {
+    match work {
+        Empty => {
+            return Idle;
+        }
+        Assigned(job: Job) => {
+            return Active(job);
+        }
+    }
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            signature: status_sig(Assigned(Job { phase: Ready })),
+            body: status_body(Assigned(Job { phase: Done })),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn, send] ~ [] @det {
+        emit "source helper matched payload enum";
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { work: Empty };
+    }
+
+    fn state_for(Assigned(job: Job)) -> WorkerState ! [] ~ [] @det {
+        return WorkerState { work: Assigned(job) };
+    }
+
+    fn state_for(Empty) -> WorkerState ! [] ~ [] @det {
+        return WorkerState { work: Empty };
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "process helper wrapped payload enum";
+        return Stop(state_for(Assigned(job)));
+    }
+}

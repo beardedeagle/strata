@@ -129,6 +129,17 @@ MainState
 
 Record value fields use `:`, not `=`.
 
+Payload-bearing enum values use constructor syntax with one immutable payload
+value:
+
+```strata
+Assigned(Job { phase: Ready })
+```
+
+The checker resolves this form against the expected enum type. If the identifier
+names a source helper instead, it is expanded as a helper call; constructor and
+helper names cannot collide silently.
+
 ## Enums
 
 Enums define named variants:
@@ -209,7 +220,7 @@ dispatch entries and cannot perform runtime effects. A process-local helper is
 visible only inside that process. A module helper is visible throughout the
 module. Recursive helper call cycles are rejected in this source slice.
 
-Function signature patterns can author fieldless enum dispatch:
+Function signature patterns can author enum dispatch:
 
 ```strata
 fn readiness(Cold) -> Readiness ! [] ~ [] @det {
@@ -218,6 +229,10 @@ fn readiness(Cold) -> Readiness ! [] ~ [] @det {
 
 fn readiness(Warm) -> Readiness ! [] ~ [] @det {
     return WarmReady;
+}
+
+fn status(Assigned(job: Job)) -> WorkStatus ! [] ~ [] @det {
+    return Active(job);
 }
 ```
 
@@ -236,9 +251,11 @@ fn readiness_body(mode: StartupMode) -> Readiness ! [] ~ [] @det {
 }
 ```
 
-These matches are exhaustive, duplicate-free, and immutable. Payload-binding
-patterns remain available for actor message dispatch; normal source function
-patterns currently cover fieldless enum constructors.
+These matches are exhaustive, duplicate-free, and immutable. Payload-bearing
+source helper patterns bind payloads as immutable values. A helper call must
+provide a concrete enum constructor value for signature-pattern or whole-body
+match dispatch; helpers are still expanded before lowering and do not become
+runtime dispatch entries.
 
 ## Statements
 
@@ -302,9 +319,10 @@ process ID. Source names remain diagnostics and trace metadata.
 
 Patterns are source-level syntax for typed value decomposition. The current
 runnable subset admits constructor patterns, constructor payload bindings, and
-wildcards. `init` may use one whole-body match over a fieldless enum constructor
-to select the initial state, and actor message dispatch may use one whole-body
-match over the typed message parameter:
+wildcards. Normal source helpers may match concrete enum values, `init` may use
+one whole-body match over a fieldless enum constructor to select the initial
+state, and actor message dispatch may use one whole-body match over the typed
+message parameter:
 
 ```strata
 fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {

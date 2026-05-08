@@ -1063,6 +1063,9 @@ impl ArtifactProcess {
                 }
                 Ok(())
             }
+            ArtifactValueTemplate::EnumVariant { payload, .. } => {
+                self.validate_template_process_refs(artifact, payload, spawned_refs)
+            }
             ArtifactValueTemplate::Record { fields, .. } => {
                 for field in fields {
                     self.validate_template_process_refs(artifact, &field.value, spawned_refs)?;
@@ -1106,6 +1109,11 @@ pub enum ArtifactValueTemplate {
         target_process: ProcessId,
         process_ref: ProcessRefId,
     },
+    EnumVariant {
+        ty: TypeId,
+        variant: String,
+        payload: Box<ArtifactValueTemplate>,
+    },
     Record {
         ty: TypeId,
         fields: Vec<ArtifactValueTemplateField>,
@@ -1118,6 +1126,7 @@ impl ArtifactValueTemplate {
             Self::Literal { ty, .. }
             | Self::ReceivedPayload { ty }
             | Self::ProcessRef { ty, .. }
+            | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. } => *ty,
         }
     }
@@ -1150,6 +1159,18 @@ impl ArtifactValueTemplate {
             Self::ProcessRef { .. } => Err(Error::new(
                 "process reference template requires runtime process reference bindings",
             )),
+            Self::EnumVariant {
+                ty,
+                variant,
+                payload,
+            } => {
+                let payload = payload.evaluate_state_value(received_payload, type_label)?;
+                let value = format!("{variant}({})", payload.value);
+                let label = format!("{variant}({})", payload.label);
+                validate_value_label("enum variant template value", &value)?;
+                validate_value_label("enum variant template label", &label)?;
+                Ok(ArtifactStateValue::with_label(*ty, value, label))
+            }
             Self::Record { ty, fields } => {
                 let ty_label = type_label(*ty)?;
                 let mut parts = Vec::with_capacity(fields.len());
@@ -1175,6 +1196,7 @@ impl ArtifactValueTemplate {
             Self::Literal { .. } => false,
             Self::ReceivedPayload { .. } => true,
             Self::ProcessRef { .. } => false,
+            Self::EnumVariant { payload, .. } => payload.depends_on_received_payload(),
             Self::Record { fields, .. } => fields
                 .iter()
                 .any(|field| field.value.depends_on_received_payload()),
@@ -1236,6 +1258,21 @@ impl ArtifactValueTemplate {
                     &format!("{field}.type_id"),
                     *ty,
                     *target_process,
+                )
+            }
+            Self::EnumVariant {
+                ty,
+                variant,
+                payload,
+            } => {
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+                validate_ident_field(&format!("{field}.variant"), variant)?;
+                payload.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.payload"),
+                    None,
+                    received_payload_type,
+                    depth + 1,
                 )
             }
             Self::Record { ty, fields } => {
@@ -1423,6 +1460,17 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
                 process_ref.as_u32()
             ));
         }
+        ArtifactValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=enum_variant\n{prefix}.type_id={}\n{prefix}.variant={variant}\n",
+                ty.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.payload"), payload);
+        }
         ArtifactValueTemplate::Record { ty, fields } => {
             encoded.push_str(&format!(
                 "{prefix}.kind=record\n{prefix}.type_id={}\n{prefix}.field_count={}\n",
@@ -1479,6 +1527,15 @@ fn decode_value_template(
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
             target_process: fields.take_process_id(&format!("{prefix}.target_process"))?,
             process_ref: fields.take_process_ref_id(&format!("{prefix}.process_ref"))?,
+        }),
+        "enum_variant" => Ok(ArtifactValueTemplate::EnumVariant {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            variant: fields.take_required(&format!("{prefix}.variant"))?,
+            payload: Box::new(decode_value_template(
+                fields,
+                &format!("{prefix}.payload"),
+                depth + 1,
+            )?),
         }),
         "record" => {
             let ty = fields.take_type_id(&format!("{prefix}.type_id"))?;

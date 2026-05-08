@@ -857,6 +857,21 @@ fn evaluate_runtime_template(
                 }),
             })
         }
+        ArtifactValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        } => {
+            let payload =
+                evaluate_runtime_template(program, payload, received_payload, step, process_refs)?;
+            let value = format!("{variant}({})", payload.value);
+            validate_payload_value_label(&value)?;
+            Ok(ArtifactPayload {
+                ty: *ty,
+                value,
+                process_ref: None,
+            })
+        }
         ArtifactValueTemplate::Record { ty, fields } => {
             let type_label = program.type_label(*ty)?;
             let mut parts = Vec::with_capacity(fields.len());

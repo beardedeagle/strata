@@ -540,12 +540,20 @@ impl<'a> MessageCaseBuilder<'a> {
                     process_functions: &self.process.functions,
                     semantic_index: self.semantic_index,
                 };
-                let binding = bindings.first().map(|binding| SourceValueBinding {
-                    name: binding.name,
-                    ty: binding.ty,
-                });
-                let payload =
-                    resolve_source_value_expr(&function_scope, payload_type, payload, binding, 0)?;
+                let source_bindings = bindings
+                    .iter()
+                    .map(|binding| SourceValueBinding {
+                        name: binding.name,
+                        ty: binding.ty,
+                    })
+                    .collect::<Vec<_>>();
+                let payload = resolve_source_value_expr(
+                    &function_scope,
+                    payload_type,
+                    payload,
+                    &source_bindings,
+                    0,
+                )?;
                 let label = if let Some(target) =
                     self.semantic_index.process_ref_target_type(payload_type)?
                 {
@@ -1004,11 +1012,15 @@ fn resolve_init_return_block_value(
             arg: Box::new(arg.clone()),
         },
     };
-    let binding = payload_binding.map(|binding| SourceValueBinding {
-        name: &binding.name,
-        ty: &binding.ty,
-    });
-    let value = resolve_source_value_expr(scope, &process.state_type, &value, binding, 0)?;
+    let bindings = payload_binding
+        .map(|binding| {
+            vec![SourceValueBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+            }]
+        })
+        .unwrap_or_default();
+    let value = resolve_source_value_expr(scope, &process.state_type, &value, &bindings, 0)?;
     if let Some(binding) = payload_binding {
         if source_value_uses_binding(&value, &binding.name) {
             return Err(Error::new(format!(
@@ -1017,7 +1029,7 @@ fn resolve_init_return_block_value(
             )));
         }
     }
-    check_source_value_type(scope, &process.state_type, &value, binding)?;
+    check_source_value_type(scope, &process.state_type, &value, &bindings)?;
     Ok(value)
 }
 
@@ -1319,6 +1331,9 @@ fn collect_source_value_expr_calls<'a>(value: &'a ValueExpr, calls: &mut BTreeSe
             calls.insert(name.as_str());
             collect_source_value_expr_calls(arg, calls);
         }
+        ValueExpr::EnumVariant { payload, .. } => {
+            collect_source_value_expr_calls(payload, calls);
+        }
         ValueExpr::Record(record) => {
             for field in &record.fields {
                 collect_source_value_expr_calls(&field.value, calls);
@@ -1374,13 +1389,6 @@ fn validate_binding_source_function_body(
                 binding_context: PatternBindingContext::Source { owner: &subject },
             };
             for arm in check_typed_match_arms(&pattern_context, &match_body.arms)? {
-                reject_source_function_payload_pattern(&subject, enum_decl, &arm.pattern, "match")?;
-                reject_source_function_payload_wildcard(
-                    &subject,
-                    enum_decl,
-                    &arm.pattern,
-                    "match",
-                )?;
                 validate_pure_source_function_block(owner, function, arm.body)?;
             }
             Ok(())
@@ -1399,10 +1407,10 @@ fn validate_binding_source_function_body(
     validate_source_function_body_values(
         &scope,
         function,
-        Some(SourceValueBinding {
+        &[SourceValueBinding {
             name: &param.name,
             ty: &param.ty,
-        }),
+        }],
     )
 }
 
@@ -1446,18 +1454,6 @@ fn validate_pattern_source_function_group(
                     binding_context: PatternBindingContext::Source { owner: &subject },
                 };
                 let checked_pattern = check_typed_match_pattern(&pattern_context, pattern)?;
-                reject_source_function_payload_pattern(
-                    &subject,
-                    enum_decl,
-                    &checked_pattern,
-                    "signature",
-                )?;
-                reject_source_function_payload_wildcard(
-                    &subject,
-                    enum_decl,
-                    &checked_pattern,
-                    "signature",
-                )?;
                 match checked_pattern {
                     TypedMatchPattern::Variant { variant, .. } => {
                         if explicit_arms[variant] {
@@ -1486,7 +1482,17 @@ fn validate_pattern_source_function_group(
                 )));
             }
         }
-        validate_source_function_body_values(&scope, function, None)?;
+        let body_bindings = match &function.params[0] {
+            FunctionParam::Pattern(Pattern::Constructor {
+                binding: Some(payload),
+                ..
+            }) => vec![SourceValueBinding {
+                name: &payload.name,
+                ty: &payload.ty,
+            }],
+            _ => Vec::new(),
+        };
+        validate_source_function_body_values(&scope, function, &body_bindings)?;
     }
 
     if wildcard_seen && explicit_arms.iter().all(|is_present| *is_present) {
@@ -1506,47 +1512,6 @@ fn validate_pattern_source_function_group(
         }
     }
     Ok(())
-}
-
-fn reject_source_function_payload_pattern(
-    subject: &str,
-    enum_decl: &Enum,
-    pattern: &TypedMatchPattern,
-    usage: &str,
-) -> Result<()> {
-    let TypedMatchPattern::Variant { variant, .. } = pattern else {
-        return Ok(());
-    };
-    let variant = &enum_decl.variants[*variant];
-    if variant.payload_type.is_some() {
-        return Err(Error::new(format!(
-            "{subject} {usage} pattern {} carries a payload; normal source function patterns require fieldless enum constructors in this source slice",
-            variant.name
-        )));
-    }
-    Ok(())
-}
-
-fn reject_source_function_payload_wildcard(
-    subject: &str,
-    enum_decl: &Enum,
-    pattern: &TypedMatchPattern,
-    usage: &str,
-) -> Result<()> {
-    if !matches!(pattern, TypedMatchPattern::Wildcard) {
-        return Ok(());
-    }
-    let Some(variant) = enum_decl
-        .variants
-        .iter()
-        .find(|variant| variant.payload_type.is_some())
-    else {
-        return Ok(());
-    };
-    Err(Error::new(format!(
-        "{subject} {usage} wildcard pattern covers payload-bearing variant {}; normal source function patterns require fieldless enum constructors in this source slice",
-        variant.name
-    )))
 }
 
 fn infer_pattern_function_enum_type(
@@ -1631,14 +1596,14 @@ fn source_function_body_scope<'a>(
 fn validate_source_function_body_values(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
     match function.body.as_ref().expect("validated function body") {
         FunctionBody::Block(body) => validate_source_function_return_expr(
             scope,
             &function.return_type,
             &body.returns,
-            binding,
+            bindings,
         ),
         FunctionBody::Match(match_body) => {
             let FunctionParam::Binding(param) = &function.params[0] else {
@@ -1654,11 +1619,28 @@ fn validate_source_function_body_values(
                 )));
             }
             for arm in &match_body.arms {
+                let mut arm_bindings = bindings.to_vec();
+                if let Pattern::Constructor {
+                    binding: Some(payload),
+                    ..
+                } = &arm.pattern
+                {
+                    if bindings.iter().any(|binding| binding.name == &payload.name) {
+                        return Err(Error::new(format!(
+                            "function {} match payload binding {} conflicts with an existing source value binding",
+                            function.name, payload.name
+                        )));
+                    }
+                    arm_bindings.push(SourceValueBinding {
+                        name: &payload.name,
+                        ty: &payload.ty,
+                    });
+                }
                 validate_source_function_return_expr(
                     scope,
                     &function.return_type,
                     &arm.body.returns,
-                    binding,
+                    &arm_bindings,
                 )?;
             }
             Ok(())
@@ -1670,7 +1652,7 @@ fn validate_source_function_return_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     returns: &ReturnExpr,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
     let value = match returns {
         ReturnExpr::Value(value) => value.clone(),
@@ -1679,19 +1661,21 @@ fn validate_source_function_return_expr(
             arg: Box::new(arg.clone()),
         },
     };
-    validate_source_function_value_expr(scope, expected_type, &value, binding)
+    validate_source_function_value_expr(scope, expected_type, &value, bindings)
 }
 
 fn validate_source_function_value_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
     match value {
-        ValueExpr::Identifier(_) => check_source_value_type(scope, expected_type, value, binding),
+        ValueExpr::Identifier(_) | ValueExpr::EnumVariant { .. } => {
+            check_source_value_type(scope, expected_type, value, bindings)
+        }
         ValueExpr::Call { name, arg } => {
-            validate_source_function_call(scope, expected_type, name, arg, binding)
+            validate_source_function_call_or_constructor(scope, expected_type, name, arg, bindings)
         }
         ValueExpr::Record(record) => {
             let record_decl = scope
@@ -1721,7 +1705,7 @@ fn validate_source_function_value_expr(
                         record.name, field.name
                     )));
                 }
-                validate_source_function_value_expr(scope, &field_decl.ty, &field.value, binding)?;
+                validate_source_function_value_expr(scope, &field_decl.ty, &field.value, bindings)?;
             }
             for field in &record_decl.fields {
                 if !seen.contains(field.name.as_str()) {
@@ -1736,14 +1720,45 @@ fn validate_source_function_value_expr(
     }
 }
 
+fn validate_source_function_call_or_constructor(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+    arg: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let constructor = enum_variant_for_expected_type(scope, expected_type, name)?;
+    let functions = source_function_group_option(scope, name)?;
+    if constructor.is_some() && functions.is_some() {
+        return Err(Error::new(format!(
+            "value expression {name}(...) is ambiguous between an enum constructor and source function"
+        )));
+    }
+    if constructor.is_some() {
+        return validate_source_enum_payload_value(scope, expected_type, name, arg, bindings);
+    }
+    let Some(functions) = functions else {
+        if identifier_starts_uppercase(name)
+            && let Ok(enum_decl) = scope.semantic_index.enum_decl(scope.module, expected_type)
+        {
+            return Err(Error::new(format!(
+                "value {name} is not a variant of enum {}",
+                enum_decl.name
+            )));
+        }
+        return Err(Error::new(format!("function {name} is not declared")));
+    };
+    validate_source_function_call(scope, expected_type, name, arg, bindings, &functions)
+}
+
 fn validate_source_function_call(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     name: &Identifier,
     arg: &ValueExpr,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
+    functions: &[&Function],
 ) -> Result<()> {
-    let functions = source_function_group(scope, name)?;
     let first = functions
         .first()
         .ok_or_else(|| Error::new(format!("function {name} is not declared")))?;
@@ -1768,25 +1783,42 @@ fn validate_source_function_call(
                     "function {name} must declare a binding parameter"
                 )));
             };
-            validate_source_function_value_expr(scope, &param.ty, arg, binding)
+            validate_source_function_value_expr(scope, &param.ty, arg, bindings)
         }
         SourceFunctionParamKind::Pattern => {
             let enum_type = infer_pattern_function_enum_type(
                 scope.module,
                 scope.semantic_index,
                 "source",
-                &functions,
+                functions,
             )?;
-            validate_source_function_value_expr(scope, &enum_type, arg, binding)
+            validate_source_function_value_expr(scope, &enum_type, arg, bindings)
         }
     }
+}
+
+fn validate_source_enum_payload_value(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+    payload: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let variant = enum_variant_for_expected_type(scope, expected_type, name)?
+        .ok_or_else(|| enum_value_error(scope, expected_type, name))?;
+    let Some(payload_type) = &variant.payload_type else {
+        return Err(Error::new(format!(
+            "enum variant {name} does not accept a payload"
+        )));
+    };
+    validate_source_function_value_expr(scope, payload_type, payload, bindings)
 }
 
 fn resolve_source_value_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
     if depth > MAX_VALUE_NESTING {
@@ -1798,10 +1830,18 @@ fn resolve_source_value_expr(
     match value {
         ValueExpr::Identifier(_) => Ok(value.clone()),
         ValueExpr::Call { name, arg } => {
-            resolve_source_function_call(scope, expected_type, name, arg, binding, depth + 1)
+            resolve_source_call_or_constructor(scope, expected_type, name, arg, bindings, depth + 1)
         }
+        ValueExpr::EnumVariant { name, payload } => resolve_source_enum_payload_value(
+            scope,
+            expected_type,
+            name,
+            payload,
+            bindings,
+            depth + 1,
+        ),
         ValueExpr::Record(record) => {
-            resolve_record_source_value_expr(scope, expected_type, record, binding, depth + 1)
+            resolve_record_source_value_expr(scope, expected_type, record, bindings, depth + 1)
         }
     }
 }
@@ -1810,7 +1850,7 @@ fn resolve_record_source_value_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     record: &RecordValue,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
     let Ok(record_decl) = scope
@@ -1835,7 +1875,7 @@ fn resolve_record_source_value_expr(
                 scope,
                 &field_decl.ty,
                 &field.value,
-                binding,
+                bindings,
                 depth + 1,
             )?,
         });
@@ -1846,15 +1886,107 @@ fn resolve_record_source_value_expr(
     }))
 }
 
+fn enum_variant_for_expected_type<'module>(
+    scope: &SourceFunctionScope<'module>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+) -> Result<Option<&'module EnumVariant>> {
+    let Ok(enum_decl) = scope.semantic_index.enum_decl(scope.module, expected_type) else {
+        return Ok(None);
+    };
+    Ok(enum_decl
+        .variants
+        .iter()
+        .find(|variant| variant.name == *name))
+}
+
+fn enum_value_error(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+) -> Error {
+    match scope.semantic_index.enum_decl(scope.module, expected_type) {
+        Ok(enum_decl) => Error::new(format!(
+            "value {name} is not a variant of enum {}",
+            enum_decl.name
+        )),
+        Err(_) => Error::new(format!(
+            "value {name} cannot construct non-enum value of type {expected_type}"
+        )),
+    }
+}
+
+fn identifier_starts_uppercase(name: &Identifier) -> bool {
+    name.as_str()
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
+}
+
+fn resolve_source_call_or_constructor(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+    arg: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let constructor = enum_variant_for_expected_type(scope, expected_type, name)?;
+    let functions = source_function_group_option(scope, name)?;
+    if constructor.is_some() && functions.is_some() {
+        return Err(Error::new(format!(
+            "value expression {name}(...) is ambiguous between an enum constructor and source function"
+        )));
+    }
+    if constructor.is_some() {
+        return resolve_source_enum_payload_value(scope, expected_type, name, arg, bindings, depth);
+    }
+    let Some(functions) = functions else {
+        if identifier_starts_uppercase(name)
+            && let Ok(enum_decl) = scope.semantic_index.enum_decl(scope.module, expected_type)
+        {
+            return Err(Error::new(format!(
+                "value {name} is not a variant of enum {}",
+                enum_decl.name
+            )));
+        }
+        return Err(Error::new(format!("function {name} is not declared")));
+    };
+    resolve_source_function_call(scope, expected_type, name, arg, bindings, depth, &functions)
+}
+
+fn resolve_source_enum_payload_value(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+    payload: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let variant = enum_variant_for_expected_type(scope, expected_type, name)?
+        .ok_or_else(|| enum_value_error(scope, expected_type, name))?;
+    let Some(payload_type) = &variant.payload_type else {
+        return Err(Error::new(format!(
+            "enum variant {name} does not accept a payload"
+        )));
+    };
+    let payload = resolve_source_value_expr(scope, payload_type, payload, bindings, depth + 1)?;
+    check_source_value_type(scope, payload_type, &payload, bindings)?;
+    Ok(ValueExpr::EnumVariant {
+        name: name.clone(),
+        payload: Box::new(payload),
+    })
+}
+
 fn resolve_source_function_call(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     name: &Identifier,
     arg: &ValueExpr,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
     depth: usize,
+    functions: &[&Function],
 ) -> Result<ValueExpr> {
-    let functions = source_function_group(scope, name)?;
     let first = functions
         .first()
         .ok_or_else(|| Error::new(format!("function {name} is not declared")))?;
@@ -1880,25 +2012,25 @@ fn resolve_source_function_call(
                 expected_type,
                 first,
                 arg,
-                binding,
+                bindings,
                 depth + 1,
             )
         }
         SourceFunctionParamKind::Pattern => resolve_pattern_source_function_call(
             scope,
             expected_type,
-            &functions,
+            functions,
             arg,
-            binding,
+            bindings,
             depth + 1,
         ),
     }
 }
 
-fn source_function_group<'a>(
+fn source_function_group_option<'a>(
     scope: &SourceFunctionScope<'a>,
     name: &Identifier,
-) -> Result<Vec<&'a Function>> {
+) -> Result<Option<Vec<&'a Function>>> {
     let local: Vec<_> = scope
         .process_functions
         .iter()
@@ -1916,9 +2048,9 @@ fn source_function_group<'a>(
             "{} function {name} conflicts with module function {name}",
             source_function_scope_label(scope)
         ))),
-        (false, true) => Ok(local),
-        (true, false) => Ok(module),
-        (true, true) => Err(Error::new(format!("function {name} is not declared"))),
+        (false, true) => Ok(Some(local)),
+        (true, false) => Ok(Some(module)),
+        (true, true) => Ok(None),
     }
 }
 
@@ -1934,7 +2066,7 @@ fn resolve_binding_source_function_call(
     expected_type: &TypeRef,
     function: &Function,
     arg: &ValueExpr,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
     let FunctionParam::Binding(param) = &function.params[0] else {
@@ -1943,16 +2075,16 @@ fn resolve_binding_source_function_call(
             function.name
         )));
     };
-    let resolved_arg = resolve_source_value_expr(scope, &param.ty, arg, binding, depth + 1)?;
-    check_source_value_type(scope, &param.ty, &resolved_arg, binding)?;
+    let resolved_arg = resolve_source_value_expr(scope, &param.ty, arg, bindings, depth + 1)?;
+    check_source_value_type(scope, &param.ty, &resolved_arg, bindings)?;
     let returned = resolve_source_function_body_value(
         scope,
         function,
-        Some((&param.name, &resolved_arg)),
-        binding,
+        &[(&param.name, &resolved_arg)],
+        bindings,
         depth + 1,
     )?;
-    resolve_source_value_expr(scope, expected_type, &returned, binding, depth + 1)
+    resolve_source_value_expr(scope, expected_type, &returned, bindings, depth + 1)
 }
 
 fn resolve_pattern_source_function_call(
@@ -1960,22 +2092,18 @@ fn resolve_pattern_source_function_call(
     expected_type: &TypeRef,
     functions: &[&Function],
     arg: &ValueExpr,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
     let enum_type =
         infer_pattern_function_enum_type(scope.module, scope.semantic_index, "source", functions)?;
-    let resolved_arg = resolve_source_value_expr(scope, &enum_type, arg, binding, depth + 1)?;
-    check_source_value_type(scope, &enum_type, &resolved_arg, binding)?;
-    let ValueExpr::Identifier(variant_name) = &resolved_arg else {
-        let name = functions
-            .first()
-            .map(|function| function.name.as_str())
-            .unwrap_or("<unknown>");
-        return Err(Error::new(format!(
-            "function {name} pattern dispatch requires a fieldless enum constructor argument"
-        )));
-    };
+    let resolved_arg = resolve_source_value_expr(scope, &enum_type, arg, bindings, depth + 1)?;
+    check_source_value_type(scope, &enum_type, &resolved_arg, bindings)?;
+    let (variant_name, selected_payload) = concrete_source_enum_value(
+        functions[0].name.as_str(),
+        "pattern dispatch",
+        &resolved_arg,
+    )?;
     let enum_decl = scope.semantic_index.enum_decl(scope.module, &enum_type)?;
     let selected_variant =
         scope
@@ -1995,12 +2123,6 @@ fn resolve_pattern_source_function_call(
                 name,
                 binding: payload_binding,
             } => {
-                if payload_binding.is_some() {
-                    return Err(Error::new(format!(
-                        "function {} signature patterns must not bind enum payloads in this source slice",
-                        function.name
-                    )));
-                }
                 let variant =
                     scope
                         .semantic_index
@@ -2008,11 +2130,22 @@ fn resolve_pattern_source_function_call(
                 if variant == selected_variant {
                     let returned =
                         source_function_block_return_value(source_function_block(function)?)?;
+                    let mut substitutions = Vec::new();
+                    if let Some(payload_binding) = payload_binding {
+                        let Some(payload) = selected_payload else {
+                            return Err(Error::new(format!(
+                                "function {} signature pattern {} requires a payload value",
+                                function.name, name
+                            )));
+                        };
+                        substitutions.push((&payload_binding.name, payload));
+                    }
+                    let returned = substitute_source_value_bindings(returned, &substitutions);
                     return resolve_source_value_expr(
                         scope,
                         expected_type,
                         &returned,
-                        binding,
+                        bindings,
                         depth + 1,
                     );
                 }
@@ -2025,7 +2158,7 @@ fn resolve_pattern_source_function_call(
 
     if let Some(function) = wildcard {
         let returned = source_function_block_return_value(source_function_block(function)?)?;
-        return resolve_source_value_expr(scope, expected_type, &returned, binding, depth + 1);
+        return resolve_source_value_expr(scope, expected_type, &returned, bindings, depth + 1);
     }
 
     Err(Error::new(format!(
@@ -2037,8 +2170,8 @@ fn resolve_pattern_source_function_call(
 fn resolve_source_function_body_value(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
-    param_arg: Option<(&Identifier, &ValueExpr)>,
-    binding: Option<SourceValueBinding<'_>>,
+    substitutions: &[(&Identifier, &ValueExpr)],
+    bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
     let body_scope = source_function_body_scope(scope, function);
@@ -2046,10 +2179,10 @@ fn resolve_source_function_body_value(
     match function.body.as_ref().expect("validated function body") {
         FunctionBody::Block(body) => {
             let value = source_function_block_return_value(body)?;
-            Ok(substitute_source_value_bindings(value, param_arg))
+            Ok(substitute_source_value_bindings(value, substitutions))
         }
         FunctionBody::Match(match_body) => {
-            let Some((param_name, arg)) = param_arg else {
+            let Some((param_name, arg)) = substitutions.first().copied() else {
                 return Err(Error::new(format!(
                     "function {} match body requires a parameter argument",
                     function.name
@@ -2061,12 +2194,8 @@ fn resolve_source_function_body_value(
                     function.name, match_body.scrutinee, param_name
                 )));
             }
-            let ValueExpr::Identifier(variant_name) = arg else {
-                return Err(Error::new(format!(
-                    "function {} match dispatch requires a fieldless enum constructor argument",
-                    function.name
-                )));
-            };
+            let (variant_name, selected_payload) =
+                concrete_source_enum_value(function.name.as_str(), "match dispatch", arg)?;
             let FunctionParam::Binding(param) = &function.params[0] else {
                 return Err(Error::new(format!(
                     "function {} match body requires a binding parameter",
@@ -2092,17 +2221,23 @@ fn resolve_source_function_body_value(
             let arms = check_typed_match_arms(&pattern_context, &match_body.arms)?;
             let mut wildcard = None;
             for arm in arms {
-                reject_source_function_payload_pattern(&subject, enum_decl, &arm.pattern, "match")?;
-                reject_source_function_payload_wildcard(
-                    &subject,
-                    enum_decl,
-                    &arm.pattern,
-                    "match",
-                )?;
                 match arm.pattern {
-                    TypedMatchPattern::Variant { variant, .. } if variant == selected_variant => {
+                    TypedMatchPattern::Variant { variant, binding }
+                        if variant == selected_variant =>
+                    {
                         let value = source_function_block_return_value(arm.body)?;
-                        return Ok(substitute_source_value_bindings(value, param_arg));
+                        if let Some(binding) = binding {
+                            let Some(payload) = selected_payload else {
+                                return Err(Error::new(format!(
+                                    "function {} match pattern {} requires a payload value",
+                                    function.name, enum_decl.variants[variant].name
+                                )));
+                            };
+                            let mut arm_substitutions = substitutions.to_vec();
+                            arm_substitutions.push((&binding.name, payload));
+                            return Ok(substitute_source_value_bindings(value, &arm_substitutions));
+                        }
+                        return Ok(substitute_source_value_bindings(value, substitutions));
                     }
                     TypedMatchPattern::Wildcard => {
                         wildcard = Some(arm.body);
@@ -2112,7 +2247,7 @@ fn resolve_source_function_body_value(
             }
             if let Some(body) = wildcard {
                 let value = source_function_block_return_value(body)?;
-                return Ok(substitute_source_value_bindings(value, param_arg));
+                return Ok(substitute_source_value_bindings(value, substitutions));
             }
             Err(Error::new(format!(
                 "function {} match has no arm for variant {} of enum {}",
@@ -2121,7 +2256,7 @@ fn resolve_source_function_body_value(
         }
     }
     .and_then(|value| {
-        resolve_source_value_expr(scope, &function.return_type, &value, binding, depth + 1)
+        resolve_source_value_expr(scope, &function.return_type, &value, bindings, depth + 1)
     })
 }
 
@@ -2140,19 +2275,38 @@ fn source_function_block_return_value(body: &FunctionBlock) -> Result<ValueExpr>
     })
 }
 
+fn concrete_source_enum_value<'a>(
+    function_name: &str,
+    usage: &str,
+    value: &'a ValueExpr,
+) -> Result<(&'a Identifier, Option<&'a ValueExpr>)> {
+    match value {
+        ValueExpr::Identifier(name) => Ok((name, None)),
+        ValueExpr::EnumVariant { name, payload } => Ok((name, Some(payload.as_ref()))),
+        ValueExpr::Call { .. } | ValueExpr::Record(_) => Err(Error::new(format!(
+            "function {function_name} {usage} requires a concrete enum constructor argument"
+        ))),
+    }
+}
+
 fn substitute_source_value_bindings(
     value: ValueExpr,
-    binding: Option<(&Identifier, &ValueExpr)>,
+    bindings: &[(&Identifier, &ValueExpr)],
 ) -> ValueExpr {
-    let Some((binding_name, replacement)) = binding else {
-        return value;
-    };
     match value {
-        ValueExpr::Identifier(name) if name == *binding_name => replacement.clone(),
-        ValueExpr::Identifier(_) => value,
+        ValueExpr::Identifier(name) => bindings
+            .iter()
+            .find_map(|(binding_name, replacement)| {
+                (name == **binding_name).then(|| (*replacement).clone())
+            })
+            .unwrap_or(ValueExpr::Identifier(name)),
         ValueExpr::Call { name, arg } => ValueExpr::Call {
             name,
-            arg: Box::new(substitute_source_value_bindings(*arg, binding)),
+            arg: Box::new(substitute_source_value_bindings(*arg, bindings)),
+        },
+        ValueExpr::EnumVariant { name, payload } => ValueExpr::EnumVariant {
+            name,
+            payload: Box::new(substitute_source_value_bindings(*payload, bindings)),
         },
         ValueExpr::Record(record) => ValueExpr::Record(RecordValue {
             name: record.name,
@@ -2161,7 +2315,7 @@ fn substitute_source_value_bindings(
                 .into_iter()
                 .map(|field| RecordValueField {
                     name: field.name,
-                    value: substitute_source_value_bindings(field.value, binding),
+                    value: substitute_source_value_bindings(field.value, bindings),
                 })
                 .collect(),
         }),
@@ -2172,23 +2326,22 @@ fn check_source_value_type(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,
-    binding: Option<SourceValueBinding<'_>>,
+    bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
-    let bindings = binding
-        .map(|binding| {
-            vec![ValueBinding {
-                name: binding.name,
-                ty: binding.ty,
-                label: binding.name.as_str(),
-            }]
+    let value_bindings = bindings
+        .iter()
+        .map(|binding| ValueBinding {
+            name: binding.name,
+            ty: binding.ty,
+            label: binding.name.as_str(),
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
     canonical_source_value_with_bindings(
         scope.module,
         scope.semantic_index,
         expected_type,
         value,
-        &bindings,
+        &value_bindings,
     )?;
     Ok(())
 }
@@ -3061,10 +3214,15 @@ fn check_step_transition(
         process_functions: &context.process.functions,
         semantic_index: context.semantic_index,
     };
-    let source_binding = input.payload_binding.map(|binding| SourceValueBinding {
-        name: &binding.name,
-        ty: &binding.ty,
-    });
+    let source_bindings = input
+        .payload_binding
+        .map(|binding| {
+            vec![SourceValueBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+            }]
+        })
+        .unwrap_or_default();
     let mut actions = Vec::with_capacity(input.body.statements.len());
     for statement in &input.body.statements {
         match statement {
@@ -3128,7 +3286,7 @@ fn check_step_transition(
         &function_scope,
         &context.process.state_type,
         state_arg,
-        source_binding,
+        &source_bindings,
         0,
     )?;
     let next_state = if matches!(&state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
@@ -3260,15 +3418,19 @@ fn resolve_send_message_case(
                     process_functions: &context.process.functions,
                     semantic_index: context.semantic_index,
                 };
-                let source_binding = payload_binding.map(|binding| SourceValueBinding {
-                    name: &binding.name,
-                    ty: &binding.ty,
-                });
+                let source_bindings = payload_binding
+                    .map(|binding| {
+                        vec![SourceValueBinding {
+                            name: &binding.name,
+                            ty: &binding.ty,
+                        }]
+                    })
+                    .unwrap_or_default();
                 resolve_source_value_expr(
                     &function_scope,
                     payload_type,
                     payload,
-                    source_binding,
+                    &source_bindings,
                     0,
                 )?
             };

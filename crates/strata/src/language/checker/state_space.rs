@@ -149,6 +149,7 @@ pub(super) fn source_value_uses_binding(value: &ValueExpr, binding: &Identifier)
     match value {
         ValueExpr::Identifier(name) => name == binding,
         ValueExpr::Call { arg, .. } => source_value_uses_binding(arg, binding),
+        ValueExpr::EnumVariant { payload, .. } => source_value_uses_binding(payload, binding),
         ValueExpr::Record(record) => record
             .fields
             .iter()
@@ -208,30 +209,77 @@ fn canonical_value(
         return canonical_record_value(module, semantic_index, record, value, bindings, depth);
     }
 
+    canonical_enum_value(
+        module,
+        semantic_index,
+        expected_type,
+        value,
+        bindings,
+        depth,
+    )
+}
+
+fn canonical_enum_value(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[ValueBinding<'_>],
+    depth: usize,
+) -> Result<String> {
     let enum_decl = semantic_index.enum_decl(module, expected_type)?;
-    let ValueExpr::Identifier(name) = value else {
-        return Err(Error::new(format!(
-            "expected enum variant identifier for enum {}",
-            enum_decl.name
-        )));
-    };
-    if let Some(variant) = enum_decl
-        .variants
-        .iter()
-        .find(|variant| variant.name == *name)
-    {
-        if variant.payload_type.is_some() {
-            return Err(Error::new(format!(
-                "enum variant {} requires a payload and cannot be used as a fieldless value",
-                variant.name
-            )));
+    match value {
+        ValueExpr::Identifier(name) => {
+            if let Some(variant) = enum_decl
+                .variants
+                .iter()
+                .find(|variant| variant.name == *name)
+            {
+                if variant.payload_type.is_some() {
+                    return Err(Error::new(format!(
+                        "enum variant {} requires a payload and cannot be used as a fieldless value",
+                        variant.name
+                    )));
+                }
+                return Ok(name.to_string());
+            }
+            Err(Error::new(format!(
+                "value {name} is not a variant of enum {}",
+                enum_decl.name
+            )))
         }
-        Ok(name.to_string())
-    } else {
-        Err(Error::new(format!(
-            "value {name} is not a variant of enum {}",
+        ValueExpr::EnumVariant { name, payload } => {
+            let variant = enum_decl
+                .variants
+                .iter()
+                .find(|variant| variant.name == *name)
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "value {name} is not a variant of enum {}",
+                        enum_decl.name
+                    ))
+                })?;
+            let Some(payload_type) = &variant.payload_type else {
+                return Err(Error::new(format!(
+                    "enum variant {name} does not accept a payload"
+                )));
+            };
+            let payload = canonical_value(
+                module,
+                semantic_index,
+                payload_type,
+                payload,
+                bindings,
+                depth + 1,
+            )?;
+            let value = format!("{name}({payload})");
+            validate_state_value_label(&value).map_err(|err| Error::new(err.to_string()))?;
+            Ok(value)
+        }
+        ValueExpr::Call { .. } | ValueExpr::Record(_) => Err(Error::new(format!(
+            "expected enum variant value for enum {}",
             enum_decl.name
-        )))
+        ))),
     }
 }
 
@@ -277,8 +325,65 @@ fn checked_value_template(
         )));
     }
 
+    if matches!(value, ValueExpr::EnumVariant { .. }) {
+        return checked_enum_variant_template(
+            module,
+            semantic_index,
+            types,
+            expected_type,
+            value,
+            binding,
+            depth,
+        );
+    }
+
     let record = semantic_index.record_decl(module, expected_type)?;
     checked_record_template(module, semantic_index, types, record, value, binding, depth)
+}
+
+fn checked_enum_variant_template(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    types: &mut CheckedTypeInterner<'_>,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    binding: Option<&ValueTemplateBinding<'_>>,
+    depth: usize,
+) -> Result<CheckedValueTemplate> {
+    let ValueExpr::EnumVariant { name, payload } = value else {
+        return Err(Error::new(format!(
+            "expected enum variant value for enum {expected_type}"
+        )));
+    };
+    let enum_decl = semantic_index.enum_decl(module, expected_type)?;
+    let variant = enum_decl
+        .variants
+        .iter()
+        .find(|variant| variant.name == *name)
+        .ok_or_else(|| {
+            Error::new(format!(
+                "value {name} is not a variant of enum {}",
+                enum_decl.name
+            ))
+        })?;
+    let Some(payload_type) = &variant.payload_type else {
+        return Err(Error::new(format!(
+            "enum variant {name} does not accept a payload"
+        )));
+    };
+    Ok(CheckedValueTemplate::EnumVariant {
+        ty: types.intern(expected_type)?,
+        variant: name.clone(),
+        payload: Box::new(checked_value_template(
+            module,
+            semantic_index,
+            types,
+            payload_type,
+            payload,
+            binding,
+            depth + 1,
+        )?),
+    })
 }
 
 fn checked_record_template(

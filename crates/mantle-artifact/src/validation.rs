@@ -463,6 +463,16 @@ fn add_value_template_bytes(
                 &process_ref.as_u32().to_string(),
             )?;
         }
+        ArtifactValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "enum_variant")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, &format!("{prefix}.variant"), variant)?;
+            add_value_template_bytes(total, &format!("{prefix}.payload"), payload)?;
+        }
         ArtifactValueTemplate::Record { ty, fields } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "record")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;

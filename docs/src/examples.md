@@ -12,15 +12,17 @@ Read them in this order:
 5. `init_match.str` for whole-body match authoring in `init`.
 6. `function_match.str` for module functions, process-local helpers, and
    pattern matching outside actor dispatch.
-7. `actor_instances.str` for multiple runtime instances of one process
+7. `function_payload_match.str` for payload-bearing enum construction and
+   matching in normal source helpers.
+8. `actor_instances.str` for multiple runtime instances of one process
    definition.
-8. `actor_payloads.str` for typed message payloads and immutable payload
+9. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-9. `actor_payload_match.str` for the same payload binding through a whole-body
+10. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-10. `actor_reply.str` for transporting typed process references through message
+11. `actor_reply.str` for transporting typed process references through message
    payloads.
-11. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+12. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -151,6 +153,31 @@ Key source ideas:
   message payload discovery and lowering.
 - Mantle sees typed state IDs, message IDs, and payload templates, not source
   helper dispatch names.
+
+## Function Payload Match
+
+`examples/function_payload_match.str` extends normal source helpers to
+payload-bearing enum values. It constructs source-visible enum payload values,
+matches them through signature patterns and whole-body helper matches, and
+lowers a received actor payload through a process-local helper into an enum
+payload state template.
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_payload_match.str
+cargo run -p strata --bin strata -- build examples/function_payload_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_payload_match.mta
+```
+
+Key source ideas:
+
+- `Assigned(Job { phase: Ready })` is resolved as a typed enum value, not a
+  helper call.
+- `status_sig(Assigned(job: Job))` binds the enum payload immutably in a normal
+  source helper signature pattern.
+- `status_body(work: Work)` matches the typed helper parameter and binds the
+  payload inside the selected arm.
+- `state_for(Assigned(job))` proves a process-local helper can wrap a received
+  immutable payload into a source enum value before lowering.
 
 ## Actor Instances
 
