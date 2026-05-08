@@ -1,0 +1,53 @@
+module actor_match;
+
+record MainState;
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Waiting,
+    SawFirst,
+    Done,
+}
+enum WorkerMsg {
+    First,
+    Second,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker First;
+        send worker Second;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Waiting;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            First => {
+                emit "worker matched First";
+                return Continue(SawFirst);
+            }
+            Second => {
+                emit "worker matched Second";
+                return Stop(Done);
+            }
+        }
+    }
+}

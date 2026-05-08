@@ -105,6 +105,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_sequence.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_sequence.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_instances.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_instances.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta

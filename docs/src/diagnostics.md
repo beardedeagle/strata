@@ -28,8 +28,8 @@ result of the first invalid shape.
 | `unsupported process function` | A process declares a function other than `init` or `step`. | Move the logic into `init` or `step`; general functions are not available. |
 | `init must declare no parameters` | `init` has parameters. | Use `fn init() -> StateType ...`. |
 | `init body must not perform statements` | `init` uses `emit`, `spawn`, or `send`. | Return only the initial state. |
-| `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageVariant` or `state: StateType, _`. |
-| `step second parameter must be a message variant pattern or wildcard pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with a message variant or `_`. |
+| `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageConstructor` or `state: StateType, _`. |
+| `step second parameter must be a message constructor pattern or wildcard pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with a message constructor or `_`, or use a whole-body `match msg`. |
 | `step returns ..., expected ProcResult<...>` | `step` return type is wrong. | Return `ProcResult<StateType>`. |
 | `step body must return Stop..., Continue..., or Panic...` | A `step` returns a bare state value or an unsupported result form. | Return one whole state value inside `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step may-behaviors must be empty` | The `~ [...]` list is not empty. | Use `~ []`. |
@@ -42,17 +42,21 @@ result of the first invalid shape.
 
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
-| `step pattern message ... is not accepted` | A `step` signature names a message variant outside the process message enum. | Use a declared message variant. |
+| `step pattern message ... is not accepted` | A `step` pattern names a message constructor outside the process message enum. | Use a declared message constructor. |
 | `duplicate step pattern for message` | A message variant has more than one explicit `step` clause. | Keep one explicit clause per variant. |
 | `duplicate wildcard step pattern` | More than one `step` clause uses `_`. | Keep one wildcard clause. |
 | `wildcard step pattern is unreachable` | Explicit clauses already cover every accepted message variant. | Remove the wildcard clause or remove an explicit clause that it should cover. |
 | `must declare step pattern for message` | A message variant is not covered by an explicit or wildcard `step` clause. | Add a `step` clause for the missing message or add one `_` clause. |
-| `message match bodies are not supported` | A function body uses `match msg`. | Declare `step` clauses with message patterns instead. |
+| `match body must be the whole function body` | A `match msg` appears after another statement or has trailing body statements. | Use one whole-body `match msg` form or step parameter patterns. |
+| `match step must declare a typed message parameter` | A match `step` uses a parameter pattern instead of `msg: MsgType`. | Use `fn step(state: StateType, msg: MsgType)`. |
+| `match scrutinee ... must be the step message parameter` | The `match` scrutinee is not the typed message parameter. | Match the declared message parameter, usually `match msg`. |
+| `message parameter ... has type ..., expected ...` | The typed message parameter is not the process `Msg` type. | Use the process message type in the second parameter. |
+| `cannot mix match step bodies with step parameter patterns` | One process uses both dispatch authoring forms. | Use either step parameter patterns or one match step body for the process. |
 | `sends message ... not accepted by ...` | The target process message enum has no such variant. | Send a declared target message variant. |
 | `message ... requires a payload` | A send omits the payload for a payload variant. | Pass one value with `send worker Variant(value);`. |
 | `message ... does not accept a payload` | A send passes a payload to a unit variant. | Remove the payload argument or send a payload variant. |
 | `payload type ... must be a named record, enum, or process reference type` | A payload variant uses an unsupported applied/generic type. | Declare a named record or enum type, or use `ProcessRef<TargetProcess>`. |
-| `step pattern payload ... has type ... expected ...` | A step payload binding annotation does not match the variant payload type. | Use the declared payload type in the signature pattern. |
+| `step pattern payload ... has type ... expected ...` | A step payload binding annotation does not match the variant payload type. | Use the declared payload type in the parameter pattern. |
 | `payload binding ... conflicts` / `process reference ... conflicts with payload binding` | A local immutable binding shadows `state`, a process, a type, a value constructor, or another local binding in the same transition. | Use distinct immutable binding names. |
 | `payload has type ..., expected ...` | A runtime envelope or artifact payload template carries the wrong value type. | Match the payload value type to the target message variant. |
 | `payload ... exceeds maximum length` | A payload value label is too large for the artifact or runtime trace boundary. | Use a smaller payload value or split the payload into smaller fields/messages. |

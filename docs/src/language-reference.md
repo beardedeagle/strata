@@ -18,7 +18,9 @@ Mantle artifact internals.
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
+| Patterns | Constructor patterns, constructor payload bindings, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, payload sends, and payload-binding step patterns. |
+| Message dispatch | Step parameter patterns, wildcard step patterns, and one whole-body `match msg` step form per process. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
 The `module` declaration names a source unit. It does not create an import
@@ -170,8 +172,9 @@ proc Worker mailbox bounded(1) {
 
 Only the aliases `State` and `Msg` are accepted inside a process. Only the
 functions `init` and `step` are accepted inside a process. Each message variant
-must resolve to exactly one `step` clause, selected by an explicit variant
-pattern or by one wildcard pattern.
+must resolve to exactly one `step` clause, selected by an explicit constructor
+pattern, by one wildcard pattern, or by one whole-body match. A process cannot
+mix step parameter patterns with a match step body in this slice.
 
 ## Function Signatures
 
@@ -188,7 +191,8 @@ Buildable source requires:
 | Function | Required Shape |
 | --- | --- |
 | `init` | No parameters, returns the process state type, uses `! [] ~ [] @det`. |
-| `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
+| parameter-pattern `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
+| match `step` | Parameters exactly `state: StateType, msg: MsgType`, returns `ProcResult<StateType>`, uses `~ [] @det`, and has a whole-body `match msg`. |
 
 The parser recognizes `@nondet`, but buildable source rejects it. The
 may-behavior list after `~` must be empty.
@@ -253,11 +257,40 @@ fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<Work
 Runtime dispatch uses the transported runtime process ID and admitted target
 process ID. Source names remain diagnostics and trace metadata.
 
+Patterns are source-level syntax for typed value decomposition. The current
+runnable subset admits constructor patterns, constructor payload bindings, and
+wildcards; actor message dispatch is the first semantic consumer that lowers to
+Mantle. Message dispatch may also be written as one whole-body match over the
+typed message parameter:
+
+```strata
+fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    match msg {
+        First => {
+            emit "worker matched First";
+            return Continue(SawFirst);
+        }
+        Second => {
+            emit "worker matched Second";
+            return Stop(Done);
+        }
+    }
+}
+```
+
+This is an authoring form for the same semantics as step parameter patterns.
+Checking resolves each arm into typed message-keyed transitions before
+lowering. Mantle still dispatches by admitted message IDs, not by source
+strings. In this buildable step subset the match scrutinee must be the typed
+message parameter, and match arms are block-delimited without comma separators.
+
 ## Effects
 
 The `! [...]` effect list is source-level authority for the runtime effects used
-by each `step` clause. It must exactly match the clause actions. Missing,
-duplicate, and unused declared effects are rejected before lowering.
+by each `step` clause. It must exactly match the clause actions. For a
+match step, the one effect list applies to every generated transition,
+so each arm must use exactly those effects. Missing, duplicate, and unused
+declared effects are rejected before lowering.
 
 | Effect | Statement |
 | --- | --- |
@@ -270,7 +303,7 @@ empty effect list.
 
 ## Step Patterns
 
-A `step` clause handles one message variant named in its signature:
+A `step` parameter pattern handles one message constructor:
 
 ```strata
 fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
@@ -279,7 +312,7 @@ fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
 }
 ```
 
-Payload variants can bind the received payload in the signature:
+Payload constructors can bind the received payload in the parameter pattern:
 
 ```strata
 fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
@@ -296,7 +329,7 @@ Process-reference bindings in the same transition cannot shadow a payload
 binding.
 
 If a process accepts more than one message, it can declare explicit clauses for
-specific variants and one wildcard clause for the remaining variants:
+specific constructors and one wildcard clause for the remaining variants:
 
 ```strata
 fn step(state: WorkerState, First) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -311,10 +344,10 @@ fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
 ```
 
 Every accepted message variant must resolve to exactly one clause. Explicit
-variant clauses handle their named variants. One wildcard clause may cover
+constructor clauses handle their named variants. One wildcard clause may cover
 variants that do not have explicit clauses. Duplicate explicit clauses,
 duplicate wildcard clauses, missing coverage, and unreachable wildcard clauses
-are rejected. Signature patterns are compile-time dispatch only: Mantle
+are rejected. Parameter patterns are compile-time dispatch only: Mantle
 dequeues one message at a time and dispatches by typed message ID.
 Payload-bearing variants keep one stable admitted message case, and their
 immutable values travel in runtime message envelopes.

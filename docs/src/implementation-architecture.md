@@ -115,9 +115,11 @@ The runnable examples are:
 - `examples/hello.str`;
 - `examples/actor_ping.str`;
 - `examples/actor_sequence.str`;
+- `examples/actor_match.str`;
 - `examples/actor_instances.str`;
 - `examples/actor_payloads.str`;
 - `examples/actor_reply.str`;
+- `examples/actor_emit_spawn_send.str`;
 - `examples/actor_panic_no_replay.str`.
 
 The integration tests in

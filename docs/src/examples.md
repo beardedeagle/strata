@@ -7,13 +7,15 @@ Read them in this order:
 1. `hello.str` for the minimum source-to-runtime program.
 2. `actor_ping.str` for spawning, sending, and a single worker transition.
 3. `actor_sequence.str` for multiple messages and message-keyed transitions.
-4. `actor_instances.str` for multiple runtime instances of one process
+4. `actor_match.str` for whole-body match authoring that checks
+   into typed message-keyed transitions.
+5. `actor_instances.str` for multiple runtime instances of one process
    definition.
-5. `actor_payloads.str` for typed message payloads and immutable payload
-   bindings in actor step signatures.
-6. `actor_reply.str` for transporting typed process references through message
+6. `actor_payloads.str` for typed message payloads and immutable payload
+   bindings in actor step parameter patterns.
+7. `actor_reply.str` for transporting typed process references through message
    payloads.
-7. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+8. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -80,6 +82,27 @@ The runtime trace records process, message, state, and output IDs alongside
 labels so that behavior can be checked without treating labels as executable
 bindings.
 
+## Actor Match
+
+`examples/actor_match.str` exercises the whole-body `match msg`
+authoring form. The checker resolves each arm into the same typed transition
+table used by step parameter patterns.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_match.str
+cargo run -p strata --bin strata -- build examples/actor_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
+```
+
+Key source ideas:
+
+- `fn step(state: WorkerState, msg: WorkerMsg)` declares a typed message
+  parameter.
+- `match msg` must be the whole function body in this source slice.
+- Each arm returns a whole replacement state through `Continue(...)` or
+  `Stop(...)`.
+- The generated Mantle artifact still dispatches by typed message IDs.
+
 ## Actor Instances
 
 `examples/actor_instances.str` proves process references and instance-aware sends.
@@ -105,7 +128,7 @@ Key source ideas:
 ## Actor Payloads
 
 `examples/actor_payloads.str` sends a typed payload from `Main` to `Worker`.
-`Worker` binds that payload in its `step` signature and returns a whole
+`Worker` binds that payload with a `step` parameter pattern and returns a whole
 replacement state containing the immutable payload value.
 
 ```sh

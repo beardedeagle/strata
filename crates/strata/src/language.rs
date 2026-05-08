@@ -10,9 +10,9 @@ mod parser;
 mod tests;
 
 pub use ast::{
-    Determinism, Effect, Enum, Function, FunctionBlock, FunctionParam, Identifier, Module,
-    OutputLiteral, Param, Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr,
-    SignaturePattern, Statement, TypeRef, ValueExpr,
+    Determinism, Effect, Enum, Function, FunctionBlock, FunctionBody, FunctionParam, Identifier,
+    Match, MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record, RecordField,
+    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 pub use checked::CheckedProgram;
 pub use checker::check_module;

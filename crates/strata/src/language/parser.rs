@@ -1,7 +1,7 @@
 use super::ast::{
-    Determinism, Effect, Enum, EnumVariant, Function, FunctionBlock, FunctionParam, Identifier,
-    Module, OutputLiteral, Param, Process, Record, RecordField, RecordValue, RecordValueField,
-    ReturnExpr, SignaturePattern, Statement, TypeRef, ValueExpr,
+    Determinism, Effect, Enum, EnumVariant, Function, FunctionBlock, FunctionBody, FunctionParam,
+    Identifier, Match, MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record,
+    RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
@@ -243,9 +243,7 @@ impl Parser {
                         ty,
                     }));
                 } else {
-                    params.push(FunctionParam::Pattern(
-                        self.parse_signature_pattern(param_name)?,
-                    ));
+                    params.push(FunctionParam::Pattern(self.parse_pattern(param_name)?));
                 }
                 if self.consume_symbol(',') {
                     if self.consume_symbol(')') {
@@ -277,7 +275,17 @@ impl Parser {
             None
         } else {
             self.expect_symbol('{')?;
-            let body = self.parse_function_block()?;
+            let body = if self.peek_keyword("match") {
+                let match_body = self.parse_match_body()?;
+                if !self.peek_symbol('}') {
+                    return Err(self.error_here(
+                        "match body must be the whole function body in this source slice",
+                    ));
+                }
+                FunctionBody::Match(match_body)
+            } else {
+                FunctionBody::Block(self.parse_function_block()?)
+            };
             self.expect_symbol('}')?;
             Some(body)
         };
@@ -293,12 +301,12 @@ impl Parser {
         })
     }
 
-    fn parse_signature_pattern(&mut self, value: String) -> Result<SignaturePattern> {
+    fn parse_pattern(&mut self, value: String) -> Result<Pattern> {
         if value == "_" {
             if self.peek_symbol('(') {
-                return Err(self.error_here("wildcard step patterns cannot bind payloads"));
+                return Err(self.error_here("wildcard patterns cannot bind payloads"));
             }
-            return Ok(SignaturePattern::Wildcard);
+            return Ok(Pattern::Wildcard);
         }
 
         let name = Identifier::new(value)?;
@@ -311,7 +319,37 @@ impl Parser {
         } else {
             None
         };
-        Ok(SignaturePattern::Variant { name, binding })
+        Ok(Pattern::Constructor { name, binding })
+    }
+
+    fn parse_match_body(&mut self) -> Result<Match> {
+        self.expect_keyword("match")?;
+        let scrutinee = self.expect_identifier()?;
+        self.expect_symbol('{')?;
+        let mut arms = Vec::new();
+        if self.peek_symbol('}') {
+            return Err(self.error_here("match body must declare at least one arm"));
+        }
+        while !self.peek_symbol('}') {
+            arms.push(self.parse_match_arm()?);
+            if self.consume_symbol(',') {
+                return Err(self.error_previous(
+                    "match arms are block-delimited and must not use comma separators",
+                ));
+            }
+        }
+        self.expect_symbol('}')?;
+        Ok(Match { scrutinee, arms })
+    }
+
+    fn parse_match_arm(&mut self) -> Result<MatchArm> {
+        let pattern_name = self.expect_ident()?;
+        let pattern = self.parse_pattern(pattern_name)?;
+        self.expect_fat_arrow()?;
+        self.expect_symbol('{')?;
+        let body = self.parse_function_block()?;
+        self.expect_symbol('}')?;
+        Ok(MatchArm { pattern, body })
     }
 
     fn parse_function_block(&mut self) -> Result<FunctionBlock> {
@@ -330,9 +368,9 @@ impl Parser {
 
     fn parse_function_statement(&mut self) -> Result<Statement> {
         if self.peek_keyword("match") {
-            return Err(self.error_here(
-                "message match bodies are not supported; declare one step clause per message variant",
-            ));
+            return Err(
+                self.error_here("match body must be the whole function body in this source slice")
+            );
         }
         if self.peek_keyword("emit") {
             self.expect_keyword("emit")?;
@@ -584,6 +622,15 @@ impl Parser {
             Ok(())
         } else {
             Err(self.error_here("expected ->"))
+        }
+    }
+
+    fn expect_fat_arrow(&mut self) -> Result<()> {
+        if matches!(self.peek_kind(), TokenKind::FatArrow) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(self.error_here("expected =>"))
         }
     }
 

@@ -51,8 +51,13 @@ impl GateHarness {
     }
 
     fn build(&self, source: &str, artifact: &str) {
+        self.remove_artifact(artifact);
         assert_success(
-            self.command(&self.strata, ["build", source], "strata build"),
+            self.command(
+                &self.strata,
+                ["build", source, "--output", artifact],
+                "strata build",
+            ),
             "strata build",
         );
         assert!(
@@ -412,6 +417,65 @@ fn actor_sequence_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn actor_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run("examples/actor_match.str", "target/strata/actor_match.mta");
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: spawned Main pid=1"));
+    assert!(stdout.contains("mantle: spawned Worker pid=2"));
+    assert!(stdout.contains("mantle: delivered First to Worker"));
+    assert!(stdout.contains("mantle: delivered Second to Worker"));
+    assert!(stdout.contains("worker matched First"));
+    assert!(stdout.contains("worker matched Second"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+
+    let artifact = gate.read_artifact("target/strata/actor_match.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.debug_name, "Main");
+    assert_eq!(main.transitions.len(), 1);
+    assert_eq!(
+        main.transitions[0].message,
+        mantle_artifact::MessageId::new(0)
+    );
+    assert_eq!(
+        main.transitions[0].effects,
+        [ArtifactEffect::Spawn, ArtifactEffect::Send]
+    );
+
+    let worker = &artifact.processes[1];
+    assert_eq!(worker.debug_name, "Worker");
+    assert_eq!(worker.transitions.len(), 2);
+    assert_eq!(
+        worker.transitions[0].message,
+        mantle_artifact::MessageId::new(0)
+    );
+    assert_eq!(
+        worker.transitions[1].message,
+        mantle_artifact::MessageId::new(1)
+    );
+    assert_eq!(worker.transitions[0].effects, [ArtifactEffect::Emit]);
+    assert_eq!(worker.transitions[1].effects, [ArtifactEffect::Emit]);
+
+    let trace = gate.read_trace("actor_match");
+    assert!(trace.contains(r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"First""#));
+    assert!(trace.contains(r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":0,"text":"worker matched First""#));
+    assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"Waiting","to_state_id":1,"to":"SawFirst""#));
+    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"First","result":"Continue","state_id":1,"state":"SawFirst""#));
+    assert!(trace.contains(r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":1,"message":"Second""#));
+    assert!(trace.contains(r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":1,"text":"worker matched Second""#));
+    assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":1,"from":"SawFirst","to_state_id":2,"to":"Done""#));
+    assert!(trace.contains(r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":1,"message":"Second","result":"Stop","state_id":2,"state":"Done""#));
+    assert!(trace.contains(
+        r#""event":"process_stopped","pid":1,"process_id":0,"process":"Main","reason":"normal""#
+    ));
+    assert!(trace.contains(
+        r#""event":"process_stopped","pid":2,"process_id":1,"process":"Worker","reason":"normal""#
+    ));
+}
+
+#[test]
 fn actor_instances_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(
@@ -560,16 +624,17 @@ fn effect_authority_missing_fails_source_check_before_build() {
 #[test]
 fn mantle_run_rejects_authority_mismatched_artifacts_before_trace() {
     let gate = GateHarness::new();
+    let seed_artifact_path = "target/strata/authority_admission_seed.mta";
 
     gate.check("examples/hello.str");
-    gate.build("examples/hello.str", "target/strata/hello.mta");
+    gate.build("examples/hello.str", seed_artifact_path);
 
     for case in AUTHORITY_ADMISSION_CASES {
         let invalid_artifact_path = format!("target/strata/{}.mta", case.stem);
         gate.remove_artifact(&invalid_artifact_path);
         gate.remove_trace(case.stem);
 
-        let artifact = gate.read_artifact("target/strata/hello.mta");
+        let artifact = gate.read_artifact(seed_artifact_path);
         let encoded_artifact = case.mutation.invalid_encoded_artifact(artifact);
         gate.write_unvalidated_encoded_artifact(&invalid_artifact_path, &encoded_artifact);
 

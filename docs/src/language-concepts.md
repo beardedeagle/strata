@@ -75,8 +75,8 @@ send worker Ping;
 send worker Assign(Job { phase: Ready });
 ```
 
-Payload variants carry one immutable value. Actor `step` signatures can bind
-that payload:
+Payload variants carry one immutable value. Actor `step` parameter patterns can
+bind that payload:
 
 ```strata
 fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {

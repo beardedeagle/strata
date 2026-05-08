@@ -131,7 +131,7 @@ The sender constructs one immutable payload value:
 send worker Assign(Job { phase: Ready });
 ```
 
-The receiver binds that value in the step signature:
+The receiver binds that value in a step parameter pattern:
 
 ```strata
 fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -197,6 +197,10 @@ cargo run -p strata --bin strata -- check examples/actor_sequence.str
 cargo run -p strata --bin strata -- build examples/actor_sequence.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
 
+cargo run -p strata --bin strata -- check examples/actor_match.str
+cargo run -p strata --bin strata -- build examples/actor_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
+
 cargo run -p strata --bin strata -- check examples/actor_instances.str
 cargo run -p strata --bin strata -- build examples/actor_instances.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
@@ -212,3 +216,5 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
 
 For `actor_sequence`, the trace should show `Worker` dequeuing `First`, stepping
 with `Continue`, then later dequeuing `Second` and stepping with `Stop`.
+`actor_match` should show the same typed transition behavior from the
+whole-body `match msg` authoring form.
