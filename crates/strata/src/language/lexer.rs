@@ -8,6 +8,7 @@ pub(super) enum TokenKind {
     StringLiteral(String),
     Symbol(char),
     Arrow,
+    FatArrow,
     AtIdent(String),
     Eof,
 }
@@ -50,6 +51,12 @@ impl<'a> Lexer<'a> {
                 self.bump_char();
                 self.bump_char();
                 push_source_token(&mut tokens, TokenKind::Arrow, offset)?;
+                continue;
+            }
+            if ch == '=' && self.peek_next_char() == Some('>') {
+                self.bump_char();
+                self.bump_char();
+                push_source_token(&mut tokens, TokenKind::FatArrow, offset)?;
                 continue;
             }
             if ch == '@' {

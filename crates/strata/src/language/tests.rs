@@ -2267,6 +2267,28 @@ fn rejects_match_arm_comma_separator() {
 }
 
 #[test]
+fn rejects_match_arm_split_fat_arrow() {
+    let source = ACTOR_PING.replace(
+        r#"fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Handled);
+    }"#,
+        r#"fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            Ping = > {
+                emit "worker handled Ping";
+                return Stop(Handled);
+            }
+        }
+    }"#,
+    );
+
+    let err = parse_source(&source).expect_err("split match arm arrow should fail");
+
+    assert!(err.to_string().contains("expected =>"));
+}
+
+#[test]
 fn rejects_match_body_in_init_for_buildable_source() {
     let source = ACTOR_PING.replace(
         r#"fn init() -> WorkerState ! [] ~ [] @det {

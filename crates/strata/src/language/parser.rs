@@ -626,8 +626,12 @@ impl Parser {
     }
 
     fn expect_fat_arrow(&mut self) -> Result<()> {
-        self.expect_symbol('=')?;
-        self.expect_symbol('>')
+        if matches!(self.peek_kind(), TokenKind::FatArrow) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(self.error_here("expected =>"))
+        }
     }
 
     fn expect_symbol(&mut self, symbol: char) -> Result<()> {
