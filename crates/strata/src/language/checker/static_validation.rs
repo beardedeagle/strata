@@ -283,6 +283,9 @@ fn validate_value_template_received_type(
             Ok(())
         }
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
+        CheckedValueTemplate::EnumVariant { payload, .. } => {
+            validate_value_template_received_type(payload, received_payload_type)
+        }
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 validate_value_template_received_type(field.value(), received_payload_type)?;
@@ -299,6 +302,9 @@ fn validate_value_template_payload_labels(template: &CheckedValueTemplate) -> Re
         }
         CheckedValueTemplate::ReceivedPayload { .. } => Ok(()),
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
+        CheckedValueTemplate::EnumVariant { payload, .. } => {
+            validate_value_template_payload_labels(payload)
+        }
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 validate_value_template_payload_labels(field.value())?;
@@ -348,6 +354,9 @@ fn validate_value_template_process_refs(
             }
             Ok(())
         }
+        CheckedValueTemplate::EnumVariant { payload, .. } => {
+            validate_value_template_process_refs(processes, process, payload, spawned_refs, false)
+        }
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 validate_value_template_process_refs(
@@ -369,6 +378,9 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference templates are not valid next-state values",
         )),
+        CheckedValueTemplate::EnumVariant { payload, .. } => {
+            reject_process_ref_template_in_next_state(payload)
+        }
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 reject_process_ref_template_in_next_state(field.value())?;
@@ -383,6 +395,9 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
         CheckedValueTemplate::Literal(_) => false,
         CheckedValueTemplate::ReceivedPayload { .. } => true,
         CheckedValueTemplate::ProcessRef { .. } => false,
+        CheckedValueTemplate::EnumVariant { payload, .. } => {
+            checked_template_depends_on_received_payload(payload)
+        }
         CheckedValueTemplate::Record { fields, .. } => fields
             .iter()
             .any(|field| checked_template_depends_on_received_payload(field.value())),
@@ -411,6 +426,16 @@ fn evaluate_checked_template(
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires static runtime process reference bindings",
         )),
+        CheckedValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        } => {
+            let payload = evaluate_checked_template(payload, received_payload)?;
+            let label = format!("{variant}({})", payload.label());
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
+        }
         CheckedValueTemplate::Record { ty, fields } => {
             let mut parts = Vec::with_capacity(fields.len());
             for field in fields {
@@ -457,6 +482,21 @@ fn evaluate_checked_runtime_template(
                 *target,
                 u64::from(pid.as_u32()),
             ))
+        }
+        CheckedValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        } => {
+            let payload = evaluate_checked_runtime_template(
+                payload,
+                received_payload,
+                process,
+                process_refs,
+            )?;
+            let label = format!("{variant}({})", payload.label());
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
         }
         CheckedValueTemplate::Record { ty, fields } => {
             let mut parts = Vec::with_capacity(fields.len());

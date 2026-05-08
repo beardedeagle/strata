@@ -271,6 +271,11 @@ pub(in crate::language) enum CheckedValueTemplate {
         target: CheckedProcessId,
         process_ref: CheckedProcessRefId,
     },
+    EnumVariant {
+        ty: CheckedTypeRef,
+        variant: Identifier,
+        payload: Box<CheckedValueTemplate>,
+    },
     Record {
         ty: CheckedTypeRef,
         fields: Vec<CheckedValueTemplateField>,
@@ -283,6 +288,7 @@ impl CheckedValueTemplate {
             Self::Literal(value) => value.ty(),
             Self::ReceivedPayload { ty }
             | Self::ProcessRef { ty, .. }
+            | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. } => ty,
         }
     }

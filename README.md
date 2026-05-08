@@ -103,6 +103,18 @@ whole-body match helper, process-local helpers in `Main` and `Worker`, and a
 helper-produced send payload. The checker expands those immutable value helpers
 before Mantle artifact generation.
 
+Source helper patterns can bind typed enum payloads:
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_payload_match.str
+cargo run -p strata --bin strata -- build examples/function_payload_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_payload_match.mta
+```
+
+That example constructs payload-bearing enum values in immutable source helper
+returns, matches them through signature patterns and whole-body matches, and
+lowers dynamic received payload wrapping into a Mantle value template.
+
 Process references support multiple runtime instances of one process definition:
 
 ```sh

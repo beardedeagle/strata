@@ -330,6 +330,10 @@ pub enum ValueExpr {
         name: Identifier,
         arg: Box<ValueExpr>,
     },
+    EnumVariant {
+        name: Identifier,
+        payload: Box<ValueExpr>,
+    },
     Record(RecordValue),
 }
 
@@ -350,6 +354,7 @@ impl fmt::Display for ValueExpr {
         match self {
             Self::Identifier(name) => write!(f, "{name}"),
             Self::Call { name, arg } => write!(f, "{name}({arg})"),
+            Self::EnumVariant { name, payload } => write!(f, "{name}({payload})"),
             Self::Record(value) => write!(f, "{value}"),
         }
     }

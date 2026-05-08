@@ -152,10 +152,10 @@ match_arm =
 Patterns are source-level binding and decomposition syntax. This source slice
 admits constructor patterns, constructor payload bindings, and `_` wildcards.
 Buildable semantic consumers are normal source function signatures and match
-bodies, fieldless enum `init` matches, and actor `step` message dispatch. Actor
-`step` dispatch accepts constructor payload bindings in parameter patterns and
-whole-body `match msg` arms. Normal source function patterns currently cover
-fieldless enum constructors.
+bodies, fieldless enum `init` matches, and actor `step` message dispatch.
+Normal source helpers and actor `step` dispatch accept constructor payload
+bindings. Source helper calls still expand before lowering; they require a
+concrete enum constructor value for pattern selection.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message
@@ -205,16 +205,18 @@ source_function =
 ```
 
 Helper block bodies must not contain statements. Helper match bodies match the
-function's typed binding parameter. Helper calls are value expressions:
+function's typed binding parameter. Helper calls and payload-bearing enum values
+share the same surface syntax:
 
 ```text
-helper_call =
+call_or_payload_constructor =
     ident "(" value_expr ")"
 ```
 
-The checker validates helper signatures and bodies before lowering, then
-expands calls in `init`, `step` result values, and send payload values.
-Recursive helper call cycles are rejected.
+The checker resolves that form against the expected type. A declared enum
+constructor becomes an immutable enum value; a declared helper is expanded in
+`init`, `step` result values, and send payload values. Recursive helper call
+cycles are rejected.
 
 ## Statements
 
@@ -280,6 +282,10 @@ value_expr =
 record_value_field =
     ident ":" value_expr
 ```
+
+The parenthesized value expression is typed during checking. It is a helper call
+when `ident` names a visible source helper and a payload-bearing enum value when
+`ident` names a constructor of the expected enum type.
 
 `init` returns a state value. `step` returns `Continue(value)`, `Stop(value)`,
 or `Panic(value)`.

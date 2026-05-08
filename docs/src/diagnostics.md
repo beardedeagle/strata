@@ -52,8 +52,10 @@ result of the first invalid shape.
 | `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
 | `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |
 | `function ... wildcard pattern is unreachable` | Explicit source function clauses already cover every variant. | Remove the wildcard clause or remove the explicit clauses it should cover. |
-| `function ... pattern ... carries a payload` | A normal source function pattern names a payload-bearing constructor, which is not a general source value form in this slice. | Match only fieldless enum constructors in normal source functions. |
-| `function ... wildcard pattern covers payload-bearing variant` | A normal source function wildcard would cover a payload-bearing constructor. | Use normal source function patterns only with fieldless enum constructors in this slice. |
+| `payload ... has type ..., expected ...` | A source helper or step payload binding annotation does not match the constructor payload type. | Use the declared payload type. |
+| `match payload binding ... conflicts with an existing source value binding` | A source helper match arm reuses the helper parameter name for a payload binding. | Use a distinct immutable payload binding name. |
+| `value ... is not a variant of enum ...` | A payload-constructor expression names a constructor outside the expected enum. | Use a constructor from the expected enum or call a declared helper. |
+| `enum variant ... requires a payload` / `does not accept a payload` | A payload-bearing constructor was used as a fieldless value, or a fieldless constructor was called with a payload. | Match the constructor's declared payload shape. |
 
 ## Message Handling Errors
 

@@ -970,6 +970,21 @@ impl LoadedTemplateAdmission<'_> {
                 target_process,
                 process_ref,
             } => self.validate_process_ref(field, *ty, *target_process, *process_ref),
+            ArtifactValueTemplate::EnumVariant {
+                ty,
+                variant,
+                payload,
+            } => {
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                validate_loaded_ident_field(&format!("{field}.variant"), variant)?;
+                let nested = Self {
+                    expected_type: None,
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.payload"), payload, depth + 1)
+            }
             ArtifactValueTemplate::Record { ty, fields } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
@@ -1151,6 +1166,9 @@ fn loaded_template_depends_on_received_payload(template: &ArtifactValueTemplate)
     match template {
         ArtifactValueTemplate::Literal { .. } | ArtifactValueTemplate::ProcessRef { .. } => false,
         ArtifactValueTemplate::ReceivedPayload { .. } => true,
+        ArtifactValueTemplate::EnumVariant { payload, .. } => {
+            loaded_template_depends_on_received_payload(payload)
+        }
         ArtifactValueTemplate::Record { fields, .. } => fields
             .iter()
             .any(|field| loaded_template_depends_on_received_payload(&field.value)),

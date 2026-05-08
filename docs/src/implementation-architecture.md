@@ -118,6 +118,7 @@ The runnable examples are:
 - `examples/actor_match.str`;
 - `examples/init_match.str`;
 - `examples/function_match.str`;
+- `examples/function_payload_match.str`;
 - `examples/actor_instances.str`;
 - `examples/actor_payloads.str`;
 - `examples/actor_payload_match.str`;

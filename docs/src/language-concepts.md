@@ -115,6 +115,10 @@ Source helpers are immutable value producers. They perform no statements, use
 encapsulate non-message-handling value construction for `init`, `step` results,
 and send payloads.
 
+Payload-bearing enum constructors are source values too. A helper may match
+`Assigned(job: Job)` in a signature pattern or whole-body match, and the payload
+binding is an immutable value scoped to that clause or arm.
+
 ## State
 
 Process state is immutable at the source level. A transition returns a whole

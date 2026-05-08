@@ -249,6 +249,15 @@ fn lower_value_template(
             target_process: lower_process_id(*target),
             process_ref: lower_process_ref_id(*process_ref),
         }),
+        CheckedValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        } => Ok(ArtifactValueTemplate::EnumVariant {
+            ty: types.artifact_id(ty)?,
+            variant: variant.to_string(),
+            payload: Box::new(lower_value_template(payload, types)?),
+        }),
         CheckedValueTemplate::Record { ty, fields } => Ok(ArtifactValueTemplate::Record {
             ty: types.artifact_id(ty)?,
             fields: fields
