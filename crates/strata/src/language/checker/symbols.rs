@@ -418,6 +418,113 @@ impl SemanticIndex {
         }
     }
 
+    pub(super) fn is_source_value_type(&self, ty: &TypeRef) -> bool {
+        self.type_decl(ty).is_ok()
+    }
+
+    pub(super) fn enum_variant_index(
+        &self,
+        module: &Module,
+        ty: &TypeRef,
+        variant: &Identifier,
+    ) -> Result<usize> {
+        let enum_index = match self.type_decl(ty)? {
+            TypeDecl::Enum(index) => index,
+            TypeDecl::Record(_) => {
+                return Err(Error::new(format!("type {ty} is not declared as an enum")));
+            }
+        };
+        let enum_decl = module
+            .enums
+            .get(enum_index)
+            .ok_or_else(|| Error::new(format!("enum index {enum_index} is not declared")))?;
+        let variant_symbol = self.symbols.resolve(variant.as_str()).ok_or_else(|| {
+            Error::new(format!(
+                "match pattern {variant} is not a variant of enum {}",
+                enum_decl.name
+            ))
+        })?;
+        self.enum_variants
+            .get(enum_index)
+            .ok_or_else(|| Error::new(format!("enum index {enum_index} is not declared")))?
+            .get(&variant_symbol)
+            .copied()
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "match pattern {variant} is not a variant of enum {}",
+                    enum_decl.name
+                ))
+            })
+    }
+
+    pub(super) fn fieldless_enum_variant_type(
+        &self,
+        module: &Module,
+        value: &Identifier,
+    ) -> Result<TypeRef> {
+        let value_symbol = self.symbols.resolve(value.as_str()).ok_or_else(|| {
+            Error::new(format!(
+                "match scrutinee {value} is not a fieldless enum variant"
+            ))
+        })?;
+        let mut matches = Vec::new();
+        for (enum_index, variants) in self.enum_variants.iter().enumerate() {
+            let Some(variant_index) = variants.get(&value_symbol) else {
+                continue;
+            };
+            let enum_decl = module
+                .enums
+                .get(enum_index)
+                .ok_or_else(|| Error::new(format!("enum index {enum_index} is not declared")))?;
+            let variant = enum_decl.variants.get(*variant_index).ok_or_else(|| {
+                Error::new(format!(
+                    "enum {} variant index {variant_index} is not declared",
+                    enum_decl.name
+                ))
+            })?;
+            matches.push((enum_decl.name.clone(), variant.payload_type.is_some()));
+        }
+
+        match matches.as_slice() {
+            [(name, false)] => Ok(TypeRef::Named(name.clone())),
+            [(_, true)] => Err(Error::new(format!(
+                "match scrutinee {value} must be a fieldless enum variant"
+            ))),
+            [] => Err(Error::new(format!(
+                "match scrutinee {value} is not a fieldless enum variant"
+            ))),
+            _ => Err(Error::new(format!(
+                "match scrutinee {value} is ambiguous across enum declarations"
+            ))),
+        }
+    }
+
+    pub(super) fn enum_variant_type(&self, module: &Module, value: &Identifier) -> Result<TypeRef> {
+        let value_symbol = self
+            .symbols
+            .resolve(value.as_str())
+            .ok_or_else(|| Error::new(format!("pattern {value} is not a declared enum variant")))?;
+        let mut matches = Vec::new();
+        for (enum_index, variants) in self.enum_variants.iter().enumerate() {
+            if variants.contains_key(&value_symbol) {
+                let enum_decl = module.enums.get(enum_index).ok_or_else(|| {
+                    Error::new(format!("enum index {enum_index} is not declared"))
+                })?;
+                matches.push(enum_decl.name.clone());
+            }
+        }
+
+        match matches.as_slice() {
+            [name] => Ok(TypeRef::Named(name.clone())),
+            [] => Err(Error::new(format!(
+                "pattern {value} is not a declared enum variant"
+            ))),
+            _ => Err(Error::new(format!(
+                "pattern {value} is ambiguous across enum declarations"
+            ))),
+        }
+    }
+
     pub(super) fn message_id_for_process(
         &self,
         module: &Module,

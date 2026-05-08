@@ -35,6 +35,14 @@ cargo run -p strata --bin strata -- check examples/actor_match.str
 cargo run -p strata --bin strata -- build examples/actor_match.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
 
+cargo run -p strata --bin strata -- check examples/init_match.str
+cargo run -p strata --bin strata -- build examples/init_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/init_match.mta
+
+cargo run -p strata --bin strata -- check examples/function_match.str
+cargo run -p strata --bin strata -- build examples/function_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_match.mta
+
 cargo run -p strata --bin strata -- check examples/actor_instances.str
 cargo run -p strata --bin strata -- build examples/actor_instances.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
@@ -42,6 +50,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mt
 cargo run -p strata --bin strata -- check examples/actor_payloads.str
 cargo run -p strata --bin strata -- build examples/actor_payloads.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+
+cargo run -p strata --bin strata -- check examples/actor_payload_match.str
+cargo run -p strata --bin strata -- build examples/actor_payload_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta
 
 cargo run -p strata --bin strata -- check examples/actor_reply.str
 cargo run -p strata --bin strata -- build examples/actor_reply.str

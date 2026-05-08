@@ -35,6 +35,38 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
+const INIT_MATCH: &str = r#"
+module init_match;
+
+enum StartupMode { Cold, Warm }
+enum Readiness { ColdReady, WarmReady }
+record MainState { readiness: Readiness }
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        match Warm {
+            Cold => {
+                return MainState { readiness: ColdReady };
+            }
+            Warm => {
+                return MainState { readiness: WarmReady };
+            }
+        }
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "init match selected WarmReady";
+        return Stop(state);
+    }
+}
+"#;
+
+const FUNCTION_MATCH: &str = include_str!("../../../../examples/function_match.str");
+
 const ACTOR_PING: &str = r#"
 module actor_ping;
 
@@ -326,6 +358,110 @@ fn checks_wildcard_only_step_pattern() {
 
     assert_eq!(main.transitions().len(), 1);
     assert_eq!(main.transitions()[0].message(), checked_message_id(0));
+}
+
+#[test]
+fn parses_checks_and_lowers_init_match_body() {
+    let module = parse_source(INIT_MATCH).expect("init match source should parse");
+    let main = module
+        .processes
+        .iter()
+        .find(|process| process.name.as_str() == "Main")
+        .expect("Main should parse");
+    let Some(FunctionBody::Match(match_body)) = &main.init.body else {
+        panic!("Main init should parse as a match body");
+    };
+    assert_eq!(match_body.scrutinee.as_str(), "Warm");
+    assert_eq!(match_body.arms.len(), 2);
+
+    let checked = check_module(module).expect("init match source should check");
+    let main = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Main")
+        .expect("Main should be checked");
+    assert_eq!(
+        checked_state_labels(main),
+        ["MainState{readiness:WarmReady}"]
+    );
+    assert_eq!(main.init_state(), checked_state_id(0));
+    assert_eq!(
+        only_transition(main).next_state(),
+        CheckedNextState::Current
+    );
+
+    let artifact = lower_to_artifact(&checked, INIT_MATCH).expect("init match should lower");
+    let main_artifact = &artifact.processes[0];
+    assert_eq!(main_artifact.init_state, mantle_artifact::StateId::new(0));
+    assert_eq!(
+        artifact_state_labels(main_artifact),
+        ["MainState{readiness:WarmReady}"]
+    );
+}
+
+#[test]
+fn parses_checks_and_lowers_source_functions_with_pattern_matching() {
+    let module = parse_source(FUNCTION_MATCH).expect("function match source should parse");
+    assert_eq!(module.functions.len(), 4);
+    assert_eq!(
+        module
+            .functions
+            .iter()
+            .filter(|function| function.name.as_str() == "readiness_sig")
+            .count(),
+        2
+    );
+    let main = module
+        .processes
+        .iter()
+        .find(|process| process.name.as_str() == "Main")
+        .expect("Main should parse");
+    assert_eq!(main.functions.len(), 1);
+    let worker = module
+        .processes
+        .iter()
+        .find(|process| process.name.as_str() == "Worker")
+        .expect("Worker should parse");
+    assert_eq!(worker.functions.len(), 1);
+
+    let checked = check_module(module).expect("function match source should check");
+    let main = &checked.processes()[0];
+    let worker = &checked.processes()[1];
+    assert_eq!(
+        checked_state_labels(main),
+        ["MainState{signature:WarmReady,body:WarmReady}"]
+    );
+    assert_eq!(
+        checked_state_labels(worker),
+        [
+            "WorkerState{job:Job{phase:Done}}",
+            "WorkerState{job:Job{phase:Ready}}"
+        ]
+    );
+    assert!(matches!(
+        only_transition(worker).next_state(),
+        CheckedNextState::Template(_)
+    ));
+
+    let artifact =
+        lower_to_artifact(&checked, FUNCTION_MATCH).expect("function match should lower");
+    assert_eq!(
+        artifact_state_labels(&artifact.processes[0]),
+        ["MainState{signature:WarmReady,body:WarmReady}"]
+    );
+    assert_eq!(
+        artifact_state_labels(&artifact.processes[1]),
+        [
+            "WorkerState{job:Job{phase:Done}}",
+            "WorkerState{job:Job{phase:Ready}}"
+        ]
+    );
+    let encoded = artifact.encode();
+    assert!(!encoded.contains("readiness_sig"));
+    assert!(!encoded.contains("readiness_body"));
+    assert!(!encoded.contains("ready_job"));
+    assert!(!encoded.contains("state_for"));
+    assert!(!encoded.contains("with_job"));
 }
 
 #[test]
@@ -2289,26 +2425,557 @@ fn rejects_match_arm_split_fat_arrow() {
 }
 
 #[test]
-fn rejects_match_body_in_init_for_buildable_source() {
-    let source = ACTOR_PING.replace(
-        r#"fn init() -> WorkerState ! [] ~ [] @det {
-        return Idle;
-    }"#,
-        r#"fn init() -> WorkerState ! [] ~ [] @det {
-        match Idle {
-            Idle => {
-                return Idle;
-            }
-        }
-    }"#,
-    );
+fn rejects_unknown_init_match_arm() {
+    let source = INIT_MATCH.replace("Cold =>", "Unknown =>");
 
-    let module = parse_source(&source).expect("init match body should parse");
-    let err = check_module(module).expect_err("init match body should fail checking");
+    let err = check_source(&source).expect_err("unknown init match arm should fail");
 
     assert!(
         err.to_string()
-            .contains("init must have a body block for buildable source")
+            .contains("match pattern Unknown is not a variant of enum StartupMode")
+    );
+}
+
+#[test]
+fn rejects_duplicate_init_match_arm() {
+    let source = INIT_MATCH.replace("Warm =>", "Cold =>");
+
+    let err = check_source(&source).expect_err("duplicate init match arm should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Main init match declares duplicate pattern for variant Cold")
+    );
+}
+
+#[test]
+fn rejects_missing_init_match_arm() {
+    let source = INIT_MATCH.replace(
+        r#"
+            Warm => {
+                return MainState { readiness: WarmReady };
+            }"#,
+        "",
+    );
+
+    let err = check_source(&source).expect_err("missing init match arm should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Main init match must handle variant Warm")
+    );
+}
+
+#[test]
+fn rejects_unreachable_init_match_wildcard_arm() {
+    let source = INIT_MATCH.replace(
+        r#"
+            Warm => {
+                return MainState { readiness: WarmReady };
+            }"#,
+        r#"
+            Warm => {
+                return MainState { readiness: WarmReady };
+            }
+            _ => {
+                return MainState { readiness: ColdReady };
+            }"#,
+    );
+
+    let err = check_source(&source).expect_err("unreachable init match wildcard should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Main init match wildcard pattern is unreachable")
+    );
+}
+
+#[test]
+fn rejects_init_match_binding_on_fieldless_variant() {
+    let source = INIT_MATCH.replace("Cold =>", "Cold(mode: StartupMode) =>");
+
+    let err = check_source(&source).expect_err("fieldless init match binding should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Main init match pattern Cold does not carry a payload")
+    );
+}
+
+#[test]
+fn checks_payload_bearing_enum_variants_in_init_match_when_binding_is_unused() {
+    let source = r#"
+module init_match_payload_variant;
+
+record ModePayload;
+enum StartupMode { Cold, Warm(ModePayload) }
+enum MainState { ColdReady, WarmReady }
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        match Cold {
+            Cold => {
+                return ColdReady;
+            }
+            Warm(payload: ModePayload) => {
+                return WarmReady;
+            }
+        }
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("payload-bearing init match enum should check");
+    let main = &checked.processes()[0];
+
+    assert_eq!(checked_state_labels(main), ["ColdReady", "WarmReady"]);
+    assert_eq!(main.init_state(), checked_state_id(0));
+}
+
+#[test]
+fn rejects_init_match_payload_binding_in_returned_state() {
+    let source = r#"
+module init_match_payload_binding_return;
+
+record ModePayload;
+record MainState { payload: ModePayload }
+enum StartupMode { Cold, Warm(ModePayload) }
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        match Cold {
+            Cold => {
+                return MainState { payload: ModePayload };
+            }
+            Warm(payload: ModePayload) => {
+                return MainState { payload: payload };
+            }
+        }
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("init match payload return should fail");
+
+    assert!(err.to_string().contains(
+        "process Main init match arm cannot use payload binding payload in returned state"
+    ));
+}
+
+#[test]
+fn rejects_unknown_source_function_call() {
+    let source = FUNCTION_MATCH.replace("state_for(Warm)", "missing(Warm)");
+
+    let err = check_source(&source).expect_err("unknown source function should fail");
+
+    assert!(err.to_string().contains("function missing is not declared"));
+}
+
+#[test]
+fn rejects_unknown_source_function_call_in_unused_function() {
+    let source = FUNCTION_MATCH.replace(
+        "proc Main mailbox bounded(1) {",
+        r#"fn unused(mode: StartupMode) -> Readiness ! [] ~ [] @det {
+    return missing(mode);
+}
+
+proc Main mailbox bounded(1) {"#,
+    );
+
+    let err = check_source(&source).expect_err("unused invalid source function should fail");
+
+    assert!(err.to_string().contains("function missing is not declared"));
+}
+
+#[test]
+fn rejects_module_source_function_call_to_process_local_helper() {
+    let source = FUNCTION_MATCH.replace(
+        "proc Main mailbox bounded(1) {",
+        r#"fn invalid_module_helper(mode: StartupMode) -> MainState ! [] ~ [] @det {
+    return state_for(mode);
+}
+
+proc Main mailbox bounded(1) {"#,
+    );
+
+    let err =
+        check_source(&source).expect_err("module source function should not see process helpers");
+
+    assert!(
+        err.to_string()
+            .contains("function state_for is not declared")
+    );
+}
+
+#[test]
+fn rejects_source_function_undeclared_parameter_type() {
+    let source = FUNCTION_MATCH.replace(
+        "proc Main mailbox bounded(1) {",
+        r#"fn unused(input: Missing) -> Readiness ! [] ~ [] @det {
+    return ColdReady;
+}
+
+proc Main mailbox bounded(1) {"#,
+    );
+
+    let err = check_source(&source).expect_err("undeclared function parameter type should fail");
+
+    assert!(err.to_string().contains(
+        "module function unused parameter input must use a declared record or enum type, found Missing"
+    ));
+}
+
+#[test]
+fn rejects_source_function_undeclared_return_type() {
+    let source = FUNCTION_MATCH.replace(
+        "proc Main mailbox bounded(1) {",
+        r#"fn unused(mode: StartupMode) -> Missing ! [] ~ [] @det {
+    return mode;
+}
+
+proc Main mailbox bounded(1) {"#,
+    );
+
+    let err = check_source(&source).expect_err("undeclared function return type should fail");
+
+    assert!(err.to_string().contains(
+        "module function unused return type must use a declared record or enum type, found Missing"
+    ));
+}
+
+#[test]
+fn rejects_unused_module_source_function_call_cycle() {
+    let source = FUNCTION_MATCH.replace(
+        "proc Main mailbox bounded(1) {",
+        r#"fn loop_readiness(mode: StartupMode) -> Readiness ! [] ~ [] @det {
+    return loop_readiness(mode);
+}
+
+proc Main mailbox bounded(1) {"#,
+    );
+
+    let err = check_source(&source).expect_err("recursive module source function should fail");
+
+    assert!(err.to_string().contains(
+        "module source function call cycle loop_readiness -> loop_readiness is not supported"
+    ));
+}
+
+#[test]
+fn rejects_unused_process_source_function_call_cycle() {
+    let source = FUNCTION_MATCH.replace(
+        "    fn init() -> MainState ! [] ~ [] @det {",
+        r#"    fn local_loop(mode: StartupMode) -> Readiness ! [] ~ [] @det {
+        return local_loop(mode);
+    }
+
+    fn init() -> MainState ! [] ~ [] @det {"#,
+    );
+
+    let err = check_source(&source).expect_err("recursive process source function should fail");
+
+    assert!(err.to_string().contains(
+        "process Main source function call cycle local_loop -> local_loop is not supported"
+    ));
+}
+
+#[test]
+fn rejects_duplicate_source_function_signature_pattern() {
+    let source = FUNCTION_MATCH.replace("fn readiness_sig(Warm)", "fn readiness_sig(Cold)");
+
+    let err = check_source(&source).expect_err("duplicate source function pattern should fail");
+
+    assert!(
+        err.to_string()
+            .contains("module function readiness_sig declares duplicate pattern for variant Cold")
+    );
+}
+
+#[test]
+fn rejects_non_exhaustive_source_function_signature_patterns() {
+    let source = FUNCTION_MATCH.replace(
+        r#"
+fn readiness_sig(Warm) -> Readiness ! [] ~ [] @det {
+    return WarmReady;
+}
+"#,
+        "\n",
+    );
+
+    let err = check_source(&source).expect_err("non-exhaustive function patterns should fail");
+
+    assert!(
+        err.to_string()
+            .contains("module function readiness_sig must handle variant Warm")
+    );
+}
+
+#[test]
+fn rejects_non_exhaustive_source_function_match_body() {
+    let source = FUNCTION_MATCH.replace(
+        r#"
+        Warm => {
+            return WarmReady;
+        }"#,
+        "",
+    );
+
+    let err = check_source(&source).expect_err("non-exhaustive function match should fail");
+
+    assert!(
+        err.to_string()
+            .contains("module function readiness_body match must handle variant Warm")
+    );
+}
+
+#[test]
+fn rejects_source_function_call_with_wrong_argument_type() {
+    let source = FUNCTION_MATCH.replace("state_for(Warm)", "state_for(WarmReady)");
+
+    let err = check_source(&source).expect_err("wrong function argument type should fail");
+
+    assert!(
+        err.to_string()
+            .contains("value WarmReady is not a variant of enum StartupMode")
+    );
+}
+
+#[test]
+fn rejects_payload_bearing_source_function_signature_pattern() {
+    let source = r#"
+module source_function_payload_signature;
+
+record Payload;
+enum Mode { Empty, Filled(Payload) }
+enum Readiness { ColdReady, WarmReady }
+record MainState { readiness: Readiness }
+enum MainMsg { Start }
+
+fn readiness(Filled) -> Readiness ! [] ~ [] @det {
+    return WarmReady;
+}
+
+fn readiness(Empty) -> Readiness ! [] ~ [] @det {
+    return ColdReady;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { readiness: ColdReady };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err =
+        check_source(source).expect_err("payload-bearing source signature pattern should fail");
+
+    assert!(
+        err.to_string()
+            .contains("module function readiness signature pattern Filled carries a payload")
+    );
+}
+
+#[test]
+fn rejects_payload_bearing_source_function_match_arm() {
+    let source = r#"
+module source_function_payload_match;
+
+record Payload;
+enum Mode { Empty, Filled(Payload) }
+enum Readiness { ColdReady, WarmReady }
+record MainState { readiness: Readiness }
+enum MainMsg { Start }
+
+fn readiness(mode: Mode) -> Readiness ! [] ~ [] @det {
+    match mode {
+        Empty => {
+            return ColdReady;
+        }
+        Filled => {
+            return WarmReady;
+        }
+    }
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { readiness: ColdReady };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("payload-bearing source match arm should fail");
+
+    assert!(
+        err.to_string()
+            .contains("module function readiness match pattern Filled carries a payload")
+    );
+}
+
+#[test]
+fn rejects_payload_bearing_source_function_signature_wildcard() {
+    let source = r#"
+module source_function_payload_signature_wildcard;
+
+record Payload;
+enum Mode { Empty, Filled(Payload) }
+enum Readiness { ColdReady, WarmReady }
+record MainState { readiness: Readiness }
+enum MainMsg { Start }
+
+fn readiness(Empty) -> Readiness ! [] ~ [] @det {
+    return ColdReady;
+}
+
+fn readiness(_) -> Readiness ! [] ~ [] @det {
+    return WarmReady;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { readiness: ColdReady };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err =
+        check_source(source).expect_err("payload-bearing source signature wildcard should fail");
+
+    assert!(err.to_string().contains(
+        "module function readiness signature wildcard pattern covers payload-bearing variant Filled"
+    ));
+}
+
+#[test]
+fn rejects_payload_bearing_source_function_match_wildcard() {
+    let source = r#"
+module source_function_payload_match_wildcard;
+
+record Payload;
+enum Mode { Empty, Filled(Payload) }
+enum Readiness { ColdReady, WarmReady }
+record MainState { readiness: Readiness }
+enum MainMsg { Start }
+
+fn readiness(mode: Mode) -> Readiness ! [] ~ [] @det {
+    match mode {
+        Empty => {
+            return ColdReady;
+        }
+        _ => {
+            return WarmReady;
+        }
+    }
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { readiness: ColdReady };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("payload-bearing source match wildcard should fail");
+
+    assert!(err.to_string().contains(
+        "module function readiness match wildcard pattern covers payload-bearing variant Filled"
+    ));
+}
+
+#[test]
+fn rejects_source_function_statements() {
+    let source = FUNCTION_MATCH.replace(
+        "return WorkerState { job: job };",
+        "emit \"helper tried to mutate behavior\";\n        return WorkerState { job: job };",
+    );
+
+    let err = check_source(&source).expect_err("source function statement should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker function with_job must not perform statements")
+    );
+}
+
+#[test]
+fn rejects_assignment_style_record_values_in_init_match_arm() {
+    let source = r#"
+module init_match_assignment;
+
+enum StartupMode { Cold, Warm }
+record MainState { mode: StartupMode }
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        match Warm {
+            Cold => {
+                return MainState { mode: Cold };
+            }
+            Warm => {
+                return MainState { mode = Warm };
+            }
+        }
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = parse_source(source).expect_err("assignment in init match arm should fail");
+
+    assert!(
+        err.to_string()
+            .contains("record value fields use ':'; assignment syntax is not supported")
     );
 }
 
@@ -3824,6 +4491,7 @@ fn checked_type_count_overflow_module() -> Module {
                     returns: ReturnExpr::Value(ValueExpr::Identifier(ident(state_name.as_str()))),
                 })),
             },
+            functions: Vec::new(),
             steps: vec![Function {
                 name: ident("step"),
                 params: vec![
@@ -3855,6 +4523,7 @@ fn checked_type_count_overflow_module() -> Module {
         name: ident("type_count_overflow"),
         records,
         enums,
+        functions: Vec::new(),
         processes,
     }
 }

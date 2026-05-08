@@ -23,6 +23,7 @@ module_decl =
 top_level_decl =
     record_decl
   | enum_decl
+  | function
   | process_decl
 ```
 
@@ -71,6 +72,7 @@ process_member =
   | message_alias
   | init_function
   | step_function
+  | source_function
 
 state_alias =
     "type" "State" "=" type_ref ";"
@@ -80,11 +82,11 @@ message_alias =
 ```
 
 The aliases and functions may appear in any order. `State`, `Msg`, and `init`
-must each appear exactly once. Each message variant must resolve to exactly one
-`step` clause, either through an explicit constructor pattern, through one
-wildcard pattern, or through one match step body. A process cannot mix step
-parameter patterns with a match step body in this slice. Other process members
-are rejected.
+must each appear exactly once. Non-`init`/`step` functions are process-local
+source helpers. Each message variant must resolve to exactly one `step` clause,
+either through an explicit constructor pattern, through one wildcard pattern,
+or through one match step body. A process cannot mix step parameter patterns
+with a match step body in this slice. Other process members are rejected.
 
 ## Functions
 
@@ -124,8 +126,10 @@ determinism =
     "@det" | "@nondet"
 ```
 
-Buildable source accepts bodies for `init` and `step` only. It requires
-deterministic functions and empty may-behavior lists.
+Buildable source accepts bodies for `init`, `step`, module helpers, and
+process-local helpers. It requires deterministic functions and empty
+may-behavior lists. Normal source helpers are pure: they use `! []`, perform no
+statements, and are expanded before lowering.
 
 ## Function Bodies
 
@@ -146,8 +150,12 @@ match_arm =
 ```
 
 Patterns are source-level binding and decomposition syntax. This source slice
-admits constructor patterns, constructor payload bindings, and `_` wildcards;
-the first buildable semantic consumer is actor `step` message dispatch.
+admits constructor patterns, constructor payload bindings, and `_` wildcards.
+Buildable semantic consumers are normal source function signatures and match
+bodies, fieldless enum `init` matches, and actor `step` message dispatch. Actor
+`step` dispatch accepts constructor payload bindings in parameter patterns and
+whole-body `match msg` arms. Normal source function patterns currently cover
+fieldless enum constructors.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message
@@ -184,6 +192,29 @@ match scrutinee must be the typed message parameter in the current buildable
 step subset. Match arms are block-delimited and do not use comma separators.
 The step effect list applies to every generated transition, so each arm must
 use exactly the declared effects.
+
+A normal source helper is a module-level function or a process-local function
+whose name is not `init` or `step`:
+
+```text
+source_function =
+    "fn" ident "(" (param_binding | pattern) ")"
+    "->" type_ref
+    "!" "[]" "~" "[]" "@det"
+    ("{" block_body "}" | "{" match_body "}")
+```
+
+Helper block bodies must not contain statements. Helper match bodies match the
+function's typed binding parameter. Helper calls are value expressions:
+
+```text
+helper_call =
+    ident "(" value_expr ")"
+```
+
+The checker validates helper signatures and bodies before lowering, then
+expands calls in `init`, `step` result values, and send payload values.
+Recursive helper call cycles are rejected.
 
 ## Statements
 
@@ -243,6 +274,7 @@ return_expr =
 
 value_expr =
     ident
+  | ident "(" value_expr ")"
   | ident "{" record_value_field ("," record_value_field)* ","? "}"
 
 record_value_field =

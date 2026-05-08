@@ -148,6 +148,7 @@ pub(super) fn canonical_source_value_with_bindings(
 pub(super) fn source_value_uses_binding(value: &ValueExpr, binding: &Identifier) -> bool {
     match value {
         ValueExpr::Identifier(name) => name == binding,
+        ValueExpr::Call { arg, .. } => source_value_uses_binding(arg, binding),
         ValueExpr::Record(record) => record
             .fields
             .iter()
@@ -197,6 +198,11 @@ fn canonical_value(
                 binding.name, binding.ty, expected_type
             )));
         }
+    }
+    if let ValueExpr::Call { name, .. } = value {
+        return Err(Error::new(format!(
+            "function call {name} must be resolved before checking value of type {expected_type}"
+        )));
     }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
         return canonical_record_value(module, semantic_index, record, value, bindings, depth);
@@ -256,6 +262,11 @@ fn checked_value_template(
                 binding.name, binding.ty, expected_type
             )));
         }
+    }
+    if let ValueExpr::Call { name, .. } = value {
+        return Err(Error::new(format!(
+            "function call {name} must be resolved before checking value template of type {expected_type}"
+        )));
     }
 
     if binding.is_none_or(|binding| !source_value_uses_binding(value, binding.name)) {
@@ -555,12 +566,14 @@ mod tests {
                 name: ident("MainMsg"),
                 variants: vec![unit_variant("Start")],
             }],
+            functions: Vec::new(),
             processes: vec![Process {
                 name: ident("Main"),
                 mailbox_bound: 1,
                 state_type: state_type.clone(),
                 msg_type: TypeRef::Named(ident("MainMsg")),
                 init: function("init", state_type.clone()),
+                functions: Vec::new(),
                 steps: vec![function("step", state_type)],
             }],
         }
@@ -581,12 +594,14 @@ mod tests {
                 name: ident("MainMsg"),
                 variants: vec![unit_variant("Start")],
             }],
+            functions: Vec::new(),
             processes: vec![Process {
                 name: ident("Main"),
                 mailbox_bound: 1,
                 state_type: state_type.clone(),
                 msg_type: TypeRef::Named(ident("MainMsg")),
                 init: function("init", state_type.clone()),
+                functions: Vec::new(),
                 steps: vec![function("step", state_type)],
             }],
         }

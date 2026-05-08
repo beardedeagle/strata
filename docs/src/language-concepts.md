@@ -4,8 +4,9 @@ Strata is a source language for explicit state, explicit effects, typed
 messages, and runtime-observable process execution.
 
 The implementation is intentionally small. The `.str` source surface declares
-source-level records, enums, processes, message types, state types, and process
-transitions. Mantle executes the admitted artifact produced from that source.
+source-level records, enums, pure source functions, processes, message types,
+state types, and process transitions. Mantle executes the admitted artifact
+produced from that source.
 
 ## Source Versus Runtime
 
@@ -14,6 +15,7 @@ Strata source is where author-visible meaning lives:
 - names;
 - records;
 - enums;
+- source functions;
 - process declarations;
 - message declarations;
 - state transition expressions;
@@ -40,6 +42,7 @@ A Strata program is organized around processes. A process declares:
 - a state type;
 - a message type;
 - an `init` function that creates the initial state;
+- optional pure helper functions local to the process;
 - a `step` function that handles messages and returns a transition result.
 
 The entry process is named `Main`. Mantle starts `Main` and delivers its first
@@ -76,13 +79,41 @@ send worker Assign(Job { phase: Ready });
 ```
 
 Payload variants carry one immutable value. Actor `step` parameter patterns can
-bind that payload:
+bind that payload, and whole-body `match msg` arms can bind the same payload:
 
 ```strata
 fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
     return Stop(WorkerState { job: job });
 }
 ```
+
+## Source Functions
+
+Strata accepts pure source helper functions at module level and inside
+processes. Helpers are checked and expanded before lowering; Mantle does not
+dispatch by helper names at runtime.
+
+```strata
+fn readiness(Warm) -> Readiness ! [] ~ [] @det {
+    return WarmReady;
+}
+
+fn state_for(mode: StartupMode) -> MainState ! [] ~ [] @det {
+    match mode {
+        Cold => {
+            return MainState { readiness: ColdReady };
+        }
+        Warm => {
+            return MainState { readiness: WarmReady };
+        }
+    }
+}
+```
+
+Source helpers are immutable value producers. They perform no statements, use
+`! [] ~ [] @det`, and return whole values. A process-local helper can
+encapsulate non-message-handling value construction for `init`, `step` results,
+and send payloads.
 
 ## State
 

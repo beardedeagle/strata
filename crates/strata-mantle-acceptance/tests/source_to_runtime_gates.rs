@@ -6,7 +6,8 @@ use std::process::{Command, Output};
 use std::sync::Once;
 
 use mantle_artifact::{
-    ArtifactEffect, ArtifactTypeKind, MantleArtifact, ProcessId, TypeId, read_artifact,
+    ArtifactEffect, ArtifactTypeKind, ArtifactValueTemplate, ArtifactValueTemplateField,
+    MantleArtifact, ProcessId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -476,6 +477,40 @@ fn actor_match_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn init_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run("examples/init_match.str", "target/strata/init_match.mta");
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: spawned Main pid=1"));
+    assert!(stdout.contains("init match selected WarmReady"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let artifact = gate.read_artifact("target/strata/init_match.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.debug_name, "Main");
+    assert_eq!(main.init_state, mantle_artifact::StateId::new(0));
+    assert_eq!(main.state_values.len(), 1);
+    assert_eq!(main.state_values[0].label, "MainState{readiness:WarmReady}");
+    assert_eq!(main.transitions.len(), 1);
+    assert_eq!(
+        main.transitions[0].next_state,
+        mantle_artifact::NextState::Current
+    );
+
+    let trace = gate.read_trace("init_match");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{readiness:WarmReady}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"init match selected WarmReady""#
+    ));
+    assert!(trace.contains(
+        r#""event":"process_stepped","pid":1,"process_id":0,"process":"Main","message_id":0,"message":"Start","result":"Stop","state_id":0,"state":"MainState{readiness:WarmReady}""#
+    ));
+}
+
+#[test]
 fn actor_instances_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(
@@ -521,6 +556,90 @@ fn actor_payloads_checks_builds_and_runs_on_mantle() {
     assert!(trace.contains(&format!(
         r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}","result":"Stop","state_id":1,"state":"WorkerState{{job:Job{{phase:Ready}}}}""#
     )));
+}
+
+#[test]
+fn actor_payload_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/actor_payload_match.str",
+        "target/strata/actor_payload_match.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: delivered Assign(Job{phase:Ready}) to Worker"));
+    assert!(stdout.contains("worker matched Assign payload"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+
+    let artifact = gate.read_artifact("target/strata/actor_payload_match.mta");
+    let job_type = value_type_id(&artifact, "Job");
+    let payload_type = format!(r#""payload_type_id":{}"#, job_type.as_u32());
+    let trace = gate.read_trace("actor_payload_match");
+    assert!(trace.contains(&format!(
+        r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}""#
+    )));
+    assert!(trace.contains(r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"WorkerState{job:Job{phase:Done}}","to_state_id":1,"to":"WorkerState{job:Job{phase:Ready}}""#));
+    assert!(trace.contains(&format!(
+        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}","result":"Stop","state_id":1,"state":"WorkerState{{job:Job{{phase:Ready}}}}""#
+    )));
+}
+
+#[test]
+fn function_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/function_match.str",
+        "target/strata/function_match.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("source functions selected WarmReady"));
+    assert!(stdout.contains("process helper assigned job"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+
+    let artifact = gate.read_artifact("target/strata/function_match.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.debug_name, "Main");
+    assert_eq!(main.init_state, mantle_artifact::StateId::new(0));
+    assert_eq!(
+        main.state_values[0].label,
+        "MainState{signature:WarmReady,body:WarmReady}"
+    );
+
+    let worker = &artifact.processes[1];
+    assert_eq!(worker.debug_name, "Worker");
+    assert_eq!(
+        worker.state_values[0].label,
+        "WorkerState{job:Job{phase:Done}}"
+    );
+    assert_eq!(
+        worker.state_values[1].label,
+        "WorkerState{job:Job{phase:Ready}}"
+    );
+    assert_eq!(
+        worker.transitions[0].next_state,
+        mantle_artifact::NextState::Template(ArtifactValueTemplate::Record {
+            ty: value_type_id(&artifact, "WorkerState"),
+            fields: vec![ArtifactValueTemplateField {
+                name: "job".to_string(),
+                value: ArtifactValueTemplate::ReceivedPayload {
+                    ty: value_type_id(&artifact, "Job"),
+                },
+            }],
+        })
+    );
+
+    let trace = gate.read_trace("function_match");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{signature:WarmReady,body:WarmReady}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source functions selected WarmReady""#
+    ));
+    assert!(trace.contains(
+        r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"WorkerState{job:Job{phase:Done}}","to_state_id":1,"to":"WorkerState{job:Job{phase:Ready}}""#
+    ));
 }
 
 #[test]
