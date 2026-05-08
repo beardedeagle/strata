@@ -36,6 +36,7 @@ impl Parser {
 
         let mut records = Vec::new();
         let mut enums = Vec::new();
+        let mut functions = Vec::new();
         let mut processes = Vec::new();
 
         while !self.at_eof() {
@@ -43,6 +44,8 @@ impl Parser {
                 records.push(self.parse_record()?);
             } else if self.peek_keyword("enum") {
                 enums.push(self.parse_enum()?);
+            } else if self.peek_keyword("fn") {
+                functions.push(self.parse_function()?);
             } else if self.peek_keyword("proc") {
                 processes.push(self.parse_process()?);
             } else if self.peek_keyword("security") {
@@ -50,7 +53,7 @@ impl Parser {
                     "security declarations are not supported in this buildable source slice",
                 ));
             } else {
-                return Err(self.error_here("expected record, enum, or proc declaration"));
+                return Err(self.error_here("expected record, enum, function, or proc declaration"));
             }
         }
 
@@ -58,6 +61,7 @@ impl Parser {
             name,
             records,
             enums,
+            functions,
             processes,
         })
     }
@@ -156,6 +160,7 @@ impl Parser {
         let mut state_type = None;
         let mut msg_type = None;
         let mut init = None;
+        let mut functions = Vec::new();
         let mut steps = Vec::new();
 
         while !self.consume_symbol('}') {
@@ -202,10 +207,8 @@ impl Parser {
                     "step" => {
                         steps.push(function);
                     }
-                    other => {
-                        return Err(Error::new(format!(
-                            "unsupported process function {other}; expected init or step"
-                        )));
+                    _ => {
+                        functions.push(function);
                     }
                 }
             } else {
@@ -224,6 +227,7 @@ impl Parser {
             msg_type: msg_type
                 .ok_or_else(|| Error::new(format!("process {name} must declare type Msg")))?,
             init: init.ok_or_else(|| Error::new(format!("process {name} must declare init")))?,
+            functions,
             steps,
         })
     }
@@ -492,13 +496,8 @@ impl Parser {
 
     fn parse_return_expr(&mut self) -> Result<ReturnExpr> {
         let value = self.parse_value_expr()?;
-        if let ValueExpr::Identifier(name) = value {
-            if !self.consume_symbol('(') {
-                return Ok(ReturnExpr::Value(ValueExpr::Identifier(name)));
-            }
-            let arg = self.parse_value_expr()?;
-            self.expect_symbol(')')?;
-            return Ok(ReturnExpr::Call { name, arg });
+        if let ValueExpr::Call { name, arg } = value {
+            return Ok(ReturnExpr::Call { name, arg: *arg });
         }
         Ok(ReturnExpr::Value(value))
     }
@@ -514,6 +513,14 @@ impl Parser {
             )));
         }
         let name = self.expect_identifier()?;
+        if self.consume_symbol('(') {
+            let arg = self.parse_value_expr_with_depth(depth + 1)?;
+            self.expect_symbol(')')?;
+            return Ok(ValueExpr::Call {
+                name,
+                arg: Box::new(arg),
+            });
+        }
         if !self.consume_symbol('{') {
             return Ok(ValueExpr::Identifier(name));
         }

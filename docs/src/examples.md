@@ -9,13 +9,18 @@ Read them in this order:
 3. `actor_sequence.str` for multiple messages and message-keyed transitions.
 4. `actor_match.str` for whole-body match authoring that checks
    into typed message-keyed transitions.
-5. `actor_instances.str` for multiple runtime instances of one process
+5. `init_match.str` for whole-body match authoring in `init`.
+6. `function_match.str` for module functions, process-local helpers, and
+   pattern matching outside actor dispatch.
+7. `actor_instances.str` for multiple runtime instances of one process
    definition.
-6. `actor_payloads.str` for typed message payloads and immutable payload
+8. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-7. `actor_reply.str` for transporting typed process references through message
+9. `actor_payload_match.str` for the same payload binding through a whole-body
+   `match msg`.
+10. `actor_reply.str` for transporting typed process references through message
    payloads.
-8. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+11. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -103,6 +108,50 @@ Key source ideas:
   `Stop(...)`.
 - The generated Mantle artifact still dispatches by typed message IDs.
 
+## Init Match
+
+`examples/init_match.str` exercises a non-step whole-body match in `init`. The
+checker resolves the fieldless enum scrutinee, proves the arms are exhaustive,
+and selects the typed initial state before lowering.
+
+```sh
+cargo run -p strata --bin strata -- check examples/init_match.str
+cargo run -p strata --bin strata -- build examples/init_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/init_match.mta
+```
+
+Key source ideas:
+
+- `match Warm` is checked against `StartupMode`.
+- Both `Cold` and `Warm` arms return immutable whole `MainState` record values.
+- The Mantle trace starts `Main` in `MainState{readiness:WarmReady}`, proving
+  the selected initial state reached runtime admission.
+
+## Function Match
+
+`examples/function_match.str` exercises normal source functions outside actor
+dispatch. It uses module-level functions and process-local helpers, including
+signature-pattern dispatch and a whole-body match helper.
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_match.str
+cargo run -p strata --bin strata -- build examples/function_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_match.mta
+```
+
+Key source ideas:
+
+- `readiness_sig(Cold)` and `readiness_sig(Warm)` are module-level function
+  clauses selected by typed signature patterns.
+- `readiness_body(mode: StartupMode)` uses a whole-body `match mode` outside
+  an actor `step`.
+- `Main` and `Worker` declare process-local helper functions for state
+  construction.
+- `send worker Assign(ready_job(Ready))` proves helper calls are expanded for
+  message payload discovery and lowering.
+- Mantle sees typed state IDs, message IDs, and payload templates, not source
+  helper dispatch names.
+
 ## Actor Instances
 
 `examples/actor_instances.str` proves process references and instance-aware sends.
@@ -144,6 +193,25 @@ Key source ideas:
 - `Assign(job: Job)` binds the received payload as an immutable step-local
   value.
 - `WorkerState { job: job }` constructs the next state as a whole value.
+
+## Actor Payload Match
+
+`examples/actor_payload_match.str` proves the same immutable payload binding
+works from a whole-body `match msg` arm, not only from a `step` signature.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payload_match.str
+cargo run -p strata --bin strata -- build examples/actor_payload_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta
+```
+
+Key source ideas:
+
+- `fn step(state: WorkerState, msg: WorkerMsg)` binds the message parameter.
+- `match msg` dispatches through the same typed pattern validation used by
+  signature patterns.
+- `Assign(job: Job)` binds the received payload immutably inside the match arm.
+- Runtime still dispatches by admitted message IDs and payload type IDs.
 
 ## Actor Reply References
 

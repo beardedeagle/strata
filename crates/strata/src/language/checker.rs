@@ -11,8 +11,9 @@ use mantle_artifact::{
 };
 
 use super::ast::{
-    Determinism, Effect, EnumVariant, Function, FunctionBlock, FunctionBody, FunctionParam,
-    Identifier, Module, Param, Pattern, Process, ReturnExpr, Statement, TypeRef, ValueExpr,
+    Determinism, Effect, Enum, EnumVariant, Function, FunctionBlock, FunctionBody, FunctionParam,
+    Identifier, MatchArm, Module, Param, Pattern, Process, RecordValue, RecordValueField,
+    ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
@@ -22,7 +23,7 @@ use super::checked::{
     CheckedTypeRef, CheckedValueTemplate,
 };
 use super::diagnostic::{Error, Result};
-use super::{PROC_RESULT_TYPE, PROCESS_REF_TYPE};
+use super::{MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
 use outputs::OutputPool;
 use state_space::{
     StateSpace, ValueBinding, ValueTemplateBinding, canonical_source_value_with_bindings,
@@ -145,7 +146,7 @@ struct ProcessRefCollectionContext<'a> {
 struct StepBodyClause<'a> {
     step: &'a Function,
     body: &'a FunctionBlock,
-    payload_param: Option<StepPayloadParam>,
+    payload_param: Option<PatternPayloadParam>,
 }
 
 struct StepDiscoveryClause<'a> {
@@ -174,7 +175,7 @@ struct StepTransitionInput<'a> {
 enum StepPattern {
     Variant {
         message: CheckedMessageVariantId,
-        binding: Option<StepPayloadParam>,
+        binding: Option<PatternPayloadParam>,
     },
     Wildcard,
 }
@@ -192,7 +193,7 @@ enum StepDispatchStyle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StepPayloadParam {
+struct PatternPayloadParam {
     name: Identifier,
     ty: TypeRef,
 }
@@ -202,6 +203,63 @@ struct StepPayloadBinding {
     name: Identifier,
     ty: TypeRef,
     checked_ty: CheckedTypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TypedMatchPattern {
+    Variant {
+        variant: usize,
+        binding: Option<PatternPayloadParam>,
+    },
+    Wildcard,
+}
+
+struct TypedMatchArm<'a> {
+    pattern: TypedMatchPattern,
+    body: &'a FunctionBlock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PatternPayloadContext {
+    StepPattern,
+    SourceValue,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PatternBindingContext<'a> {
+    Step { process: &'a Process },
+    Source { owner: &'a str },
+}
+
+struct PatternCheckContext<'a> {
+    module: &'a Module,
+    semantic_index: &'a SemanticIndex,
+    enum_decl: &'a Enum,
+    enum_type: &'a TypeRef,
+    subject: &'a str,
+    label: &'a str,
+    payload_context: PatternPayloadContext,
+    binding_context: PatternBindingContext<'a>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceFunctionScope<'a> {
+    module: &'a Module,
+    process: &'a Process,
+    process_functions: &'a [Function],
+    semantic_index: &'a SemanticIndex,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceValueBinding<'a> {
+    name: &'a Identifier,
+    ty: &'a TypeRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceFunctionParamKind {
+    Binding,
+    Pattern,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -476,13 +534,25 @@ impl<'a> MessageCaseBuilder<'a> {
                 variant.name
             ))),
             (Some(payload_type), Some(payload)) => {
+                let function_scope = SourceFunctionScope {
+                    module: self.module,
+                    process: self.process,
+                    process_functions: &self.process.functions,
+                    semantic_index: self.semantic_index,
+                };
+                let binding = bindings.first().map(|binding| SourceValueBinding {
+                    name: binding.name,
+                    ty: binding.ty,
+                });
+                let payload =
+                    resolve_source_value_expr(&function_scope, payload_type, payload, binding, 0)?;
                 let label = if let Some(target) =
                     self.semantic_index.process_ref_target_type(payload_type)?
                 {
                     canonical_process_ref_payload_label(
                         payload_type,
                         target,
-                        payload,
+                        &payload,
                         bindings,
                         process_refs,
                     )?
@@ -491,7 +561,7 @@ impl<'a> MessageCaseBuilder<'a> {
                         self.module,
                         self.semantic_index,
                         payload_type,
-                        payload,
+                        &payload,
                         bindings,
                     )?
                 };
@@ -642,6 +712,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     let entry_process = semantic_index
         .process_id_by_name("Main")
         .map_err(|_| Error::new("entry process Main is not declared"))?;
+    validate_source_function_declarations(&module, &semantic_index)?;
     validate_process_declarations_before_message_cases(&module, &semantic_index)?;
     let message_cases =
         MessageCaseTable::build(&module, entry_process, &semantic_index, &mut types)?;
@@ -758,7 +829,12 @@ fn check_process(
     )?;
 
     let mut state_space = StateSpace::new(context.module, context.semantic_index, process, types)?;
-    let init_state = check_init(context.semantic_index, process, &mut state_space)?;
+    let init_state = check_init(
+        context.module,
+        context.semantic_index,
+        process,
+        &mut state_space,
+    )?;
     let process_context = ProcessCheckContext {
         module: context.module,
         process,
@@ -785,6 +861,7 @@ fn check_process(
 }
 
 fn check_init(
+    module: &Module,
     semantic_index: &SemanticIndex,
     process: &Process,
     state_space: &mut StateSpace<'_>,
@@ -806,25 +883,1431 @@ fn check_init(
         return Err(Error::new("init must be deterministic"));
     }
 
-    let Some(FunctionBody::Block(body)) = &init.body else {
-        return Err(Error::new(
-            "init must have a body block for buildable source",
-        ));
-    };
-    if !body.statements.is_empty() {
-        return Err(Error::new(
-            "init body must not perform statements in this slice",
-        ));
-    }
     validate_effects("init", &init.effects, BTreeSet::new())?;
 
-    let ReturnExpr::Value(value) = &body.returns else {
+    let function_scope = SourceFunctionScope {
+        module,
+        process,
+        process_functions: &process.functions,
+        semantic_index,
+    };
+    let Some(body) = &init.body else {
+        return Err(Error::new("init must have a body for buildable source"));
+    };
+    match body {
+        FunctionBody::Block(body) => {
+            check_init_return_block(&function_scope, state_space, body, None, "init body")
+        }
+        FunctionBody::Match(match_body) => {
+            check_init_match(&function_scope, state_space, match_body)
+        }
+    }
+}
+
+fn check_init_match(
+    scope: &SourceFunctionScope<'_>,
+    state_space: &mut StateSpace<'_>,
+    match_body: &super::ast::Match,
+) -> Result<CheckedStateId> {
+    let scrutinee_type = scope
+        .semantic_index
+        .fieldless_enum_variant_type(scope.module, &match_body.scrutinee)?;
+    let enum_decl = scope
+        .semantic_index
+        .enum_decl(scope.module, &scrutinee_type)?;
+    let selected_variant = scope.semantic_index.enum_variant_index(
+        scope.module,
+        &scrutinee_type,
+        &match_body.scrutinee,
+    )?;
+    let subject = format!("process {}", scope.process.name);
+    let pattern_context = PatternCheckContext {
+        module: scope.module,
+        semantic_index: scope.semantic_index,
+        enum_decl,
+        enum_type: &scrutinee_type,
+        subject: &subject,
+        label: "init match",
+        payload_context: PatternPayloadContext::SourceValue,
+        binding_context: PatternBindingContext::Source { owner: &subject },
+    };
+    let arms = check_typed_match_arms(&pattern_context, &match_body.arms)?;
+
+    let mut selected_state = None;
+    let mut wildcard_state = None;
+    for arm in arms {
+        let payload_binding = match &arm.pattern {
+            TypedMatchPattern::Variant { binding, .. } => binding.as_ref(),
+            TypedMatchPattern::Wildcard => None,
+        };
+        let state =
+            resolve_init_return_block_value(scope, arm.body, payload_binding, "init match arm")?;
+        match arm.pattern {
+            TypedMatchPattern::Variant { variant, .. } if variant == selected_variant => {
+                selected_state = Some(state);
+            }
+            TypedMatchPattern::Wildcard => {
+                wildcard_state = Some(state);
+            }
+            _ => {}
+        }
+    }
+
+    let state = selected_state.or(wildcard_state).ok_or_else(|| {
+        Error::new(format!(
+            "process {} init match has no arm for scrutinee {}",
+            scope.process.name, match_body.scrutinee
+        ))
+    })?;
+    state_space.resolve_state_value(scope.semantic_index, &state)
+}
+
+fn check_init_return_block(
+    scope: &SourceFunctionScope<'_>,
+    state_space: &mut StateSpace<'_>,
+    body: &FunctionBlock,
+    payload_binding: Option<&PatternPayloadParam>,
+    context: &str,
+) -> Result<CheckedStateId> {
+    let value = resolve_init_return_block_value(scope, body, payload_binding, context)?;
+    state_space.resolve_state_value(scope.semantic_index, &value)
+}
+
+fn resolve_init_return_block_value(
+    scope: &SourceFunctionScope<'_>,
+    body: &FunctionBlock,
+    payload_binding: Option<&PatternPayloadParam>,
+    context: &str,
+) -> Result<ValueExpr> {
+    if !body.statements.is_empty() {
         return Err(Error::new(format!(
-            "init body must return a value of {}",
-            process.state_type
+            "{context} must not perform statements in this slice"
+        )));
+    }
+    let value = match &body.returns {
+        ReturnExpr::Value(value) => value.clone(),
+        ReturnExpr::Call { name, arg } => ValueExpr::Call {
+            name: name.clone(),
+            arg: Box::new(arg.clone()),
+        },
+    };
+    let binding = payload_binding.map(|binding| SourceValueBinding {
+        name: &binding.name,
+        ty: &binding.ty,
+    });
+    let value = resolve_source_value_expr(scope, &scope.process.state_type, &value, binding, 0)?;
+    if let Some(binding) = payload_binding {
+        if source_value_uses_binding(&value, &binding.name) {
+            return Err(Error::new(format!(
+                "process {} {context} cannot use payload binding {} in returned state",
+                scope.process.name, binding.name
+            )));
+        }
+    }
+    check_source_value_type(scope, &scope.process.state_type, &value, binding)?;
+    Ok(value)
+}
+
+fn validate_source_function_declarations(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+) -> Result<()> {
+    let mut module_function_names = BTreeSet::new();
+    validate_source_function_groups(module, semantic_index, "module", None, &module.functions)?;
+    for function in &module.functions {
+        module_function_names.insert(function.name.as_str());
+    }
+
+    for process in &module.processes {
+        for function in &process.functions {
+            if module_function_names.contains(function.name.as_str()) {
+                return Err(Error::new(format!(
+                    "process {} function {} conflicts with module function {}",
+                    process.name, function.name, function.name
+                )));
+            }
+        }
+        let owner = format!("process {}", process.name);
+        validate_source_function_groups(
+            module,
+            semantic_index,
+            &owner,
+            Some(process),
+            &process.functions,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_source_function_groups(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    process: Option<&Process>,
+    functions: &[Function],
+) -> Result<()> {
+    let mut groups: BTreeMap<&str, Vec<&Function>> = BTreeMap::new();
+    for function in functions {
+        validate_source_function_name(semantic_index, owner, &function.name)?;
+        groups
+            .entry(function.name.as_str())
+            .or_default()
+            .push(function);
+    }
+
+    for group in groups.values() {
+        validate_source_function_group(module, semantic_index, owner, process, group)?;
+    }
+
+    validate_source_function_call_cycles(owner, functions)?;
+
+    Ok(())
+}
+
+fn validate_source_function_name(
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    name: &Identifier,
+) -> Result<()> {
+    if matches!(
+        name.as_str(),
+        "init" | "step" | "Stop" | "Continue" | "Panic"
+    ) {
+        return Err(Error::new(format!(
+            "{owner} function {name} uses a reserved function name"
+        )));
+    }
+    if semantic_index.process_id(name).is_ok() {
+        return Err(Error::new(format!(
+            "{owner} function {name} conflicts with a process declaration"
+        )));
+    }
+    if semantic_index.identifier_conflicts_with_declared_value(name) {
+        return Err(Error::new(format!(
+            "{owner} function {name} conflicts with a declared type or value constructor"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_source_function_group(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    process: Option<&Process>,
+    functions: &[&Function],
+) -> Result<()> {
+    let Some(first) = functions.first() else {
+        return Ok(());
+    };
+    let first_kind = source_function_param_kind(first)?;
+
+    for function in functions {
+        validate_source_function_contract(semantic_index, owner, function)?;
+        if !semantic_index.same_type(&function.return_type, &first.return_type) {
+            return Err(Error::new(format!(
+                "{owner} function {} clauses must return {}, found {}",
+                first.name, first.return_type, function.return_type
+            )));
+        }
+        let kind = source_function_param_kind(function)?;
+        if kind != first_kind {
+            return Err(Error::new(format!(
+                "{owner} function {} cannot mix binding parameters with pattern parameters",
+                first.name
+            )));
+        }
+    }
+
+    match first_kind {
+        SourceFunctionParamKind::Binding => {
+            if functions.len() != 1 {
+                return Err(Error::new(format!(
+                    "{owner} function {} declares duplicate binding clauses",
+                    first.name
+                )));
+            }
+            validate_binding_source_function_body(module, semantic_index, owner, process, first)
+        }
+        SourceFunctionParamKind::Pattern => validate_pattern_source_function_group(
+            module,
+            semantic_index,
+            owner,
+            process,
+            functions,
+        ),
+    }
+}
+
+fn validate_source_function_contract(
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    function: &Function,
+) -> Result<()> {
+    if function.params.len() != 1 {
+        return Err(Error::new(format!(
+            "{owner} function {} must declare exactly one parameter in this source slice",
+            function.name
+        )));
+    }
+    if !function.effects.is_empty() {
+        return Err(Error::new(format!(
+            "{owner} function {} must not declare effects",
+            function.name
+        )));
+    }
+    if !function.may.is_empty() {
+        return Err(Error::new(format!(
+            "{owner} function {} may-behaviors must be empty",
+            function.name
+        )));
+    }
+    if function.determinism != Determinism::Det {
+        return Err(Error::new(format!(
+            "{owner} function {} must be deterministic",
+            function.name
+        )));
+    }
+    if function.body.is_none() {
+        return Err(Error::new(format!(
+            "{owner} function {} must have a body for buildable source",
+            function.name
+        )));
+    }
+    validate_source_function_declared_value_type(
+        semantic_index,
+        owner,
+        function,
+        "return type",
+        &function.return_type,
+    )?;
+    if let [FunctionParam::Binding(param)] = function.params.as_slice() {
+        validate_source_function_declared_value_type(
+            semantic_index,
+            owner,
+            function,
+            &format!("parameter {}", param.name),
+            &param.ty,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_source_function_declared_value_type(
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    function: &Function,
+    position: &str,
+    ty: &TypeRef,
+) -> Result<()> {
+    if semantic_index.is_source_value_type(ty) {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "{owner} function {} {position} must use a declared record or enum type, found {ty}",
+        function.name
+    )))
+}
+
+fn validate_source_function_call_cycles(owner: &str, functions: &[Function]) -> Result<()> {
+    let function_names = functions
+        .iter()
+        .map(|function| function.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut graph = function_names
+        .iter()
+        .map(|name| (*name, BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+
+    for function in functions {
+        let mut calls = BTreeSet::new();
+        collect_source_function_calls(function, &mut calls);
+        let caller = function.name.as_str();
+        let Some(callees) = graph.get_mut(caller) else {
+            return Err(Error::new(format!(
+                "{owner} function {} is not registered for cycle validation",
+                function.name
+            )));
+        };
+        for call in calls {
+            if function_names.contains(call) {
+                callees.insert(call);
+            }
+        }
+    }
+
+    let mut visited = BTreeSet::new();
+    let mut stack = Vec::new();
+    for name in function_names {
+        validate_source_function_call_cycle_from(owner, name, &graph, &mut visited, &mut stack)?;
+    }
+    Ok(())
+}
+
+fn validate_source_function_call_cycle_from<'a>(
+    owner: &str,
+    name: &'a str,
+    graph: &BTreeMap<&'a str, BTreeSet<&'a str>>,
+    visited: &mut BTreeSet<&'a str>,
+    stack: &mut Vec<&'a str>,
+) -> Result<()> {
+    if visited.contains(name) {
+        return Ok(());
+    }
+
+    stack.push(name);
+    if let Some(callees) = graph.get(name) {
+        for &callee in callees {
+            if let Some(position) = stack.iter().position(|candidate| *candidate == callee) {
+                let mut cycle = stack[position..].to_vec();
+                cycle.push(callee);
+                return Err(Error::new(format!(
+                    "{owner} source function call cycle {} is not supported in this source slice",
+                    cycle.join(" -> ")
+                )));
+            }
+            validate_source_function_call_cycle_from(owner, callee, graph, visited, stack)?;
+        }
+    }
+    stack.pop();
+    visited.insert(name);
+    Ok(())
+}
+
+fn collect_source_function_calls<'a>(function: &'a Function, calls: &mut BTreeSet<&'a str>) {
+    let Some(body) = &function.body else {
+        return;
+    };
+    match body {
+        FunctionBody::Block(body) => collect_source_return_expr_calls(&body.returns, calls),
+        FunctionBody::Match(match_body) => {
+            for arm in &match_body.arms {
+                collect_source_return_expr_calls(&arm.body.returns, calls);
+            }
+        }
+    }
+}
+
+fn collect_source_return_expr_calls<'a>(returns: &'a ReturnExpr, calls: &mut BTreeSet<&'a str>) {
+    match returns {
+        ReturnExpr::Value(value) => collect_source_value_expr_calls(value, calls),
+        ReturnExpr::Call { name, arg } => {
+            calls.insert(name.as_str());
+            collect_source_value_expr_calls(arg, calls);
+        }
+    }
+}
+
+fn collect_source_value_expr_calls<'a>(value: &'a ValueExpr, calls: &mut BTreeSet<&'a str>) {
+    match value {
+        ValueExpr::Identifier(_) => {}
+        ValueExpr::Call { name, arg } => {
+            calls.insert(name.as_str());
+            collect_source_value_expr_calls(arg, calls);
+        }
+        ValueExpr::Record(record) => {
+            for field in &record.fields {
+                collect_source_value_expr_calls(&field.value, calls);
+            }
+        }
+    }
+}
+
+fn source_function_param_kind(function: &Function) -> Result<SourceFunctionParamKind> {
+    match function.params.as_slice() {
+        [FunctionParam::Binding(_)] => Ok(SourceFunctionParamKind::Binding),
+        [FunctionParam::Pattern(_)] => Ok(SourceFunctionParamKind::Pattern),
+        _ => Err(Error::new(format!(
+            "function {} must declare exactly one parameter in this source slice",
+            function.name
+        ))),
+    }
+}
+
+fn validate_binding_source_function_body(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    process: Option<&Process>,
+    function: &Function,
+) -> Result<()> {
+    let FunctionParam::Binding(param) = &function.params[0] else {
+        return Err(Error::new(format!(
+            "{owner} function {} must declare a binding parameter",
+            function.name
         )));
     };
-    state_space.resolve_state_value(semantic_index, value)
+
+    match function.body.as_ref().expect("validated function body") {
+        FunctionBody::Block(body) => validate_pure_source_function_block(owner, function, body),
+        FunctionBody::Match(match_body) => {
+            if match_body.scrutinee != param.name {
+                return Err(Error::new(format!(
+                    "{owner} function {} match scrutinee {} must be parameter {}",
+                    function.name, match_body.scrutinee, param.name
+                )));
+            }
+            let enum_decl = semantic_index.enum_decl(module, &param.ty)?;
+            let subject = format!("{owner} function {}", function.name);
+            let pattern_context = PatternCheckContext {
+                module,
+                semantic_index,
+                enum_decl,
+                enum_type: &param.ty,
+                subject: &subject,
+                label: "match",
+                payload_context: PatternPayloadContext::SourceValue,
+                binding_context: PatternBindingContext::Source { owner: &subject },
+            };
+            for arm in check_typed_match_arms(&pattern_context, &match_body.arms)? {
+                reject_source_function_payload_pattern(&subject, enum_decl, &arm.pattern, "match")?;
+                reject_source_function_payload_wildcard(
+                    &subject,
+                    enum_decl,
+                    &arm.pattern,
+                    "match",
+                )?;
+                validate_pure_source_function_block(owner, function, arm.body)?;
+            }
+            Ok(())
+        }
+    }?;
+
+    let Some(process_for_scope) = process.or_else(|| module.processes.first()) else {
+        return Err(Error::new(format!(
+            "{owner} function {} cannot validate body without a process context",
+            function.name
+        )));
+    };
+    let process_functions = process
+        .map(|process| process.functions.as_slice())
+        .unwrap_or(&[]);
+    let scope = SourceFunctionScope {
+        module,
+        process: process_for_scope,
+        process_functions,
+        semantic_index,
+    };
+    validate_source_function_body_values(
+        &scope,
+        function,
+        Some(SourceValueBinding {
+            name: &param.name,
+            ty: &param.ty,
+        }),
+    )
+}
+
+fn validate_pattern_source_function_group(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    process: Option<&Process>,
+    functions: &[&Function],
+) -> Result<()> {
+    let Some(first) = functions.first() else {
+        return Ok(());
+    };
+    let enum_type = infer_pattern_function_enum_type(module, semantic_index, owner, functions)?;
+    let enum_decl = semantic_index.enum_decl(module, &enum_type)?;
+    let process_functions = process
+        .map(|process| process.functions.as_slice())
+        .unwrap_or(&[]);
+    let Some(process_for_scope) = process.or_else(|| module.processes.first()) else {
+        return Err(Error::new(format!(
+            "{owner} function {} cannot validate patterns without a process context",
+            first.name
+        )));
+    };
+    let scope = SourceFunctionScope {
+        module,
+        process: process_for_scope,
+        process_functions,
+        semantic_index,
+    };
+    let mut explicit_arms = vec![false; enum_decl.variants.len()];
+    let mut wildcard_seen = false;
+
+    for function in functions {
+        validate_pure_source_function_block(owner, function, source_function_block(function)?)?;
+        match &function.params[0] {
+            FunctionParam::Pattern(pattern) => {
+                let subject = format!("{owner} function {}", function.name);
+                let pattern_context = PatternCheckContext {
+                    module,
+                    semantic_index,
+                    enum_decl,
+                    enum_type: &enum_type,
+                    subject: &subject,
+                    label: "signature",
+                    payload_context: PatternPayloadContext::SourceValue,
+                    binding_context: PatternBindingContext::Source { owner: &subject },
+                };
+                let checked_pattern = check_typed_match_pattern(&pattern_context, pattern)?;
+                reject_source_function_payload_pattern(
+                    &subject,
+                    enum_decl,
+                    &checked_pattern,
+                    "signature",
+                )?;
+                reject_source_function_payload_wildcard(
+                    &subject,
+                    enum_decl,
+                    &checked_pattern,
+                    "signature",
+                )?;
+                match checked_pattern {
+                    TypedMatchPattern::Variant { variant, .. } => {
+                        if explicit_arms[variant] {
+                            return Err(Error::new(format!(
+                                "{owner} function {} declares duplicate pattern for variant {}",
+                                function.name, enum_decl.variants[variant].name
+                            )));
+                        }
+                        explicit_arms[variant] = true;
+                    }
+                    TypedMatchPattern::Wildcard => {
+                        if wildcard_seen {
+                            return Err(Error::new(format!(
+                                "{owner} function {} declares duplicate wildcard pattern",
+                                function.name
+                            )));
+                        }
+                        wildcard_seen = true;
+                    }
+                }
+            }
+            FunctionParam::Binding(_) => {
+                return Err(Error::new(format!(
+                    "{owner} function {} cannot mix binding and pattern clauses",
+                    function.name
+                )));
+            }
+        }
+        validate_source_function_body_values(&scope, function, None)?;
+    }
+
+    if wildcard_seen && explicit_arms.iter().all(|is_present| *is_present) {
+        return Err(Error::new(format!(
+            "{owner} function {} wildcard pattern is unreachable",
+            first.name
+        )));
+    }
+    if !wildcard_seen {
+        for (index, variant) in enum_decl.variants.iter().enumerate() {
+            if !explicit_arms[index] {
+                return Err(Error::new(format!(
+                    "{owner} function {} must handle variant {}",
+                    first.name, variant.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn reject_source_function_payload_pattern(
+    subject: &str,
+    enum_decl: &Enum,
+    pattern: &TypedMatchPattern,
+    usage: &str,
+) -> Result<()> {
+    let TypedMatchPattern::Variant { variant, .. } = pattern else {
+        return Ok(());
+    };
+    let variant = &enum_decl.variants[*variant];
+    if variant.payload_type.is_some() {
+        return Err(Error::new(format!(
+            "{subject} {usage} pattern {} carries a payload; normal source function patterns require fieldless enum constructors in this source slice",
+            variant.name
+        )));
+    }
+    Ok(())
+}
+
+fn reject_source_function_payload_wildcard(
+    subject: &str,
+    enum_decl: &Enum,
+    pattern: &TypedMatchPattern,
+    usage: &str,
+) -> Result<()> {
+    if !matches!(pattern, TypedMatchPattern::Wildcard) {
+        return Ok(());
+    }
+    let Some(variant) = enum_decl
+        .variants
+        .iter()
+        .find(|variant| variant.payload_type.is_some())
+    else {
+        return Ok(());
+    };
+    Err(Error::new(format!(
+        "{subject} {usage} wildcard pattern covers payload-bearing variant {}; normal source function patterns require fieldless enum constructors in this source slice",
+        variant.name
+    )))
+}
+
+fn infer_pattern_function_enum_type(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    functions: &[&Function],
+) -> Result<TypeRef> {
+    let mut inferred = None;
+    for function in functions {
+        let FunctionParam::Pattern(Pattern::Constructor { name, .. }) = &function.params[0] else {
+            continue;
+        };
+        let next = semantic_index.enum_variant_type(module, name)?;
+        if let Some(existing) = &inferred {
+            if !semantic_index.same_type(existing, &next) {
+                return Err(Error::new(format!(
+                    "{owner} function {} pattern {} belongs to {}, expected {}",
+                    function.name, name, next, existing
+                )));
+            }
+        } else {
+            inferred = Some(next);
+        }
+    }
+    inferred.ok_or_else(|| {
+        Error::new(format!(
+            "{owner} function {} wildcard pattern cannot infer a matched enum type",
+            functions
+                .first()
+                .map(|function| function.name.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        ))
+    })
+}
+
+fn validate_pure_source_function_block(
+    owner: &str,
+    function: &Function,
+    body: &FunctionBlock,
+) -> Result<()> {
+    if !body.statements.is_empty() {
+        return Err(Error::new(format!(
+            "{owner} function {} must not perform statements",
+            function.name
+        )));
+    }
+    Ok(())
+}
+
+fn source_function_block(function: &Function) -> Result<&FunctionBlock> {
+    match function.body.as_ref().expect("validated function body") {
+        FunctionBody::Block(body) => Ok(body),
+        FunctionBody::Match(_) => Err(Error::new(format!(
+            "function {} pattern signature clauses must use block bodies",
+            function.name
+        ))),
+    }
+}
+
+fn source_function_body_scope<'a>(
+    scope: &SourceFunctionScope<'a>,
+    function: &Function,
+) -> SourceFunctionScope<'a> {
+    if scope
+        .module
+        .functions
+        .iter()
+        .any(|candidate| std::ptr::eq(candidate, function))
+    {
+        SourceFunctionScope {
+            module: scope.module,
+            process: scope.process,
+            process_functions: &[],
+            semantic_index: scope.semantic_index,
+        }
+    } else {
+        *scope
+    }
+}
+
+fn validate_source_function_body_values(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    binding: Option<SourceValueBinding<'_>>,
+) -> Result<()> {
+    match function.body.as_ref().expect("validated function body") {
+        FunctionBody::Block(body) => validate_source_function_return_expr(
+            scope,
+            &function.return_type,
+            &body.returns,
+            binding,
+        ),
+        FunctionBody::Match(match_body) => {
+            let FunctionParam::Binding(param) = &function.params[0] else {
+                return Err(Error::new(format!(
+                    "function {} match body requires a binding parameter",
+                    function.name
+                )));
+            };
+            if match_body.scrutinee != param.name {
+                return Err(Error::new(format!(
+                    "function {} match scrutinee {} must be parameter {}",
+                    function.name, match_body.scrutinee, param.name
+                )));
+            }
+            for arm in &match_body.arms {
+                validate_source_function_return_expr(
+                    scope,
+                    &function.return_type,
+                    &arm.body.returns,
+                    binding,
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_source_function_return_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    returns: &ReturnExpr,
+    binding: Option<SourceValueBinding<'_>>,
+) -> Result<()> {
+    let value = match returns {
+        ReturnExpr::Value(value) => value.clone(),
+        ReturnExpr::Call { name, arg } => ValueExpr::Call {
+            name: name.clone(),
+            arg: Box::new(arg.clone()),
+        },
+    };
+    validate_source_function_value_expr(scope, expected_type, &value, binding)
+}
+
+fn validate_source_function_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    binding: Option<SourceValueBinding<'_>>,
+) -> Result<()> {
+    match value {
+        ValueExpr::Identifier(_) => check_source_value_type(scope, expected_type, value, binding),
+        ValueExpr::Call { name, arg } => {
+            validate_source_function_call(scope, expected_type, name, arg, binding)
+        }
+        ValueExpr::Record(record) => {
+            let record_decl = scope
+                .semantic_index
+                .record_decl(scope.module, expected_type)?;
+            if record.name != record_decl.name {
+                return Err(Error::new(format!(
+                    "expected record value {}, found {}",
+                    record_decl.name, record.name
+                )));
+            }
+            let mut seen = BTreeSet::new();
+            for field in &record.fields {
+                let Some(field_decl) = record_decl
+                    .fields
+                    .iter()
+                    .find(|candidate| candidate.name == field.name)
+                else {
+                    return Err(Error::new(format!(
+                        "record {} has no field {}",
+                        record.name, field.name
+                    )));
+                };
+                if !seen.insert(field.name.as_str()) {
+                    return Err(Error::new(format!(
+                        "record {} field {} is assigned more than once",
+                        record.name, field.name
+                    )));
+                }
+                validate_source_function_value_expr(scope, &field_decl.ty, &field.value, binding)?;
+            }
+            for field in &record_decl.fields {
+                if !seen.contains(field.name.as_str()) {
+                    return Err(Error::new(format!(
+                        "record {} value is missing field {}",
+                        record_decl.name, field.name
+                    )));
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_source_function_call(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+    arg: &ValueExpr,
+    binding: Option<SourceValueBinding<'_>>,
+) -> Result<()> {
+    let functions = source_function_group(scope, name)?;
+    let first = functions
+        .first()
+        .ok_or_else(|| Error::new(format!("function {name} is not declared")))?;
+    if !scope
+        .semantic_index
+        .same_type(&first.return_type, expected_type)
+    {
+        return Err(Error::new(format!(
+            "function {name} returns {}, expected {}",
+            first.return_type, expected_type
+        )));
+    }
+    match source_function_param_kind(first)? {
+        SourceFunctionParamKind::Binding => {
+            if functions.len() != 1 {
+                return Err(Error::new(format!(
+                    "function {name} declares duplicate binding clauses"
+                )));
+            }
+            let FunctionParam::Binding(param) = &first.params[0] else {
+                return Err(Error::new(format!(
+                    "function {name} must declare a binding parameter"
+                )));
+            };
+            validate_source_function_value_expr(scope, &param.ty, arg, binding)
+        }
+        SourceFunctionParamKind::Pattern => {
+            let enum_type = infer_pattern_function_enum_type(
+                scope.module,
+                scope.semantic_index,
+                "source",
+                &functions,
+            )?;
+            validate_source_function_value_expr(scope, &enum_type, arg, binding)
+        }
+    }
+}
+
+fn resolve_source_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    binding: Option<SourceValueBinding<'_>>,
+    depth: usize,
+) -> Result<ValueExpr> {
+    if depth > MAX_VALUE_NESTING {
+        return Err(Error::new(format!(
+            "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+        )));
+    }
+
+    match value {
+        ValueExpr::Identifier(_) => Ok(value.clone()),
+        ValueExpr::Call { name, arg } => {
+            resolve_source_function_call(scope, expected_type, name, arg, binding, depth + 1)
+        }
+        ValueExpr::Record(record) => {
+            resolve_record_source_value_expr(scope, expected_type, record, binding, depth + 1)
+        }
+    }
+}
+
+fn resolve_record_source_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    record: &RecordValue,
+    binding: Option<SourceValueBinding<'_>>,
+    depth: usize,
+) -> Result<ValueExpr> {
+    let Ok(record_decl) = scope
+        .semantic_index
+        .record_decl(scope.module, expected_type)
+    else {
+        return Ok(ValueExpr::Record(record.clone()));
+    };
+    let mut fields = Vec::with_capacity(record.fields.len());
+    for field in &record.fields {
+        let Some(field_decl) = record_decl
+            .fields
+            .iter()
+            .find(|candidate| candidate.name == field.name)
+        else {
+            fields.push(field.clone());
+            continue;
+        };
+        fields.push(RecordValueField {
+            name: field.name.clone(),
+            value: resolve_source_value_expr(
+                scope,
+                &field_decl.ty,
+                &field.value,
+                binding,
+                depth + 1,
+            )?,
+        });
+    }
+    Ok(ValueExpr::Record(RecordValue {
+        name: record.name.clone(),
+        fields,
+    }))
+}
+
+fn resolve_source_function_call(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+    arg: &ValueExpr,
+    binding: Option<SourceValueBinding<'_>>,
+    depth: usize,
+) -> Result<ValueExpr> {
+    let functions = source_function_group(scope, name)?;
+    let first = functions
+        .first()
+        .ok_or_else(|| Error::new(format!("function {name} is not declared")))?;
+    if !scope
+        .semantic_index
+        .same_type(&first.return_type, expected_type)
+    {
+        return Err(Error::new(format!(
+            "function {name} returns {}, expected {}",
+            first.return_type, expected_type
+        )));
+    }
+
+    match source_function_param_kind(first)? {
+        SourceFunctionParamKind::Binding => {
+            if functions.len() != 1 {
+                return Err(Error::new(format!(
+                    "function {name} declares duplicate binding clauses"
+                )));
+            }
+            resolve_binding_source_function_call(
+                scope,
+                expected_type,
+                first,
+                arg,
+                binding,
+                depth + 1,
+            )
+        }
+        SourceFunctionParamKind::Pattern => resolve_pattern_source_function_call(
+            scope,
+            expected_type,
+            &functions,
+            arg,
+            binding,
+            depth + 1,
+        ),
+    }
+}
+
+fn source_function_group<'a>(
+    scope: &SourceFunctionScope<'a>,
+    name: &Identifier,
+) -> Result<Vec<&'a Function>> {
+    let local: Vec<_> = scope
+        .process_functions
+        .iter()
+        .filter(|function| function.name == *name)
+        .collect();
+    let module: Vec<_> = scope
+        .module
+        .functions
+        .iter()
+        .filter(|function| function.name == *name)
+        .collect();
+
+    match (local.is_empty(), module.is_empty()) {
+        (false, false) => Err(Error::new(format!(
+            "process {} function {name} conflicts with module function {name}",
+            scope.process.name
+        ))),
+        (false, true) => Ok(local),
+        (true, false) => Ok(module),
+        (true, true) => Err(Error::new(format!("function {name} is not declared"))),
+    }
+}
+
+fn resolve_binding_source_function_call(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    function: &Function,
+    arg: &ValueExpr,
+    binding: Option<SourceValueBinding<'_>>,
+    depth: usize,
+) -> Result<ValueExpr> {
+    let FunctionParam::Binding(param) = &function.params[0] else {
+        return Err(Error::new(format!(
+            "function {} must declare a binding parameter",
+            function.name
+        )));
+    };
+    let resolved_arg = resolve_source_value_expr(scope, &param.ty, arg, binding, depth + 1)?;
+    check_source_value_type(scope, &param.ty, &resolved_arg, binding)?;
+    let returned = resolve_source_function_body_value(
+        scope,
+        function,
+        Some((&param.name, &resolved_arg)),
+        binding,
+        depth + 1,
+    )?;
+    resolve_source_value_expr(scope, expected_type, &returned, binding, depth + 1)
+}
+
+fn resolve_pattern_source_function_call(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    functions: &[&Function],
+    arg: &ValueExpr,
+    binding: Option<SourceValueBinding<'_>>,
+    depth: usize,
+) -> Result<ValueExpr> {
+    let enum_type =
+        infer_pattern_function_enum_type(scope.module, scope.semantic_index, "source", functions)?;
+    let resolved_arg = resolve_source_value_expr(scope, &enum_type, arg, binding, depth + 1)?;
+    check_source_value_type(scope, &enum_type, &resolved_arg, binding)?;
+    let ValueExpr::Identifier(variant_name) = &resolved_arg else {
+        let name = functions
+            .first()
+            .map(|function| function.name.as_str())
+            .unwrap_or("<unknown>");
+        return Err(Error::new(format!(
+            "function {name} pattern dispatch requires a fieldless enum constructor argument"
+        )));
+    };
+    let enum_decl = scope.semantic_index.enum_decl(scope.module, &enum_type)?;
+    let selected_variant =
+        scope
+            .semantic_index
+            .enum_variant_index(scope.module, &enum_type, variant_name)?;
+
+    let mut wildcard = None;
+    for function in functions {
+        let FunctionParam::Pattern(pattern) = &function.params[0] else {
+            return Err(Error::new(format!(
+                "function {} cannot mix binding and pattern clauses",
+                function.name
+            )));
+        };
+        match pattern {
+            Pattern::Constructor {
+                name,
+                binding: payload_binding,
+            } => {
+                if payload_binding.is_some() {
+                    return Err(Error::new(format!(
+                        "function {} signature patterns must not bind enum payloads in this source slice",
+                        function.name
+                    )));
+                }
+                let variant =
+                    scope
+                        .semantic_index
+                        .enum_variant_index(scope.module, &enum_type, name)?;
+                if variant == selected_variant {
+                    let returned =
+                        source_function_block_return_value(source_function_block(function)?)?;
+                    return resolve_source_value_expr(
+                        scope,
+                        expected_type,
+                        &returned,
+                        binding,
+                        depth + 1,
+                    );
+                }
+            }
+            Pattern::Wildcard => {
+                wildcard = Some(function);
+            }
+        }
+    }
+
+    if let Some(function) = wildcard {
+        let returned = source_function_block_return_value(source_function_block(function)?)?;
+        return resolve_source_value_expr(scope, expected_type, &returned, binding, depth + 1);
+    }
+
+    Err(Error::new(format!(
+        "function {} has no pattern for variant {} of enum {}",
+        functions[0].name, variant_name, enum_decl.name
+    )))
+}
+
+fn resolve_source_function_body_value(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    param_arg: Option<(&Identifier, &ValueExpr)>,
+    binding: Option<SourceValueBinding<'_>>,
+    depth: usize,
+) -> Result<ValueExpr> {
+    let body_scope = source_function_body_scope(scope, function);
+    let scope = &body_scope;
+    match function.body.as_ref().expect("validated function body") {
+        FunctionBody::Block(body) => {
+            let value = source_function_block_return_value(body)?;
+            Ok(substitute_source_value_bindings(value, param_arg))
+        }
+        FunctionBody::Match(match_body) => {
+            let Some((param_name, arg)) = param_arg else {
+                return Err(Error::new(format!(
+                    "function {} match body requires a parameter argument",
+                    function.name
+                )));
+            };
+            if match_body.scrutinee != *param_name {
+                return Err(Error::new(format!(
+                    "function {} match scrutinee {} must be parameter {}",
+                    function.name, match_body.scrutinee, param_name
+                )));
+            }
+            let ValueExpr::Identifier(variant_name) = arg else {
+                return Err(Error::new(format!(
+                    "function {} match dispatch requires a fieldless enum constructor argument",
+                    function.name
+                )));
+            };
+            let FunctionParam::Binding(param) = &function.params[0] else {
+                return Err(Error::new(format!(
+                    "function {} match body requires a binding parameter",
+                    function.name
+                )));
+            };
+            let enum_decl = scope.semantic_index.enum_decl(scope.module, &param.ty)?;
+            let selected_variant =
+                scope
+                    .semantic_index
+                    .enum_variant_index(scope.module, &param.ty, variant_name)?;
+            let subject = format!("function {}", function.name);
+            let pattern_context = PatternCheckContext {
+                module: scope.module,
+                semantic_index: scope.semantic_index,
+                enum_decl,
+                enum_type: &param.ty,
+                subject: &subject,
+                label: "match",
+                payload_context: PatternPayloadContext::SourceValue,
+                binding_context: PatternBindingContext::Source { owner: &subject },
+            };
+            let arms = check_typed_match_arms(&pattern_context, &match_body.arms)?;
+            let mut wildcard = None;
+            for arm in arms {
+                reject_source_function_payload_pattern(&subject, enum_decl, &arm.pattern, "match")?;
+                reject_source_function_payload_wildcard(
+                    &subject,
+                    enum_decl,
+                    &arm.pattern,
+                    "match",
+                )?;
+                match arm.pattern {
+                    TypedMatchPattern::Variant { variant, .. } if variant == selected_variant => {
+                        let value = source_function_block_return_value(arm.body)?;
+                        return Ok(substitute_source_value_bindings(value, param_arg));
+                    }
+                    TypedMatchPattern::Wildcard => {
+                        wildcard = Some(arm.body);
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(body) = wildcard {
+                let value = source_function_block_return_value(body)?;
+                return Ok(substitute_source_value_bindings(value, param_arg));
+            }
+            Err(Error::new(format!(
+                "function {} match has no arm for variant {} of enum {}",
+                function.name, variant_name, enum_decl.name
+            )))
+        }
+    }
+    .and_then(|value| {
+        resolve_source_value_expr(scope, &function.return_type, &value, binding, depth + 1)
+    })
+}
+
+fn source_function_block_return_value(body: &FunctionBlock) -> Result<ValueExpr> {
+    if !body.statements.is_empty() {
+        return Err(Error::new(
+            "source function body must not perform statements",
+        ));
+    }
+    Ok(match &body.returns {
+        ReturnExpr::Value(value) => value.clone(),
+        ReturnExpr::Call { name, arg } => ValueExpr::Call {
+            name: name.clone(),
+            arg: Box::new(arg.clone()),
+        },
+    })
+}
+
+fn substitute_source_value_bindings(
+    value: ValueExpr,
+    binding: Option<(&Identifier, &ValueExpr)>,
+) -> ValueExpr {
+    let Some((binding_name, replacement)) = binding else {
+        return value;
+    };
+    match value {
+        ValueExpr::Identifier(name) if name == *binding_name => replacement.clone(),
+        ValueExpr::Identifier(_) => value,
+        ValueExpr::Call { name, arg } => ValueExpr::Call {
+            name,
+            arg: Box::new(substitute_source_value_bindings(*arg, binding)),
+        },
+        ValueExpr::Record(record) => ValueExpr::Record(RecordValue {
+            name: record.name,
+            fields: record
+                .fields
+                .into_iter()
+                .map(|field| RecordValueField {
+                    name: field.name,
+                    value: substitute_source_value_bindings(field.value, binding),
+                })
+                .collect(),
+        }),
+    }
+}
+
+fn check_source_value_type(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    binding: Option<SourceValueBinding<'_>>,
+) -> Result<()> {
+    let bindings = binding
+        .map(|binding| {
+            vec![ValueBinding {
+                name: binding.name,
+                ty: binding.ty,
+                label: binding.name.as_str(),
+            }]
+        })
+        .unwrap_or_default();
+    canonical_source_value_with_bindings(
+        scope.module,
+        scope.semantic_index,
+        expected_type,
+        value,
+        &bindings,
+    )?;
+    Ok(())
+}
+
+fn check_typed_match_arms<'a>(
+    context: &PatternCheckContext<'_>,
+    arms: &'a [MatchArm],
+) -> Result<Vec<TypedMatchArm<'a>>> {
+    let mut explicit_arms = vec![false; context.enum_decl.variants.len()];
+    let mut wildcard_seen = false;
+    let mut checked_arms = Vec::with_capacity(arms.len());
+    let label = context.label;
+
+    for arm in arms {
+        let pattern = check_typed_match_pattern(context, &arm.pattern)?;
+        match pattern {
+            TypedMatchPattern::Variant { variant, .. } => {
+                if explicit_arms[variant] {
+                    return Err(Error::new(format!(
+                        "{} {label} declares duplicate pattern for variant {}",
+                        context.subject, context.enum_decl.variants[variant].name,
+                    )));
+                }
+                explicit_arms[variant] = true;
+            }
+            TypedMatchPattern::Wildcard => {
+                if wildcard_seen {
+                    return Err(Error::new(format!(
+                        "{} {label} declares duplicate wildcard pattern",
+                        context.subject
+                    )));
+                }
+                wildcard_seen = true;
+            }
+        }
+        checked_arms.push(TypedMatchArm {
+            pattern,
+            body: &arm.body,
+        });
+    }
+
+    if wildcard_seen && explicit_arms.iter().all(|is_present| *is_present) {
+        return Err(Error::new(format!(
+            "{} {label} wildcard pattern is unreachable",
+            context.subject
+        )));
+    }
+    if !wildcard_seen {
+        for (index, variant) in context.enum_decl.variants.iter().enumerate() {
+            if !explicit_arms[index] {
+                return Err(Error::new(format!(
+                    "{} {label} must handle variant {}",
+                    context.subject, variant.name,
+                )));
+            }
+        }
+    }
+
+    Ok(checked_arms)
+}
+
+fn check_typed_match_pattern(
+    context: &PatternCheckContext<'_>,
+    pattern: &Pattern,
+) -> Result<TypedMatchPattern> {
+    match pattern {
+        Pattern::Constructor { name, binding } => {
+            let variant_index = context.semantic_index.enum_variant_index(
+                context.module,
+                context.enum_type,
+                name,
+            )?;
+            let variant = &context.enum_decl.variants[variant_index];
+            let binding = check_pattern_payload_binding(
+                context.semantic_index,
+                variant,
+                binding.as_ref(),
+                context.label,
+                context.payload_context,
+                context.binding_context,
+            )?;
+            Ok(TypedMatchPattern::Variant {
+                variant: variant_index,
+                binding,
+            })
+        }
+        Pattern::Wildcard => Ok(TypedMatchPattern::Wildcard),
+    }
+}
+
+fn check_pattern_payload_binding(
+    semantic_index: &SemanticIndex,
+    variant: &EnumVariant,
+    binding: Option<&Param>,
+    context: &str,
+    payload_context: PatternPayloadContext,
+    binding_context: PatternBindingContext<'_>,
+) -> Result<Option<PatternPayloadParam>> {
+    match (&variant.payload_type, binding) {
+        (None, None) => Ok(None),
+        (None, Some(_)) => {
+            let noun = match payload_context {
+                PatternPayloadContext::StepPattern => "message",
+                PatternPayloadContext::SourceValue => "pattern",
+            };
+            let subject = pattern_binding_subject(binding_context);
+            Err(Error::new(format!(
+                "{subject} {context} {noun} {} does not carry a payload",
+                variant.name
+            )))
+        }
+        (Some(_), None) => Ok(None),
+        (Some(payload_type), Some(binding)) => {
+            validate_pattern_binding_name(binding_context, semantic_index, &binding.name)?;
+            if !semantic_index.same_type(&binding.ty, payload_type) {
+                let subject = pattern_binding_subject(binding_context);
+                return Err(Error::new(format!(
+                    "{subject} {context} payload {} has type {}, expected {}",
+                    binding.name, binding.ty, payload_type
+                )));
+            }
+            Ok(Some(PatternPayloadParam {
+                name: binding.name.clone(),
+                ty: binding.ty.clone(),
+            }))
+        }
+    }
 }
 
 fn check_step(
@@ -1241,18 +2724,44 @@ fn check_step_pattern(
     semantic_index: &SemanticIndex,
     message_pattern: &Pattern,
 ) -> Result<StepPattern> {
+    step_pattern_from_typed(check_step_typed_pattern(
+        module,
+        process,
+        process_id,
+        semantic_index,
+        message_pattern,
+    )?)
+}
+
+fn check_step_typed_pattern(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    message_pattern: &Pattern,
+) -> Result<TypedMatchPattern> {
     match message_pattern {
         Pattern::Constructor { name, binding } => {
             let message = semantic_index.message_id_for_step_pattern(module, process_id, name)?;
             let variant = semantic_index.message_variant(module, process_id, message)?;
-            let payload_param =
+            let binding =
                 check_step_payload_pattern(process, semantic_index, variant, binding.as_ref())?;
-            Ok(StepPattern::Variant {
-                message,
-                binding: payload_param,
+            Ok(TypedMatchPattern::Variant {
+                variant: message.index(),
+                binding,
             })
         }
-        Pattern::Wildcard => Ok(StepPattern::Wildcard),
+        Pattern::Wildcard => Ok(TypedMatchPattern::Wildcard),
+    }
+}
+
+fn step_pattern_from_typed(pattern: TypedMatchPattern) -> Result<StepPattern> {
+    match pattern {
+        TypedMatchPattern::Variant { variant, binding } => Ok(StepPattern::Variant {
+            message: CheckedMessageVariantId::from_index(variant)?,
+            binding,
+        }),
+        TypedMatchPattern::Wildcard => Ok(StepPattern::Wildcard),
     }
 }
 
@@ -1327,51 +2836,43 @@ fn check_step_payload_pattern(
     semantic_index: &SemanticIndex,
     variant: &EnumVariant,
     binding: Option<&Param>,
-) -> Result<Option<StepPayloadParam>> {
-    match (&variant.payload_type, binding) {
-        (None, None) => Ok(None),
-        (None, Some(_)) => Err(Error::new(format!(
-            "process {} step pattern message {} does not carry a payload",
-            process.name, variant.name
-        ))),
-        (Some(_), None) => Ok(None),
-        (Some(payload_type), Some(binding)) => {
-            validate_payload_binding_name(process, semantic_index, &binding.name)?;
-            if !semantic_index.same_type(&binding.ty, payload_type) {
-                return Err(Error::new(format!(
-                    "process {} step pattern payload {} has type {}, expected {}",
-                    process.name, binding.name, binding.ty, payload_type
-                )));
-            }
-            Ok(Some(StepPayloadParam {
-                name: binding.name.clone(),
-                ty: binding.ty.clone(),
-            }))
-        }
+) -> Result<Option<PatternPayloadParam>> {
+    check_pattern_payload_binding(
+        semantic_index,
+        variant,
+        binding,
+        "step pattern",
+        PatternPayloadContext::StepPattern,
+        PatternBindingContext::Step { process },
+    )
+}
+
+fn pattern_binding_subject(context: PatternBindingContext<'_>) -> String {
+    match context {
+        PatternBindingContext::Step { process } => format!("process {}", process.name),
+        PatternBindingContext::Source { owner } => owner.to_string(),
     }
 }
 
-fn validate_payload_binding_name(
-    process: &Process,
+fn validate_pattern_binding_name(
+    context: PatternBindingContext<'_>,
     semantic_index: &SemanticIndex,
     binding: &Identifier,
 ) -> Result<()> {
+    let subject = pattern_binding_subject(context);
     if binding.as_str() == STEP_STATE_PARAMETER_NAME {
         return Err(Error::new(format!(
-            "process {} payload binding {} conflicts with a step parameter name",
-            process.name, binding
+            "{subject} payload binding {binding} conflicts with a reserved state parameter name"
         )));
     }
     if semantic_index.process_id(binding).is_ok() {
         return Err(Error::new(format!(
-            "process {} payload binding {} conflicts with a process declaration",
-            process.name, binding
+            "{subject} payload binding {binding} conflicts with a process declaration"
         )));
     }
     if semantic_index.identifier_conflicts_with_declared_value(binding) {
         return Err(Error::new(format!(
-            "process {} payload binding {} conflicts with a declared type or value constructor",
-            process.name, binding
+            "{subject} payload binding {binding} conflicts with a declared type or value constructor"
         )));
     }
     Ok(())
@@ -1546,6 +3047,16 @@ fn check_step_transition(
         ty: &binding.ty,
         checked_ty: &binding.checked_ty,
     });
+    let function_scope = SourceFunctionScope {
+        module: context.module,
+        process: context.process,
+        process_functions: &context.process.functions,
+        semantic_index: context.semantic_index,
+    };
+    let source_binding = input.payload_binding.map(|binding| SourceValueBinding {
+        name: &binding.name,
+        ty: &binding.ty,
+    });
     let mut actions = Vec::with_capacity(input.body.statements.len());
     for statement in &input.body.statements {
         match statement {
@@ -1579,6 +3090,7 @@ fn check_step_transition(
                     send_target.target_process,
                     message,
                     payload.as_ref(),
+                    input.payload_binding,
                     payload_template_binding.as_ref(),
                 )?;
                 actions.push(CheckedAction::Send {
@@ -1604,34 +3116,43 @@ fn check_step_transition(
             ));
         }
     };
-    let next_state = if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
+    let state_arg = resolve_source_value_expr(
+        &function_scope,
+        &context.process.state_type,
+        state_arg,
+        source_binding,
+        0,
+    )?;
+    let next_state = if matches!(&state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
     {
         CheckedNextState::Current
     } else if let Some(binding) = input.payload_binding {
-        if source_value_uses_binding(state_arg, &binding.name) {
+        if source_value_uses_binding(&state_arg, &binding.name) {
             let template = checked_value_template_with_binding(
                 context.module,
                 context.semantic_index,
                 types,
                 &context.process.state_type,
-                state_arg,
+                &state_arg,
                 payload_template_binding.as_ref(),
             )?;
             populate_payload_template_state_values(
                 context,
                 state_space,
                 input.variant,
-                state_arg,
+                &state_arg,
                 binding,
             )?;
             CheckedNextState::Template(template)
         } else {
             CheckedNextState::Value(
-                state_space.resolve_state_value(context.semantic_index, state_arg)?,
+                state_space.resolve_state_value(context.semantic_index, &state_arg)?,
             )
         }
     } else {
-        CheckedNextState::Value(state_space.resolve_state_value(context.semantic_index, state_arg)?)
+        CheckedNextState::Value(
+            state_space.resolve_state_value(context.semantic_index, &state_arg)?,
+        )
     };
 
     Ok(CheckedTransition::new(CheckedTransitionParts {
@@ -1696,6 +3217,7 @@ fn resolve_send_message_case(
     target_process: CheckedProcessId,
     message: &Identifier,
     payload: Option<&ValueExpr>,
+    payload_binding: Option<&StepPayloadBinding>,
     binding: Option<&ValueTemplateBinding<'_>>,
 ) -> Result<CheckedSendMessage> {
     let variant = context.semantic_index.message_id_for_process(
@@ -1722,13 +3244,34 @@ fn resolve_send_message_case(
                 context.process.name, variant_decl.name
             )));
         }
-        (Some(payload_type), Some(payload)) => Some(checked_send_payload_template(
-            context,
-            types,
-            payload_type,
-            payload,
-            binding,
-        )?),
+        (Some(payload_type), Some(payload)) => {
+            let resolved_payload = {
+                let function_scope = SourceFunctionScope {
+                    module: context.module,
+                    process: context.process,
+                    process_functions: &context.process.functions,
+                    semantic_index: context.semantic_index,
+                };
+                let source_binding = payload_binding.map(|binding| SourceValueBinding {
+                    name: &binding.name,
+                    ty: &binding.ty,
+                });
+                resolve_source_value_expr(
+                    &function_scope,
+                    payload_type,
+                    payload,
+                    source_binding,
+                    0,
+                )?
+            };
+            Some(checked_send_payload_template(
+                context,
+                types,
+                payload_type,
+                &resolved_payload,
+                binding,
+            )?)
+        }
     };
     Ok(CheckedSendMessage {
         message: context.message_cases.message_id(target_process, variant)?,

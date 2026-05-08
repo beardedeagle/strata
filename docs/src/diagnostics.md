@@ -19,13 +19,12 @@ result of the first invalid shape.
 
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
-| `expected record, enum, or proc declaration` | A top-level item is not accepted. | Use only `record`, `enum`, or `proc` after `module`. |
+| `expected record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `record`, `enum`, `fn`, or `proc` after `module`. |
 | `entry process Main is not declared` | The program has no `Main` process. | Add `proc Main ...`. |
 | `uses reserved prefix __strata_checked_` | A source type name collides with internal checked type metadata. | Rename the source type without the reserved prefix. |
 | `checked type_count exceeds Mantle artifact limit` | The checked program needs more distinct artifact types than Mantle admits. | Reduce the number of distinct state, message, payload, and process-reference types. |
 | `process ... must declare type State` | A process is missing its state alias. | Add `type State = StateType;`. |
 | `process ... must declare type Msg` | A process is missing its message alias. | Add `type Msg = MessageEnum;`. |
-| `unsupported process function` | A process declares a function other than `init` or `step`. | Move the logic into `init` or `step`; general functions are not available. |
 | `init must declare no parameters` | `init` has parameters. | Use `fn init() -> StateType ...`. |
 | `init body must not perform statements` | `init` uses `emit`, `spawn`, or `send`. | Return only the initial state. |
 | `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageConstructor` or `state: StateType, _`. |
@@ -37,6 +36,24 @@ result of the first invalid shape.
 | `uses effect ... but does not declare it` | The body performs `emit`, `spawn`, or `send` without matching effect authority. | Add the exact used effect to `! [...]` or remove the statement. |
 | `declares effect ... but does not use it` | The effect list is wider than the body. | Remove the unused effect. |
 | `declares duplicate effect` | The effect list repeats one authority. | Keep each effect at most once. |
+
+## Source Function Errors
+
+| Diagnostic Contains | Likely Cause | Fix |
+| --- | --- | --- |
+| `function ... conflicts with a declared type or value constructor` | A source function name collides with a type or enum constructor. | Choose a distinct function name. |
+| `function ... must declare exactly one parameter` | A normal source function uses an arity outside the current buildable call form. | Use one typed binding parameter or one pattern parameter clause. |
+| `function ... must use a declared record or enum type` | A source function parameter or return type names something outside the source value type set. | Use a declared `record` or `enum` type. |
+| `function ... must not declare effects` / `function ... must not perform statements` | A normal source function tries to perform runtime behavior. | Keep normal functions pure; perform `emit`, `spawn`, and `send` only in `step`. |
+| `function ... may-behaviors must be empty` / `function ... must be deterministic` | A normal source function is not in the deterministic buildable subset. | Use `~ [] @det`. |
+| `function ... is not declared` | A value expression calls an unknown function. | Declare a module function or process-local helper with that name. |
+| `function ... returns ..., expected ...` | The function return type does not match the value position where it is called. | Call a function returning the expected type or change the annotation. |
+| `source function call cycle ... is not supported` | Source helper calls are recursive, but helpers are expanded before lowering and have no recursion model. | Remove the cycle; pass whole values through non-recursive helpers. |
+| `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
+| `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |
+| `function ... wildcard pattern is unreachable` | Explicit source function clauses already cover every variant. | Remove the wildcard clause or remove the explicit clauses it should cover. |
+| `function ... pattern ... carries a payload` | A normal source function pattern names a payload-bearing constructor, which is not a general source value form in this slice. | Match only fieldless enum constructors in normal source functions. |
+| `function ... wildcard pattern covers payload-bearing variant` | A normal source function wildcard would cover a payload-bearing constructor. | Use normal source function patterns only with fieldless enum constructors in this slice. |
 
 ## Message Handling Errors
 
@@ -61,6 +78,18 @@ result of the first invalid shape.
 | `payload has type ..., expected ...` | A runtime envelope or artifact payload template carries the wrong value type. | Match the payload value type to the target message variant. |
 | `payload ... exceeds maximum length` | A payload value label is too large for the artifact or runtime trace boundary. | Use a smaller payload value or split the payload into smaller fields/messages. |
 | `payload ... is not a bound process reference` | A `ProcessRef<T>` payload send uses a value that is not a process reference. | Pass an immutable process reference binding or received `ProcessRef<T>` payload. |
+
+## Match Errors
+
+| Diagnostic Contains | Likely Cause | Fix |
+| --- | --- | --- |
+| `match scrutinee ... is not a fieldless enum variant` | An `init` match uses a scrutinee that is not a fieldless enum constructor in this source slice. | Match a declared fieldless enum constructor. |
+| `match pattern ... is not a variant of enum ...` | A match arm names a constructor outside the scrutinee enum. | Use a constructor from the matched enum. |
+| `init match must handle variant` | An `init` match is non-exhaustive. | Add an arm for the missing variant or one `_` arm. |
+| `init match declares duplicate pattern` | More than one arm handles the same constructor. | Keep one arm per constructor. |
+| `init match wildcard pattern is unreachable` | Explicit arms already cover the matched enum. | Remove the wildcard arm or remove the explicit arms it should cover. |
+| `init match pattern ... does not carry a payload` | A fieldless constructor pattern tries to bind a payload. | Remove the binding. |
+| `init match arm cannot use payload binding ... in returned state` | An `init` match arm tries to materialize a payload binding even though `init` matches lower to a static initial state. | Return a concrete whole state value from each `init` match arm. |
 
 ## State Errors
 

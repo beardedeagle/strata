@@ -108,12 +108,21 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/init_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/init_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/init_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_match.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_instances.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_instances.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payloads.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payloads.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_reply.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_reply.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta

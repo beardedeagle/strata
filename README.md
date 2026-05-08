@@ -79,6 +79,30 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
 That example uses `match msg` as an authoring form while lowering to typed
 Mantle transition IDs, not runtime source-string dispatch.
 
+Non-step match bodies can select an immutable initial state:
+
+```sh
+cargo run -p strata --bin strata -- check examples/init_match.str
+cargo run -p strata --bin strata -- build examples/init_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/init_match.mta
+```
+
+That example uses a typed `init` match over an enum constructor and lowers the
+selected whole-state record value into the Mantle initial state ID.
+
+Normal source functions can live at module level or inside a process:
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_match.str
+cargo run -p strata --bin strata -- build examples/function_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_match.mta
+```
+
+That example uses module-level signature-pattern functions, a module-level
+whole-body match helper, process-local helpers in `Main` and `Worker`, and a
+helper-produced send payload. The checker expands those immutable value helpers
+before Mantle artifact generation.
+
 Process references support multiple runtime instances of one process definition:
 
 ```sh
@@ -102,6 +126,17 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
 That example sends `Assign(Job { phase: Ready })`, binds the payload with a
 `step` parameter pattern as `Assign(job: Job)`, and returns a whole replacement
 state containing the bound payload value.
+
+The same payload binding can be authored inside a whole-body match:
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payload_match.str
+cargo run -p strata --bin strata -- build examples/actor_payload_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta
+```
+
+That example binds `Assign(job: Job)` inside `match msg` and lowers to the same
+typed payload and transition model as the signature-pattern form.
 
 Process references can travel as typed immutable payloads:
 

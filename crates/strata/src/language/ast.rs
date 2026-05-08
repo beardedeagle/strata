@@ -133,6 +133,7 @@ pub struct Module {
     pub name: Identifier,
     pub records: Vec<Record>,
     pub enums: Vec<Enum>,
+    pub functions: Vec<Function>,
     pub processes: Vec<Process>,
 }
 
@@ -167,6 +168,7 @@ pub struct Process {
     pub state_type: TypeRef,
     pub msg_type: TypeRef,
     pub init: Function,
+    pub functions: Vec<Function>,
     pub steps: Vec<Function>,
 }
 
@@ -324,6 +326,10 @@ pub enum ReturnExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueExpr {
     Identifier(Identifier),
+    Call {
+        name: Identifier,
+        arg: Box<ValueExpr>,
+    },
     Record(RecordValue),
 }
 
@@ -343,6 +349,7 @@ impl fmt::Display for ValueExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Identifier(name) => write!(f, "{name}"),
+            Self::Call { name, arg } => write!(f, "{name}({arg})"),
             Self::Record(value) => write!(f, "{value}"),
         }
     }

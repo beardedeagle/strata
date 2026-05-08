@@ -1,0 +1,94 @@
+module function_match;
+
+record MainState {
+    signature: Readiness,
+    body: Readiness,
+}
+record Job {
+    phase: JobPhase,
+}
+record WorkerState {
+    job: Job,
+}
+enum StartupMode {
+    Cold,
+    Warm,
+}
+enum Readiness {
+    ColdReady,
+    WarmReady,
+}
+enum JobPhase {
+    Ready,
+    Done,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerMsg {
+    Assign(Job),
+}
+
+fn readiness_sig(Cold) -> Readiness ! [] ~ [] @det {
+    return ColdReady;
+}
+
+fn readiness_sig(Warm) -> Readiness ! [] ~ [] @det {
+    return WarmReady;
+}
+
+fn readiness_body(mode: StartupMode) -> Readiness ! [] ~ [] @det {
+    match mode {
+        Cold => {
+            return ColdReady;
+        }
+        Warm => {
+            return WarmReady;
+        }
+    }
+}
+
+fn ready_job(phase: JobPhase) -> Job ! [] ~ [] @det {
+    return Job { phase: phase };
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn state_for(mode: StartupMode) -> MainState ! [] ~ [] @det {
+        return MainState {
+            signature: readiness_sig(mode),
+            body: readiness_body(mode),
+        };
+    }
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return state_for(Warm);
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn, send] ~ [] @det {
+        emit "source functions selected WarmReady";
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(ready_job(Ready));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { job: Job { phase: Done } };
+    }
+
+    fn with_job(job: Job) -> WorkerState ! [] ~ [] @det {
+        return WorkerState { job: job };
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "process helper assigned job";
+        return Stop(with_job(job));
+    }
+}

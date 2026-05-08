@@ -1,0 +1,45 @@
+module actor_payload_match;
+
+record MainState;
+record Job {
+    phase: JobPhase,
+}
+record WorkerState {
+    job: Job,
+}
+enum MainMsg { Start }
+enum JobPhase { Ready, Done }
+enum WorkerMsg { Assign(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { job: Job { phase: Done } };
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            Assign(job: Job) => {
+                emit "worker matched Assign payload";
+                return Stop(WorkerState { job: job });
+            }
+        }
+    }
+}

@@ -9,18 +9,18 @@ Mantle artifact internals.
 | Area | Accepted Surface |
 | --- | --- |
 | Source unit | One `module name;` declaration per file. |
-| Top-level declarations | `record`, `enum`, and `proc`. |
+| Top-level declarations | `record`, `enum`, `fn`, and `proc`. |
 | Classes | Not available. |
 | Methods | Not available. |
-| Top-level functions | Not available. |
-| Process functions | `init` and `step` only. |
+| Top-level functions | Pure deterministic one-argument source helpers. |
+| Process functions | `init`, `step`, and pure deterministic one-argument process-local helpers. |
 | Imports | Not available. |
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Patterns | Constructor patterns, constructor payload bindings, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, payload sends, and payload-binding step patterns. |
-| Message dispatch | Step parameter patterns, wildcard step patterns, and one whole-body `match msg` step form per process. |
+| Pattern dispatch | Function signature patterns, source function match bodies, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, and one whole-body `match msg` step form per process. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
 The `module` declaration names a source unit. It does not create an import
@@ -35,13 +35,17 @@ module hello;
 ```
 
 After the module declaration, the accepted top-level declarations are records,
-enums, and processes.
+enums, source functions, and processes.
 
 ```strata
 module example;
 
 record MainState;
 enum MainMsg { Start }
+
+fn identity_state(state: MainState) -> MainState ! [] ~ [] @det {
+    return state;
+}
 
 proc Main mailbox bounded(1) {
     type State = MainState;
@@ -170,11 +174,12 @@ proc Worker mailbox bounded(1) {
 }
 ```
 
-Only the aliases `State` and `Msg` are accepted inside a process. Only the
-functions `init` and `step` are accepted inside a process. Each message variant
-must resolve to exactly one `step` clause, selected by an explicit constructor
-pattern, by one wildcard pattern, or by one whole-body match. A process cannot
-mix step parameter patterns with a match step body in this slice.
+Only the aliases `State` and `Msg` are accepted inside a process. Processes may
+also declare pure deterministic helper functions alongside `init` and `step`.
+Each message variant must resolve to exactly one `step` clause, selected by an
+explicit constructor pattern, by one wildcard pattern, or by one whole-body
+match. A process cannot mix step parameter patterns with a match step body in
+this slice.
 
 ## Function Signatures
 
@@ -193,9 +198,47 @@ Buildable source requires:
 | `init` | No parameters, returns the process state type, uses `! [] ~ [] @det`. |
 | parameter-pattern `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
 | match `step` | Parameters exactly `state: StateType, msg: MsgType`, returns `ProcResult<StateType>`, uses `~ [] @det`, and has a whole-body `match msg`. |
+| source helper | One binding parameter or one pattern parameter, returns a source value type, uses `! [] ~ [] @det`, and has no runtime statements. |
 
 The parser recognizes `@nondet`, but buildable source rejects it. The
 may-behavior list after `~` must be empty.
+
+Normal source functions are checked before lowering and expanded into the
+value positions where they are called. They do not become Mantle runtime
+dispatch entries and cannot perform runtime effects. A process-local helper is
+visible only inside that process. A module helper is visible throughout the
+module. Recursive helper call cycles are rejected in this source slice.
+
+Function signature patterns can author fieldless enum dispatch:
+
+```strata
+fn readiness(Cold) -> Readiness ! [] ~ [] @det {
+    return ColdReady;
+}
+
+fn readiness(Warm) -> Readiness ! [] ~ [] @det {
+    return WarmReady;
+}
+```
+
+A helper may also use a whole-body match over its typed binding parameter:
+
+```strata
+fn readiness_body(mode: StartupMode) -> Readiness ! [] ~ [] @det {
+    match mode {
+        Cold => {
+            return ColdReady;
+        }
+        Warm => {
+            return WarmReady;
+        }
+    }
+}
+```
+
+These matches are exhaustive, duplicate-free, and immutable. Payload-binding
+patterns remain available for actor message dispatch; normal source function
+patterns currently cover fieldless enum constructors.
 
 ## Statements
 
@@ -259,9 +302,9 @@ process ID. Source names remain diagnostics and trace metadata.
 
 Patterns are source-level syntax for typed value decomposition. The current
 runnable subset admits constructor patterns, constructor payload bindings, and
-wildcards; actor message dispatch is the first semantic consumer that lowers to
-Mantle. Message dispatch may also be written as one whole-body match over the
-typed message parameter:
+wildcards. `init` may use one whole-body match over a fieldless enum constructor
+to select the initial state, and actor message dispatch may use one whole-body
+match over the typed message parameter:
 
 ```strata
 fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -278,11 +321,18 @@ fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] 
 }
 ```
 
-This is an authoring form for the same semantics as step parameter patterns.
-Checking resolves each arm into typed message-keyed transitions before
-lowering. Mantle still dispatches by admitted message IDs, not by source
-strings. In this buildable step subset the match scrutinee must be the typed
-message parameter, and match arms are block-delimited without comma separators.
+Step `match` is an authoring form for the same semantics as step parameter
+patterns, including typed payload bindings. Checking resolves each arm into
+typed message-keyed transitions before lowering. Mantle still dispatches by
+admitted message IDs and payload type IDs, not by source strings. In this
+buildable step subset the match scrutinee must be the typed message parameter,
+and match arms are block-delimited without comma separators.
+
+An `init` match is checked against the enum that owns the scrutinee constructor.
+It must be exhaustive, duplicate-free, and statement-free; each arm returns an
+immutable whole state value. Payload-bearing enum variants can be covered by
+explicit patterns or `_`, but `init` arms cannot materialize payload bindings in
+the returned state because the initial state lowers to one static state ID.
 
 ## Effects
 
@@ -312,11 +362,20 @@ fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
 }
 ```
 
-Payload constructors can bind the received payload in the parameter pattern:
+Payload constructors can bind the received payload in a `step` parameter pattern
+or a whole-body `match msg` arm:
 
 ```strata
 fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
     return Stop(WorkerState { job: job });
+}
+
+fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    match msg {
+        Assign(job: Job) => {
+            return Stop(WorkerState { job: job });
+        }
+    }
 }
 ```
 
