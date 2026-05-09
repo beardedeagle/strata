@@ -3683,7 +3683,7 @@ fn check_step_shape(
         if match_body.scrutinee.as_str() == STEP_STATE_PARAMETER_NAME {
             let FunctionParam::Pattern(message_pattern) = &step.params[1] else {
                 return Err(Error::new(
-                    "state match step must declare a message constructor pattern",
+                    "state match step second parameter must be a message constructor pattern or wildcard pattern",
                 ));
             };
             return Ok(StepDispatchForm::StateMatch(check_step_pattern(

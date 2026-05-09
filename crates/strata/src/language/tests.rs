@@ -3015,7 +3015,7 @@ fn rejects_match_with_wrong_target() {
 
     assert!(
         err.to_string()
-            .contains("state match step must declare a message constructor pattern")
+            .contains("state match step second parameter must be a message constructor pattern or wildcard pattern")
     );
 }
 
