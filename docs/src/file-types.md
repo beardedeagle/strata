@@ -29,19 +29,23 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=8
+schema_version=1
 source_language=strata
 ```
 
 The schema version identifies the admitted `.mta` encoding shape. It is not a
-Strata language release or a stability guarantee.
+Strata language release, a migration counter, or a stability guarantee. In the
+current greenfield implementation, `1` is the single admitted artifact schema
+baseline.
 
 Executable references, type identity, and state transitions inside `.mta` use
 validated table IDs and typed transition forms. Process transition records are
-encoded by transition index and carry a `message` ID field plus exact effect
-authority for their actions. Validation requires one unique transition for each
-accepted message, and runtime selection indexes the admitted transition table by
-typed message ID.
+encoded by transition index and carry a `message` ID field, an optional
+`current_state` ID guard, and exact effect authority for their actions.
+Validation requires either one unguarded transition for a message or a complete
+set of state-specific transitions over the admitted state table. Runtime
+selection indexes the admitted transition table by typed message ID plus typed
+current state ID when a state guard is present.
 
 Artifact type identity is carried by a Mantle type table. Process
 `state_type_id`, `message_type_id`, message `payload_type_id`, payload template
@@ -50,9 +54,11 @@ Artifact type identity is carried by a Mantle type table. Process
 labels are metadata only; Mantle does not parse source type strings such as
 process-reference spellings to decide runtime behavior.
 
-State value tables carry a type ID, typed value identity, and display label for
-each admitted state. Mantle admission and runtime next-state resolution use the
-type ID and value identity. Labels remain trace and diagnostic metadata.
+State value tables carry a type ID, typed value identity, display label, and
+optional typed payload metadata for each admitted state. Mantle admission and
+runtime next-state resolution use the type ID and value identity. State-match
+payload templates use the admitted current state's typed payload metadata.
+Labels remain trace and diagnostic metadata.
 
 Process references are encoded as per-process reference tables. A spawn action
 binds a process-reference ID to a runtime process instance for the transition.

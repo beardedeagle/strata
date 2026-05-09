@@ -357,7 +357,8 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
         let step = ActiveStep::new(self.program, &self.processes[process_index], envelope)?;
         let definition = self.program.process(step.process_id)?;
-        let transition = definition.transition_for_message(step.message)?;
+        let transition =
+            definition.transition_for_message_state(step.message, Some(step.current_state))?;
         let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
         let final_state = self.resolve_next_state(process_index, &step, &next_state)?;
@@ -409,6 +410,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         self.program,
                         payload,
                         step.payload.as_ref(),
+                        step.current_state_payload.as_ref(),
                         step,
                         local_process_refs,
                     )?),
@@ -560,9 +562,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         template: &ArtifactValueTemplate,
     ) -> Result<StateId> {
-        let value = self
-            .program
-            .evaluate_state_value(template, step.payload.as_ref())?;
+        let value = self.evaluate_state_template(template, step)?;
         let process = self.program.process(step.process_id)?;
         let state_index = process
             .state_values
@@ -571,10 +571,25 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             .ok_or_else(|| {
                 Error::new(format!(
                     "process {} next_state template produced value {} not admitted by state table",
-                    step.process_name, value.label
+                    step.process_name, value.value
                 ))
             })?;
         StateId::from_index(state_index)
+    }
+
+    fn evaluate_state_template(
+        &self,
+        template: &ArtifactValueTemplate,
+        step: &ActiveStep,
+    ) -> Result<ArtifactPayload> {
+        evaluate_runtime_template(
+            self.program,
+            template,
+            step.payload.as_ref(),
+            step.current_state_payload.as_ref(),
+            step,
+            &BTreeMap::new(),
+        )
     }
 
     fn resolve_next_state(
@@ -786,6 +801,8 @@ struct ActiveStep {
     pid: RuntimeProcessId,
     process_id: ProcessId,
     process_name: String,
+    current_state: StateId,
+    current_state_payload: Option<ArtifactPayload>,
     message: MessageId,
     message_label: String,
     payload: Option<ArtifactPayload>,
@@ -797,10 +814,26 @@ impl ActiveStep {
         process: &ProcessInstance,
         envelope: RuntimeMessageEnvelope,
     ) -> Result<Self> {
+        let process_name = program.process_label(process.process_id)?.to_string();
+        let current_state_payload = program
+            .process(process.process_id)?
+            .state_values
+            .get(process.state.index())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} current_state id {} is not loaded",
+                    process_name,
+                    process.state.as_u32()
+                ))
+            })?
+            .payload
+            .clone();
         Ok(Self {
             pid: process.pid,
             process_id: process.process_id,
-            process_name: program.process_label(process.process_id)?.to_string(),
+            process_name,
+            current_state: process.state,
+            current_state_payload,
             message: envelope.message,
             message_label: program
                 .message_label(process.process_id, envelope.message)?
@@ -814,6 +847,7 @@ fn evaluate_runtime_template(
     program: &LoadedProgram,
     template: &ArtifactValueTemplate,
     received_payload: Option<&ArtifactPayload>,
+    current_state_payload: Option<&ArtifactPayload>,
     step: &ActiveStep,
     process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
 ) -> Result<ArtifactPayload> {
@@ -830,6 +864,19 @@ fn evaluate_runtime_template(
             if payload.ty != *ty {
                 return Err(Error::new(format!(
                     "received payload has type id {}, expected {}",
+                    payload.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            Ok(payload.clone())
+        }
+        ArtifactValueTemplate::CurrentStatePayload { ty } => {
+            let payload = current_state_payload.ok_or_else(|| {
+                Error::new("current state payload template requires a payload-bearing state")
+            })?;
+            if payload.ty != *ty {
+                return Err(Error::new(format!(
+                    "current state payload has type id {}, expected {}",
                     payload.ty.as_u32(),
                     ty.as_u32()
                 )));
@@ -862,8 +909,14 @@ fn evaluate_runtime_template(
             variant,
             payload,
         } => {
-            let payload =
-                evaluate_runtime_template(program, payload, received_payload, step, process_refs)?;
+            let payload = evaluate_runtime_template(
+                program,
+                payload,
+                received_payload,
+                current_state_payload,
+                step,
+                process_refs,
+            )?;
             let value = format!("{variant}({})", payload.value);
             validate_payload_value_label(&value)?;
             Ok(ArtifactPayload {
@@ -880,6 +933,7 @@ fn evaluate_runtime_template(
                     program,
                     &field.value,
                     received_payload,
+                    current_state_payload,
                     step,
                     process_refs,
                 )?;
@@ -1556,12 +1610,15 @@ mod tests {
             message: MessageId::new(0),
             message_label: "Start".to_string(),
             payload: Some(received.clone()),
+            current_state: StateId::new(0),
+            current_state_payload: None,
         };
 
         let err = evaluate_runtime_template(
             &program,
             &template,
             Some(&received),
+            None,
             &step,
             &BTreeMap::new(),
         )
@@ -1638,6 +1695,7 @@ mod tests {
                     mailbox_bound: 1,
                     init_state: StateId::new(0),
                     transitions: vec![ArtifactTransition {
+                        current_state: None,
                         message: MessageId::new(0),
                         step_result: StepResult::Stop,
                         next_state: NextState::Current,
@@ -1655,6 +1713,7 @@ mod tests {
                     mailbox_bound: 1,
                     init_state: StateId::new(0),
                     transitions: vec![ArtifactTransition {
+                        current_state: None,
                         message: MessageId::new(0),
                         step_result: StepResult::Stop,
                         next_state: NextState::Current,

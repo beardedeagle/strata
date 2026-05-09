@@ -85,8 +85,9 @@ The aliases and functions may appear in any order. `State`, `Msg`, and `init`
 must each appear exactly once. Non-`init`/`step` functions are process-local
 source helpers. Each message variant must resolve to exactly one `step` clause,
 either through an explicit constructor pattern, through one wildcard pattern,
-or through one match step body. A process cannot mix step parameter patterns
-with a match step body in this slice. Other process members are rejected.
+through one `match msg` step body, or through a state-match step for a specific
+message pattern. A process cannot mix parameter-pattern/state-match step forms
+with a `match msg` step body in this slice. Other process members are rejected.
 
 ## Functions
 
@@ -153,9 +154,11 @@ Patterns are source-level binding and decomposition syntax. This source slice
 admits constructor patterns, constructor payload bindings, and `_` wildcards.
 Buildable semantic consumers are normal source function signatures and match
 bodies, fieldless enum `init` matches, and actor `step` message dispatch.
-Normal source helpers and actor `step` dispatch accept constructor payload
-bindings. Source helper calls still expand before lowering; they require a
-concrete enum constructor value for pattern selection.
+Actor `step` bodies may also match the current process state parameter when
+the process state type is an enum. Normal source helpers, actor `step` dispatch,
+and current-state matches accept constructor payload bindings. Source helper
+calls still expand before lowering; they require a concrete enum constructor
+value for pattern selection.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message
@@ -192,6 +195,26 @@ match scrutinee must be the typed message parameter in the current buildable
 step subset. Match arms are block-delimited and do not use comma separators.
 The step effect list applies to every generated transition, so each arm must
 use exactly the declared effects.
+
+A state-match `step` uses the normal state parameter plus a message constructor
+or wildcard pattern, then uses a whole-body `match state`:
+
+```text
+state_match_step_function =
+    "fn" "step" "(" "state" ":" type_ref ","
+        (ident | ident "(" ident ":" type_ref ")" | "_") ")"
+    "->" "ProcResult" "<" type_ref ">"
+    "!" effect_list "~" "[]" "@det"
+    "{" "match" "state" "{" match_arm+ "}" "}"
+```
+
+State-match arms resolve against the declared process state enum. Payload
+variants must bind their payload with an explicit type, such as
+`Working(job: Job)`. Fieldless variants must not bind a payload. Bindings are
+immutable and transition-local. Each generated transition is keyed by the
+message ID and the admitted current state ID; state changes still occur only by
+returning a whole state value through `Continue(...)`, `Stop(...)`, or
+`Panic(...)`.
 
 A normal source helper is a module-level function or a process-local function
 whose name is not `init` or `step`:

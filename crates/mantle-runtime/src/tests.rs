@@ -535,7 +535,7 @@ fn in_memory_host_selects_transitions_by_message_id() {
 }
 
 #[test]
-fn loaded_program_indexes_transitions_by_message_id() {
+fn loaded_program_selects_transitions_by_message_id() {
     let mut artifact = sequence_artifact();
     artifact.processes[1].transitions.swap(0, 1);
 
@@ -545,22 +545,80 @@ fn loaded_program_indexes_transitions_by_message_id() {
         .process(ProcessId::new(1))
         .expect("worker process should be loaded");
 
-    assert_eq!(worker.transitions[0].step_result, StepResult::Continue);
-    assert_eq!(worker.transitions[1].step_result, StepResult::Stop);
     assert_eq!(
         worker
-            .transition_for_message(MessageId::new(0))
+            .transition_for_message_state(MessageId::new(0), None)
             .expect("First transition should be loaded")
             .step_result,
         StepResult::Continue
     );
     assert_eq!(
         worker
-            .transition_for_message(MessageId::new(1))
+            .transition_for_message_state(MessageId::new(1), None)
             .expect("Second transition should be loaded")
             .step_result,
         StepResult::Stop
     );
+}
+
+#[test]
+fn loaded_program_rejects_transition_current_state_outside_state_table() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0].current_state = Some(StateId::new(99));
+
+    let err = LoadedProgram::from_artifact(&artifact)
+        .expect_err("unknown transition current state should fail loaded admission");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker transition 0 current_state id 99 is not a valid state value")
+    );
+}
+
+#[test]
+fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
+    let mut artifact = valid_artifact();
+    let mut working = ArtifactStateValue::with_label(
+        WORKER_STATE,
+        "Working(Job{phase:Ready})",
+        "Working(Job{phase:Ready})",
+    );
+    working.payload = Some(ArtifactPayload {
+        ty: JOB,
+        value: "Job{phase:Ready}".to_string(),
+        process_ref: None,
+    });
+    artifact.processes[1].state_values =
+        vec![ArtifactStateValue::new(WORKER_STATE, "Idle"), working];
+    artifact.processes[1].transitions = vec![
+        ArtifactTransition {
+            current_state: Some(StateId::new(0)),
+            message: MessageId::new(0),
+            step_result: StepResult::Stop,
+            next_state: NextState::Current,
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+        ArtifactTransition {
+            current_state: Some(StateId::new(1)),
+            message: MessageId::new(0),
+            step_result: StepResult::Stop,
+            next_state: NextState::Template(ArtifactValueTemplate::EnumVariant {
+                ty: WORKER_STATE,
+                variant: "Done".to_string(),
+                payload: Box::new(ArtifactValueTemplate::CurrentStatePayload { ty: JOB }),
+            }),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+    ];
+
+    let err = LoadedProgram::from_artifact(&artifact)
+        .expect_err("unadmitted current-state-derived next state should fail loaded admission");
+
+    assert!(err.to_string().contains(
+        "process Worker transition 0 next_state_template produced value Done(Job{phase:Ready}) not admitted by state table"
+    ));
 }
 
 #[test]
@@ -578,6 +636,7 @@ fn in_memory_host_preserves_current_next_state() {
         mailbox_bound: 1,
         init_state: StateId::new(1),
         transitions: vec![ArtifactTransition {
+            current_state: None,
             message: MessageId::new(0),
             step_result: StepResult::Stop,
             next_state: NextState::Current,
@@ -666,6 +725,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
+                    current_state: None,
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
@@ -693,6 +753,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
+                    current_state: None,
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Value(StateId::new(1)),
@@ -720,6 +781,7 @@ fn panic_artifact() -> MantleArtifact {
         });
     artifact.processes[1].mailbox_bound = 2;
     artifact.processes[1].transitions[0] = ArtifactTransition {
+        current_state: None,
         message: MessageId::new(0),
         step_result: StepResult::Panic,
         next_state: NextState::Value(StateId::new(1)),
@@ -752,6 +814,7 @@ fn payload_artifact() -> MantleArtifact {
     artifact.processes[1].message_type = WORKER_MSG;
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[1].transitions[0] = ArtifactTransition {
+        current_state: None,
         message: MessageId::new(0),
         step_result: StepResult::Stop,
         next_state: NextState::Template(ArtifactValueTemplate::Record {
@@ -793,6 +856,7 @@ fn looping_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
+                    current_state: None,
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
@@ -823,6 +887,7 @@ fn looping_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
+                    current_state: None,
                     message: MessageId::new(0),
                     step_result: StepResult::Continue,
                     next_state: NextState::Current,
@@ -853,6 +918,7 @@ fn looping_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
+                    current_state: None,
                     message: MessageId::new(0),
                     step_result: StepResult::Continue,
                     next_state: NextState::Current,
@@ -902,6 +968,7 @@ fn sequence_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
+                    current_state: None,
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
@@ -938,6 +1005,7 @@ fn sequence_artifact() -> MantleArtifact {
                 init_state: StateId::new(0),
                 transitions: vec![
                     ArtifactTransition {
+                        current_state: None,
                         message: MessageId::new(0),
                         step_result: StepResult::Continue,
                         next_state: NextState::Value(StateId::new(1)),
@@ -947,6 +1015,7 @@ fn sequence_artifact() -> MantleArtifact {
                         }],
                     },
                     ArtifactTransition {
+                        current_state: None,
                         message: MessageId::new(1),
                         step_result: StepResult::Stop,
                         next_state: NextState::Value(StateId::new(2)),

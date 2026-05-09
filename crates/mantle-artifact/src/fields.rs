@@ -91,6 +91,17 @@ impl ArtifactFields {
         StateId::from_index(self.take_bounded_usize(key, 0, MAX_STATE_VALUES_PER_PROCESS - 1)?)
     }
 
+    pub(crate) fn take_optional_state_id(&mut self, key: &str) -> Result<Option<StateId>> {
+        let Some(value) = self.take_optional(key) else {
+            return Ok(None);
+        };
+        let index = value
+            .parse::<usize>()
+            .map_err(|_| Error::new(format!("invalid {key} value {value:?}")))?;
+        validate_count(key, index, 0, MAX_STATE_VALUES_PER_PROCESS - 1)?;
+        Ok(Some(StateId::from_index(index)?))
+    }
+
     pub(crate) fn take_message_id(&mut self, key: &str) -> Result<MessageId> {
         MessageId::from_index(self.take_bounded_usize(
             key,

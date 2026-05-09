@@ -69,8 +69,13 @@ result of the first invalid shape.
 | `match body must be the whole function body` | A `match msg` appears after another statement or has trailing body statements. | Use one whole-body `match msg` form or step parameter patterns. |
 | `match step must declare a typed message parameter` | A match `step` uses a parameter pattern instead of `msg: MsgType`. | Use `fn step(state: StateType, msg: MsgType)`. |
 | `match scrutinee ... must be the step message parameter` | The `match` scrutinee is not the typed message parameter. | Match the declared message parameter, usually `match msg`. |
+| `state match step must use a match body` | A `match state` step was parsed in a non-match body shape. | Make `match state { ... }` the whole step body. |
+| `state match pattern ... requires a payload binding` | A payload-bearing state variant is matched without binding its payload. | Write the arm as `Variant(name: PayloadType)`. |
+| `state match pattern ... does not carry a payload` | A fieldless state variant was matched with a payload binding. | Remove the binding from the fieldless variant arm. |
+| `state match payload ... has type ..., expected ...` | A state payload binding annotation does not match the state variant payload type. | Use the declared state variant payload type. |
+| `state payload binding ... conflicts with message payload binding` | A `match state` arm reuses the enclosing message payload binding name. | Give the state payload binding its own transition-local name. |
 | `message parameter ... has type ..., expected ...` | The typed message parameter is not the process `Msg` type. | Use the process message type in the second parameter. |
-| `cannot mix match step bodies with step parameter patterns` | One process uses both dispatch authoring forms. | Use either step parameter patterns or one match step body for the process. |
+| `cannot mix match step bodies with step parameter patterns` | One process mixes `match msg` dispatch with parameter-pattern or state-match dispatch. | Use either parameter-pattern/state-match clauses or one `match msg` body for the process. |
 | `sends message ... not accepted by ...` | The target process message enum has no such variant. | Send a declared target message variant. |
 | `message ... requires a payload` | A send omits the payload for a payload variant. | Pass one value with `send worker Variant(value);`. |
 | `message ... does not accept a payload` | A send passes a payload to a unit variant. | Remove the payload argument or send a payload variant. |
@@ -103,6 +108,8 @@ result of the first invalid shape.
 | `record value fields use ':'` | A record value used assignment syntax. | Use `field: value`, not `field = value`. |
 | `process reference payloads are not valid state values` / `process reference templates are not valid next-state values` | A state value or next-state template tries to embed runtime process authority. | Keep process references in direct message payloads; process states must be immutable data values. |
 | `state value state conflicts` | A state enum variant is named `state`. | Rename the variant. |
+| `current state payload template requires a payload-bearing state` | An artifact or checked transition uses a state-payload template without a payload-bearing current state guard. | Ensure the transition is keyed by an admitted payload-bearing state value. |
+| `current_state id ... is not a valid state value` / `is not a loaded state value` | An artifact transition references a current state outside the admitted state table. | Emit only admitted state IDs from lowering; reject or regenerate invalid artifacts. |
 
 ## Process And Mailbox Errors
 

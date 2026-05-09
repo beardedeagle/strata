@@ -234,6 +234,12 @@ impl MantleArtifact {
                     transition.step_result.as_str(),
                     transition.next_state.kind_str()
                 ));
+                if let Some(current_state) = transition.current_state {
+                    encoded.push_str(&format!(
+                        "{transition_prefix}.current_state={}\n",
+                        current_state.as_u32()
+                    ));
+                }
                 if let NextState::Value(state) = &transition.next_state {
                     encoded.push_str(&format!(
                         "{transition_prefix}.next_state_value={}\n",
@@ -374,6 +380,8 @@ impl MantleArtifact {
                 }
 
                 transitions.push(ArtifactTransition {
+                    current_state: fields
+                        .take_optional_state_id(&format!("{transition_prefix}.current_state"))?,
                     message: fields.take_message_id(&format!("{transition_prefix}.message"))?,
                     step_result: fields
                         .take_step_result(&format!("{transition_prefix}.step_result"))?,
@@ -535,7 +543,16 @@ impl MantleArtifact {
         template: &ArtifactValueTemplate,
         received_payload: Option<&ArtifactPayload>,
     ) -> Result<ArtifactStateValue> {
-        template.evaluate_state_value(received_payload, &|ty| {
+        self.evaluate_state_value_with_current_state(template, received_payload, None)
+    }
+
+    fn evaluate_state_value_with_current_state(
+        &self,
+        template: &ArtifactValueTemplate,
+        received_payload: Option<&ArtifactPayload>,
+        current_state_payload: Option<&ArtifactPayload>,
+    ) -> Result<ArtifactStateValue> {
+        template.evaluate_state_value(received_payload, current_state_payload, &|ty| {
             self.type_label(ty).map(str::to_owned)
         })
     }
@@ -611,6 +628,7 @@ pub struct ArtifactStateValue {
     pub ty: TypeId,
     pub value: String,
     pub label: String,
+    pub payload: Option<ArtifactPayload>,
 }
 
 impl ArtifactStateValue {
@@ -620,6 +638,7 @@ impl ArtifactStateValue {
             ty,
             label: value.clone(),
             value,
+            payload: None,
         }
     }
 
@@ -628,6 +647,7 @@ impl ArtifactStateValue {
             ty,
             value: value.into(),
             label: label.into(),
+            payload: None,
         }
     }
 
@@ -692,6 +712,16 @@ impl ArtifactProcess {
                     self.state_type.as_u32()
                 )));
             }
+            if let Some(payload) = &state_value.payload {
+                artifact.validate_value_type("state value payload type", payload.ty)?;
+                validate_value_label("state value payload", &payload.value)?;
+                if payload.process_ref.is_some() {
+                    return Err(Error::new(format!(
+                        "process {} state value {} carries a process reference payload",
+                        self.debug_name, state_value.label
+                    )));
+                }
+            }
         }
         validate_unique_message_variant_list(&self.message_variants)?;
         for message in &self.message_variants {
@@ -714,20 +744,19 @@ impl ArtifactProcess {
                 self.init_state.as_u32()
             )));
         }
-        if self.transitions.len() != self.message_variants.len() {
-            return Err(Error::new(format!(
-                "process {} transition_count must equal message_count",
-                self.debug_name
-            )));
-        }
-        let mut transition_messages = BTreeSet::new();
+        let mut transition_keys = BTreeSet::new();
         let mut action_count = 0usize;
         for transition in &self.transitions {
-            if !transition_messages.insert(transition.message.as_u32()) {
+            let transition_key = (
+                transition.message.as_u32(),
+                transition.current_state.map(StateId::as_u32),
+            );
+            if !transition_keys.insert(transition_key) {
                 return Err(Error::new(format!(
-                    "process {} declares duplicate transition for message id {}",
+                    "process {} declares duplicate transition for message id {} current_state {:?}",
                     self.debug_name,
-                    transition.message.as_u32()
+                    transition.message.as_u32(),
+                    transition.current_state.map(StateId::as_u32)
                 )));
             }
             if transition.message.index() >= self.message_variants.len() {
@@ -737,6 +766,8 @@ impl ArtifactProcess {
                     transition.message.as_u32()
                 )));
             }
+            let current_state_payload_type =
+                self.transition_current_state_payload_type(transition)?;
             match &transition.next_state {
                 NextState::Current => {}
                 NextState::Value(state) => {
@@ -762,6 +793,7 @@ impl ArtifactProcess {
                         ),
                         Some(self.state_type),
                         received_payload_type,
+                        current_state_payload_type,
                         0,
                     )?;
                     self.validate_static_next_state_template_value(artifact, transition, template)?;
@@ -772,12 +804,41 @@ impl ArtifactProcess {
                 .ok_or_else(|| Error::new("process action_count overflowed"))?;
         }
         validate_count("action_count", action_count, 0, MAX_ACTIONS_PER_PROCESS)?;
+        self.validate_transition_coverage(&transition_keys)?;
+        Ok(())
+    }
+
+    fn validate_transition_coverage(
+        &self,
+        transition_keys: &BTreeSet<(u32, Option<u32>)>,
+    ) -> Result<()> {
         for message_index in 0..self.message_variants.len() {
-            if !transition_messages.contains(&(message_index as u32)) {
+            let message = message_index as u32;
+            let has_unguarded = transition_keys.contains(&(message, None));
+            let has_guarded = (0..self.state_values.len())
+                .any(|state_index| transition_keys.contains(&(message, Some(state_index as u32))));
+            if has_unguarded {
+                if has_guarded {
+                    return Err(Error::new(format!(
+                        "process {} mixes unguarded and state-specific transitions for message id {}",
+                        self.debug_name, message
+                    )));
+                }
+                continue;
+            }
+            if !has_guarded {
                 return Err(Error::new(format!(
                     "process {} has no transition for message id {}",
-                    self.debug_name, message_index
+                    self.debug_name, message
                 )));
+            }
+            for state_index in 0..self.state_values.len() {
+                if !transition_keys.contains(&(message, Some(state_index as u32))) {
+                    return Err(Error::new(format!(
+                        "process {} has no transition for message id {} current_state id {}",
+                        self.debug_name, message, state_index
+                    )));
+                }
             }
         }
         Ok(())
@@ -792,7 +853,15 @@ impl ArtifactProcess {
         if template.depends_on_received_payload() {
             return Ok(());
         }
-        let value = artifact.evaluate_state_value(template, None)?;
+        let current_state_payload = transition
+            .current_state
+            .and_then(|state| self.state_values.get(state.index()))
+            .and_then(|state| state.payload.as_ref());
+        let value = artifact.evaluate_state_value_with_current_state(
+            template,
+            None,
+            current_state_payload,
+        )?;
         if self
             .state_values
             .iter()
@@ -806,6 +875,27 @@ impl ArtifactProcess {
             transition.message.as_u32(),
             value.label
         )))
+    }
+
+    fn transition_current_state_payload_type(
+        &self,
+        transition: &ArtifactTransition,
+    ) -> Result<Option<TypeId>> {
+        let Some(current_state) = transition.current_state else {
+            return Ok(None);
+        };
+        let state_value = self
+            .state_values
+            .get(current_state.index())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} transition {} current_state id {} is not a valid state value",
+                    self.debug_name,
+                    transition.message.as_u32(),
+                    current_state.as_u32()
+                ))
+            })?;
+        Ok(state_value.payload.as_ref().map(|payload| payload.ty))
     }
 
     fn validate_references(&self, artifact: &MantleArtifact, process_id: ProcessId) -> Result<()> {
@@ -956,6 +1046,8 @@ impl ArtifactProcess {
                             .message_variants
                             .get(transition.message.index())
                             .and_then(|message| message.payload_type);
+                        let current_state_payload_type =
+                            self.transition_current_state_payload_type(transition)?;
                         payload.validate_for_received_payload(
                             artifact,
                             &format!(
@@ -965,6 +1057,7 @@ impl ArtifactProcess {
                             ),
                             Some(*payload_type),
                             received_payload_type,
+                            current_state_payload_type,
                             0,
                         )?;
                     }
@@ -1033,7 +1126,8 @@ impl ArtifactProcess {
     ) -> Result<()> {
         match template {
             ArtifactValueTemplate::Literal { .. }
-            | ArtifactValueTemplate::ReceivedPayload { .. } => Ok(()),
+            | ArtifactValueTemplate::ReceivedPayload { .. }
+            | ArtifactValueTemplate::CurrentStatePayload { .. } => Ok(()),
             ArtifactValueTemplate::ProcessRef {
                 ty,
                 target_process,
@@ -1104,6 +1198,9 @@ pub enum ArtifactValueTemplate {
     ReceivedPayload {
         ty: TypeId,
     },
+    CurrentStatePayload {
+        ty: TypeId,
+    },
     ProcessRef {
         ty: TypeId,
         target_process: ProcessId,
@@ -1125,6 +1222,7 @@ impl ArtifactValueTemplate {
         match self {
             Self::Literal { ty, .. }
             | Self::ReceivedPayload { ty }
+            | Self::CurrentStatePayload { ty }
             | Self::ProcessRef { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. } => *ty,
@@ -1134,6 +1232,7 @@ impl ArtifactValueTemplate {
     pub fn evaluate_state_value(
         &self,
         received_payload: Option<&ArtifactPayload>,
+        current_state_payload: Option<&ArtifactPayload>,
         type_label: &dyn Fn(TypeId) -> Result<String>,
     ) -> Result<ArtifactStateValue> {
         match self {
@@ -1156,6 +1255,24 @@ impl ArtifactValueTemplate {
                 }
                 Ok(ArtifactStateValue::new(payload.ty, payload.value.clone()))
             }
+            Self::CurrentStatePayload { ty } => {
+                let payload = current_state_payload.ok_or_else(|| {
+                    Error::new("current state payload template requires a payload-bearing state")
+                })?;
+                if payload.ty != *ty {
+                    return Err(Error::new(format!(
+                        "current state payload has type id {}, expected {}",
+                        payload.ty.as_u32(),
+                        ty.as_u32()
+                    )));
+                }
+                if payload.process_ref.is_some() {
+                    return Err(Error::new(
+                        "process reference payloads are not valid state values",
+                    ));
+                }
+                Ok(ArtifactStateValue::new(payload.ty, payload.value.clone()))
+            }
             Self::ProcessRef { .. } => Err(Error::new(
                 "process reference template requires runtime process reference bindings",
             )),
@@ -1164,7 +1281,11 @@ impl ArtifactValueTemplate {
                 variant,
                 payload,
             } => {
-                let payload = payload.evaluate_state_value(received_payload, type_label)?;
+                let payload = payload.evaluate_state_value(
+                    received_payload,
+                    current_state_payload,
+                    type_label,
+                )?;
                 let value = format!("{variant}({})", payload.value);
                 let label = format!("{variant}({})", payload.label);
                 validate_value_label("enum variant template value", &value)?;
@@ -1176,9 +1297,11 @@ impl ArtifactValueTemplate {
                 let mut parts = Vec::with_capacity(fields.len());
                 let mut labels = Vec::with_capacity(fields.len());
                 for field in fields {
-                    let value = field
-                        .value
-                        .evaluate_state_value(received_payload, type_label)?;
+                    let value = field.value.evaluate_state_value(
+                        received_payload,
+                        current_state_payload,
+                        type_label,
+                    )?;
                     parts.push(format!("{}:{}", field.name, value.value));
                     labels.push(format!("{}:{}", field.name, value.label));
                 }
@@ -1195,6 +1318,7 @@ impl ArtifactValueTemplate {
         match self {
             Self::Literal { .. } => false,
             Self::ReceivedPayload { .. } => true,
+            Self::CurrentStatePayload { .. } => false,
             Self::ProcessRef { .. } => false,
             Self::EnumVariant { payload, .. } => payload.depends_on_received_payload(),
             Self::Record { fields, .. } => fields
@@ -1209,6 +1333,7 @@ impl ArtifactValueTemplate {
         field: &str,
         expected_type: Option<TypeId>,
         received_payload_type: Option<TypeId>,
+        current_state_payload_type: Option<TypeId>,
         depth: usize,
     ) -> Result<()> {
         if depth > MAX_VALUE_TEMPLATE_DEPTH {
@@ -1256,6 +1381,21 @@ impl ArtifactValueTemplate {
                 }
                 Ok(())
             }
+            Self::CurrentStatePayload { ty } => {
+                let Some(current_state_payload_type) = current_state_payload_type else {
+                    return Err(Error::new(format!(
+                        "{field} requires a payload-bearing current state"
+                    )));
+                };
+                if *ty != current_state_payload_type {
+                    return Err(Error::new(format!(
+                        "{field} has current state payload type id {}, expected {}",
+                        ty.as_u32(),
+                        current_state_payload_type.as_u32()
+                    )));
+                }
+                Ok(())
+            }
             Self::ProcessRef {
                 ty, target_process, ..
             } => {
@@ -1282,6 +1422,7 @@ impl ArtifactValueTemplate {
                     &format!("{field}.payload"),
                     None,
                     received_payload_type,
+                    current_state_payload_type,
                     depth + 1,
                 )
             }
@@ -1307,6 +1448,7 @@ impl ArtifactValueTemplate {
                         &format!("{field}.field.{}", record_field.name),
                         None,
                         received_payload_type,
+                        current_state_payload_type,
                         depth + 1,
                     )?;
                 }
@@ -1337,6 +1479,7 @@ pub struct ArtifactProcessRefPayload {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactTransition {
+    pub current_state: Option<StateId>,
     pub message: MessageId,
     pub step_result: StepResult,
     pub next_state: NextState,
@@ -1407,13 +1550,41 @@ fn encode_state_value(encoded: &mut String, prefix: &str, state_value: &Artifact
         state_value.value,
         state_value.label
     ));
+    if let Some(payload) = &state_value.payload {
+        encoded.push_str(&format!(
+            "{prefix}.payload_type_id={}\n{prefix}.payload_value={}\n",
+            payload.ty.as_u32(),
+            payload.value
+        ));
+    }
 }
 
 fn decode_state_value(fields: &mut ArtifactFields, prefix: &str) -> Result<ArtifactStateValue> {
+    let payload_type = fields.take_optional_type_id(&format!("{prefix}.payload_type_id"))?;
+    let payload_value = fields.take_optional(&format!("{prefix}.payload_value"));
+    let payload = match (payload_type, payload_value) {
+        (None, None) => None,
+        (Some(ty), Some(value)) => Some(ArtifactPayload {
+            ty,
+            value,
+            process_ref: None,
+        }),
+        (Some(_), None) => {
+            return Err(Error::new(format!(
+                "{prefix}.payload_type_id requires {prefix}.payload_value"
+            )));
+        }
+        (None, Some(_)) => {
+            return Err(Error::new(format!(
+                "{prefix}.payload_value requires {prefix}.payload_type_id"
+            )));
+        }
+    };
     Ok(ArtifactStateValue {
         ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
         value: fields.take_required(&format!("{prefix}.value"))?,
         label: fields.take_required(&format!("{prefix}.label"))?,
+        payload,
     })
 }
 
@@ -1455,6 +1626,12 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
         ArtifactValueTemplate::ReceivedPayload { ty } => {
             encoded.push_str(&format!(
                 "{prefix}.kind=received_payload\n{prefix}.type_id={}\n",
+                ty.as_u32()
+            ));
+        }
+        ArtifactValueTemplate::CurrentStatePayload { ty } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=current_state_payload\n{prefix}.type_id={}\n",
                 ty.as_u32()
             ));
         }
@@ -1531,6 +1708,9 @@ fn decode_value_template(
             value: fields.take_required(&format!("{prefix}.value"))?,
         }),
         "received_payload" => Ok(ArtifactValueTemplate::ReceivedPayload {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+        }),
+        "current_state_payload" => Ok(ArtifactValueTemplate::CurrentStatePayload {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
         }),
         "process_ref" => Ok(ArtifactValueTemplate::ProcessRef {

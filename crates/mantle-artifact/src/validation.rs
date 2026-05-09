@@ -210,6 +210,18 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                 &format!("{value_prefix}.label"),
                 &value.label,
             )?;
+            if let Some(payload) = &value.payload {
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{value_prefix}.payload_type_id"),
+                    &type_id_string(payload.ty),
+                )?;
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{value_prefix}.payload_value"),
+                    &payload.value,
+                )?;
+            }
         }
         add_field_bytes(
             &mut encoded_len,
@@ -275,6 +287,13 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                 &format!("{transition_prefix}.message"),
                 &transition.message.as_u32().to_string(),
             )?;
+            if let Some(current_state) = transition.current_state {
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{transition_prefix}.current_state"),
+                    &current_state.as_u32().to_string(),
+                )?;
+            }
             add_field_bytes(
                 &mut encoded_len,
                 &format!("{transition_prefix}.step_result"),
@@ -443,6 +462,10 @@ fn add_value_template_bytes(
         }
         ArtifactValueTemplate::ReceivedPayload { ty } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "received_payload")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+        }
+        ArtifactValueTemplate::CurrentStatePayload { ty } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "current_state_payload")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
         }
         ArtifactValueTemplate::ProcessRef {

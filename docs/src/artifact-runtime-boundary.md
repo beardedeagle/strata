@@ -31,7 +31,8 @@ execution, the artifact decoder and validator check:
 - unique process debug names;
 - unique typed state value identities per process;
 - unique process reference names per process;
-- exactly one transition per accepted message;
+- either one unguarded transition per accepted message or one state-specific
+  transition for each admitted state value;
 - exact transition effect authority for emitted, spawned, and sent actions;
 - transition references to known messages, state values, type IDs, process
   references, outputs, and process IDs.
@@ -45,9 +46,10 @@ Mantle loads admitted transitions into indexed runtime tables. Before emitting
 `ArtifactLoaded` or executing runtime side effects, Mantle validates loaded
 entry metadata, state tables, transition state targets and templates, outputs,
 process references, sends, payload templates, and transition effect authority.
-A dequeued message selects the transition by typed message ID. Dynamic
-next-state templates resolve to an admitted state ID by typed state value
-identity, not by display label text.
+A dequeued message selects the transition by typed message ID, and by admitted
+current state ID when the transition table is state-specific. Dynamic next-state
+templates resolve to an admitted state ID by typed state value identity, not by
+display label text.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect authority, and must exactly match the action effects that execute.

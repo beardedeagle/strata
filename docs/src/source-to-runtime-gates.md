@@ -12,83 +12,74 @@ The normal gate shape is:
 
 For fail-closed runtime behavior, the source must check and build, and
 `mantle run` must fail only after Mantle admits the artifact and emits trace
-evidence for the failure.
+evidence for the failure. Source-level rejection gates are different: they must
+fail before build/lowering and must not leave a target artifact behind.
 
-The source-to-runtime gates are:
+## Canonical Gates
+
+The canonical user-facing gate is:
 
 ```sh
-cargo build
+just source-to-runtime-gates
+```
 
+The split entrypoints are available when only one side of the gate is needed:
+
+```sh
+just source-to-runtime-success-gates
+just source-to-runtime-failure-gates
+```
+
+The maintained command list belongs in the executable gate definitions:
+
+- `Justfile` owns the commands a user or CI runner executes.
+- `crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs` mirrors the
+  same source-to-runtime contract as integration tests.
+- `docs/src/examples.md` owns the curated list of runnable examples and the
+  behavior each one demonstrates.
+
+This page intentionally does not enumerate every runtime gate. When a new
+user-visible language or runtime behavior needs source-to-runtime proof, update
+the executable gate and document the example on the examples page.
+
+## Representative Commands
+
+The minimum success gate checks, builds, runs, and traces `hello.str`:
+
+```sh
 cargo run -p strata --bin strata -- check examples/hello.str
 cargo run -p strata --bin strata -- build examples/hello.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+```
 
-cargo run -p strata --bin strata -- check examples/actor_ping.str
-cargo run -p strata --bin strata -- build examples/actor_ping.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
+A richer state/payload gate follows the same shape:
 
-cargo run -p strata --bin strata -- check examples/actor_sequence.str
-cargo run -p strata --bin strata -- build examples/actor_sequence.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
+```sh
+cargo run -p strata --bin strata -- check examples/state_payload_match.str
+cargo run -p strata --bin strata -- build examples/state_payload_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta
+```
 
-cargo run -p strata --bin strata -- check examples/actor_match.str
-cargo run -p strata --bin strata -- build examples/actor_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
+A source rejection gate must fail during checking and must not create a target
+artifact:
 
-cargo run -p strata --bin strata -- check examples/init_match.str
-cargo run -p strata --bin strata -- build examples/init_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/init_match.mta
-
-cargo run -p strata --bin strata -- check examples/function_match.str
-cargo run -p strata --bin strata -- build examples/function_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/function_match.mta
-
-cargo run -p strata --bin strata -- check examples/function_payload_match.str
-cargo run -p strata --bin strata -- build examples/function_payload_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/function_payload_match.mta
-
-cargo run -p strata --bin strata -- check examples/state_payload_enum.str
-cargo run -p strata --bin strata -- build examples/state_payload_enum.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
-
-cargo run -p strata --bin strata -- check examples/actor_instances.str
-cargo run -p strata --bin strata -- build examples/actor_instances.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
-
-cargo run -p strata --bin strata -- check examples/actor_payloads.str
-cargo run -p strata --bin strata -- build examples/actor_payloads.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
-
-cargo run -p strata --bin strata -- check examples/actor_payload_match.str
-cargo run -p strata --bin strata -- build examples/actor_payload_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta
-
-cargo run -p strata --bin strata -- check examples/actor_reply.str
-cargo run -p strata --bin strata -- build examples/actor_reply.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
-
-cargo run -p strata --bin strata -- check examples/actor_emit_spawn_send.str
-cargo run -p strata --bin strata -- build examples/actor_emit_spawn_send.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_emit_spawn_send.mta
-
-# Expected to fail during source checking before build/lowering.
+```sh
 cargo run -p strata --bin strata -- check examples/failures/effect_authority_missing.str
+```
 
+A runtime fail-closed gate checks and builds successfully, then returns non-zero
+from Mantle after writing trace evidence:
+
+```sh
 cargo run -p strata --bin strata -- check examples/actor_panic_no_replay.str
 cargo run -p strata --bin strata -- build examples/actor_panic_no_replay.str
-# Expected to fail closed after writing actor_panic_no_replay.observability.jsonl.
 cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta
 ```
 
-Each `mantle run` command must admit the generated `.mta`, execute it, and emit
-an observability trace under `target/strata/`. Expected-failure gates must
-return non-zero with failure evidence in the trace.
-
-The source-to-runtime gate integration tests in
-`crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs` mirror this
-user-facing sequence and should stay aligned with the examples. They live
-outside Mantle-owned crates because these gates prove the Strata/Mantle
-execution path, not Mantle runtime ownership of Strata source behavior.
+Each successful `mantle run` command must admit the generated `.mta`, execute it,
+and emit an observability trace under `target/strata/`. Expected-failure gates
+must return non-zero with source diagnostics or runtime failure evidence at the
+layer being tested.
 
 When adding a new user-visible language or runtime behavior, add or update an
 example that follows this shape. A passing unit test is useful, but it does not

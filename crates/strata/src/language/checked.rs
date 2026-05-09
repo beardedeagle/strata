@@ -213,6 +213,7 @@ pub(in crate::language) struct CheckedStateValue {
     ty: CheckedTypeRef,
     value: String,
     label: String,
+    payload: Option<CheckedPayloadValue>,
 }
 
 impl CheckedStateValue {
@@ -221,6 +222,20 @@ impl CheckedStateValue {
             ty,
             label: value.clone(),
             value,
+            payload: None,
+        }
+    }
+
+    pub(in crate::language) fn enum_variant(
+        ty: CheckedTypeRef,
+        value: String,
+        payload: Option<CheckedPayloadValue>,
+    ) -> Self {
+        Self {
+            ty,
+            label: value.clone(),
+            value,
+            payload,
         }
     }
 
@@ -234,6 +249,10 @@ impl CheckedStateValue {
 
     pub(in crate::language) fn label(&self) -> &str {
         &self.label
+    }
+
+    pub(in crate::language) fn payload(&self) -> Option<&CheckedPayloadValue> {
+        self.payload.as_ref()
     }
 
     pub(in crate::language) fn has_same_identity_as_payload(
@@ -266,6 +285,9 @@ pub(in crate::language) enum CheckedValueTemplate {
     ReceivedPayload {
         ty: CheckedTypeRef,
     },
+    CurrentStatePayload {
+        ty: CheckedTypeRef,
+    },
     ProcessRef {
         ty: CheckedTypeRef,
         target: CheckedProcessId,
@@ -287,6 +309,7 @@ impl CheckedValueTemplate {
         match self {
             Self::Literal(value) => value.ty(),
             Self::ReceivedPayload { ty }
+            | Self::CurrentStatePayload { ty }
             | Self::ProcessRef { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. } => ty,
@@ -405,6 +428,7 @@ pub(in crate::language) enum CheckedSendTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) struct CheckedTransition {
+    current_state: Option<CheckedStateId>,
     message: CheckedMessageId,
     step_result: CheckedStepResult,
     next_state: CheckedNextState,
@@ -415,12 +439,17 @@ pub(in crate::language) struct CheckedTransition {
 impl CheckedTransition {
     pub(in crate::language) fn new(parts: CheckedTransitionParts) -> Self {
         Self {
+            current_state: parts.current_state,
             message: parts.message,
             step_result: parts.step_result,
             next_state: parts.next_state,
             effects: parts.effects,
             actions: parts.actions,
         }
+    }
+
+    pub(in crate::language) fn current_state(&self) -> Option<CheckedStateId> {
+        self.current_state
     }
 
     pub(in crate::language) fn message(&self) -> CheckedMessageId {
@@ -445,6 +474,7 @@ impl CheckedTransition {
 }
 
 pub(in crate::language) struct CheckedTransitionParts {
+    pub current_state: Option<CheckedStateId>,
     pub message: CheckedMessageId,
     pub step_result: CheckedStepResult,
     pub next_state: CheckedNextState,
