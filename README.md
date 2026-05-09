@@ -115,6 +115,22 @@ That example constructs payload-bearing enum values in immutable source helper
 returns, matches them through signature patterns and whole-body matches, and
 lowers dynamic received payload wrapping into a Mantle value template.
 
+Source helper return matches and record destructuring are checked before
+lowering:
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_record_return_match.str
+cargo run -p strata --bin strata -- build examples/function_record_return_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_record_return_match.mta
+cargo run -p strata --bin strata -- check examples/function_record_body_match.str
+cargo run -p strata --bin strata -- build examples/function_record_body_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_record_body_match.mta
+```
+
+These examples destructure immutable record values inside a helper
+`return match` and a whole-body helper match; Mantle admits only the resolved
+whole-state values.
+
 Process state enums can carry typed immutable payloads:
 
 ```sh

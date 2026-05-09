@@ -27,9 +27,11 @@ result of the first invalid shape.
 | `process ... must declare type Msg` | A process is missing its message alias. | Add `type Msg = MessageEnum;`. |
 | `init must declare no parameters` | `init` has parameters. | Use `fn init() -> StateType ...`. |
 | `init body must not perform statements` | `init` uses `emit`, `spawn`, or `send`. | Return only the initial state. |
+| `init body return match is not supported` | An `init` body tries to use helper-only `return match` syntax. | Use a whole-body `match` for the supported init match form, or return one state value. |
 | `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageConstructor` or `state: StateType, _`. |
 | `step second parameter must be a message constructor pattern or wildcard pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with a message constructor or `_`, or use a whole-body `match msg`. |
 | `step returns ..., expected ProcResult<...>` | `step` return type is wrong. | Return `ProcResult<StateType>`. |
+| `step return match is not supported` | A `step` body tries to use helper-only `return match` syntax. | Use whole-body `match msg` or `match state` dispatch, with each arm returning `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step body must return Stop..., Continue..., or Panic...` | A `step` returns a bare state value or an unsupported result form. | Return one whole state value inside `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step may-behaviors must be empty` | The `~ [...]` list is not empty. | Use `~ []`. |
 | `step must be deterministic` | `step` uses `@nondet`. | Use `@det`. |
@@ -52,6 +54,18 @@ result of the first invalid shape.
 | `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
 | `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |
 | `function ... wildcard pattern is unreachable` | Explicit source function clauses already cover every variant. | Remove the wildcard clause or remove the explicit clauses it should cover. |
+| `record pattern ... has no field ...` | A source helper record pattern names a field outside the matched record. | Bind a declared field from the record. |
+| `record pattern ... binds field ... more than once` | A source helper record pattern repeats one field. | Bind each record field at most once. |
+| `record pattern binding ... is declared more than once` | A source helper record pattern binds two fields to the same local name. | Use one distinct immutable binding name per field. |
+| `record pattern binding ... conflicts ...` | A source helper record pattern binding reuses a reserved, process, type, or constructor name. | Choose a distinct immutable binding name. |
+| `requires a concrete record value argument` | A record destructuring helper or helper match is trying to destructure a value that is not concrete after source helper expansion. | Pass a concrete record value into the helper or match a source binding that resolves to one. |
+| `match record pattern ... must declare exactly one arm` | A helper whole-body match over a record tries to use enum-style multi-arm dispatch. | Use one record destructuring arm for the matched record type. |
+| `match over record ... cannot use a wildcard pattern` | A helper whole-body match over a record tries to use `_`. | Use the record destructuring pattern for the matched record type. |
+| `match record pattern binding ... conflicts ...` | A helper whole-body record match binding reuses an existing source value binding. | Choose a distinct immutable binding name. |
+| `return match scrutinee ... must be a source value binding` | A helper return-match tries to match a name that is not an in-scope immutable source value. | Match the helper parameter or a payload binding introduced by an enclosing source match. |
+| `return match must handle variant ...` | A helper return-match is non-exhaustive. | Add the missing constructor arm or one `_` fallback. |
+| `return match record pattern ... must declare exactly one arm` | A helper return-match over a record tries to use enum-style multi-arm dispatch. | Use one record destructuring arm for the matched record type. |
+| `return match record pattern binding ... conflicts ...` | A helper return-match record binding reuses an existing source value binding. | Choose a distinct immutable binding name. |
 | `payload ... has type ..., expected ...` | A source helper or step payload binding annotation does not match the constructor payload type. | Use the declared payload type. |
 | `match payload binding ... conflicts with an existing source value binding` | A source helper match arm reuses the helper parameter name for a payload binding. | Use a distinct immutable payload binding name. |
 | `value ... is not a variant of enum ...` | A payload-constructor expression names a constructor outside the expected enum. | Use a constructor from the expected enum or call a declared helper. |

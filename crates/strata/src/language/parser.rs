@@ -1,7 +1,8 @@
 use super::ast::{
     Determinism, Effect, Enum, EnumVariant, Function, FunctionBlock, FunctionBody, FunctionParam,
     Identifier, Match, MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record,
-    RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
+    RecordField, RecordPatternField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
+    ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
@@ -310,10 +311,17 @@ impl Parser {
             if self.peek_symbol('(') {
                 return Err(self.error_here("wildcard patterns cannot bind payloads"));
             }
+            if self.peek_symbol('{') {
+                return Err(self.error_here("wildcard patterns cannot destructure fields"));
+            }
             return Ok(Pattern::Wildcard);
         }
 
         let name = Identifier::new(value)?;
+        if self.consume_symbol('{') {
+            let fields = self.parse_record_pattern_fields(&name)?;
+            return Ok(Pattern::Record { name, fields });
+        }
         let binding = if self.consume_symbol('(') {
             let name = self.expect_identifier()?;
             self.expect_symbol(':')?;
@@ -324,6 +332,46 @@ impl Parser {
             None
         };
         Ok(Pattern::Constructor { name, binding })
+    }
+
+    fn parse_record_pattern_fields(
+        &mut self,
+        record_name: &Identifier,
+    ) -> Result<Vec<RecordPatternField>> {
+        let mut fields = Vec::new();
+        if self.peek_symbol('}') {
+            return Err(self.error_here(format!(
+                "record pattern {record_name} must bind at least one field"
+            )));
+        }
+        loop {
+            if self.peek_keyword("mut") || self.peek_keyword("var") {
+                return Err(self.error_here(
+                    "record pattern bindings are immutable; mutable bindings are not supported",
+                ));
+            }
+            let field = self.expect_identifier()?;
+            if self.consume_symbol('=') {
+                return Err(self.error_previous(
+                    "record pattern fields use ':'; assignment syntax is not supported",
+                ));
+            }
+            let binding = if self.consume_symbol(':') {
+                self.expect_identifier()?
+            } else {
+                field.clone()
+            };
+            fields.push(RecordPatternField { field, binding });
+            if self.consume_symbol(',') {
+                if self.consume_symbol('}') {
+                    break;
+                }
+                continue;
+            }
+            self.expect_symbol('}')?;
+            break;
+        }
+        Ok(fields)
     }
 
     fn parse_match_body(&mut self) -> Result<Match> {
@@ -495,6 +543,9 @@ impl Parser {
     }
 
     fn parse_return_expr(&mut self) -> Result<ReturnExpr> {
+        if self.peek_keyword("match") {
+            return Ok(ReturnExpr::Match(self.parse_match_body()?));
+        }
         let value = self.parse_value_expr()?;
         if let ValueExpr::Call { name, arg } = value {
             return Ok(ReturnExpr::Call { name, arg: *arg });

@@ -253,6 +253,46 @@ fn rejects_unknown_match_arm() {
 }
 
 #[test]
+fn rejects_record_pattern_in_step_match_arm() {
+    let source = r#"
+module step_record_pattern_rejection;
+
+enum Phase {
+    Ready,
+}
+record MainState {
+    phase: Phase,
+}
+enum MainMsg {
+    Start,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { phase: Ready };
+    }
+
+    fn step(state: MainState, msg: MainMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        match msg {
+            MainState { phase } => {
+                return Stop(state);
+            }
+        }
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("record step match arm should fail");
+
+    assert!(err.to_string().contains(
+        "process Main step pattern MainState destructures a record, but step patterns expect message constructors"
+    ));
+}
+
+#[test]
 fn rejects_mixed_parameter_pattern_and_match_dispatch() {
     let source = ACTOR_SEQUENCE.replace(
         r#"fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {

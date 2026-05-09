@@ -1,0 +1,241 @@
+use super::*;
+
+struct BodyMatchResolutionContext<'ctx, 'module, 'value, 'local, 'outer> {
+    scope: &'ctx SourceFunctionScope<'module>,
+    function: &'ctx Function,
+    match_body: &'ctx Match,
+    substitutions: &'ctx [SourceSubstitution<'value>],
+    local_bindings: &'ctx [SourceValueBinding<'local>],
+    bindings: &'ctx [SourceValueBinding<'outer>],
+    depth: usize,
+}
+
+pub(super) fn resolve_source_function_body_match_value(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    match_body: &Match,
+    substitutions: &[SourceSubstitution<'_>],
+    local_bindings: &[SourceValueBinding<'_>],
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let Some((param_name, arg)) = substitutions.first().copied() else {
+        return Err(Error::new(format!(
+            "function {} match body requires a parameter argument",
+            function.name
+        )));
+    };
+    if match_body.scrutinee != *param_name {
+        return Err(Error::new(format!(
+            "function {} match scrutinee {} must be parameter {}",
+            function.name, match_body.scrutinee, param_name
+        )));
+    }
+    let FunctionParam::Binding(param) = &function.params[0] else {
+        return Err(Error::new(format!(
+            "function {} match body requires a binding parameter",
+            function.name
+        )));
+    };
+
+    let context = BodyMatchResolutionContext {
+        scope,
+        function,
+        match_body,
+        substitutions,
+        local_bindings,
+        bindings,
+        depth,
+    };
+    if let Ok(enum_decl) = scope.semantic_index.enum_decl(scope.module, &param.ty) {
+        return resolve_source_function_body_enum_match_value(&context, &param.ty, enum_decl, arg);
+    }
+    if let Ok(record_decl) = scope.semantic_index.record_decl(scope.module, &param.ty) {
+        return resolve_source_function_body_record_match_value(&context, record_decl, arg);
+    }
+
+    Err(Error::new(format!(
+        "function {} match scrutinee {} must be a declared record or enum source value",
+        function.name, match_body.scrutinee
+    )))
+}
+
+fn resolve_source_function_body_enum_match_value(
+    context: &BodyMatchResolutionContext<'_, '_, '_, '_, '_>,
+    enum_type: &TypeRef,
+    enum_decl: &Enum,
+    selected: &ValueExpr,
+) -> Result<ValueExpr> {
+    let (variant_name, selected_payload) =
+        concrete_source_enum_value(context.function.name.as_str(), "match dispatch", selected)?;
+    let selected_variant = context.scope.semantic_index.enum_variant_index(
+        context.scope.module,
+        enum_type,
+        variant_name,
+    )?;
+    let subject = format!("function {}", context.function.name);
+    let pattern_context = PatternCheckContext {
+        module: context.scope.module,
+        semantic_index: context.scope.semantic_index,
+        enum_decl,
+        enum_type,
+        subject: &subject,
+        label: "match",
+        payload_context: PatternPayloadContext::SourceValue,
+        binding_context: PatternBindingContext::Source { owner: &subject },
+    };
+    let arms = check_typed_match_arms(&pattern_context, &context.match_body.arms)?;
+    let mut wildcard = None;
+    for arm in arms {
+        match arm.pattern {
+            TypedMatchPattern::Variant { variant, binding } if variant == selected_variant => {
+                if let Some(binding) = binding {
+                    let Some(payload) = selected_payload else {
+                        return Err(Error::new(format!(
+                            "function {} match pattern {} requires a payload value",
+                            context.function.name, enum_decl.variants[variant].name
+                        )));
+                    };
+                    let mut arm_substitutions = context.substitutions.to_vec();
+                    let mut arm_bindings = context.local_bindings.to_vec();
+                    arm_substitutions.push((&binding.name, payload));
+                    arm_bindings.push(SourceValueBinding {
+                        name: &binding.name,
+                        ty: &binding.ty,
+                    });
+                    return resolve_source_function_block_return_value(
+                        context.scope,
+                        context.function,
+                        arm.body,
+                        &arm_substitutions,
+                        &arm_bindings,
+                        context.bindings,
+                        context.depth + 1,
+                    );
+                }
+                return resolve_source_function_block_return_value(
+                    context.scope,
+                    context.function,
+                    arm.body,
+                    context.substitutions,
+                    context.local_bindings,
+                    context.bindings,
+                    context.depth + 1,
+                );
+            }
+            TypedMatchPattern::Wildcard => {
+                wildcard = Some(arm.body);
+            }
+            _ => {}
+        }
+    }
+    if let Some(body) = wildcard {
+        return resolve_source_function_block_return_value(
+            context.scope,
+            context.function,
+            body,
+            context.substitutions,
+            context.local_bindings,
+            context.bindings,
+            context.depth + 1,
+        );
+    }
+    Err(Error::new(format!(
+        "function {} match has no arm for variant {} of enum {}",
+        context.function.name, variant_name, enum_decl.name
+    )))
+}
+
+fn resolve_source_function_body_record_match_value(
+    context: &BodyMatchResolutionContext<'_, '_, '_, '_, '_>,
+    record_decl: &Record,
+    selected: &ValueExpr,
+) -> Result<ValueExpr> {
+    let record_value =
+        concrete_source_record_value(context.function.name.as_str(), "match dispatch", selected)?;
+    if record_value.name != record_decl.name {
+        return Err(Error::new(format!(
+            "function {} match expected record {}, found {}",
+            context.function.name, record_decl.name, record_value.name
+        )));
+    }
+
+    let [arm] = context.match_body.arms.as_slice() else {
+        return Err(Error::new(format!(
+            "function {} match record pattern {} must declare exactly one arm",
+            context.function.name, record_decl.name
+        )));
+    };
+    let Pattern::Record { name, fields } = &arm.pattern else {
+        return Err(record_body_match_pattern_error(
+            context.function,
+            &arm.pattern,
+            record_decl,
+        ));
+    };
+    if name != &record_decl.name {
+        return Err(Error::new(format!(
+            "function {} match record pattern {} cannot match record {}",
+            context.function.name, name, record_decl.name
+        )));
+    }
+
+    let subject = format!("function {} match", context.function.name);
+    let (record_substitutions, pattern_bindings) = resolve_record_pattern_value_bindings(
+        context.scope.semantic_index,
+        &subject,
+        record_decl,
+        fields,
+        record_value,
+    )?;
+    for binding in &pattern_bindings {
+        if context
+            .local_bindings
+            .iter()
+            .any(|existing| existing.name == &binding.name)
+        {
+            return Err(Error::new(format!(
+                "function {} match record pattern binding {} conflicts with an existing source value binding",
+                context.function.name, binding.name
+            )));
+        }
+    }
+    let mut arm_substitutions = context.substitutions.to_vec();
+    arm_substitutions.extend(record_substitutions);
+    let mut arm_bindings = context.local_bindings.to_vec();
+    arm_bindings.extend(pattern_bindings.iter().map(|binding| SourceValueBinding {
+        name: &binding.name,
+        ty: &binding.ty,
+    }));
+
+    resolve_source_function_block_return_value(
+        context.scope,
+        context.function,
+        &arm.body,
+        &arm_substitutions,
+        &arm_bindings,
+        context.bindings,
+        context.depth + 1,
+    )
+}
+
+fn record_body_match_pattern_error(
+    function: &Function,
+    pattern: &Pattern,
+    record_decl: &Record,
+) -> Error {
+    match pattern {
+        Pattern::Constructor { name, .. } => Error::new(format!(
+            "function {} match pattern {} expects an enum constructor, but scrutinee is record {}",
+            function.name, name, record_decl.name
+        )),
+        Pattern::Record { .. } => Error::new(format!(
+            "function {} match record pattern cannot match record {}",
+            function.name, record_decl.name
+        )),
+        Pattern::Wildcard => Error::new(format!(
+            "function {} match over record {} cannot use a wildcard pattern",
+            function.name, record_decl.name
+        )),
+    }
+}

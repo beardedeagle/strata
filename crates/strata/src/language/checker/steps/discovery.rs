@@ -245,6 +245,10 @@ fn check_step_typed_pattern(
                 binding,
             })
         }
+        Pattern::Record { name, .. } => Err(Error::new(format!(
+            "process {} step pattern {name} destructures a record, but step patterns expect message constructors",
+            process.name
+        ))),
         Pattern::Wildcard => Ok(TypedMatchPattern::Wildcard),
     }
 }

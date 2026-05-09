@@ -98,6 +98,12 @@ pub(super) fn check_step_transition(
         ReturnExpr::Call { name, arg } if name.as_str() == "Panic" => {
             (CheckedStepResult::Panic, arg)
         }
+        ReturnExpr::Match(_) => {
+            return Err(Error::new(format!(
+                "process {} step return match is not supported in this source slice",
+                context.process.name
+            )));
+        }
         _ => {
             return Err(Error::new(
                 "step body must return Stop(<state value>), Continue(<state value>), or Panic(<state value>)",

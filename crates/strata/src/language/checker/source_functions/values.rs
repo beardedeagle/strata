@@ -1,7 +1,15 @@
+use super::record_patterns::record_pattern_type;
 use super::value_resolution::{
     resolve_binding_source_function_call, resolve_pattern_source_function_call,
+    resolve_record_pattern_source_function_call,
 };
 use super::*;
+
+mod body_matches;
+mod return_matches;
+
+use body_matches::validate_source_function_body_match_values;
+use return_matches::validate_source_function_return_match;
 
 pub(super) fn validate_source_function_body_values(
     scope: &SourceFunctionScope<'_>,
@@ -11,67 +19,49 @@ pub(super) fn validate_source_function_body_values(
     match source_function_body(function)? {
         FunctionBody::Block(body) => validate_source_function_return_expr(
             scope,
+            function,
             &function.return_type,
             &body.returns,
             bindings,
         ),
-        FunctionBody::Match(match_body) => {
-            let FunctionParam::Binding(param) = &function.params[0] else {
-                return Err(Error::new(format!(
-                    "function {} match body requires a binding parameter",
-                    function.name
-                )));
-            };
-            if match_body.scrutinee != param.name {
-                return Err(Error::new(format!(
-                    "function {} match scrutinee {} must be parameter {}",
-                    function.name, match_body.scrutinee, param.name
-                )));
-            }
-            for arm in &match_body.arms {
-                let mut arm_bindings = bindings.to_vec();
-                if let Pattern::Constructor {
-                    binding: Some(payload),
-                    ..
-                } = &arm.pattern
-                {
-                    if bindings.iter().any(|binding| binding.name == &payload.name) {
-                        return Err(Error::new(format!(
-                            "function {} match payload binding {} conflicts with an existing source value binding",
-                            function.name, payload.name
-                        )));
-                    }
-                    arm_bindings.push(SourceValueBinding {
-                        name: &payload.name,
-                        ty: &payload.ty,
-                    });
-                }
-                validate_source_function_return_expr(
-                    scope,
-                    &function.return_type,
-                    &arm.body.returns,
-                    &arm_bindings,
-                )?;
-            }
-            Ok(())
-        }
+        FunctionBody::Match(match_body) => validate_source_function_body_match_values(
+            scope,
+            function,
+            &function.return_type,
+            match_body,
+            bindings,
+        ),
     }
 }
 
 fn validate_source_function_return_expr(
     scope: &SourceFunctionScope<'_>,
+    function: &Function,
     expected_type: &TypeRef,
     returns: &ReturnExpr,
     bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
-    let value = match returns {
-        ReturnExpr::Value(value) => value.clone(),
-        ReturnExpr::Call { name, arg } => ValueExpr::Call {
-            name: name.clone(),
-            arg: Box::new(arg.clone()),
-        },
-    };
-    validate_source_function_value_expr(scope, expected_type, &value, bindings)
+    match returns {
+        ReturnExpr::Value(value) => {
+            validate_source_function_value_expr(scope, expected_type, value, bindings)
+        }
+        ReturnExpr::Call { name, arg } => validate_source_function_value_expr(
+            scope,
+            expected_type,
+            &ValueExpr::Call {
+                name: name.clone(),
+                arg: Box::new(arg.clone()),
+            },
+            bindings,
+        ),
+        ReturnExpr::Match(match_body) => validate_source_function_return_match(
+            scope,
+            function,
+            expected_type,
+            match_body,
+            bindings,
+        ),
+    }
 }
 
 fn validate_source_function_value_expr(
@@ -195,7 +185,7 @@ fn validate_source_function_call(
             };
             validate_source_function_value_expr(scope, &param.ty, arg, bindings)
         }
-        SourceFunctionParamKind::Pattern => {
+        SourceFunctionParamKind::EnumPattern => {
             let enum_type = infer_pattern_function_enum_type(
                 scope.module,
                 scope.semantic_index,
@@ -203,6 +193,15 @@ fn validate_source_function_call(
                 functions,
             )?;
             validate_source_function_value_expr(scope, &enum_type, arg, bindings)
+        }
+        SourceFunctionParamKind::RecordPattern => {
+            if functions.len() != 1 {
+                return Err(Error::new(format!(
+                    "function {name} declares duplicate record pattern clauses"
+                )));
+            }
+            let record_type = record_pattern_type(first)?;
+            validate_source_function_value_expr(scope, &record_type, arg, bindings)
         }
     }
 }
@@ -432,7 +431,7 @@ fn resolve_source_function_call(
                 depth + 1,
             )
         }
-        SourceFunctionParamKind::Pattern => resolve_pattern_source_function_call(
+        SourceFunctionParamKind::EnumPattern => resolve_pattern_source_function_call(
             scope,
             expected_type,
             functions,
@@ -440,6 +439,21 @@ fn resolve_source_function_call(
             bindings,
             depth + 1,
         ),
+        SourceFunctionParamKind::RecordPattern => {
+            if functions.len() != 1 {
+                return Err(Error::new(format!(
+                    "function {name} declares duplicate record pattern clauses"
+                )));
+            }
+            resolve_record_pattern_source_function_call(
+                scope,
+                expected_type,
+                first,
+                arg,
+                bindings,
+                depth + 1,
+            )
+        }
     }
 }
 

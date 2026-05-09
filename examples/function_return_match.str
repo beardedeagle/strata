@@ -1,0 +1,48 @@
+module function_return_match;
+
+record MainState {
+    status: WorkStatus,
+}
+record Job {
+    phase: JobPhase,
+}
+enum JobPhase {
+    Ready,
+    Done,
+}
+enum Work {
+    Empty,
+    Assigned(Job),
+}
+enum WorkStatus {
+    Idle,
+    Active(Job),
+}
+enum MainMsg {
+    Start,
+}
+
+fn status(work: Work) -> WorkStatus ! [] ~ [] @det {
+    return match work {
+        Empty => {
+            return Idle;
+        }
+        Assigned(job: Job) => {
+            return Active(job);
+        }
+    };
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { status: status(Assigned(Job { phase: Ready })) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "source helper return match selected payload";
+        return Stop(state);
+    }
+}

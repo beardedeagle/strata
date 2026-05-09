@@ -16,8 +16,8 @@ use mantle_artifact::{
 
 use super::ast::{
     Determinism, Effect, Enum, EnumVariant, Function, FunctionBlock, FunctionBody, FunctionParam,
-    Identifier, MatchArm, Module, Param, Pattern, Process, RecordValue, RecordValueField,
-    ReturnExpr, Statement, TypeRef, ValueExpr,
+    Identifier, Match, MatchArm, Module, Param, Pattern, Process, Record, RecordPatternField,
+    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
@@ -310,7 +310,8 @@ struct SourceValueBinding<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SourceFunctionParamKind {
     Binding,
-    Pattern,
+    EnumPattern,
+    RecordPattern,
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -566,6 +567,10 @@ fn check_typed_match_pattern(
                 binding,
             })
         }
+        Pattern::Record { name, .. } => Err(Error::new(format!(
+            "{} {} pattern {name} destructures a record, but this match expects enum constructors",
+            context.subject, context.label
+        ))),
         Pattern::Wildcard => Ok(TypedMatchPattern::Wildcard),
     }
 }
