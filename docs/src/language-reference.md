@@ -127,7 +127,8 @@ Fieldless record values are written as the record name:
 MainState
 ```
 
-Record value fields use `:`, not `=`.
+Record value fields use `:`, not `=`. A braced record value must provide every
+declared field exactly once; missing, duplicate, or unknown fields are rejected.
 
 Payload-bearing enum values use constructor syntax with one immutable payload
 value:
