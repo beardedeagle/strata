@@ -367,6 +367,28 @@ fn rejects_bare_concrete_state_return_with_accurate_message() {
 }
 
 #[test]
+fn rejects_return_match_expression_in_step_body() {
+    let source = ACTOR_PING.replace(
+        "return Stop(Handled);",
+        r#"return match state {
+            Idle => {
+                return Stop(Handled);
+            }
+            Handled => {
+                return Stop(Handled);
+            }
+        };"#,
+    );
+
+    let err = check_source(&source).expect_err("step return match should be rejected");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker step return match is not supported in this source slice")
+    );
+}
+
+#[test]
 fn rejects_panic_step_result_with_wrong_state_value() {
     let source = ACTOR_PING.replace("return Stop(Handled);", "return Panic(MainState);");
 

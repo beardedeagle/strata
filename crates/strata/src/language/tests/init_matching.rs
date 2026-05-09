@@ -90,6 +90,27 @@ fn rejects_record_pattern_in_init_match_arm() {
 }
 
 #[test]
+fn rejects_return_match_expression_in_init_body() {
+    let source = ACTOR_PING.replace(
+        "return Idle;",
+        r#"return match Idle {
+            Idle => {
+                return Idle;
+            }
+            Handled => {
+                return Handled;
+            }
+        };"#,
+    );
+
+    let err = check_source(&source).expect_err("init return match should fail");
+
+    assert!(err.to_string().contains(
+        "process Worker init body return match is not supported in init in this source slice"
+    ));
+}
+
+#[test]
 fn checks_payload_bearing_enum_variants_in_init_match_when_binding_is_unused() {
     let source = r#"
 module init_match_payload_variant;

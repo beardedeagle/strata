@@ -27,9 +27,11 @@ result of the first invalid shape.
 | `process ... must declare type Msg` | A process is missing its message alias. | Add `type Msg = MessageEnum;`. |
 | `init must declare no parameters` | `init` has parameters. | Use `fn init() -> StateType ...`. |
 | `init body must not perform statements` | `init` uses `emit`, `spawn`, or `send`. | Return only the initial state. |
+| `init body return match is not supported` | An `init` body tries to use helper-only `return match` syntax. | Use a whole-body `match` for the supported init match form, or return one state value. |
 | `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageConstructor` or `state: StateType, _`. |
 | `step second parameter must be a message constructor pattern or wildcard pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with a message constructor or `_`, or use a whole-body `match msg`. |
 | `step returns ..., expected ProcResult<...>` | `step` return type is wrong. | Return `ProcResult<StateType>`. |
+| `step return match is not supported` | A `step` body tries to use helper-only `return match` syntax. | Use whole-body `match msg` or `match state` dispatch, with each arm returning `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step body must return Stop..., Continue..., or Panic...` | A `step` returns a bare state value or an unsupported result form. | Return one whole state value inside `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step may-behaviors must be empty` | The `~ [...]` list is not empty. | Use `~ []`. |
 | `step must be deterministic` | `step` uses `@nondet`. | Use `@det`. |

@@ -149,7 +149,8 @@ fn resolve_init_return_block_value(
         },
         ReturnExpr::Match(_) => {
             return Err(Error::new(format!(
-                "{context} return match is not supported in init in this source slice"
+                "process {} {context} return match is not supported in init in this source slice",
+                process.name
             )));
         }
     };
