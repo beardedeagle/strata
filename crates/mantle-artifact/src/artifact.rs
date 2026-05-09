@@ -889,7 +889,7 @@ impl ArtifactProcess {
             .get(current_state.index())
             .ok_or_else(|| {
                 Error::new(format!(
-                    "process {} transition {} current_state id {} is not a valid state value",
+                    "process {} message id {} current_state id {} is not a valid state value",
                     self.debug_name,
                     transition.message.as_u32(),
                     current_state.as_u32()

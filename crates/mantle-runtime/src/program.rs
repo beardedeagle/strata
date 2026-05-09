@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
@@ -256,10 +256,14 @@ pub(crate) struct LoadedProcess {
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
     pub(crate) transitions: Vec<LoadedTransition>,
+    transition_lookup: TransitionLookup,
 }
 
 impl LoadedProcess {
     fn from_artifact(process: &ArtifactProcess) -> Result<Self> {
+        let transitions = load_transitions(process)?;
+        let transition_lookup = TransitionLookup::from_transitions(&transitions);
+
         Ok(Self {
             debug_name: process.debug_name.clone(),
             state_type: process.state_type,
@@ -276,36 +280,46 @@ impl LoadedProcess {
                 .collect(),
             mailbox_bound: process.mailbox_bound,
             init_state: process.init_state,
-            transitions: load_transitions(process)?,
+            transitions,
+            transition_lookup,
         })
     }
 
-    pub(crate) fn transition_for_message_state(
+    pub(crate) fn transition_for_dispatch(
         &self,
         message: MessageId,
-        current_state: Option<StateId>,
+        current_state: StateId,
     ) -> Result<&LoadedTransition> {
-        self.transitions
-            .iter()
-            .find(|transition| {
-                transition.message == message && transition.current_state == current_state
-            })
-            .or_else(|| {
-                self.transitions.iter().find(|transition| {
-                    transition.message == message && transition.current_state.is_none()
-                })
-            })
-            .ok_or_else(|| {
-                let state = current_state
-                    .map(|state| format!(" current_state id {}", state.as_u32()))
-                    .unwrap_or_default();
-                Error::new(format!(
-                    "process {} has no transition for message id {}{}",
-                    self.debug_name,
-                    message.as_u32(),
-                    state
-                ))
-            })
+        let lookup_state = self
+            .transition_lookup
+            .is_state_specific_message(message)
+            .then_some(current_state);
+        let transition_index = self
+            .transition_lookup
+            .for_dispatch(message, current_state)
+            .ok_or_else(|| self.transition_lookup_error(message, lookup_state))?;
+        self.transition_by_lookup_index(transition_index)
+    }
+
+    fn transition_by_lookup_index(&self, index: usize) -> Result<&LoadedTransition> {
+        self.transitions.get(index).ok_or_else(|| {
+            Error::new(format!(
+                "process {} transition index {} is not loaded",
+                self.debug_name, index
+            ))
+        })
+    }
+
+    fn transition_lookup_error(&self, message: MessageId, current_state: Option<StateId>) -> Error {
+        let state = current_state
+            .map(|state| format!(" current_state id {}", state.as_u32()))
+            .unwrap_or_default();
+        Error::new(format!(
+            "process {} has no transition for message id {}{}",
+            self.debug_name,
+            message.as_u32(),
+            state
+        ))
     }
 
     fn validate_admission(&self, program: &LoadedProgram, process_id: ProcessId) -> Result<()> {
@@ -501,6 +515,49 @@ impl LoadedProcess {
                     process_ref.as_u32()
                 ))
             })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TransitionLookup {
+    by_key: BTreeMap<(u32, Option<u32>), usize>,
+    state_specific_messages: BTreeSet<u32>,
+}
+
+impl TransitionLookup {
+    fn from_transitions(transitions: &[LoadedTransition]) -> Self {
+        let mut by_key = BTreeMap::new();
+        let mut state_specific_messages = BTreeSet::new();
+        for (index, transition) in transitions.iter().enumerate() {
+            let message = transition.message.as_u32();
+            let current_state = transition.current_state.map(StateId::as_u32);
+            if current_state.is_some() {
+                state_specific_messages.insert(message);
+            }
+            by_key.insert((message, current_state), index);
+        }
+        Self {
+            by_key,
+            state_specific_messages,
+        }
+    }
+
+    fn for_dispatch(&self, message: MessageId, current_state: StateId) -> Option<usize> {
+        if self.is_state_specific_message(message) {
+            self.exact(message, Some(current_state))
+        } else {
+            self.exact(message, None)
+        }
+    }
+
+    fn exact(&self, message: MessageId, current_state: Option<StateId>) -> Option<usize> {
+        self.by_key
+            .get(&(message.as_u32(), current_state.map(StateId::as_u32)))
+            .copied()
+    }
+
+    fn is_state_specific_message(&self, message: MessageId) -> bool {
+        self.state_specific_messages.contains(&message.as_u32())
     }
 }
 
@@ -725,7 +782,7 @@ fn transition_current_state_payload_type(
         .get(current_state.index())
         .ok_or_else(|| {
             Error::new(format!(
-                "process {} transition {} current_state id {} is not a loaded state value",
+                "process {} message id {} current_state id {} is not a loaded state value",
                 process.debug_name,
                 transition.message.as_u32(),
                 current_state.as_u32()

@@ -547,14 +547,14 @@ fn loaded_program_selects_transitions_by_message_id() {
 
     assert_eq!(
         worker
-            .transition_for_message_state(MessageId::new(0), None)
+            .transition_for_dispatch(MessageId::new(0), StateId::new(0))
             .expect("First transition should be loaded")
             .step_result,
         StepResult::Continue
     );
     assert_eq!(
         worker
-            .transition_for_message_state(MessageId::new(1), None)
+            .transition_for_dispatch(MessageId::new(1), StateId::new(0))
             .expect("Second transition should be loaded")
             .step_result,
         StepResult::Stop
@@ -571,7 +571,7 @@ fn loaded_program_rejects_transition_current_state_outside_state_table() {
 
     assert!(
         err.to_string()
-            .contains("process Worker transition 0 current_state id 99 is not a valid state value")
+            .contains("process Worker message id 0 current_state id 99 is not a valid state value")
     );
 }
 

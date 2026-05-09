@@ -1108,7 +1108,7 @@ fn validate_rejects_transition_current_state_outside_state_table() {
 
     assert!(
         err.to_string()
-            .contains("process Worker transition 0 current_state id 99 is not a valid state value")
+            .contains("process Worker message id 0 current_state id 99 is not a valid state value")
     );
 }
 

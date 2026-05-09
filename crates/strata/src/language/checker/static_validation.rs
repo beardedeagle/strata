@@ -291,7 +291,7 @@ fn validate_transition_current_state(
     if let Some(current_state) = transition.current_state() {
         if current_state.index() >= process.state_values().len() {
             return Err(Error::new(format!(
-                "process {} transition {} current_state id {} is not a valid state value",
+                "process {} message id {} current_state id {} is not a valid state value",
                 process.debug_name(),
                 transition.message().as_u32(),
                 current_state.as_u32()
