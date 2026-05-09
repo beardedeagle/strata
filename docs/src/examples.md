@@ -15,15 +15,17 @@ Read them in this order:
 7. `function_payload_match.str` for payload-bearing enum construction and
    matching in normal source helpers.
 8. `state_payload_enum.str` for payload-bearing process state enum transitions.
-9. `actor_instances.str` for multiple runtime instances of one process
-   definition.
-10. `actor_payloads.str` for typed message payloads and immutable payload
-   bindings in actor step parameter patterns.
-11. `actor_payload_match.str` for the same payload binding through a whole-body
-   `match msg`.
-12. `actor_reply.str` for transporting typed process references through message
+9. `state_payload_match.str` for matching immutable current process state
    payloads.
-13. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+10. `actor_instances.str` for multiple runtime instances of one process
+   definition.
+11. `actor_payloads.str` for typed message payloads and immutable payload
+   bindings in actor step parameter patterns.
+12. `actor_payload_match.str` for the same payload binding through a whole-body
+   `match msg`.
+13. `actor_reply.str` for transporting typed process references through message
+   payloads.
+14. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -201,6 +203,30 @@ Key source ideas:
 - Mantle receives a next-state value template and admits the resulting
   `Working(Job{phase:Ready})` only because it is present in the typed state
   table.
+
+## State Payload Match
+
+`examples/state_payload_match.str` matches the current process state as typed
+immutable data. The worker first enters `Working(Job { phase: Ready })`; a later
+`Complete` message dispatches over the current state and binds `job` inside the
+selected state arm.
+
+```sh
+cargo run -p strata --bin strata -- check examples/state_payload_match.str
+cargo run -p strata --bin strata -- build examples/state_payload_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta
+```
+
+Key source ideas:
+
+- `fn step(state: WorkerState, Complete)` can use a whole-body `match state`.
+- `Working(job: Job)` binds the state enum payload immutably for that transition
+  arm only.
+- `return Stop(Done(job));` returns a whole replacement state; it does not mutate
+  the current state in place.
+- The Mantle artifact carries state-specific transitions keyed by admitted
+  message ID plus admitted current state ID, and the payload-derived next state
+  uses a typed current-state payload template.
 
 ## Actor Instances
 

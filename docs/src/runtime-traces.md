@@ -64,7 +64,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"8","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"1","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -106,6 +106,11 @@ Payload-bearing messages keep the stable admitted message label and add
 Runtime dispatch uses the numeric `message_id`; labels and payload values are
 trace metadata. Payload type identity is the numeric ID from the admitted
 artifact type table, not a source type string.
+
+For state-specific transitions produced by `match state`, runtime dispatch
+uses the current admitted `state_id` together with the admitted `message_id`.
+The trace continues to record the resulting state ID and label; labels are not
+used to select the transition.
 
 When a payload is a transported process reference, the trace also includes the
 admitted target process ID and runtime process ID:

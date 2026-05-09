@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
@@ -6,10 +6,10 @@ use mantle_artifact::{
     ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
     Error, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId, validate_message_label,
-    validate_payload_value_label, validate_state_value_label,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
+    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
+    validate_message_label, validate_payload_value_label, validate_state_value_label,
 };
 
 #[derive(Debug, Clone)]
@@ -169,12 +169,13 @@ impl LoadedProgram {
         Ok(())
     }
 
-    pub(crate) fn evaluate_state_value(
+    fn evaluate_state_value_with_current_state(
         &self,
         template: &ArtifactValueTemplate,
         received_payload: Option<&mantle_artifact::ArtifactPayload>,
+        current_state_payload: Option<&mantle_artifact::ArtifactPayload>,
     ) -> Result<ArtifactStateValue> {
-        template.evaluate_state_value(received_payload, &|ty| {
+        template.evaluate_state_value(received_payload, current_state_payload, &|ty| {
             self.type_label(ty).map(str::to_owned)
         })
     }
@@ -255,10 +256,14 @@ pub(crate) struct LoadedProcess {
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
     pub(crate) transitions: Vec<LoadedTransition>,
+    transition_lookup: TransitionLookup,
 }
 
 impl LoadedProcess {
     fn from_artifact(process: &ArtifactProcess) -> Result<Self> {
+        let transitions = load_transitions(process)?;
+        let transition_lookup = TransitionLookup::from_transitions(&transitions);
+
         Ok(Self {
             debug_name: process.debug_name.clone(),
             state_type: process.state_type,
@@ -275,18 +280,46 @@ impl LoadedProcess {
                 .collect(),
             mailbox_bound: process.mailbox_bound,
             init_state: process.init_state,
-            transitions: load_transitions_by_message(process)?,
+            transitions,
+            transition_lookup,
         })
     }
 
-    pub(crate) fn transition_for_message(&self, message: MessageId) -> Result<&LoadedTransition> {
-        self.transitions.get(message.index()).ok_or_else(|| {
+    pub(crate) fn transition_for_dispatch(
+        &self,
+        message: MessageId,
+        current_state: StateId,
+    ) -> Result<&LoadedTransition> {
+        let lookup_state = self
+            .transition_lookup
+            .is_state_specific_message(message)
+            .then_some(current_state);
+        let transition_index = self
+            .transition_lookup
+            .for_dispatch(message, current_state)
+            .ok_or_else(|| self.transition_lookup_error(message, lookup_state))?;
+        self.transition_by_lookup_index(transition_index)
+    }
+
+    fn transition_by_lookup_index(&self, index: usize) -> Result<&LoadedTransition> {
+        self.transitions.get(index).ok_or_else(|| {
             Error::new(format!(
-                "process {} has no transition for message id {}",
-                self.debug_name,
-                message.as_u32()
+                "process {} transition index {} is not loaded",
+                self.debug_name, index
             ))
         })
+    }
+
+    fn transition_lookup_error(&self, message: MessageId, current_state: Option<StateId>) -> Error {
+        let state = current_state
+            .map(|state| format!(" current_state id {}", state.as_u32()))
+            .unwrap_or_default();
+        Error::new(format!(
+            "process {} has no transition for message id {}{}",
+            self.debug_name,
+            message.as_u32(),
+            state
+        ))
     }
 
     fn validate_admission(&self, program: &LoadedProgram, process_id: ProcessId) -> Result<()> {
@@ -306,15 +339,9 @@ impl LoadedProcess {
                 self.init_state.as_u32()
             )));
         }
-        if self.transitions.len() != self.message_variants.len() {
+        if self.transitions.is_empty() || self.transitions.len() > MAX_TRANSITIONS_PER_PROCESS {
             return Err(Error::new(format!(
-                "process {} loaded transition_count must equal message_count",
-                self.debug_name
-            )));
-        }
-        if self.transitions.len() > MAX_MESSAGE_VARIANTS_PER_PROCESS {
-            return Err(Error::new(format!(
-                "process {} loaded transition_count must be no greater than {MAX_MESSAGE_VARIANTS_PER_PROCESS}",
+                "process {} loaded transition_count must be between 1 and {MAX_TRANSITIONS_PER_PROCESS}",
                 self.debug_name
             )));
         }
@@ -334,8 +361,9 @@ impl LoadedProcess {
             )));
         }
 
-        for (message_index, transition) in self.transitions.iter().enumerate() {
-            let message = MessageId::from_index(message_index)?;
+        validate_loaded_transition_coverage(self)?;
+        for transition in &self.transitions {
+            let message = transition.message;
             transition.validate_admission(program, self, message)?;
             transition.effect_authority.validate_actions(
                 &self.debug_name,
@@ -380,6 +408,28 @@ impl LoadedProcess {
                     state.ty.as_u32(),
                     self.state_type.as_u32()
                 )));
+            }
+            if let Some(payload) = &state.payload {
+                program
+                    .validate_value_type("state value payload type", payload.ty)
+                    .map_err(|err| {
+                        Error::new(format!(
+                            "process {} state value payload type: {err}",
+                            self.debug_name
+                        ))
+                    })?;
+                validate_payload_value_label(&payload.value).map_err(|err| {
+                    Error::new(format!(
+                        "process {} state value payload: {err}",
+                        self.debug_name
+                    ))
+                })?;
+                if payload.process_ref.is_some() {
+                    return Err(Error::new(format!(
+                        "process {} state value {} carries a process reference payload",
+                        self.debug_name, state.label
+                    )));
+                }
             }
             if !states.insert((state.ty, state.value.as_str())) {
                 return Err(Error::new(format!(
@@ -468,6 +518,49 @@ impl LoadedProcess {
     }
 }
 
+#[derive(Debug, Clone)]
+struct TransitionLookup {
+    by_key: BTreeMap<(u32, Option<u32>), usize>,
+    state_specific_messages: BTreeSet<u32>,
+}
+
+impl TransitionLookup {
+    fn from_transitions(transitions: &[LoadedTransition]) -> Self {
+        let mut by_key = BTreeMap::new();
+        let mut state_specific_messages = BTreeSet::new();
+        for (index, transition) in transitions.iter().enumerate() {
+            let message = transition.message.as_u32();
+            let current_state = transition.current_state.map(StateId::as_u32);
+            if current_state.is_some() {
+                state_specific_messages.insert(message);
+            }
+            by_key.insert((message, current_state), index);
+        }
+        Self {
+            by_key,
+            state_specific_messages,
+        }
+    }
+
+    fn for_dispatch(&self, message: MessageId, current_state: StateId) -> Option<usize> {
+        if self.is_state_specific_message(message) {
+            self.exact(message, Some(current_state))
+        } else {
+            self.exact(message, None)
+        }
+    }
+
+    fn exact(&self, message: MessageId, current_state: Option<StateId>) -> Option<usize> {
+        self.by_key
+            .get(&(message.as_u32(), current_state.map(StateId::as_u32)))
+            .copied()
+    }
+
+    fn is_state_specific_message(&self, message: MessageId) -> bool {
+        self.state_specific_messages.contains(&message.as_u32())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoadedMessageVariant {
     pub(crate) label: String,
@@ -496,44 +589,75 @@ impl LoadedProcessRef {
     }
 }
 
-fn load_transitions_by_message(process: &ArtifactProcess) -> Result<Vec<LoadedTransition>> {
-    let mut transitions = vec![None; process.message_variants.len()];
-    for transition in &process.transitions {
-        let Some(slot) = transitions.get_mut(transition.message.index()) else {
-            return Err(Error::new(format!(
-                "process {} transition message id {} is not loaded",
-                process.debug_name,
-                transition.message.as_u32()
-            )));
-        };
-        if slot
-            .replace(LoadedTransition::from_artifact(transition))
-            .is_some()
-        {
-            return Err(Error::new(format!(
-                "process {} declares duplicate transition for message id {}",
-                process.debug_name,
-                transition.message.as_u32()
-            )));
-        }
-    }
-
-    transitions
-        .into_iter()
-        .enumerate()
-        .map(|(message_index, transition)| {
-            transition.ok_or_else(|| {
-                Error::new(format!(
-                    "process {} has no transition for message id {}",
-                    process.debug_name, message_index
-                ))
-            })
+fn load_transitions(process: &ArtifactProcess) -> Result<Vec<LoadedTransition>> {
+    process
+        .transitions
+        .iter()
+        .map(|transition| {
+            if transition.message.index() >= process.message_variants.len() {
+                return Err(Error::new(format!(
+                    "process {} transition message id {} is not loaded",
+                    process.debug_name,
+                    transition.message.as_u32()
+                )));
+            }
+            Ok(LoadedTransition::from_artifact(transition))
         })
         .collect()
 }
 
+fn validate_loaded_transition_coverage(process: &LoadedProcess) -> Result<()> {
+    let mut transition_keys = BTreeSet::new();
+    for transition in &process.transitions {
+        if !transition_keys.insert((
+            transition.message.as_u32(),
+            transition.current_state.map(StateId::as_u32),
+        )) {
+            return Err(Error::new(format!(
+                "process {} declares duplicate transition for message id {} current_state {:?}",
+                process.debug_name,
+                transition.message.as_u32(),
+                transition.current_state.map(StateId::as_u32)
+            )));
+        }
+    }
+
+    for message_index in 0..process.message_variants.len() {
+        let message = message_index as u32;
+        let has_unguarded = transition_keys.contains(&(message, None));
+        let has_guarded = (0..process.state_values.len())
+            .any(|state_index| transition_keys.contains(&(message, Some(state_index as u32))));
+        if has_unguarded {
+            if has_guarded {
+                return Err(Error::new(format!(
+                    "process {} mixes unguarded and state-specific transitions for message id {}",
+                    process.debug_name, message
+                )));
+            }
+            continue;
+        }
+        if !has_guarded {
+            return Err(Error::new(format!(
+                "process {} has no transition for message id {}",
+                process.debug_name, message
+            )));
+        }
+        for state_index in 0..process.state_values.len() {
+            if !transition_keys.contains(&(message, Some(state_index as u32))) {
+                return Err(Error::new(format!(
+                    "process {} has no transition for message id {} current_state id {}",
+                    process.debug_name, message, state_index
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedTransition {
+    pub(crate) current_state: Option<StateId>,
+    pub(crate) message: MessageId,
     pub(crate) step_result: StepResult,
     pub(crate) next_state: NextState,
     pub(crate) effect_authority: LoadedEffectAuthority,
@@ -543,6 +667,8 @@ pub(crate) struct LoadedTransition {
 impl LoadedTransition {
     fn from_artifact(transition: &ArtifactTransition) -> Self {
         Self {
+            current_state: transition.current_state,
+            message: transition.message,
             step_result: transition.step_result,
             next_state: transition.next_state.clone(),
             effect_authority: LoadedEffectAuthority::from_artifact(&transition.effects),
@@ -562,9 +688,16 @@ impl LoadedTransition {
     ) -> Result<()> {
         self.validate_next_state(program, process, message)?;
 
+        let current_state_payload_type = transition_current_state_payload_type(process, self)?;
         let mut spawned_refs = vec![false; process.process_refs.len()];
         for action in &self.actions {
-            action.validate_admission(program, process, message, &mut spawned_refs)?;
+            action.validate_admission(
+                program,
+                process,
+                message,
+                current_state_payload_type,
+                &mut spawned_refs,
+            )?;
         }
         Ok(())
     }
@@ -575,14 +708,15 @@ impl LoadedTransition {
         process: &LoadedProcess,
         message: MessageId,
     ) -> Result<()> {
+        let context = self.transition_context(message);
         match &self.next_state {
             NextState::Current => Ok(()),
             NextState::Value(state) => {
                 if state.index() >= process.state_values.len() {
                     return Err(Error::new(format!(
-                        "process {} transition {} next_state id {} is not a loaded state value",
+                        "process {} {} next_state id {} is not a loaded state value",
                         process.debug_name,
-                        message.as_u32(),
+                        context,
                         state.as_u32()
                     )));
                 }
@@ -590,9 +724,12 @@ impl LoadedTransition {
             }
             NextState::Template(template) => {
                 let received_payload_type = process.message_variants[message.index()].payload_type;
+                let current_state_payload_type =
+                    transition_current_state_payload_type(process, self)?;
                 LoadedTemplateAdmission {
                     expected_type: Some(process.state_type),
                     received_payload_type,
+                    current_state_payload_type,
                     allow_direct_process_ref: false,
                     program,
                     process,
@@ -600,30 +737,67 @@ impl LoadedTransition {
                 }
                 .validate(
                     &format!(
-                        "process {} transition {} next_state_template",
-                        process.debug_name,
-                        message.as_u32()
+                        "process {} {} next_state_template",
+                        process.debug_name, context
                     ),
                     template,
                 )?;
                 if loaded_template_depends_on_received_payload(template) {
                     return Ok(());
                 }
-                let value = program.evaluate_state_value(template, None)?;
+                let current_state_payload = self
+                    .current_state
+                    .and_then(|state| process.state_values.get(state.index()))
+                    .and_then(|state| state.payload.as_ref());
+                let value = program.evaluate_state_value_with_current_state(
+                    template,
+                    None,
+                    current_state_payload,
+                )?;
                 if process.state_values.iter().any(|state_value| {
                     state_value.ty == value.ty && state_value.value == value.value
                 }) {
                     return Ok(());
                 }
                 Err(Error::new(format!(
-                    "process {} transition {} next_state_template produced value {} not admitted by loaded state table",
-                    process.debug_name,
-                    message.as_u32(),
-                    value.label
+                    "process {} {} next_state_template produced value {} not admitted by loaded state table",
+                    process.debug_name, context, value.label
                 )))
             }
         }
     }
+
+    fn transition_context(&self, message: MessageId) -> String {
+        match self.current_state {
+            Some(current_state) => format!(
+                "message id {} current_state id {}",
+                message.as_u32(),
+                current_state.as_u32()
+            ),
+            None => format!("message id {}", message.as_u32()),
+        }
+    }
+}
+
+fn transition_current_state_payload_type(
+    process: &LoadedProcess,
+    transition: &LoadedTransition,
+) -> Result<Option<TypeId>> {
+    let Some(current_state) = transition.current_state else {
+        return Ok(None);
+    };
+    let state_value = process
+        .state_values
+        .get(current_state.index())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} message id {} current_state id {} is not a loaded state value",
+                process.debug_name,
+                transition.message.as_u32(),
+                current_state.as_u32()
+            ))
+        })?;
+    Ok(state_value.payload.as_ref().map(|payload| payload.ty))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -751,6 +925,7 @@ impl LoadedAction {
         program: &LoadedProgram,
         process: &LoadedProcess,
         message: MessageId,
+        current_state_payload_type: Option<TypeId>,
         spawned_refs: &mut [bool],
     ) -> Result<()> {
         match self {
@@ -830,6 +1005,7 @@ impl LoadedAction {
                         expected_type: Some(payload_type),
                         received_payload_type: process.message_variants[message.index()]
                             .payload_type,
+                        current_state_payload_type,
                         allow_direct_process_ref: true,
                         program,
                         process,
@@ -922,6 +1098,7 @@ impl LoadedSendTarget {
 struct LoadedTemplateAdmission<'a> {
     expected_type: Option<TypeId>,
     received_payload_type: Option<TypeId>,
+    current_state_payload_type: Option<TypeId>,
     allow_direct_process_ref: bool,
     program: &'a LoadedProgram,
     process: &'a LoadedProcess,
@@ -964,6 +1141,9 @@ impl LoadedTemplateAdmission<'_> {
             }
             ArtifactValueTemplate::ReceivedPayload { ty } => {
                 self.validate_received_payload(field, *ty)
+            }
+            ArtifactValueTemplate::CurrentStatePayload { ty } => {
+                self.validate_current_state_payload(field, *ty)
             }
             ArtifactValueTemplate::ProcessRef {
                 ty,
@@ -1014,6 +1194,22 @@ impl LoadedTemplateAdmission<'_> {
         {
             return Err(Error::new(format!(
                 "{field} process reference template must be a direct message payload"
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_current_state_payload(&self, field: &str, ty: TypeId) -> Result<()> {
+        let Some(current_state_payload_type) = self.current_state_payload_type else {
+            return Err(Error::new(format!(
+                "{field} requires a payload-bearing current state"
+            )));
+        };
+        if ty != current_state_payload_type {
+            return Err(Error::new(format!(
+                "{field} has current state payload type id {}, expected {}",
+                ty.as_u32(),
+                current_state_payload_type.as_u32()
             )));
         }
         Ok(())
@@ -1176,6 +1372,7 @@ fn loaded_template_depends_on_received_payload(template: &ArtifactValueTemplate)
     match template {
         ArtifactValueTemplate::Literal { .. } | ArtifactValueTemplate::ProcessRef { .. } => false,
         ArtifactValueTemplate::ReceivedPayload { .. } => true,
+        ArtifactValueTemplate::CurrentStatePayload { .. } => false,
         ArtifactValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_depends_on_received_payload(payload)
         }

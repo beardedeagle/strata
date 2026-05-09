@@ -69,6 +69,7 @@ const FUNCTION_MATCH: &str = include_str!("../../../../examples/function_match.s
 const FUNCTION_PAYLOAD_MATCH: &str =
     include_str!("../../../../examples/function_payload_match.str");
 const STATE_PAYLOAD_ENUM: &str = include_str!("../../../../examples/state_payload_enum.str");
+const STATE_PAYLOAD_MATCH: &str = include_str!("../../../../examples/state_payload_match.str");
 const ACTOR_REPLY: &str = include_str!("../../../../examples/actor_reply.str");
 
 const ACTOR_PING: &str = r#"
@@ -1900,6 +1901,493 @@ fn checks_concrete_payload_state_enum_init_value() {
 }
 
 #[test]
+fn parses_checks_and_lowers_state_payload_match() {
+    let checked = check_source(STATE_PAYLOAD_MATCH).expect("state payload match should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker process should be checked");
+
+    assert_eq!(
+        checked_state_labels(worker),
+        [
+            "Idle",
+            "Working(Job{phase:Ready})",
+            "Done(Job{phase:Ready})"
+        ]
+    );
+    assert_eq!(worker.transitions().len(), 4);
+    assert_eq!(worker.transitions()[0].message(), checked_message_id(0));
+    assert_eq!(worker.transitions()[0].current_state(), None);
+    assert_eq!(worker.transitions()[1].message(), checked_message_id(1));
+    assert_eq!(
+        worker.transitions()[1].current_state(),
+        Some(checked_state_id(0))
+    );
+    assert_eq!(worker.transitions()[2].message(), checked_message_id(1));
+    assert_eq!(
+        worker.transitions()[2].current_state(),
+        Some(checked_state_id(1))
+    );
+    assert_eq!(worker.transitions()[3].message(), checked_message_id(1));
+    assert_eq!(
+        worker.transitions()[3].current_state(),
+        Some(checked_state_id(2))
+    );
+
+    match worker.transitions()[2].next_state() {
+        CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
+            variant, payload, ..
+        }) => {
+            assert_eq!(variant.as_str(), "Done");
+            assert_eq!(
+                *payload,
+                CheckedValueTemplate::CurrentStatePayload {
+                    ty: worker.state_values()[1]
+                        .payload()
+                        .expect("Working should carry Job")
+                        .ty()
+                        .clone(),
+                }
+            );
+        }
+        next_state => panic!("expected current-state payload template, got {next_state:?}"),
+    }
+
+    let artifact =
+        lower_to_artifact(&checked, STATE_PAYLOAD_MATCH).expect("state match should lower");
+    let worker_artifact = &artifact.processes[1];
+    assert_eq!(
+        artifact_state_labels(worker_artifact),
+        [
+            "Idle",
+            "Working(Job{phase:Ready})",
+            "Done(Job{phase:Ready})"
+        ]
+    );
+    let job_ty = artifact_type_id(&artifact, "Job");
+    assert_eq!(
+        worker_artifact.state_values[1].payload.as_ref(),
+        Some(&mantle_artifact::ArtifactPayload {
+            ty: job_ty,
+            value: "Job{phase:Ready}".to_string(),
+            process_ref: None,
+        })
+    );
+    assert_eq!(
+        worker_artifact.state_values[2].payload.as_ref(),
+        Some(&mantle_artifact::ArtifactPayload {
+            ty: job_ty,
+            value: "Job{phase:Ready}".to_string(),
+            process_ref: None,
+        })
+    );
+    assert_eq!(
+        worker_artifact.transitions[2].current_state,
+        Some(mantle_artifact::StateId::new(1))
+    );
+    match &worker_artifact.transitions[2].next_state {
+        mantle_artifact::NextState::Template(ArtifactValueTemplate::EnumVariant {
+            variant,
+            payload,
+            ..
+        }) => {
+            assert_eq!(variant, "Done");
+            assert_eq!(
+                **payload,
+                ArtifactValueTemplate::CurrentStatePayload { ty: job_ty }
+            );
+        }
+        next_state => {
+            panic!("expected artifact current-state payload template, got {next_state:?}")
+        }
+    }
+}
+
+#[test]
+fn state_match_sees_concrete_payload_states_from_other_steps() {
+    let source = r#"
+module concrete_state_payload_match;
+
+record MainState;
+record Job { phase: JobPhase }
+enum JobPhase { Ready, Done }
+enum MainMsg { Start }
+enum WorkerState { Idle, Working(Job), Done(Job) }
+enum WorkerMsg { Begin, Complete }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Begin;
+        send worker Complete;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Begin) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(Working(Job { phase: Ready }));
+    }
+
+    fn step(state: WorkerState, Complete) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match state {
+            Idle => {
+                return Stop(Idle);
+            }
+            Working(job: Job) => {
+                return Stop(Done(job));
+            }
+            Done(job: Job) => {
+                return Stop(Done(job));
+            }
+        }
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("concrete payload state match should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker process should be checked");
+
+    assert_eq!(
+        checked_state_labels(worker),
+        [
+            "Idle",
+            "Working(Job{phase:Ready})",
+            "Done(Job{phase:Ready})"
+        ]
+    );
+    assert_eq!(worker.transitions().len(), 4);
+    assert_eq!(
+        worker.transitions()[2].current_state(),
+        Some(checked_state_id(1))
+    );
+}
+
+#[test]
+fn state_match_wildcard_covers_payload_states_from_message_cases() {
+    let source = r#"
+module wildcard_state_payload_match;
+
+record MainState;
+record Job { phase: JobPhase }
+enum JobPhase { Ready }
+enum MainMsg { Start }
+enum WorkerState { Idle, Working(Job) }
+enum WorkerMsg { Assign(Job), Complete }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        send worker Complete;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(Working(job));
+    }
+
+    fn step(state: WorkerState, Complete) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match state {
+            Idle => {
+                return Stop(Idle);
+            }
+            _ => {
+                return Stop(state);
+            }
+        }
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("wildcard state payload match should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker process should be checked");
+
+    assert_eq!(
+        checked_state_labels(worker),
+        ["Idle", "Working(Job{phase:Ready})"]
+    );
+    assert_eq!(worker.transitions().len(), 3);
+    assert_eq!(
+        worker.transitions()[2].current_state(),
+        Some(checked_state_id(1))
+    );
+    assert_eq!(
+        worker.transitions()[2].next_state(),
+        CheckedNextState::Current
+    );
+}
+
+#[test]
+fn state_match_payload_binding_can_feed_send_payload() {
+    let source = r#"
+module state_payload_send;
+
+record MainState;
+record SinkState;
+record Job { phase: JobPhase }
+enum JobPhase { Ready }
+enum MainMsg { Start }
+enum SinkMsg { Ack, Done(Job) }
+enum WorkerState { Idle, Working(Job), Done(Job) }
+enum WorkerMsg { Assign(Job), Complete(ProcessRef<Sink>) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Assign(Job { phase: Ready });
+        send worker Complete(sink);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(Working(job));
+    }
+
+    fn step(state: WorkerState, Complete(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [send] ~ [] @det {
+        match state {
+            Idle => {
+                send reply_to Ack;
+                return Stop(Idle);
+            }
+            Working(job: Job) => {
+                send reply_to Done(job);
+                return Stop(Done(job));
+            }
+            Done(job: Job) => {
+                send reply_to Done(job);
+                return Stop(Done(job));
+            }
+        }
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Ack) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+
+    fn step(state: SinkState, Done(job: Job)) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("state payload send should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker process should be checked");
+    let working_transition = worker
+        .transitions()
+        .iter()
+        .find(|transition| transition.current_state() == Some(checked_state_id(1)))
+        .expect("Working transition should be expanded");
+
+    let CheckedAction::Send { payload, .. } = &working_transition.actions()[0] else {
+        panic!("expected send action");
+    };
+    assert!(matches!(
+        payload.as_ref(),
+        Some(CheckedValueTemplate::CurrentStatePayload { .. })
+    ));
+    let sink = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Sink")
+        .expect("Sink process should be checked");
+    assert_eq!(sink.transitions().len(), 2);
+}
+
+#[test]
+fn rejects_state_match_unknown_constructor() {
+    let source = STATE_PAYLOAD_MATCH.replace("Idle => {", "Missing => {");
+
+    let err = check_source(&source).expect_err("unknown state match constructor should fail");
+
+    assert!(
+        err.to_string()
+            .contains("match pattern Missing is not a variant of enum WorkerState")
+    );
+}
+
+#[test]
+fn rejects_payload_state_match_without_payload_binding() {
+    let source = STATE_PAYLOAD_MATCH.replace("Working(job: Job) => {", "Working => {");
+
+    let err = check_source(&source).expect_err("payload state match without binding should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker state match pattern Working requires a payload binding")
+    );
+}
+
+#[test]
+fn rejects_fieldless_state_match_with_payload_binding() {
+    let source = STATE_PAYLOAD_MATCH.replace("Idle => {", "Idle(job: Job) => {");
+
+    let err = check_source(&source).expect_err("fieldless state match with binding should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker state match pattern Idle does not carry a payload")
+    );
+}
+
+#[test]
+fn rejects_state_match_payload_binding_with_wrong_type() {
+    let source =
+        STATE_PAYLOAD_MATCH.replace("Working(job: Job) => {", "Working(job: JobPhase) => {");
+
+    let err = check_source(&source).expect_err("wrong state match payload type should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker state match payload job has type JobPhase, expected Job")
+    );
+}
+
+#[test]
+fn rejects_state_match_payload_binding_conflicting_with_message_binding() {
+    let source = STATE_PAYLOAD_MATCH
+        .replace(
+            "enum WorkerMsg {\n    Assign(Job),\n    Complete,\n}",
+            "enum WorkerMsg {\n    Assign(Job),\n    Complete(Job),\n}",
+        )
+        .replace(
+            "send worker Complete;",
+            "send worker Complete(Job { phase: Done });",
+        )
+        .replace(
+            "fn step(state: WorkerState, Complete) -> ProcResult<WorkerState>",
+            "fn step(state: WorkerState, Complete(job: Job)) -> ProcResult<WorkerState>",
+        );
+
+    let err = check_source(&source).expect_err("state payload binding name conflict should fail");
+
+    assert!(err.to_string().contains(
+        "process Worker state payload binding job conflicts with message payload binding"
+    ));
+}
+
+#[test]
+fn rejects_non_exhaustive_state_match() {
+    let source = STATE_PAYLOAD_MATCH.replace(
+        "            Done(job: Job) => {\n                emit \"worker already done\";\n                return Stop(Done(job));\n            }\n",
+        "",
+    );
+
+    let err = check_source(&source).expect_err("non-exhaustive state match should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker state match must handle variant Done")
+    );
+}
+
+#[test]
+fn rejects_duplicate_state_match_arm() {
+    let source = STATE_PAYLOAD_MATCH.replace("Done(job: Job) => {", "Idle => {");
+
+    let err = check_source(&source).expect_err("duplicate state match arm should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker state match declares duplicate pattern for variant Idle")
+    );
+}
+
+#[test]
+fn rejects_state_payload_binding_outside_transition_arm() {
+    let source = STATE_PAYLOAD_MATCH.replace("return Stop(Idle);", "return Stop(Done(job));");
+
+    let err = check_source(&source).expect_err("state payload binding should be arm-local");
+
+    assert!(
+        err.to_string()
+            .contains("record state type Job must be constructed with Job { ... }")
+    );
+}
+
+#[test]
+fn rejects_assignment_style_state_update_syntax() {
+    let source = STATE_PAYLOAD_MATCH.replace(
+        "emit \"worker completed job\";",
+        "job = Job { phase: Done };",
+    );
+
+    let err = parse_source(&source).expect_err("assignment syntax should fail to parse");
+
+    assert!(err.to_string().contains("expected") || err.to_string().contains("unexpected token"));
+}
+
+#[test]
 fn rejects_payload_state_constructor_without_payload_value() {
     let source = STATE_PAYLOAD_ENUM.replace("return Stop(Working(job));", "return Stop(Working);");
 
@@ -2526,9 +3014,8 @@ fn rejects_match_with_wrong_target() {
     let err = check_source(&source).expect_err("wrong match scrutinee should fail");
 
     assert!(
-        err.to_string().contains(
-            "process Worker match scrutinee state must be the step message parameter msg"
-        )
+        err.to_string()
+            .contains("state match step second parameter must be a message constructor pattern or wildcard pattern")
     );
 }
 

@@ -27,10 +27,18 @@ pub(super) struct ValueBinding<'a> {
     pub(super) label: &'a str,
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct ValueTemplateBinding<'a> {
     pub(super) name: &'a Identifier,
     pub(super) ty: &'a TypeRef,
     pub(super) checked_ty: &'a CheckedTypeRef,
+    pub(super) source: ValueTemplateSource,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ValueTemplateSource {
+    ReceivedPayload,
+    CurrentStatePayload,
 }
 
 #[derive(Clone, Copy)]
@@ -94,7 +102,11 @@ impl<'module> StateSpace<'module> {
             .iter()
             .filter(|variant| variant.payload_type.is_none())
             .map(|variant| {
-                CheckedStateValue::new(checked_state_type.clone(), variant.name.to_string())
+                CheckedStateValue::enum_variant(
+                    checked_state_type.clone(),
+                    variant.name.to_string(),
+                    None,
+                )
             })
             .collect();
         Ok(Self {
@@ -109,14 +121,16 @@ impl<'module> StateSpace<'module> {
     pub(super) fn resolve_state_value(
         &mut self,
         semantic_index: &SemanticIndex,
+        types: &mut CheckedTypeInterner<'_>,
         value: &ValueExpr,
     ) -> Result<CheckedStateId> {
-        self.resolve_state_value_with_bindings(semantic_index, value, &[])
+        self.resolve_state_value_with_bindings(semantic_index, types, value, &[])
     }
 
     pub(super) fn resolve_state_value_with_bindings(
         &mut self,
         semantic_index: &SemanticIndex,
+        types: &mut CheckedTypeInterner<'_>,
         value: &ValueExpr,
         bindings: &[ValueBinding<'_>],
     ) -> Result<CheckedStateId> {
@@ -129,7 +143,8 @@ impl<'module> StateSpace<'module> {
             CanonicalValueContext::StateValue,
             0,
         )?;
-        let state_value = CheckedStateValue::new(self.checked_state_type.clone(), label);
+        let state_value =
+            self.checked_state_value(semantic_index, types, value, bindings, label)?;
         if let Some(index) = self.values.iter().position(|candidate| {
             candidate.ty() == state_value.ty() && candidate.value() == state_value.value()
         }) {
@@ -143,6 +158,92 @@ impl<'module> StateSpace<'module> {
         }
         self.values.push(state_value);
         CheckedStateId::from_index(self.values.len() - 1)
+    }
+
+    pub(super) fn values(&self) -> &[CheckedStateValue] {
+        &self.values
+    }
+
+    fn checked_state_value(
+        &self,
+        semantic_index: &SemanticIndex,
+        types: &mut CheckedTypeInterner<'_>,
+        value: &ValueExpr,
+        bindings: &[ValueBinding<'_>],
+        label: String,
+    ) -> Result<CheckedStateValue> {
+        let Ok(enum_decl) = semantic_index.enum_decl(self.module, self.state_type) else {
+            return Ok(CheckedStateValue::new(
+                self.checked_state_type.clone(),
+                label,
+            ));
+        };
+
+        match value {
+            ValueExpr::Identifier(name) => {
+                let Some(variant) = enum_decl
+                    .variants
+                    .iter()
+                    .find(|variant| variant.name == *name)
+                else {
+                    return Ok(CheckedStateValue::new(
+                        self.checked_state_type.clone(),
+                        label,
+                    ));
+                };
+                if variant.payload_type.is_some() {
+                    return Ok(CheckedStateValue::new(
+                        self.checked_state_type.clone(),
+                        label,
+                    ));
+                }
+                Ok(CheckedStateValue::enum_variant(
+                    self.checked_state_type.clone(),
+                    label,
+                    None,
+                ))
+            }
+            ValueExpr::EnumVariant { name, payload } => {
+                let Some(variant) = enum_decl
+                    .variants
+                    .iter()
+                    .find(|variant| variant.name == *name)
+                else {
+                    return Ok(CheckedStateValue::new(
+                        self.checked_state_type.clone(),
+                        label,
+                    ));
+                };
+                let Some(payload_type) = &variant.payload_type else {
+                    return Ok(CheckedStateValue::enum_variant(
+                        self.checked_state_type.clone(),
+                        label,
+                        None,
+                    ));
+                };
+                let payload_label = canonical_value(
+                    self.module,
+                    semantic_index,
+                    payload_type,
+                    payload,
+                    bindings,
+                    CanonicalValueContext::StateValue,
+                    0,
+                )?;
+                Ok(CheckedStateValue::enum_variant(
+                    self.checked_state_type.clone(),
+                    label,
+                    Some(CheckedPayloadValue::new(
+                        types.intern(payload_type)?,
+                        payload_label,
+                    )),
+                ))
+            }
+            ValueExpr::Call { .. } | ValueExpr::Record(_) => Ok(CheckedStateValue::new(
+                self.checked_state_type.clone(),
+                label,
+            )),
+        }
     }
 
     pub(super) fn into_values(self) -> Result<Vec<CheckedStateValue>> {
@@ -188,7 +289,7 @@ pub(super) fn checked_value_template_with_binding(
     types: &mut CheckedTypeInterner<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,
-    binding: Option<&ValueTemplateBinding<'_>>,
+    bindings: &[ValueTemplateBinding<'_>],
 ) -> Result<CheckedValueTemplate> {
     checked_value_template(
         module,
@@ -196,7 +297,7 @@ pub(super) fn checked_value_template_with_binding(
         types,
         expected_type,
         value,
-        binding,
+        bindings,
         0,
     )
 }
@@ -332,7 +433,7 @@ fn checked_value_template(
     types: &mut CheckedTypeInterner<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,
-    binding: Option<&ValueTemplateBinding<'_>>,
+    bindings: &[ValueTemplateBinding<'_>],
     depth: usize,
 ) -> Result<CheckedValueTemplate> {
     if depth > MAX_VALUE_NESTING {
@@ -341,11 +442,18 @@ fn checked_value_template(
         )));
     }
 
-    if let (Some(binding), ValueExpr::Identifier(name)) = (binding, value) {
-        if name == binding.name {
+    if let ValueExpr::Identifier(name) = value {
+        if let Some(binding) = bindings.iter().find(|binding| name == binding.name) {
             if semantic_index.same_type(binding.ty, expected_type) {
-                return Ok(CheckedValueTemplate::ReceivedPayload {
-                    ty: binding.checked_ty.clone(),
+                return Ok(match binding.source {
+                    ValueTemplateSource::ReceivedPayload => CheckedValueTemplate::ReceivedPayload {
+                        ty: binding.checked_ty.clone(),
+                    },
+                    ValueTemplateSource::CurrentStatePayload => {
+                        CheckedValueTemplate::CurrentStatePayload {
+                            ty: binding.checked_ty.clone(),
+                        }
+                    }
                 });
             }
             return Err(Error::new(format!(
@@ -360,7 +468,10 @@ fn checked_value_template(
         )));
     }
 
-    if binding.is_none_or(|binding| !source_value_uses_binding(value, binding.name)) {
+    if !bindings
+        .iter()
+        .any(|binding| source_value_uses_binding(value, binding.name))
+    {
         let label = canonical_value(
             module,
             semantic_index,
@@ -383,13 +494,21 @@ fn checked_value_template(
             types,
             expected_type,
             value,
-            binding,
+            bindings,
             depth,
         );
     }
 
     let record = semantic_index.record_decl(module, expected_type)?;
-    checked_record_template(module, semantic_index, types, record, value, binding, depth)
+    checked_record_template(
+        module,
+        semantic_index,
+        types,
+        record,
+        value,
+        bindings,
+        depth,
+    )
 }
 
 fn checked_enum_variant_template(
@@ -398,7 +517,7 @@ fn checked_enum_variant_template(
     types: &mut CheckedTypeInterner<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,
-    binding: Option<&ValueTemplateBinding<'_>>,
+    bindings: &[ValueTemplateBinding<'_>],
     depth: usize,
 ) -> Result<CheckedValueTemplate> {
     let ValueExpr::EnumVariant { name, payload } = value else {
@@ -431,7 +550,7 @@ fn checked_enum_variant_template(
             types,
             payload_type,
             payload,
-            binding,
+            bindings,
             depth + 1,
         )?),
     })
@@ -443,7 +562,7 @@ fn checked_record_template(
     types: &mut CheckedTypeInterner<'_>,
     record: &Record,
     value: &ValueExpr,
-    binding: Option<&ValueTemplateBinding<'_>>,
+    bindings: &[ValueTemplateBinding<'_>],
     depth: usize,
 ) -> Result<CheckedValueTemplate> {
     let ValueExpr::Record(value) = value else {
@@ -502,7 +621,7 @@ fn checked_record_template(
                 types,
                 &field.ty,
                 value,
-                binding,
+                bindings,
                 depth + 1,
             )?,
         ));
@@ -660,7 +779,11 @@ mod tests {
             .collect();
 
         let err = state_space
-            .resolve_state_value(&semantic_index, &ValueExpr::Identifier(ident("MainState")))
+            .resolve_state_value(
+                &semantic_index,
+                &mut types,
+                &ValueExpr::Identifier(ident("MainState")),
+            )
             .expect_err("state value limit should fail");
 
         assert!(err.to_string().contains(&format!(
@@ -680,7 +803,7 @@ mod tests {
         let value = nested_record_value(MAX_VALUE_NESTING + 1);
 
         let err = state_space
-            .resolve_state_value(&semantic_index, &value)
+            .resolve_state_value(&semantic_index, &mut types, &value)
             .expect_err("excessive AST value nesting should fail");
 
         assert!(
@@ -704,7 +827,7 @@ mod tests {
         });
 
         let err = state_space
-            .resolve_state_value(&semantic_index, &value)
+            .resolve_state_value(&semantic_index, &mut types, &value)
             .expect_err("empty braced record value AST should fail");
 
         assert!(err.to_string().contains(

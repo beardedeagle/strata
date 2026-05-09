@@ -1,0 +1,69 @@
+module state_payload_match;
+
+record MainState;
+record Job {
+    phase: JobPhase,
+}
+enum JobPhase {
+    Ready,
+    Done,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Idle,
+    Working(Job),
+    Done(Job),
+}
+enum WorkerMsg {
+    Assign(Job),
+    Complete,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        send worker Complete;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker accepted job";
+        return Continue(Working(job));
+    }
+
+    fn step(state: WorkerState, Complete) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match state {
+            Idle => {
+                emit "worker had no job";
+                return Stop(Idle);
+            }
+            Working(job: Job) => {
+                emit "worker completed job";
+                return Stop(Done(job));
+            }
+            Done(job: Job) => {
+                emit "worker already done";
+                return Stop(Done(job));
+            }
+        }
+    }
+}

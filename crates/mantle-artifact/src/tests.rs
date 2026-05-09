@@ -146,6 +146,24 @@ fn decode_rejects_unbounded_nested_counts_before_allocation() {
 }
 
 #[test]
+fn decode_rejects_unbounded_transition_current_state_before_validation() {
+    let encoded = valid_artifact().encode().replace(
+        "process.1.transition.0.message=0",
+        &format!(
+            "process.1.transition.0.current_state={}\nprocess.1.transition.0.message=0",
+            MAX_STATE_VALUES_PER_PROCESS
+        ),
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("current_state id should be bounded");
+
+    assert!(
+        err.to_string()
+            .contains("process.1.transition.0.current_state must be no greater than")
+    );
+}
+
+#[test]
 fn validate_accepts_language_neutral_source_language() {
     let mut artifact = valid_artifact();
     artifact.source_language = "lattice".to_string();
@@ -603,6 +621,7 @@ fn validate_rejects_aggregate_process_action_count_above_limit() {
         .push(ArtifactMessageVariant::unit("Pong"));
     artifact.processes[1].transitions[0].actions = emit_actions(MAX_ACTIONS_PER_PROCESS / 2);
     artifact.processes[1].transitions.push(ArtifactTransition {
+        current_state: None,
         message: MessageId::new(1),
         step_result: StepResult::Stop,
         next_state: NextState::Current,
@@ -900,7 +919,7 @@ fn validate_rejects_unknown_next_state_value_id() {
 
     assert!(
         err.to_string()
-            .contains("process Worker transition next_state id 99 is not a valid state value")
+            .contains("process Worker message id 0 next_state id 99 is not a valid state value")
     );
 }
 
@@ -918,7 +937,7 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
         .expect_err("static next-state template outside state table should fail");
 
     assert!(err.to_string().contains(
-        "process Worker transition 0 next_state_template produced value Missing not admitted by state table"
+        "process Worker message id 0 next_state_template produced value Missing not admitted by state table"
     ));
 }
 
@@ -941,7 +960,7 @@ fn validate_rejects_process_ref_payload_enum_next_state_template() {
         .expect_err("process ref payload next-state template should fail");
 
     assert!(err.to_string().contains(
-        "process Worker transition 0 next_state_template.payload process reference template must be a direct message payload"
+        "process Worker message id 0 next_state_template.payload process reference template must be a direct message payload"
     ));
 }
 
@@ -976,7 +995,54 @@ fn validate_rejects_next_state_template_when_label_matches_but_identity_does_not
         .expect_err("state labels must not admit mismatched typed values");
 
     assert!(err.to_string().contains(
-        "process Worker transition 0 next_state_template produced value Handled not admitted by state table"
+        "process Worker message id 0 next_state_template produced value Handled not admitted by state table"
+    ));
+}
+
+#[test]
+fn validate_rejects_current_state_payload_template_outside_state_table() {
+    let mut artifact = valid_artifact();
+    let mut working = ArtifactStateValue::with_label(
+        WORKER_STATE,
+        "Working(Job{phase:Ready})",
+        "Working(Job{phase:Ready})",
+    );
+    working.payload = Some(ArtifactPayload {
+        ty: JOB,
+        value: "Job{phase:Ready}".to_string(),
+        process_ref: None,
+    });
+    artifact.processes[1].state_values =
+        vec![ArtifactStateValue::new(WORKER_STATE, "Idle"), working];
+    artifact.processes[1].transitions = vec![
+        ArtifactTransition {
+            current_state: Some(StateId::new(0)),
+            message: MessageId::new(0),
+            step_result: StepResult::Stop,
+            next_state: NextState::Current,
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+        ArtifactTransition {
+            current_state: Some(StateId::new(1)),
+            message: MessageId::new(0),
+            step_result: StepResult::Stop,
+            next_state: NextState::Template(ArtifactValueTemplate::EnumVariant {
+                ty: WORKER_STATE,
+                variant: "Done".to_string(),
+                payload: Box::new(ArtifactValueTemplate::CurrentStatePayload { ty: JOB }),
+            }),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+    ];
+
+    let err = artifact
+        .validate()
+        .expect_err("unadmitted current-state-derived next state should fail");
+
+    assert!(err.to_string().contains(
+        "process Worker message id 0 current_state id 1 next_state_template produced value Done(Job{phase:Ready}) not admitted by state table"
     ));
 }
 
@@ -993,7 +1059,7 @@ fn validate_rejects_missing_transition_for_message() {
 
     assert!(
         err.to_string()
-            .contains("process Worker transition_count must equal message_count")
+            .contains("process Worker has no transition for message id 1")
     );
 }
 
@@ -1028,6 +1094,21 @@ fn validate_rejects_unknown_transition_message() {
     assert!(
         err.to_string()
             .contains("process Worker transition message id 1 is not accepted")
+    );
+}
+
+#[test]
+fn validate_rejects_transition_current_state_outside_state_table() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0].current_state = Some(StateId::new(99));
+
+    let err = artifact
+        .validate()
+        .expect_err("unknown transition current state should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker message id 0 current_state id 99 is not a valid state value")
     );
 }
 
@@ -1195,6 +1276,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
+                    current_state: None,
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
@@ -1222,6 +1304,7 @@ fn valid_artifact() -> MantleArtifact {
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
                 transitions: vec![ArtifactTransition {
+                    current_state: None,
                     message: MessageId::new(0),
                     step_result: StepResult::Stop,
                     next_state: NextState::Value(StateId::new(1)),

@@ -26,8 +26,9 @@ use super::diagnostic::{Error, Result};
 use super::{MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
 use outputs::OutputPool;
 use state_space::{
-    StateSpace, ValueBinding, ValueTemplateBinding, canonical_source_value_with_bindings,
-    checked_value_template_with_binding, source_value_uses_binding,
+    StateSpace, ValueBinding, ValueTemplateBinding, ValueTemplateSource,
+    canonical_source_value_with_bindings, checked_value_template_with_binding,
+    source_value_uses_binding,
 };
 use static_validation::validate_action_references;
 use symbols::SemanticIndex;
@@ -145,13 +146,20 @@ struct ProcessRefCollectionContext<'a> {
 #[derive(Debug, Clone)]
 struct StepBodyClause<'a> {
     step: &'a Function,
-    body: &'a FunctionBlock,
+    body: StepBodySource<'a>,
     payload_param: Option<PatternPayloadParam>,
+}
+
+#[derive(Debug, Clone)]
+enum StepBodySource<'a> {
+    Block(&'a FunctionBlock),
+    StateMatch(&'a super::ast::Match),
 }
 
 struct StepDiscoveryClause<'a> {
     pattern: StepPattern,
     body: &'a FunctionBlock,
+    state_payload_bindings: Vec<StatePayloadDiscoveryBinding>,
 }
 
 #[derive(Debug, Clone)]
@@ -160,13 +168,17 @@ struct StepClause<'a> {
     variant: CheckedMessageVariantId,
     message: CheckedMessageId,
     payload_binding: Option<StepPayloadBinding>,
+    current_state: Option<CheckedStateId>,
+    state_payload_binding: Option<StepStatePayloadBinding>,
     body: &'a FunctionBlock,
 }
 
 struct StepTransitionInput<'a> {
+    current_state: Option<CheckedStateId>,
     variant: CheckedMessageVariantId,
     message: CheckedMessageId,
     payload_binding: Option<&'a StepPayloadBinding>,
+    state_payload_binding: Option<&'a StepStatePayloadBinding>,
     body: &'a FunctionBlock,
     declared_effects: &'a [Effect],
 }
@@ -184,6 +196,7 @@ enum StepPattern {
 enum StepDispatchForm {
     ParameterPattern(StepPattern),
     BodyMatch,
+    StateMatch(StepPattern),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,10 +212,38 @@ struct PatternPayloadParam {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct StatePayloadDiscoveryBinding {
+    name: Identifier,
+    ty: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiscoveryValueBinding {
+    name: Identifier,
+    ty: TypeRef,
+    label: String,
+}
+
+struct SendPayloadDiscoveryContext<'a, 'types, 'semantic> {
+    sender_cases: &'a [DiscoveredMessageCase],
+    concrete_state_payloads: &'a BTreeMap<String, BTreeSet<String>>,
+    process_refs: &'a BTreeMap<Identifier, CheckedProcessId>,
+    types: &'types mut CheckedTypeInterner<'semantic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct StepPayloadBinding {
     name: Identifier,
     ty: TypeRef,
     checked_ty: CheckedTypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StepStatePayloadBinding {
+    name: Identifier,
+    ty: TypeRef,
+    checked_ty: CheckedTypeRef,
+    label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -330,6 +371,15 @@ impl MessageCaseTable {
                 collect_explicit_step_variants(module, process, process_id, semantic_index)
             })
             .collect::<Result<Vec<_>>>()?;
+        let concrete_state_payload_domains = module
+            .processes
+            .iter()
+            .enumerate()
+            .map(|(process_index, process)| {
+                let process_id = CheckedProcessId::from_index(process_index)?;
+                collect_concrete_state_payload_domains(module, process, process_id, semantic_index)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let mut iteration_count = 0usize;
         let max_iterations = MAX_MESSAGE_VARIANTS_PER_PROCESS.saturating_mul(builders.len());
@@ -382,12 +432,20 @@ impl MessageCaseTable {
                                             target_process_id.as_u32()
                                         ))
                                     })?;
-                                changed |= builder.add_payload_case(
+                                let mut discovery_context = SendPayloadDiscoveryContext {
+                                    sender_cases,
+                                    concrete_state_payloads: &concrete_state_payload_domains
+                                        [process_index],
+                                    process_refs: &process_ref_targets[process_index],
+                                    types,
+                                };
+                                changed |= add_discovered_send_payload_cases(
+                                    builder,
                                     target_variant,
                                     payload.as_ref(),
                                     &bindings,
-                                    &process_ref_targets[process_index],
-                                    types,
+                                    &clause.state_payload_bindings,
+                                    &mut discovery_context,
                                 )?;
                             }
                         }
@@ -662,6 +720,111 @@ impl<'a> MessageCaseBuilder<'a> {
     }
 }
 
+fn add_discovered_send_payload_cases(
+    builder: &mut MessageCaseBuilder<'_>,
+    variant_id: CheckedMessageVariantId,
+    payload: Option<&ValueExpr>,
+    message_bindings: &[DiscoveryValueBinding],
+    state_payload_bindings: &[StatePayloadDiscoveryBinding],
+    context: &mut SendPayloadDiscoveryContext<'_, '_, '_>,
+) -> Result<bool> {
+    let mut changed = false;
+    for bindings in discovery_value_binding_sets(
+        payload,
+        message_bindings,
+        state_payload_bindings,
+        context.sender_cases,
+        context.concrete_state_payloads,
+        context.types,
+    )? {
+        let value_bindings = value_bindings_from_discovery(&bindings);
+        changed |= builder.add_payload_case(
+            variant_id,
+            payload,
+            &value_bindings,
+            context.process_refs,
+            context.types,
+        )?;
+    }
+    Ok(changed)
+}
+
+fn discovery_value_binding_sets(
+    payload: Option<&ValueExpr>,
+    message_bindings: &[DiscoveryValueBinding],
+    state_payload_bindings: &[StatePayloadDiscoveryBinding],
+    sender_cases: &[DiscoveredMessageCase],
+    concrete_state_payloads: &BTreeMap<String, BTreeSet<String>>,
+    types: &mut CheckedTypeInterner<'_>,
+) -> Result<Vec<Vec<DiscoveryValueBinding>>> {
+    let Some(payload) = payload else {
+        return Ok(vec![message_bindings.to_vec()]);
+    };
+    let mut binding_sets = vec![message_bindings.to_vec()];
+    for binding in state_payload_bindings {
+        if !source_value_uses_binding(payload, &binding.name) {
+            continue;
+        }
+        let payloads =
+            state_payload_discovery_values(binding, sender_cases, concrete_state_payloads, types)?;
+        if payloads.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut expanded = Vec::with_capacity(binding_sets.len().saturating_mul(payloads.len()));
+        for base in &binding_sets {
+            for payload in &payloads {
+                let mut next = base.clone();
+                next.push(DiscoveryValueBinding {
+                    name: binding.name.clone(),
+                    ty: binding.ty.clone(),
+                    label: payload.label().to_string(),
+                });
+                expanded.push(next);
+            }
+        }
+        binding_sets = expanded;
+    }
+    Ok(binding_sets)
+}
+
+fn state_payload_discovery_values(
+    binding: &StatePayloadDiscoveryBinding,
+    sender_cases: &[DiscoveredMessageCase],
+    concrete_state_payloads: &BTreeMap<String, BTreeSet<String>>,
+    types: &mut CheckedTypeInterner<'_>,
+) -> Result<Vec<CheckedPayloadValue>> {
+    let checked_ty = types.intern(&binding.ty)?;
+    let mut payloads = BTreeMap::new();
+    if let Some(concrete_payloads) = concrete_state_payloads.get(checked_ty.label()) {
+        for label in concrete_payloads {
+            payloads.insert(
+                label.clone(),
+                CheckedPayloadValue::new(checked_ty.clone(), label.clone()),
+            );
+        }
+    }
+    for case in sender_cases {
+        let Some(payload) = case.payload() else {
+            continue;
+        };
+        if payload.ty().label() == checked_ty.label() && payload.process_ref_payload().is_none() {
+            payloads.insert(payload.label().to_string(), payload.clone());
+        }
+    }
+    Ok(payloads.into_values().collect())
+}
+
+fn value_bindings_from_discovery(bindings: &[DiscoveryValueBinding]) -> Vec<ValueBinding<'_>> {
+    bindings
+        .iter()
+        .map(|binding| ValueBinding {
+            name: &binding.name,
+            ty: &binding.ty,
+            label: &binding.label,
+        })
+        .collect()
+}
+
 fn canonical_process_ref_payload_label(
     expected_type: &TypeRef,
     expected_target: CheckedProcessId,
@@ -842,6 +1005,7 @@ fn check_process(
         context.semantic_index,
         process,
         &mut state_space,
+        types,
     )?;
     let process_context = ProcessCheckContext {
         module: context.module,
@@ -873,6 +1037,7 @@ fn check_init(
     semantic_index: &SemanticIndex,
     process: &Process,
     state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
 ) -> Result<CheckedStateId> {
     let init = &process.init;
     if !init.params.is_empty() {
@@ -907,12 +1072,13 @@ fn check_init(
             process,
             &function_scope,
             state_space,
+            types,
             body,
             None,
             "init body",
         ),
         FunctionBody::Match(match_body) => {
-            check_init_match(process, &function_scope, state_space, match_body)
+            check_init_match(process, &function_scope, state_space, types, match_body)
         }
     }
 }
@@ -921,6 +1087,7 @@ fn check_init_match(
     process: &Process,
     scope: &SourceFunctionScope<'_>,
     state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
     match_body: &super::ast::Match,
 ) -> Result<CheckedStateId> {
     let scrutinee_type = scope
@@ -978,19 +1145,20 @@ fn check_init_match(
             process.name, match_body.scrutinee
         ))
     })?;
-    state_space.resolve_state_value(scope.semantic_index, &state)
+    state_space.resolve_state_value(scope.semantic_index, types, &state)
 }
 
 fn check_init_return_block(
     process: &Process,
     scope: &SourceFunctionScope<'_>,
     state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
     body: &FunctionBlock,
     payload_binding: Option<&PatternPayloadParam>,
     context: &str,
 ) -> Result<CheckedStateId> {
     let value = resolve_init_return_block_value(process, scope, body, payload_binding, context)?;
-    state_space.resolve_state_value(scope.semantic_index, &value)
+    state_space.resolve_state_value(scope.semantic_index, types, &value)
 }
 
 fn resolve_init_return_block_value(
@@ -2489,6 +2657,8 @@ fn check_step(
         context.process_id,
         context.semantic_index,
         context.message_cases,
+        state_space,
+        types,
     )?;
     let (process_refs, process_ref_index) = collect_process_refs(
         context.process,
@@ -2514,9 +2684,11 @@ fn check_step(
             outputs,
             types,
             StepTransitionInput {
+                current_state: clause.current_state,
                 variant: clause.variant,
                 message: clause.message,
                 payload_binding: clause.payload_binding.as_ref(),
+                state_payload_binding: clause.state_payload_binding.as_ref(),
                 body: clause.body,
                 declared_effects: &clause.step.effects,
             },
@@ -2550,12 +2722,23 @@ fn check_step_clauses<'a>(
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     message_cases: &MessageCaseTable,
+    state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
 ) -> Result<Vec<StepClause<'a>>> {
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
     let mut explicit_clauses = vec![None; msg_enum.variants.len()];
     let mut wildcard_clause = None;
     let mut dispatch_style = None;
     let mut match_body_seen = false;
+
+    preadmit_concrete_step_state_values(
+        module,
+        process,
+        process_id,
+        semantic_index,
+        state_space,
+        types,
+    )?;
 
     for step in &process.steps {
         let Some(body) = &step.body else {
@@ -2579,7 +2762,7 @@ fn check_step_clauses<'a>(
                     pattern,
                     StepBodyClause {
                         step,
-                        body,
+                        body: StepBodySource::Block(body),
                         payload_param: None,
                     },
                 )?;
@@ -2616,11 +2799,33 @@ fn check_step_clauses<'a>(
                         pattern,
                         StepBodyClause {
                             step,
-                            body: &arm.body,
+                            body: StepBodySource::Block(&arm.body),
                             payload_param: None,
                         },
                     )?;
                 }
+            }
+            StepDispatchForm::StateMatch(pattern) => {
+                set_step_dispatch_style(
+                    process,
+                    &mut dispatch_style,
+                    StepDispatchStyle::ParameterPattern,
+                )?;
+                let FunctionBody::Match(match_body) = body else {
+                    return Err(Error::new("state match step must use a match body"));
+                };
+                insert_step_body_clause(
+                    process,
+                    &msg_enum.variants,
+                    &mut explicit_clauses,
+                    &mut wildcard_clause,
+                    pattern,
+                    StepBodyClause {
+                        step,
+                        body: StepBodySource::StateMatch(match_body),
+                        payload_param: None,
+                    },
+                )?;
             }
         }
     }
@@ -2663,16 +2868,467 @@ fn check_step_clauses<'a>(
             _ => None,
         };
         let message = message_cases.message_id(process_id, variant_id)?;
-        clauses.push(StepClause {
-            step: clause.step,
-            variant: variant_id,
-            message,
-            payload_binding,
-            body: clause.body,
-        });
+        match &clause.body {
+            StepBodySource::Block(body) => {
+                clauses.push(StepClause {
+                    step: clause.step,
+                    variant: variant_id,
+                    message,
+                    payload_binding,
+                    current_state: None,
+                    state_payload_binding: None,
+                    body,
+                });
+            }
+            StepBodySource::StateMatch(match_body) => expand_state_match_step_clauses(
+                module,
+                process,
+                process_id,
+                semantic_index,
+                message_cases,
+                state_space,
+                types,
+                clause.step,
+                variant_id,
+                message,
+                payload_binding,
+                match_body,
+                &mut clauses,
+            )?,
+        }
     }
 
     Ok(clauses)
+}
+
+fn preadmit_concrete_step_state_values(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+) -> Result<()> {
+    for step in &process.steps {
+        let Some(body) = &step.body else {
+            continue;
+        };
+        match check_step_shape(module, process, process_id, semantic_index, step)? {
+            StepDispatchForm::ParameterPattern(pattern) => {
+                let FunctionBody::Block(body) = body else {
+                    continue;
+                };
+                preadmit_concrete_step_return(
+                    module,
+                    process,
+                    semantic_index,
+                    state_space,
+                    types,
+                    body,
+                    &step_pattern_binding_names(&pattern),
+                )?;
+            }
+            StepDispatchForm::BodyMatch => {
+                let FunctionBody::Match(match_body) = body else {
+                    continue;
+                };
+                for arm in &match_body.arms {
+                    let pattern = check_step_pattern(
+                        module,
+                        process,
+                        process_id,
+                        semantic_index,
+                        &arm.pattern,
+                    )?;
+                    preadmit_concrete_step_return(
+                        module,
+                        process,
+                        semantic_index,
+                        state_space,
+                        types,
+                        &arm.body,
+                        &step_pattern_binding_names(&pattern),
+                    )?;
+                }
+            }
+            StepDispatchForm::StateMatch(pattern) => {
+                let FunctionBody::Match(match_body) = body else {
+                    continue;
+                };
+                let state_enum = semantic_index.enum_decl(module, &process.state_type)?;
+                let subject = format!("process {}", process.name);
+                let pattern_context = PatternCheckContext {
+                    module,
+                    semantic_index,
+                    enum_decl: state_enum,
+                    enum_type: &process.state_type,
+                    subject: &subject,
+                    label: "state match",
+                    payload_context: PatternPayloadContext::SourceValue,
+                    binding_context: PatternBindingContext::Source { owner: &subject },
+                };
+                let arms = check_typed_match_arms(&pattern_context, &match_body.arms)?;
+                let message_bindings = step_pattern_binding_names(&pattern);
+                for arm in arms {
+                    let mut bindings = message_bindings.clone();
+                    if let TypedMatchPattern::Variant {
+                        variant: _,
+                        binding: Some(binding),
+                    } = &arm.pattern
+                    {
+                        bindings.push(&binding.name);
+                    } else if let TypedMatchPattern::Variant {
+                        variant,
+                        binding: None,
+                    } = &arm.pattern
+                    {
+                        if state_enum.variants[*variant].payload_type.is_some() {
+                            continue;
+                        }
+                    }
+                    preadmit_concrete_step_return(
+                        module,
+                        process,
+                        semantic_index,
+                        state_space,
+                        types,
+                        arm.body,
+                        &bindings,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_concrete_state_payload_domains(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    let mut local_types = CheckedTypeInterner::new(semantic_index);
+    let mut state_space = StateSpace::new(module, semantic_index, process, &mut local_types)?;
+    check_init(
+        module,
+        semantic_index,
+        process,
+        &mut state_space,
+        &mut local_types,
+    )?;
+    preadmit_concrete_step_state_values(
+        module,
+        process,
+        process_id,
+        semantic_index,
+        &mut state_space,
+        &mut local_types,
+    )?;
+
+    let mut domains: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for state in state_space.values() {
+        if let Some(payload) = state.payload() {
+            domains
+                .entry(payload.ty().label().to_string())
+                .or_default()
+                .insert(payload.label().to_string());
+        }
+    }
+    Ok(domains)
+}
+
+fn step_pattern_binding_names(pattern: &StepPattern) -> Vec<&Identifier> {
+    match pattern {
+        StepPattern::Variant {
+            binding: Some(binding),
+            ..
+        } => vec![&binding.name],
+        StepPattern::Variant { binding: None, .. } | StepPattern::Wildcard => Vec::new(),
+    }
+}
+
+fn preadmit_concrete_step_return(
+    module: &Module,
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    body: &FunctionBlock,
+    binding_names: &[&Identifier],
+) -> Result<()> {
+    let state_arg = match &body.returns {
+        ReturnExpr::Call { name, arg }
+            if name.as_str() == "Stop"
+                || name.as_str() == "Continue"
+                || name.as_str() == "Panic" =>
+        {
+            arg
+        }
+        _ => return Ok(()),
+    };
+    if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
+        || binding_names
+            .iter()
+            .any(|binding| source_value_uses_binding(state_arg, binding))
+    {
+        return Ok(());
+    }
+
+    let function_scope = SourceFunctionScope {
+        module,
+        process_name: Some(&process.name),
+        process_functions: &process.functions,
+        semantic_index,
+    };
+    let state_arg =
+        resolve_source_value_expr(&function_scope, &process.state_type, state_arg, &[], 0)?;
+    state_space.resolve_state_value(semantic_index, types, &state_arg)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn expand_state_match_step_clauses<'a>(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    message_cases: &MessageCaseTable,
+    state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    step: &'a Function,
+    variant: CheckedMessageVariantId,
+    message: CheckedMessageId,
+    payload_binding: Option<StepPayloadBinding>,
+    match_body: &'a super::ast::Match,
+    clauses: &mut Vec<StepClause<'a>>,
+) -> Result<()> {
+    let state_enum = semantic_index.enum_decl(module, &process.state_type)?;
+    let subject = format!("process {}", process.name);
+    let pattern_context = PatternCheckContext {
+        module,
+        semantic_index,
+        enum_decl: state_enum,
+        enum_type: &process.state_type,
+        subject: &subject,
+        label: "state match",
+        payload_context: PatternPayloadContext::SourceValue,
+        binding_context: PatternBindingContext::Source { owner: &subject },
+    };
+    let arms = check_typed_match_arms(&pattern_context, &match_body.arms)?;
+    let explicit_variants = arms
+        .iter()
+        .filter_map(|arm| match arm.pattern {
+            TypedMatchPattern::Variant { variant, .. } => Some(variant),
+            TypedMatchPattern::Wildcard => None,
+        })
+        .collect::<BTreeSet<_>>();
+
+    for arm in arms {
+        let cases = state_match_arm_cases(
+            module,
+            process,
+            process_id,
+            semantic_index,
+            message_cases,
+            state_space,
+            types,
+            state_enum,
+            &explicit_variants,
+            &arm.pattern,
+        )?;
+        for (current_state, state_payload_binding) in cases {
+            validate_state_payload_binding_name(
+                process,
+                payload_binding.as_ref(),
+                state_payload_binding.as_ref(),
+            )?;
+            clauses.push(StepClause {
+                step,
+                variant,
+                message,
+                payload_binding: payload_binding.clone(),
+                current_state: Some(current_state),
+                state_payload_binding,
+                body: arm.body,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_state_payload_binding_name(
+    process: &Process,
+    message_payload_binding: Option<&StepPayloadBinding>,
+    state_payload_binding: Option<&StepStatePayloadBinding>,
+) -> Result<()> {
+    let (Some(message_payload_binding), Some(state_payload_binding)) =
+        (message_payload_binding, state_payload_binding)
+    else {
+        return Ok(());
+    };
+    if message_payload_binding.name == state_payload_binding.name {
+        return Err(Error::new(format!(
+            "process {} state payload binding {} conflicts with message payload binding",
+            process.name, state_payload_binding.name
+        )));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn state_match_arm_cases(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    message_cases: &MessageCaseTable,
+    state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    state_enum: &Enum,
+    explicit_variants: &BTreeSet<usize>,
+    pattern: &TypedMatchPattern,
+) -> Result<Vec<(CheckedStateId, Option<StepStatePayloadBinding>)>> {
+    match pattern {
+        TypedMatchPattern::Variant { variant, binding } => {
+            let variant_decl = &state_enum.variants[*variant];
+            match (&variant_decl.payload_type, binding) {
+                (None, None) => {
+                    let value = ValueExpr::Identifier(variant_decl.name.clone());
+                    let state = state_space.resolve_state_value(semantic_index, types, &value)?;
+                    Ok(vec![(state, None)])
+                }
+                (None, Some(_)) => unreachable!("fieldless payload binding is checked earlier"),
+                (Some(_), None) => Err(Error::new(format!(
+                    "process {} state match pattern {} requires a payload binding",
+                    process.name, variant_decl.name
+                ))),
+                (Some(payload_type), Some(binding)) => {
+                    let checked_ty = types.intern(payload_type)?;
+                    let payloads = state_match_payload_domain(
+                        module,
+                        process,
+                        process_id,
+                        semantic_index,
+                        message_cases,
+                        state_space,
+                        payload_type,
+                        &checked_ty,
+                    )?;
+                    let state_value = ValueExpr::EnumVariant {
+                        name: variant_decl.name.clone(),
+                        payload: Box::new(ValueExpr::Identifier(binding.name.clone())),
+                    };
+                    payloads
+                        .into_iter()
+                        .map(|payload| {
+                            let state = state_space.resolve_state_value_with_bindings(
+                                semantic_index,
+                                types,
+                                &state_value,
+                                &[ValueBinding {
+                                    name: &binding.name,
+                                    ty: &binding.ty,
+                                    label: payload.label(),
+                                }],
+                            )?;
+                            Ok((
+                                state,
+                                Some(StepStatePayloadBinding {
+                                    name: binding.name.clone(),
+                                    ty: binding.ty.clone(),
+                                    checked_ty: checked_ty.clone(),
+                                    label: payload.label().to_string(),
+                                }),
+                            ))
+                        })
+                        .collect()
+                }
+            }
+        }
+        TypedMatchPattern::Wildcard => {
+            let mut cases = Vec::new();
+            for (variant_index, variant_decl) in state_enum.variants.iter().enumerate() {
+                if explicit_variants.contains(&variant_index) {
+                    continue;
+                }
+                match &variant_decl.payload_type {
+                    None => {
+                        let value = ValueExpr::Identifier(variant_decl.name.clone());
+                        let state =
+                            state_space.resolve_state_value(semantic_index, types, &value)?;
+                        cases.push((state, None));
+                    }
+                    Some(payload_type) => {
+                        let checked_ty = types.intern(payload_type)?;
+                        let payload_name = Identifier::new("__state_payload")?;
+                        let state_value = ValueExpr::EnumVariant {
+                            name: variant_decl.name.clone(),
+                            payload: Box::new(ValueExpr::Identifier(payload_name.clone())),
+                        };
+                        for payload in state_match_payload_domain(
+                            module,
+                            process,
+                            process_id,
+                            semantic_index,
+                            message_cases,
+                            state_space,
+                            payload_type,
+                            &checked_ty,
+                        )? {
+                            let state = state_space.resolve_state_value_with_bindings(
+                                semantic_index,
+                                types,
+                                &state_value,
+                                &[ValueBinding {
+                                    name: &payload_name,
+                                    ty: payload_type,
+                                    label: payload.label(),
+                                }],
+                            )?;
+                            cases.push((state, None));
+                        }
+                    }
+                }
+            }
+            Ok(cases)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn state_match_payload_domain(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    message_cases: &MessageCaseTable,
+    state_space: &StateSpace<'_>,
+    payload_type: &TypeRef,
+    checked_payload_type: &CheckedTypeRef,
+) -> Result<Vec<CheckedPayloadValue>> {
+    let mut payloads = BTreeMap::new();
+    for state in state_space.values() {
+        if let Some(payload) = state.payload() {
+            if payload.ty() == checked_payload_type {
+                payloads.insert(payload.label().to_string(), payload.clone());
+            }
+        }
+    }
+    let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+    for (variant_index, message_variant) in msg_enum.variants.iter().enumerate() {
+        let Some(message_payload_type) = &message_variant.payload_type else {
+            continue;
+        };
+        if !semantic_index.same_type(message_payload_type, payload_type) {
+            continue;
+        }
+        let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
+        for payload in message_cases.payload_values(process_id, variant_id)? {
+            payloads.insert(payload.label().to_string(), payload.clone());
+        }
+    }
+    Ok(payloads.into_values().collect())
 }
 
 fn insert_step_body_clause<'a>(
@@ -2739,7 +3395,11 @@ fn step_discovery_clauses<'a>(
             let FunctionBody::Block(body) = body else {
                 return Err(Error::new("step parameter pattern must use a block body"));
             };
-            Ok(vec![StepDiscoveryClause { pattern, body }])
+            Ok(vec![StepDiscoveryClause {
+                pattern,
+                body,
+                state_payload_bindings: Vec::new(),
+            }])
         }
         StepDispatchForm::BodyMatch => {
             let FunctionBody::Match(match_body) = body else {
@@ -2758,6 +3418,53 @@ fn step_discovery_clauses<'a>(
                             &arm.pattern,
                         )?,
                         body: &arm.body,
+                        state_payload_bindings: Vec::new(),
+                    })
+                })
+                .collect()
+        }
+        StepDispatchForm::StateMatch(pattern) => {
+            let FunctionBody::Match(match_body) = body else {
+                return Err(Error::new("state match step must use a match body"));
+            };
+            let state_enum = semantic_index.enum_decl(module, &process.state_type)?;
+            let subject = format!("process {}", process.name);
+            let pattern_context = PatternCheckContext {
+                module,
+                semantic_index,
+                enum_decl: state_enum,
+                enum_type: &process.state_type,
+                subject: &subject,
+                label: "state match",
+                payload_context: PatternPayloadContext::SourceValue,
+                binding_context: PatternBindingContext::Source { owner: &subject },
+            };
+            check_typed_match_arms(&pattern_context, &match_body.arms)?
+                .into_iter()
+                .map(|arm| {
+                    let state_payload_bindings = match &arm.pattern {
+                        TypedMatchPattern::Variant {
+                            variant,
+                            binding: Some(binding),
+                        } => vec![StatePayloadDiscoveryBinding {
+                            name: binding.name.clone(),
+                            ty: state_enum.variants[*variant]
+                                .payload_type
+                                .clone()
+                                .ok_or_else(|| {
+                                    Error::new(format!(
+                                        "process {} state match pattern {} does not carry a payload",
+                                        process.name, state_enum.variants[*variant].name
+                                    ))
+                                })?,
+                        }],
+                        TypedMatchPattern::Variant { binding: None, .. }
+                        | TypedMatchPattern::Wildcard => Vec::new(),
+                    };
+                    Ok(StepDiscoveryClause {
+                        pattern: pattern.clone(),
+                        body: arm.body,
+                        state_payload_bindings,
                     })
                 })
                 .collect()
@@ -2835,7 +3542,7 @@ fn matching_message_cases<'a>(
 fn payload_value_bindings<'a>(
     pattern: &'a StepPattern,
     case: &'a DiscoveredMessageCase,
-) -> Vec<ValueBinding<'a>> {
+) -> Vec<DiscoveryValueBinding> {
     match (pattern, case.payload()) {
         (
             StepPattern::Variant {
@@ -2843,10 +3550,10 @@ fn payload_value_bindings<'a>(
                 ..
             },
             Some(payload),
-        ) => vec![ValueBinding {
-            name: &param.name,
-            ty: &param.ty,
-            label: payload.label(),
+        ) => vec![DiscoveryValueBinding {
+            name: param.name.clone(),
+            ty: param.ty.clone(),
+            label: payload.label().to_string(),
         }],
         _ => Vec::new(),
     }
@@ -2973,6 +3680,20 @@ fn check_step_shape(
     }
 
     if let Some(FunctionBody::Match(match_body)) = &step.body {
+        if match_body.scrutinee.as_str() == STEP_STATE_PARAMETER_NAME {
+            let FunctionParam::Pattern(message_pattern) = &step.params[1] else {
+                return Err(Error::new(
+                    "state match step second parameter must be a message constructor pattern or wildcard pattern",
+                ));
+            };
+            return Ok(StepDispatchForm::StateMatch(check_step_pattern(
+                module,
+                process,
+                process_id,
+                semantic_index,
+                message_pattern,
+            )?));
+        }
         let message_param =
             check_step_match_scrutinee_parameter(process, step, &match_body.scrutinee)?;
         if !semantic_index.same_type(&message_param.ty, &process.msg_type) {
@@ -3068,6 +3789,7 @@ fn collect_process_refs(
             &context,
             clause.body,
             clause.payload_binding.as_ref(),
+            clause.state_payload_binding.as_ref(),
             &mut process_refs,
             &mut process_ref_index,
         )?;
@@ -3143,6 +3865,7 @@ fn collect_process_refs_from_block(
     context: &ProcessRefCollectionContext<'_>,
     block: &FunctionBlock,
     payload_binding: Option<&StepPayloadBinding>,
+    state_payload_binding: Option<&StepStatePayloadBinding>,
     process_refs: &mut Vec<CheckedProcessRef>,
     process_ref_index: &mut BTreeMap<Identifier, ProcessRefBinding>,
 ) -> Result<()> {
@@ -3154,6 +3877,14 @@ fn collect_process_refs_from_block(
             if binding.name == *name {
                 return Err(Error::new(format!(
                     "process {} process reference {} conflicts with payload binding",
+                    context.process.name, name
+                )));
+            }
+        }
+        if let Some(binding) = state_payload_binding {
+            if binding.name == *name {
+                return Err(Error::new(format!(
+                    "process {} process reference {} conflicts with state payload binding",
                     context.process.name, name
                 )));
             }
@@ -3213,22 +3944,40 @@ fn check_step_transition(
         name: &binding.name,
         ty: &binding.ty,
         checked_ty: &binding.checked_ty,
+        source: ValueTemplateSource::ReceivedPayload,
     });
+    let state_template_binding = input
+        .state_payload_binding
+        .map(|binding| ValueTemplateBinding {
+            name: &binding.name,
+            ty: &binding.ty,
+            checked_ty: &binding.checked_ty,
+            source: ValueTemplateSource::CurrentStatePayload,
+        });
+    let template_bindings = payload_template_binding
+        .iter()
+        .chain(state_template_binding.iter())
+        .copied()
+        .collect::<Vec<_>>();
     let function_scope = SourceFunctionScope {
         module: context.module,
         process_name: Some(&context.process.name),
         process_functions: &context.process.functions,
         semantic_index: context.semantic_index,
     };
-    let source_bindings = input
-        .payload_binding
-        .map(|binding| {
-            vec![SourceValueBinding {
-                name: &binding.name,
-                ty: &binding.ty,
-            }]
-        })
-        .unwrap_or_default();
+    let mut source_bindings = Vec::new();
+    if let Some(binding) = input.payload_binding {
+        source_bindings.push(SourceValueBinding {
+            name: &binding.name,
+            ty: &binding.ty,
+        });
+    }
+    if let Some(binding) = input.state_payload_binding {
+        source_bindings.push(SourceValueBinding {
+            name: &binding.name,
+            ty: &binding.ty,
+        });
+    }
     let mut actions = Vec::with_capacity(input.body.statements.len());
     for statement in &input.body.statements {
         match statement {
@@ -3262,8 +4011,8 @@ fn check_step_transition(
                     send_target.target_process,
                     message,
                     payload.as_ref(),
-                    input.payload_binding,
-                    payload_template_binding.as_ref(),
+                    &source_bindings,
+                    &template_bindings,
                 )?;
                 actions.push(CheckedAction::Send {
                     target: send_target.target,
@@ -3298,36 +4047,38 @@ fn check_step_transition(
     let next_state = if matches!(&state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
     {
         CheckedNextState::Current
-    } else if let Some(binding) = input.payload_binding {
-        if source_value_uses_binding(&state_arg, &binding.name) {
-            let template = checked_value_template_with_binding(
-                context.module,
-                context.semantic_index,
-                types,
-                &context.process.state_type,
-                &state_arg,
-                payload_template_binding.as_ref(),
-            )?;
-            populate_payload_template_state_values(
-                context,
-                state_space,
-                input.variant,
-                &state_arg,
-                binding,
-            )?;
-            CheckedNextState::Template(template)
-        } else {
-            CheckedNextState::Value(
-                state_space.resolve_state_value(context.semantic_index, &state_arg)?,
-            )
-        }
+    } else if template_bindings
+        .iter()
+        .any(|binding| source_value_uses_binding(&state_arg, binding.name))
+    {
+        let template = checked_value_template_with_binding(
+            context.module,
+            context.semantic_index,
+            types,
+            &context.process.state_type,
+            &state_arg,
+            &template_bindings,
+        )?;
+        populate_template_state_values(
+            context,
+            state_space,
+            types,
+            input.variant,
+            &state_arg,
+            input.payload_binding,
+            input.state_payload_binding,
+        )?;
+        CheckedNextState::Template(template)
     } else {
-        CheckedNextState::Value(
-            state_space.resolve_state_value(context.semantic_index, &state_arg)?,
-        )
+        CheckedNextState::Value(state_space.resolve_state_value(
+            context.semantic_index,
+            types,
+            &state_arg,
+        )?)
     };
 
     Ok(CheckedTransition::new(CheckedTransitionParts {
+        current_state: input.current_state,
         message: input.message,
         step_result,
         next_state,
@@ -3389,8 +4140,8 @@ fn resolve_send_message_case(
     target_process: CheckedProcessId,
     message: &Identifier,
     payload: Option<&ValueExpr>,
-    payload_binding: Option<&StepPayloadBinding>,
-    binding: Option<&ValueTemplateBinding<'_>>,
+    source_bindings: &[SourceValueBinding<'_>],
+    bindings: &[ValueTemplateBinding<'_>],
 ) -> Result<CheckedSendMessage> {
     let variant = context.semantic_index.message_id_for_process(
         context.module,
@@ -3424,19 +4175,11 @@ fn resolve_send_message_case(
                     process_functions: &context.process.functions,
                     semantic_index: context.semantic_index,
                 };
-                let source_bindings = payload_binding
-                    .map(|binding| {
-                        vec![SourceValueBinding {
-                            name: &binding.name,
-                            ty: &binding.ty,
-                        }]
-                    })
-                    .unwrap_or_default();
                 resolve_source_value_expr(
                     &function_scope,
                     payload_type,
                     payload,
-                    &source_bindings,
+                    source_bindings,
                     0,
                 )?
             };
@@ -3445,7 +4188,7 @@ fn resolve_send_message_case(
                 types,
                 payload_type,
                 &resolved_payload,
-                binding,
+                bindings,
             )?)
         }
     };
@@ -3460,7 +4203,7 @@ fn checked_send_payload_template(
     types: &mut CheckedTypeInterner<'_>,
     expected_type: &TypeRef,
     payload: &ValueExpr,
-    binding: Option<&ValueTemplateBinding<'_>>,
+    bindings: &[ValueTemplateBinding<'_>],
 ) -> Result<CheckedValueTemplate> {
     if let Some(target_process) = context
         .semantic_index
@@ -3472,18 +4215,23 @@ fn checked_send_payload_template(
                 context.process.name, expected_type
             )));
         };
-        if let Some(binding) = binding {
-            if name == binding.name {
-                if binding.ty == expected_type {
-                    return Ok(CheckedValueTemplate::ReceivedPayload {
+        if let Some(binding) = bindings.iter().find(|binding| name == binding.name) {
+            if binding.ty == expected_type {
+                return Ok(match binding.source {
+                    ValueTemplateSource::ReceivedPayload => CheckedValueTemplate::ReceivedPayload {
                         ty: binding.checked_ty.clone(),
-                    });
-                }
-                return Err(Error::new(format!(
-                    "value binding {} has type {}, expected {}",
-                    binding.name, binding.ty, expected_type
-                )));
+                    },
+                    ValueTemplateSource::CurrentStatePayload => {
+                        CheckedValueTemplate::CurrentStatePayload {
+                            ty: binding.checked_ty.clone(),
+                        }
+                    }
+                });
             }
+            return Err(Error::new(format!(
+                "value binding {} has type {}, expected {}",
+                binding.name, binding.ty, expected_type
+            )));
         }
         let process_ref = context.process_ref_index.get(name).ok_or_else(|| {
             Error::new(format!(
@@ -3513,28 +4261,54 @@ fn checked_send_payload_template(
         types,
         expected_type,
         payload,
-        binding,
+        bindings,
     )
 }
 
-fn populate_payload_template_state_values(
+fn populate_template_state_values(
     context: &StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
     variant: CheckedMessageVariantId,
     state_arg: &ValueExpr,
-    binding: &StepPayloadBinding,
+    payload_binding: Option<&StepPayloadBinding>,
+    state_payload_binding: Option<&StepStatePayloadBinding>,
 ) -> Result<()> {
-    for payload in context
-        .message_cases
-        .payload_values(context.process_id, variant)?
-    {
+    if let Some(binding) = payload_binding {
+        for payload in context
+            .message_cases
+            .payload_values(context.process_id, variant)?
+        {
+            let mut bindings = vec![ValueBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+                label: payload.label(),
+            }];
+            if let Some(state_binding) = state_payload_binding {
+                bindings.push(ValueBinding {
+                    name: &state_binding.name,
+                    ty: &state_binding.ty,
+                    label: &state_binding.label,
+                });
+            }
+            state_space.resolve_state_value_with_bindings(
+                context.semantic_index,
+                types,
+                state_arg,
+                &bindings,
+            )?;
+        }
+        return Ok(());
+    }
+    if let Some(binding) = state_payload_binding {
         state_space.resolve_state_value_with_bindings(
             context.semantic_index,
+            types,
             state_arg,
             &[ValueBinding {
                 name: &binding.name,
                 ty: &binding.ty,
-                label: payload.label(),
+                label: &binding.label,
             }],
         )?;
     }

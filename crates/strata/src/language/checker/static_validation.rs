@@ -20,6 +20,7 @@ pub(super) fn validate_action_references(
         for transition in process.transitions() {
             validate_transition(processes, process, process_id, *entry_process, transition)?;
         }
+        validate_transition_coverage(process)?;
     }
     validate_static_runtime_order(processes, *entry_process, *entry_message)?;
     Ok(())
@@ -39,7 +40,13 @@ fn validate_transition(
             transition.message().as_u32()
         )));
     }
-    validate_next_state(process, transition.message(), transition.next_state())?;
+    validate_transition_current_state(process, transition)?;
+    validate_next_state(
+        process,
+        transition.message(),
+        transition.current_state(),
+        transition.next_state(),
+    )?;
     validate_transition_effects(process, transition)?;
     let mut spawned_refs = BTreeSet::new();
 
@@ -112,7 +119,7 @@ fn validate_transition(
                 }
                 validate_send_payload_shape(
                     process,
-                    transition.message(),
+                    transition,
                     target_process,
                     *message,
                     payload.as_ref(),
@@ -167,14 +174,16 @@ fn validate_transition_effects(
 
 fn validate_send_payload_shape(
     process: &CheckedProcess,
-    current_message: CheckedMessageId,
+    transition: &CheckedTransition,
     target_process: &CheckedProcess,
     target_message: CheckedMessageId,
     payload: Option<&CheckedValueTemplate>,
     spawned_refs: &BTreeSet<CheckedProcessRefId>,
     processes: &[CheckedProcess],
 ) -> Result<()> {
-    let current_payload_type = message_payload_type(process, current_message)?;
+    let current_payload_type = message_payload_type(process, transition.message())?;
+    let current_state_payload_type =
+        current_state_payload_type(process, transition.current_state())?;
     let target_payload_type = message_payload_type(target_process, target_message)?;
     match (target_payload_type, payload) {
         (None, None) => Ok(()),
@@ -189,7 +198,11 @@ fn validate_send_payload_shape(
             target_message.as_u32()
         ))),
         (Some(expected_type), Some(payload)) => {
-            validate_value_template_received_type(payload, current_payload_type)?;
+            validate_value_template_binding_types(
+                payload,
+                current_payload_type,
+                current_state_payload_type,
+            )?;
             validate_value_template_payload_labels(payload)?;
             validate_value_template_process_refs(processes, process, payload, spawned_refs, true)?;
             if payload.result_type() != expected_type {
@@ -208,6 +221,7 @@ fn validate_send_payload_shape(
 fn validate_next_state(
     process: &CheckedProcess,
     current_message: CheckedMessageId,
+    current_state: Option<CheckedStateId>,
     next_state: CheckedNextState,
 ) -> Result<()> {
     match next_state {
@@ -231,14 +245,22 @@ fn validate_next_state(
                     process.state_type()
                 )));
             }
-            validate_value_template_received_type(
+            validate_value_template_binding_types(
                 &template,
                 message_payload_type(process, current_message)?,
+                current_state_payload_type(process, current_state)?,
             )?;
             validate_value_template_payload_labels(&template)?;
             reject_process_ref_template_in_next_state(&template)?;
             if !checked_template_depends_on_received_payload(&template) {
-                resolve_checked_template_state(process, &template, None)?;
+                resolve_checked_template_state(
+                    process,
+                    &template,
+                    None,
+                    current_state
+                        .and_then(|state| process.state_values().get(state.index()))
+                        .and_then(|state| state.payload()),
+                )?;
             }
             Ok(())
         }
@@ -262,9 +284,116 @@ fn message_payload_type(
         })
 }
 
-fn validate_value_template_received_type(
+fn validate_transition_current_state(
+    process: &CheckedProcess,
+    transition: &CheckedTransition,
+) -> Result<()> {
+    if let Some(current_state) = transition.current_state() {
+        if current_state.index() >= process.state_values().len() {
+            return Err(Error::new(format!(
+                "process {} message id {} current_state id {} is not a valid state value",
+                process.debug_name(),
+                transition.message().as_u32(),
+                current_state.as_u32()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_transition_coverage(process: &CheckedProcess) -> Result<()> {
+    let mut declared = BTreeSet::new();
+    for transition in process.transitions() {
+        let key = (transition.message(), transition.current_state());
+        if !declared.insert(key) {
+            return Err(Error::new(format!(
+                "process {} declares duplicate transition for message id {} current_state {:?}",
+                process.debug_name(),
+                transition.message().as_u32(),
+                transition.current_state().map(CheckedStateId::as_u32)
+            )));
+        }
+    }
+
+    for message_index in 0..process.message_cases().len() {
+        let message = CheckedMessageId::from_index(message_index)?;
+        let mut has_unguarded = false;
+        let mut guarded_states = BTreeSet::new();
+
+        for transition in process
+            .transitions()
+            .iter()
+            .filter(|transition| transition.message() == message)
+        {
+            match transition.current_state() {
+                Some(current_state) => {
+                    guarded_states.insert(current_state);
+                }
+                None => {
+                    has_unguarded = true;
+                }
+            }
+        }
+
+        if has_unguarded {
+            if !guarded_states.is_empty() {
+                return Err(Error::new(format!(
+                    "process {} mixes unguarded and state-specific transitions for message id {}",
+                    process.debug_name(),
+                    message.as_u32()
+                )));
+            }
+            continue;
+        }
+
+        if guarded_states.is_empty() {
+            return Err(Error::new(format!(
+                "process {} has no transition for message id {}",
+                process.debug_name(),
+                message.as_u32()
+            )));
+        }
+
+        for state_index in 0..process.state_values().len() {
+            let state = CheckedStateId::from_index(state_index)?;
+            if !guarded_states.contains(&state) {
+                return Err(Error::new(format!(
+                    "process {} has no transition for message id {} current_state id {}",
+                    process.debug_name(),
+                    message.as_u32(),
+                    state.as_u32()
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn current_state_payload_type(
+    process: &CheckedProcess,
+    current_state: Option<CheckedStateId>,
+) -> Result<Option<&CheckedTypeRef>> {
+    let Some(current_state) = current_state else {
+        return Ok(None);
+    };
+    let state = process
+        .state_values()
+        .get(current_state.index())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} current_state id {} is not a valid state value",
+                process.debug_name(),
+                current_state.as_u32()
+            ))
+        })?;
+    Ok(state.payload().map(CheckedPayloadValue::ty))
+}
+
+fn validate_value_template_binding_types(
     template: &CheckedValueTemplate,
     received_payload_type: Option<&CheckedTypeRef>,
+    current_state_payload_type: Option<&CheckedTypeRef>,
 ) -> Result<()> {
     match template {
         CheckedValueTemplate::Literal(_) => Ok(()),
@@ -282,13 +411,33 @@ fn validate_value_template_received_type(
             }
             Ok(())
         }
-        CheckedValueTemplate::ProcessRef { .. } => Ok(()),
-        CheckedValueTemplate::EnumVariant { payload, .. } => {
-            validate_value_template_received_type(payload, received_payload_type)
+        CheckedValueTemplate::CurrentStatePayload { ty } => {
+            let Some(current_state_payload_type) = current_state_payload_type else {
+                return Err(Error::new(
+                    "current state payload template requires a payload-bearing state",
+                ));
+            };
+            if ty != current_state_payload_type {
+                return Err(Error::new(format!(
+                    "current state payload template has type {}, expected {}",
+                    ty, current_state_payload_type
+                )));
+            }
+            Ok(())
         }
+        CheckedValueTemplate::ProcessRef { .. } => Ok(()),
+        CheckedValueTemplate::EnumVariant { payload, .. } => validate_value_template_binding_types(
+            payload,
+            received_payload_type,
+            current_state_payload_type,
+        ),
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
-                validate_value_template_received_type(field.value(), received_payload_type)?;
+                validate_value_template_binding_types(
+                    field.value(),
+                    received_payload_type,
+                    current_state_payload_type,
+                )?;
             }
             Ok(())
         }
@@ -300,7 +449,8 @@ fn validate_value_template_payload_labels(template: &CheckedValueTemplate) -> Re
         CheckedValueTemplate::Literal(value) => {
             validate_payload_value_label(value.label()).map_err(|err| Error::new(err.to_string()))
         }
-        CheckedValueTemplate::ReceivedPayload { .. } => Ok(()),
+        CheckedValueTemplate::ReceivedPayload { .. }
+        | CheckedValueTemplate::CurrentStatePayload { .. } => Ok(()),
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             validate_value_template_payload_labels(payload)
@@ -322,7 +472,9 @@ fn validate_value_template_process_refs(
     allow_direct_process_ref: bool,
 ) -> Result<()> {
     match template {
-        CheckedValueTemplate::Literal(_) | CheckedValueTemplate::ReceivedPayload { .. } => Ok(()),
+        CheckedValueTemplate::Literal(_)
+        | CheckedValueTemplate::ReceivedPayload { .. }
+        | CheckedValueTemplate::CurrentStatePayload { .. } => Ok(()),
         CheckedValueTemplate::ProcessRef {
             ty,
             target,
@@ -386,6 +538,12 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
             }
             Ok(())
         }
+        CheckedValueTemplate::CurrentStatePayload { ty } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            Ok(())
+        }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference templates are not valid next-state values",
         )),
@@ -409,6 +567,7 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
     match template {
         CheckedValueTemplate::Literal(_) => false,
         CheckedValueTemplate::ReceivedPayload { .. } => true,
+        CheckedValueTemplate::CurrentStatePayload { .. } => false,
         CheckedValueTemplate::ProcessRef { .. } => false,
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             checked_template_depends_on_received_payload(payload)
@@ -422,6 +581,7 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
 fn evaluate_checked_template(
     template: &CheckedValueTemplate,
     received_payload: Option<&CheckedPayloadValue>,
+    current_state_payload: Option<&CheckedPayloadValue>,
 ) -> Result<CheckedPayloadValue> {
     match template {
         CheckedValueTemplate::Literal(value) => Ok(value.clone()),
@@ -443,6 +603,19 @@ fn evaluate_checked_template(
             }
             Ok(payload.clone())
         }
+        CheckedValueTemplate::CurrentStatePayload { ty } => {
+            let payload = current_state_payload.ok_or_else(|| {
+                Error::new("current state payload template requires a payload-bearing state")
+            })?;
+            if payload.ty() != ty {
+                return Err(Error::new(format!(
+                    "current state payload has type {}, expected {}",
+                    payload.ty(),
+                    ty
+                )));
+            }
+            Ok(payload.clone())
+        }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires static runtime process reference bindings",
         )),
@@ -451,7 +624,8 @@ fn evaluate_checked_template(
             variant,
             payload,
         } => {
-            let payload = evaluate_checked_template(payload, received_payload)?;
+            let payload =
+                evaluate_checked_template(payload, received_payload, current_state_payload)?;
             let label = format!("{variant}({})", payload.label());
             validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
             Ok(CheckedPayloadValue::new(ty.clone(), label))
@@ -459,7 +633,11 @@ fn evaluate_checked_template(
         CheckedValueTemplate::Record { ty, fields } => {
             let mut parts = Vec::with_capacity(fields.len());
             for field in fields {
-                let value = evaluate_checked_template(field.value(), received_payload)?;
+                let value = evaluate_checked_template(
+                    field.value(),
+                    received_payload,
+                    current_state_payload,
+                )?;
                 parts.push(format!("{}:{}", field.name(), value.label()));
             }
             let label = format!("{ty}{{{}}}", parts.join(","));
@@ -472,6 +650,7 @@ fn evaluate_checked_template(
 fn evaluate_checked_runtime_template(
     template: &CheckedValueTemplate,
     received_payload: Option<&CheckedPayloadValue>,
+    current_state_payload: Option<&CheckedPayloadValue>,
     process: &CheckedProcess,
     process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
 ) -> Result<CheckedPayloadValue> {
@@ -484,6 +663,19 @@ fn evaluate_checked_runtime_template(
             if payload.ty() != ty {
                 return Err(Error::new(format!(
                     "received payload has type {}, expected {}",
+                    payload.ty(),
+                    ty
+                )));
+            }
+            Ok(payload.clone())
+        }
+        CheckedValueTemplate::CurrentStatePayload { ty } => {
+            let payload = current_state_payload.ok_or_else(|| {
+                Error::new("current state payload template requires a payload-bearing state")
+            })?;
+            if payload.ty() != ty {
+                return Err(Error::new(format!(
+                    "current state payload has type {}, expected {}",
                     payload.ty(),
                     ty
                 )));
@@ -511,6 +703,7 @@ fn evaluate_checked_runtime_template(
             let payload = evaluate_checked_runtime_template(
                 payload,
                 received_payload,
+                current_state_payload,
                 process,
                 process_refs,
             )?;
@@ -524,6 +717,7 @@ fn evaluate_checked_runtime_template(
                 let value = evaluate_checked_runtime_template(
                     field.value(),
                     received_payload,
+                    current_state_payload,
                     process,
                     process_refs,
                 )?;
@@ -540,8 +734,9 @@ fn resolve_checked_template_state(
     process: &CheckedProcess,
     template: &CheckedValueTemplate,
     received_payload: Option<&CheckedPayloadValue>,
+    current_state_payload: Option<&CheckedPayloadValue>,
 ) -> Result<CheckedStateId> {
-    let value = evaluate_checked_template(template, received_payload)?;
+    let value = evaluate_checked_template(template, received_payload, current_state_payload)?;
     let state_index = process
         .state_values()
         .iter()
@@ -562,12 +757,19 @@ fn resolve_checked_next_state(
     next_state: CheckedNextState,
     received_payload: Option<&CheckedPayloadValue>,
 ) -> Result<CheckedStateId> {
+    let current_state_payload = process
+        .state_values()
+        .get(current_state.index())
+        .and_then(|state| state.payload());
     match next_state {
         CheckedNextState::Current => Ok(current_state),
         CheckedNextState::Value(state) => Ok(state),
-        CheckedNextState::Template(template) => {
-            resolve_checked_template_state(process, &template, received_payload)
-        }
+        CheckedNextState::Template(template) => resolve_checked_template_state(
+            process,
+            &template,
+            received_payload,
+            current_state_payload,
+        ),
     }
 }
 
@@ -858,10 +1060,15 @@ fn validate_static_runtime_order(
             .mailbox
             .pop_front()
             .ok_or_else(|| Error::new("static runtime mailbox changed during dequeue"))?;
-        let transition = transition_for_message(process, envelope.message)?;
+        let current_state = instances[process_index].state;
+        let current_state_payload = process
+            .state_values()
+            .get(current_state.index())
+            .and_then(|state| state.payload());
+        let transition = transition_for_message(process, envelope.message, current_state)?;
         let final_state = resolve_checked_next_state(
             process,
-            instances[process_index].state,
+            current_state,
             transition.next_state(),
             envelope.payload.as_ref(),
         )?;
@@ -942,6 +1149,7 @@ fn validate_static_runtime_order(
                         Some(payload) => Some(evaluate_checked_runtime_template(
                             payload,
                             envelope.payload.as_ref(),
+                            current_state_payload,
                             process,
                             &local_process_refs,
                         )?),
@@ -990,16 +1198,25 @@ fn next_static_runnable(instances: &[StaticProcessInstance]) -> Option<usize> {
 fn transition_for_message(
     process: &CheckedProcess,
     message: CheckedMessageId,
+    current_state: CheckedStateId,
 ) -> Result<&CheckedTransition> {
     process
         .transitions()
         .iter()
-        .find(|transition| transition.message() == message)
+        .find(|transition| {
+            transition.message() == message && transition.current_state() == Some(current_state)
+        })
+        .or_else(|| {
+            process.transitions().iter().find(|transition| {
+                transition.message() == message && transition.current_state().is_none()
+            })
+        })
         .ok_or_else(|| {
             Error::new(format!(
-                "process {} has no transition for message id {}",
+                "process {} has no transition for message id {} current_state id {}",
                 process.debug_name(),
-                message.as_u32()
+                message.as_u32(),
+                current_state.as_u32()
             ))
         })
 }
@@ -1143,6 +1360,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: CheckedStateId::from_index(0).expect("valid checked state id"),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::ReceivedPayload {
@@ -1182,6 +1400,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::Literal(
@@ -1223,6 +1442,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1262,6 +1482,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1299,6 +1520,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1339,6 +1561,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1376,6 +1599,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1416,6 +1640,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1447,6 +1672,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1490,6 +1716,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1528,6 +1755,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1571,6 +1799,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1609,6 +1838,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1653,6 +1883,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1697,6 +1928,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1740,6 +1972,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::Record {
@@ -1774,6 +2007,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1814,6 +2048,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1838,6 +2073,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
@@ -1887,6 +2123,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -1927,6 +2164,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::Record {
@@ -1977,6 +2215,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Current,
@@ -2014,6 +2253,7 @@ mod tests {
             mailbox_bound: 1,
             init_state: checked_state_id(0),
             transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+                current_state: None,
                 message: checked_message_id(0),
                 step_result: CheckedStepResult::Stop,
                 next_state: CheckedNextState::Template(CheckedValueTemplate::EnumVariant {

@@ -120,6 +120,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/state_payload_enum.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/state_payload_enum.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/state_payload_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/state_payload_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_instances.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_instances.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta

@@ -20,7 +20,7 @@ Mantle artifact internals.
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Patterns | Constructor patterns, constructor payload bindings, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, payload sends, and payload-binding step patterns. |
-| Pattern dispatch | Function signature patterns, source function match bodies, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, and one whole-body `match msg` step form per process. |
+| Pattern dispatch | Function signature patterns, source function match bodies, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, and whole-body `match state` inside message-specific step clauses. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
 The `module` declaration names a source unit. It does not create an import
@@ -190,8 +190,9 @@ Only the aliases `State` and `Msg` are accepted inside a process. Processes may
 also declare pure deterministic helper functions alongside `init` and `step`.
 Each message variant must resolve to exactly one `step` clause, selected by an
 explicit constructor pattern, by one wildcard pattern, or by one whole-body
-match. A process cannot mix step parameter patterns with a match step body in
-this slice.
+`match msg`. A message-specific step clause can also dispatch over current
+state with a whole-body `match state`. A process cannot mix parameter-pattern
+or state-match step clauses with a `match msg` step body in this slice.
 
 ## Function Signatures
 
@@ -210,6 +211,7 @@ Buildable source requires:
 | `init` | No parameters, returns the process state type, uses `! [] ~ [] @det`. |
 | parameter-pattern `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
 | match `step` | Parameters exactly `state: StateType, msg: MsgType`, returns `ProcResult<StateType>`, uses `~ [] @det`, and has a whole-body `match msg`. |
+| state-match `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`, and has a whole-body `match state`. |
 | source helper | One binding parameter or one pattern parameter, returns a source value type, uses `! [] ~ [] @det`, and has no runtime statements. |
 
 The parser recognizes `@nondet`, but buildable source rejects it. The
@@ -347,6 +349,35 @@ admitted message IDs and payload type IDs, not by source strings. In this
 buildable step subset the match scrutinee must be the typed message parameter,
 and match arms are block-delimited without comma separators.
 
+A message-specific `step` may instead match the current state parameter when
+the process state type is an enum:
+
+```strata
+fn step(state: WorkerState, Complete) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    match state {
+        Idle => {
+            emit "worker had no job";
+            return Stop(Idle);
+        }
+        Working(job: Job) => {
+            emit "worker completed job";
+            return Stop(Done(job));
+        }
+        Done(job: Job) => {
+            emit "worker already done";
+            return Stop(Done(job));
+        }
+    }
+}
+```
+
+State-match arms resolve against the declared process state enum and are
+exhaustive over its variants. Payload-bearing state variants must bind their
+payload with the declared payload type. The binding is immutable and local to
+that transition arm. Lowering emits typed Mantle transitions keyed by admitted
+message ID plus admitted current state ID, and runtime selection fails closed
+if the current state is not admitted.
+
 An `init` match is checked against the enum that owns the scrutinee constructor.
 It must be exhaustive, duplicate-free, and statement-free; each arm returns an
 immutable whole state value. Payload-bearing enum variants can be covered by
@@ -357,9 +388,9 @@ the returned state because the initial state lowers to one static state ID.
 
 The `! [...]` effect list is source-level authority for the runtime effects used
 by each `step` clause. It must exactly match the clause actions. For a
-match step, the one effect list applies to every generated transition,
-so each arm must use exactly those effects. Missing, duplicate, and unused
-declared effects are rejected before lowering.
+`match msg` or `match state` step, the one effect list applies to every
+generated transition, so each arm must use exactly those effects. Missing,
+duplicate, and unused declared effects are rejected before lowering.
 
 | Effect | Statement |
 | --- | --- |
@@ -464,6 +495,10 @@ return Panic(Failed);
 
 State changes are immutable whole-value transitions. There is no assignment
 statement and no source-visible field mutation.
+
+Payload-bearing process states can be observed only through checked immutable
+state patterns such as `Working(job: Job)`. Returning `Done(job)` creates a new
+whole state value; it does not rewrite the payload inside the existing state.
 
 ## Limits
 

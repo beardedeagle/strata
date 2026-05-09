@@ -127,6 +127,20 @@ That example admits `Idle` and `Working(Job { phase: Ready })` as typed state
 values, then lowers a received payload state transition into a Mantle value
 template that must resolve to the admitted state table before execution.
 
+Current process state can also be matched as immutable data:
+
+```sh
+cargo run -p strata --bin strata -- check examples/state_payload_match.str
+cargo run -p strata --bin strata -- build examples/state_payload_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta
+```
+
+That example enters `Working(Job { phase: Ready })`, later matches
+`Working(job: Job)` through the current state parameter, and returns the whole
+replacement state `Done(job)`. Lowering emits typed state-specific Mantle
+transitions, and runtime dispatch selects by admitted message ID plus admitted
+current state ID.
+
 Process references support multiple runtime instances of one process definition:
 
 ```sh

@@ -134,6 +134,7 @@ fn lower_transition(
     types: &ArtifactTypeMap,
 ) -> mantle_artifact::Result<ArtifactTransition> {
     Ok(ArtifactTransition {
+        current_state: transition.current_state().map(lower_state_id),
         message: lower_message_id(transition.message()),
         step_result: lower_step_result(transition.step_result()),
         next_state: lower_next_state(transition.next_state(), types)?,
@@ -219,11 +220,19 @@ fn lower_state_value(
     value: &CheckedStateValue,
     types: &ArtifactTypeMap,
 ) -> mantle_artifact::Result<ArtifactStateValue> {
-    Ok(ArtifactStateValue::with_label(
+    let mut state = ArtifactStateValue::with_label(
         types.artifact_id(value.ty())?,
         value.value().to_string(),
         value.label().to_string(),
-    ))
+    );
+    if let Some(payload) = value.payload() {
+        state.payload = Some(mantle_artifact::ArtifactPayload {
+            ty: types.artifact_id(payload.ty())?,
+            value: payload.label().to_string(),
+            process_ref: None,
+        });
+    }
+    Ok(state)
 }
 
 fn lower_value_template(
@@ -237,6 +246,11 @@ fn lower_value_template(
         }),
         CheckedValueTemplate::ReceivedPayload { ty } => {
             Ok(ArtifactValueTemplate::ReceivedPayload {
+                ty: types.artifact_id(ty)?,
+            })
+        }
+        CheckedValueTemplate::CurrentStatePayload { ty } => {
+            Ok(ArtifactValueTemplate::CurrentStatePayload {
                 ty: types.artifact_id(ty)?,
             })
         }
