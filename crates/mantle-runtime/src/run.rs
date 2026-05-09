@@ -1215,11 +1215,12 @@ mod tests {
     fn runtime_rejects_loaded_unknown_next_state_before_artifact_loaded() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].current_state = Some(StateId::new(0));
         program.processes[0].transitions[0].next_state = NextState::Value(StateId::new(1));
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
-            "process Main transition 0 next_state id 1 is not a loaded state value",
+            "process Main message id 0 current_state id 0 next_state id 1 is not a loaded state value",
         );
     }
 
@@ -1227,6 +1228,7 @@ mod tests {
     fn runtime_rejects_loaded_unadmitted_template_state_before_artifact_loaded() {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+        program.processes[0].transitions[0].current_state = Some(StateId::new(0));
         program.processes[0].transitions[0].next_state =
             NextState::Template(ArtifactValueTemplate::Literal {
                 ty: MAIN_STATE,
@@ -1235,7 +1237,7 @@ mod tests {
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
-            "process Main transition 0 next_state_template produced value UnadmittedState not admitted by loaded state table",
+            "process Main message id 0 current_state id 0 next_state_template produced value UnadmittedState not admitted by loaded state table",
         );
     }
 
@@ -1244,6 +1246,7 @@ mod tests {
         let artifact = artifact_with_unbound_worker_process_ref();
         let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
         program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+        program.processes[1].transitions[0].current_state = Some(StateId::new(0));
         program.processes[1].transitions[0].next_state =
             NextState::Template(ArtifactValueTemplate::EnumVariant {
                 ty: WORKER_STATE,
@@ -1255,7 +1258,7 @@ mod tests {
 
         assert_loaded_admission_rejects_before_artifact_loaded(
             &program,
-            "process Worker transition 0 next_state_template.payload process reference template must be a direct message payload",
+            "process Worker message id 0 current_state id 0 next_state_template.payload process reference template must be a direct message payload",
         );
     }
 

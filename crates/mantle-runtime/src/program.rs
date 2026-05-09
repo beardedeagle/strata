@@ -708,14 +708,15 @@ impl LoadedTransition {
         process: &LoadedProcess,
         message: MessageId,
     ) -> Result<()> {
+        let context = self.transition_context(message);
         match &self.next_state {
             NextState::Current => Ok(()),
             NextState::Value(state) => {
                 if state.index() >= process.state_values.len() {
                     return Err(Error::new(format!(
-                        "process {} transition {} next_state id {} is not a loaded state value",
+                        "process {} {} next_state id {} is not a loaded state value",
                         process.debug_name,
-                        message.as_u32(),
+                        context,
                         state.as_u32()
                     )));
                 }
@@ -736,9 +737,8 @@ impl LoadedTransition {
                 }
                 .validate(
                     &format!(
-                        "process {} transition {} next_state_template",
-                        process.debug_name,
-                        message.as_u32()
+                        "process {} {} next_state_template",
+                        process.debug_name, context
                     ),
                     template,
                 )?;
@@ -760,12 +760,21 @@ impl LoadedTransition {
                     return Ok(());
                 }
                 Err(Error::new(format!(
-                    "process {} transition {} next_state_template produced value {} not admitted by loaded state table",
-                    process.debug_name,
-                    message.as_u32(),
-                    value.label
+                    "process {} {} next_state_template produced value {} not admitted by loaded state table",
+                    process.debug_name, context, value.label
                 )))
             }
+        }
+    }
+
+    fn transition_context(&self, message: MessageId) -> String {
+        match self.current_state {
+            Some(current_state) => format!(
+                "message id {} current_state id {}",
+                message.as_u32(),
+                current_state.as_u32()
+            ),
+            None => format!("message id {}", message.as_u32()),
         }
     }
 }
