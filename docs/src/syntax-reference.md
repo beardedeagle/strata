@@ -151,9 +151,6 @@ function_body =
 block_body =
     statement* return_statement
 
-return_statement =
-    "return" (value_expr | match_body) ";"
-
 match_body =
     "match" ident "{" match_arm+ "}"
 
@@ -312,7 +309,7 @@ payload-binding step patterns.
 ```text
 return_expr =
     value_expr
-  | ident "(" value_expr ")"
+  | match_body
 
 value_expr =
     ident
