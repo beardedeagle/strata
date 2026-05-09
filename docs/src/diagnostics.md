@@ -54,6 +54,7 @@ result of the first invalid shape.
 | `function ... wildcard pattern is unreachable` | Explicit source function clauses already cover every variant. | Remove the wildcard clause or remove the explicit clauses it should cover. |
 | `record pattern ... has no field ...` | A source helper record pattern names a field outside the matched record. | Bind a declared field from the record. |
 | `record pattern ... binds field ... more than once` | A source helper record pattern repeats one field. | Bind each record field at most once. |
+| `record pattern binding ... is declared more than once` | A source helper record pattern binds two fields to the same local name. | Use one distinct immutable binding name per field. |
 | `record pattern binding ... conflicts ...` | A source helper record pattern binding reuses a reserved, process, type, or constructor name. | Choose a distinct immutable binding name. |
 | `match record pattern ... must declare exactly one arm` | A helper whole-body match over a record tries to use enum-style multi-arm dispatch. | Use one record destructuring arm for the matched record type. |
 | `match over record ... cannot use a wildcard pattern` | A helper whole-body match over a record tries to use `_`. | Use the record destructuring pattern for the matched record type. |

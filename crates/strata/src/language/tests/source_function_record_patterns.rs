@@ -552,6 +552,51 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn rejects_source_function_record_pattern_duplicate_binding() {
+    let source = r#"
+module source_function_record_pattern_duplicate_binding;
+
+enum JobPhase {
+    Ready,
+    Done,
+}
+record Job {
+    phase: JobPhase,
+    fallback: JobPhase,
+}
+record MainState {
+    phase: JobPhase,
+}
+enum MainMsg {
+    Start,
+}
+
+fn phase_of(Job { phase: selected, fallback: selected }) -> JobPhase ! [] ~ [] @det {
+    return selected;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { phase: phase_of(Job { phase: Ready, fallback: Done }) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("duplicate record pattern binding should fail");
+
+    assert!(err.to_string().contains(
+        "module function phase_of record pattern binding selected is declared more than once"
+    ));
+}
+
+#[test]
 fn rejects_source_function_record_pattern_binding_constructor_conflict() {
     let source = r#"
 module source_function_record_pattern_binding_conflict;
