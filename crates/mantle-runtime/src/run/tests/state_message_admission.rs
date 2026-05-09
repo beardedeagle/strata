@@ -1,0 +1,150 @@
+use super::support::*;
+
+#[test]
+fn runtime_rejects_loaded_process_ref_state_type_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].state_type = PROCESS_REF_WORKER;
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "state_type type id 8 must be a value type",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_payload_bearing_entry_message_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].message_variants[0].payload_type = Some(START_PAYLOAD);
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "entry message id 0 must not require a payload",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_invalid_message_payload_type_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].message_variants[0].payload_type = Some(TypeId::new(99));
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker message payload_type: loaded type id 99 is not loaded",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_invalid_init_state_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].init_state = StateId::new(1);
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main init_state id 1 is not a loaded state value",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_unknown_next_state_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].current_state = Some(StateId::new(0));
+    program.processes[0].transitions[0].next_state = NextState::Value(StateId::new(1));
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main message id 0 current_state id 0 next_state id 1 is not a loaded state value",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_unadmitted_template_state_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].current_state = Some(StateId::new(0));
+    program.processes[0].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Literal {
+            ty: MAIN_STATE,
+            value: "UnadmittedState".to_string(),
+        });
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main message id 0 current_state id 0 next_state_template produced value UnadmittedState not admitted by loaded state table",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    program.processes[1].transitions[0].current_state = Some(StateId::new(0));
+    program.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::EnumVariant {
+            ty: WORKER_STATE,
+            variant: "Routed".to_string(),
+            payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
+                ty: PROCESS_REF_WORKER,
+            }),
+        });
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker message id 0 current_state id 0 next_state_template.payload process reference template must be a direct message payload",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Record {
+            ty: MAIN_STATE,
+            fields: vec![ArtifactValueTemplateField {
+                name: "item".to_string(),
+                value: ArtifactValueTemplate::Literal {
+                    ty: TypeId::new(99),
+                    value: "Item".to_string(),
+                },
+            }],
+        });
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "loaded type id 99 is not loaded",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_template_depth_overflow_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state =
+        NextState::Template(record_template_with_depth(MAX_VALUE_TEMPLATE_DEPTH + 2));
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "exceeds maximum value template depth",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_unknown_emit_output_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].effect_authority =
+        crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
+    program.processes[0].transitions[0]
+        .actions
+        .push(LoadedAction::Emit {
+            output: OutputId::new(0),
+        });
+
+    assert_loaded_admission_rejects_before_artifact_loaded(&program, "output id 0 is not loaded");
+}
