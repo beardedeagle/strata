@@ -14,18 +14,25 @@ Read them in this order:
    pattern matching outside actor dispatch.
 7. `function_payload_match.str` for payload-bearing enum construction and
    matching in normal source helpers.
-8. `state_payload_enum.str` for payload-bearing process state enum transitions.
-9. `state_payload_match.str` for matching immutable current process state
+8. `function_return_match.str` for helper return-match expressions.
+9. `function_record_pattern.str` for source helper record destructuring
+   patterns.
+10. `function_record_return_match.str` for helper return-match record
+   destructuring.
+11. `function_record_body_match.str` for whole-body helper match record
+   destructuring.
+12. `state_payload_enum.str` for payload-bearing process state enum transitions.
+13. `state_payload_match.str` for matching immutable current process state
    payloads.
-10. `actor_instances.str` for multiple runtime instances of one process
+14. `actor_instances.str` for multiple runtime instances of one process
    definition.
-11. `actor_payloads.str` for typed message payloads and immutable payload
+15. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-12. `actor_payload_match.str` for the same payload binding through a whole-body
+16. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-13. `actor_reply.str` for transporting typed process references through message
+17. `actor_reply.str` for transporting typed process references through message
    payloads.
-14. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+18. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -181,6 +188,83 @@ Key source ideas:
   payload inside the selected arm.
 - `state_for(Assigned(job))` proves a process-local helper can wrap a received
   immutable payload into a source enum value before lowering.
+
+## Function Return Match
+
+`examples/function_return_match.str` uses a helper `return match` expression to
+select an immutable result from an in-scope source value binding.
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_return_match.str
+cargo run -p strata --bin strata -- build examples/function_return_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_return_match.mta
+```
+
+Key source ideas:
+
+- `return match work { ... };` is checked as a pure helper return expression.
+- The selected arm binds enum payloads immutably before helper expansion.
+- Mantle receives the resolved `MainState{status:Active(Job{phase:Ready})}`
+  state value, not source helper dispatch.
+
+## Function Record Pattern
+
+`examples/function_record_pattern.str` destructures an immutable record value in
+a normal source helper signature.
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_record_pattern.str
+cargo run -p strata --bin strata -- build examples/function_record_pattern.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_record_pattern.mta
+```
+
+Key source ideas:
+
+- `fn phase_of(Job { phase })` binds the `phase` field as an immutable source
+  value.
+- `field: binding` may rename a record field binding in the helper signature.
+- The helper expands before lowering; Mantle admits the resolved
+  `MainState{phase:Ready}` state value.
+
+## Function Record Return Match
+
+`examples/function_record_return_match.str` destructures an immutable record value
+inside a helper `return match` expression.
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_record_return_match.str
+cargo run -p strata --bin strata -- build examples/function_record_return_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_record_return_match.mta
+```
+
+Key source ideas:
+
+- `return match job { Job { phase } => { return phase; } };` binds the
+  `phase` field as an immutable source value inside the selected arm.
+- Record return-match destructuring requires the scrutinee to be an in-scope
+  source binding with a concrete record value.
+- The helper expands before lowering; Mantle admits the resolved
+  `MainState{phase:Ready}` state value.
+
+## Function Record Body Match
+
+`examples/function_record_body_match.str` destructures an immutable record value
+inside a whole-body source helper match.
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_record_body_match.str
+cargo run -p strata --bin strata -- build examples/function_record_body_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_record_body_match.mta
+```
+
+Key source ideas:
+
+- `match job { Job { phase } => { return phase; } }` binds the `phase` field
+  as an immutable source value inside the selected arm.
+- Record body-match destructuring requires one record pattern arm over the
+  helper parameter's concrete record value.
+- The helper expands before lowering; Mantle admits the resolved
+  `MainState{phase:Ready}` state value.
 
 ## State Payload Enum
 

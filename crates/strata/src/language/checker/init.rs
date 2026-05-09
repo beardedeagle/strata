@@ -147,6 +147,11 @@ fn resolve_init_return_block_value(
             name: name.clone(),
             arg: Box::new(arg.clone()),
         },
+        ReturnExpr::Match(_) => {
+            return Err(Error::new(format!(
+                "{context} return match is not supported in init in this source slice"
+            )));
+        }
     };
     let bindings = payload_binding
         .map(|binding| {

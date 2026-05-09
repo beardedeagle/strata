@@ -701,6 +701,109 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn function_return_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/function_return_match.str",
+        "target/strata/function_return_match.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("source helper return match selected payload"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let artifact = gate.read_artifact("target/strata/function_return_match.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(
+        main.state_values[0].label,
+        "MainState{status:Active(Job{phase:Ready})}"
+    );
+
+    let trace = gate.read_trace("function_return_match");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{status:Active(Job{phase:Ready})}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper return match selected payload""#
+    ));
+}
+
+#[test]
+fn function_record_pattern_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/function_record_pattern.str",
+        "target/strata/function_record_pattern.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("source helper record pattern selected field"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let artifact = gate.read_artifact("target/strata/function_record_pattern.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.state_values[0].label, "MainState{phase:Ready}");
+
+    let trace = gate.read_trace("function_record_pattern");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{phase:Ready}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper record pattern selected field""#
+    ));
+}
+
+#[test]
+fn function_record_return_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/function_record_return_match.str",
+        "target/strata/function_record_return_match.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("source helper record return match selected field"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let artifact = gate.read_artifact("target/strata/function_record_return_match.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.state_values[0].label, "MainState{phase:Ready}");
+
+    let trace = gate.read_trace("function_record_return_match");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{phase:Ready}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper record return match selected field""#
+    ));
+}
+
+#[test]
+fn function_record_body_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/function_record_body_match.str",
+        "target/strata/function_record_body_match.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("source helper record body match selected field"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let artifact = gate.read_artifact("target/strata/function_record_body_match.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.state_values[0].label, "MainState{phase:Ready}");
+
+    let trace = gate.read_trace("function_record_body_match");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{phase:Ready}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper record body match selected field""#
+    ));
+}
+
+#[test]
 fn state_payload_enum_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(

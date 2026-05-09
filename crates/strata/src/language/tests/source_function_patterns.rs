@@ -209,6 +209,111 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn checks_source_function_return_match_expression_with_payload_binding() {
+    let source = r#"
+module source_function_return_match;
+
+record Job {
+    phase: JobPhase,
+}
+enum JobPhase {
+    Ready,
+    Done,
+}
+enum Work {
+    Empty,
+    Assigned(Job),
+}
+enum WorkStatus {
+    Idle,
+    Active(Job),
+}
+record MainState {
+    status: WorkStatus,
+}
+enum MainMsg {
+    Start,
+}
+
+fn status(work: Work) -> WorkStatus ! [] ~ [] @det {
+    return match work {
+        Empty => {
+            return Idle;
+        }
+        Assigned(job: Job) => {
+            return Active(job);
+        }
+    };
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { status: status(Assigned(Job { phase: Ready })) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    check_source(source).expect("source helper return match should check");
+}
+
+#[test]
+fn rejects_non_exhaustive_source_function_return_match_expression() {
+    let source = r#"
+module source_function_return_match_non_exhaustive;
+
+enum Mode {
+    Cold,
+    Warm,
+}
+enum Readiness {
+    ColdReady,
+    WarmReady,
+}
+record MainState {
+    readiness: Readiness,
+}
+enum MainMsg {
+    Start,
+}
+
+fn readiness(mode: Mode) -> Readiness ! [] ~ [] @det {
+    return match mode {
+        Cold => {
+            return ColdReady;
+        }
+    };
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { readiness: readiness(Warm) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("non-exhaustive return match should fail");
+
+    assert!(
+        err.to_string()
+            .contains("function readiness return match must handle variant Warm")
+    );
+}
+
+#[test]
 fn rejects_unknown_source_enum_payload_constructor_value() {
     let source = FUNCTION_PAYLOAD_MATCH.replace(
         "status_sig(Assigned(Job { phase: Ready }))",

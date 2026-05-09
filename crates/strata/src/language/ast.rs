@@ -195,7 +195,17 @@ pub enum Pattern {
         name: Identifier,
         binding: Option<Param>,
     },
+    Record {
+        name: Identifier,
+        fields: Vec<RecordPatternField>,
+    },
     Wildcard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordPatternField {
+    pub field: Identifier,
+    pub binding: Identifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -321,6 +331,7 @@ impl fmt::Display for Effect {
 pub enum ReturnExpr {
     Value(ValueExpr),
     Call { name: Identifier, arg: ValueExpr },
+    Match(Match),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

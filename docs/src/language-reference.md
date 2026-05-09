@@ -18,7 +18,7 @@ Mantle artifact internals.
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
-| Patterns | Constructor patterns, constructor payload bindings, and `_` wildcards. |
+| Patterns | Constructor patterns, constructor payload bindings, record destructuring patterns in source helper signatures, helper match bodies, helper return-match expressions, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, payload sends, and payload-binding step patterns. |
 | Pattern dispatch | Function signature patterns, source function match bodies, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, and whole-body `match state` inside message-specific step clauses. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
@@ -239,6 +239,19 @@ fn status(Assigned(job: Job)) -> WorkStatus ! [] ~ [] @det {
 }
 ```
 
+A source helper signature may also destructure fields from an immutable record
+value:
+
+```strata
+fn phase_of(Job { phase }) -> JobPhase ! [] ~ [] @det {
+    return phase;
+}
+
+fn renamed_phase(Job { phase: current }) -> JobPhase ! [] ~ [] @det {
+    return current;
+}
+```
+
 A helper may also use a whole-body match over its typed binding parameter:
 
 ```strata
@@ -254,11 +267,53 @@ fn readiness_body(mode: StartupMode) -> Readiness ! [] ~ [] @det {
 }
 ```
 
-These matches are exhaustive, duplicate-free, and immutable. Payload-bearing
-source helper patterns bind payloads as immutable values. A helper call must
-provide a concrete enum constructor value for signature-pattern or whole-body
-match dispatch; helpers are still expanded before lowering and do not become
-runtime dispatch entries.
+Whole-body helper matches may also destructure a concrete record binding:
+
+```strata
+fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
+    match job {
+        Job { phase } => {
+            return phase;
+        }
+    }
+}
+```
+
+Or a block body may return a match over an in-scope source value binding:
+
+```strata
+fn status(work: Work) -> WorkStatus ! [] ~ [] @det {
+    return match work {
+        Empty => {
+            return Idle;
+        }
+        Assigned(job: Job) => {
+            return Active(job);
+        }
+    };
+}
+```
+
+The same helper return-match form may destructure a concrete record binding:
+
+```strata
+fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
+    return match job {
+        Job { phase } => {
+            return phase;
+        }
+    };
+}
+```
+
+Enum matches are exhaustive, duplicate-free, and immutable. Record body matches
+and return matches use one record pattern arm for the matched record type.
+Payload-bearing source helper patterns and record destructuring patterns bind
+immutable source values. A helper call must provide a concrete enum constructor
+value for signature-pattern, whole-body match, or enum helper return-match
+dispatch. Record destructuring helpers require a concrete record value
+argument. Helpers are still expanded before lowering and do not become runtime
+dispatch entries.
 
 ## Statements
 
@@ -321,8 +376,10 @@ Runtime dispatch uses the transported runtime process ID and admitted target
 process ID. Source names remain diagnostics and trace metadata.
 
 Patterns are source-level syntax for typed value decomposition. The current
-runnable subset admits constructor patterns, constructor payload bindings, and
-wildcards. Normal source helpers may match concrete enum values, `init` may use
+runnable subset admits constructor patterns, constructor payload bindings,
+record destructuring patterns in source helper signatures, helper match bodies,
+and helper return-match expressions, and wildcards. Normal source helpers may
+match concrete enum values or destructure concrete record values, `init` may use
 one whole-body match over a fieldless enum constructor to select the initial
 state, and actor message dispatch may use one whole-body match over the typed
 message parameter:

@@ -1,8 +1,12 @@
 use super::*;
 
+mod match_bodies;
+mod record_patterns;
 mod value_resolution;
 mod values;
 
+use match_bodies::validate_binding_source_function_match_body;
+use record_patterns::validate_record_pattern_source_function_group;
 use values::validate_source_function_body_values;
 pub(super) use values::{check_source_value_type, resolve_source_value_expr};
 
@@ -112,7 +116,7 @@ fn validate_source_function_group(
         let kind = source_function_param_kind(function)?;
         if kind != first_kind {
             return Err(Error::new(format!(
-                "{owner} function {} cannot mix binding parameters with pattern parameters",
+                "{owner} function {} cannot mix source parameter forms",
                 first.name
             )));
         }
@@ -128,7 +132,14 @@ fn validate_source_function_group(
             }
             validate_binding_source_function_body(module, semantic_index, owner, process, first)
         }
-        SourceFunctionParamKind::Pattern => validate_pattern_source_function_group(
+        SourceFunctionParamKind::EnumPattern => validate_enum_pattern_source_function_group(
+            module,
+            semantic_index,
+            owner,
+            process,
+            functions,
+        ),
+        SourceFunctionParamKind::RecordPattern => validate_record_pattern_source_function_group(
             module,
             semantic_index,
             owner,
@@ -294,6 +305,11 @@ fn collect_source_return_expr_calls<'a>(returns: &'a ReturnExpr, calls: &mut BTr
             calls.insert(name.as_str());
             collect_source_value_expr_calls(arg, calls);
         }
+        ReturnExpr::Match(match_body) => {
+            for arm in &match_body.arms {
+                collect_source_return_expr_calls(&arm.body.returns, calls);
+            }
+        }
     }
 }
 
@@ -318,7 +334,10 @@ fn collect_source_value_expr_calls<'a>(value: &'a ValueExpr, calls: &mut BTreeSe
 fn source_function_param_kind(function: &Function) -> Result<SourceFunctionParamKind> {
     match function.params.as_slice() {
         [FunctionParam::Binding(_)] => Ok(SourceFunctionParamKind::Binding),
-        [FunctionParam::Pattern(_)] => Ok(SourceFunctionParamKind::Pattern),
+        [FunctionParam::Pattern(Pattern::Record { .. })] => {
+            Ok(SourceFunctionParamKind::RecordPattern)
+        }
+        [FunctionParam::Pattern(_)] => Ok(SourceFunctionParamKind::EnumPattern),
         _ => Err(Error::new(format!(
             "function {} must declare exactly one parameter in this source slice",
             function.name
@@ -342,30 +361,14 @@ fn validate_binding_source_function_body(
 
     match source_function_body(function)? {
         FunctionBody::Block(body) => validate_pure_source_function_block(owner, function, body),
-        FunctionBody::Match(match_body) => {
-            if match_body.scrutinee != param.name {
-                return Err(Error::new(format!(
-                    "{owner} function {} match scrutinee {} must be parameter {}",
-                    function.name, match_body.scrutinee, param.name
-                )));
-            }
-            let enum_decl = semantic_index.enum_decl(module, &param.ty)?;
-            let subject = format!("{owner} function {}", function.name);
-            let pattern_context = PatternCheckContext {
-                module,
-                semantic_index,
-                enum_decl,
-                enum_type: &param.ty,
-                subject: &subject,
-                label: "match",
-                payload_context: PatternPayloadContext::SourceValue,
-                binding_context: PatternBindingContext::Source { owner: &subject },
-            };
-            for arm in check_typed_match_arms(&pattern_context, &match_body.arms)? {
-                validate_pure_source_function_block(owner, function, arm.body)?;
-            }
-            Ok(())
-        }
+        FunctionBody::Match(match_body) => validate_binding_source_function_match_body(
+            module,
+            semantic_index,
+            owner,
+            function,
+            param,
+            match_body,
+        ),
     }?;
 
     let process_functions = process
@@ -387,7 +390,7 @@ fn validate_binding_source_function_body(
     )
 }
 
-fn validate_pattern_source_function_group(
+fn validate_enum_pattern_source_function_group(
     module: &Module,
     semantic_index: &SemanticIndex,
     owner: &str,

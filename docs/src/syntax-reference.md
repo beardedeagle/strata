@@ -112,7 +112,15 @@ param_binding =
 pattern =
     ident
   | ident "(" ident ":" type_ref ")"
+  | ident "{" record_pattern_fields "}"
   | "_"
+
+record_pattern_fields =
+    record_pattern_field ("," record_pattern_field)* ","?
+
+record_pattern_field =
+    ident
+  | ident ":" ident
 
 effect_list =
     "[" (effect ("," effect)* ","?)? "]"
@@ -143,6 +151,9 @@ function_body =
 block_body =
     statement* return_statement
 
+return_statement =
+    "return" (value_expr | match_body) ";"
+
 match_body =
     "match" ident "{" match_arm+ "}"
 
@@ -151,14 +162,17 @@ match_arm =
 ```
 
 Patterns are source-level binding and decomposition syntax. This source slice
-admits constructor patterns, constructor payload bindings, and `_` wildcards.
-Buildable semantic consumers are normal source function signatures and match
-bodies, fieldless enum `init` matches, and actor `step` message dispatch.
-Actor `step` bodies may also match the current process state parameter when
-the process state type is an enum. Normal source helpers, actor `step` dispatch,
-and current-state matches accept constructor payload bindings. Source helper
-calls still expand before lowering; they require a concrete enum constructor
-value for pattern selection.
+admits constructor patterns, constructor payload bindings, record destructuring
+patterns, and `_` wildcards. Buildable semantic consumers are normal source
+function signatures and match bodies, helper return-match expressions, fieldless
+enum `init` matches, and actor `step` message dispatch. Record destructuring
+patterns are accepted in normal source helper signatures, helper match bodies,
+and helper return-match expressions over record source bindings. Actor `step`
+bodies may also match the current process state parameter when the process
+state type is an enum. Normal source helpers, actor `step` dispatch, and
+current-state matches accept constructor payload bindings. Source helper calls
+still expand before lowering; enum pattern dispatch requires a concrete enum
+constructor value and record destructuring requires a concrete record value.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message
@@ -190,11 +204,12 @@ match_step_function =
     "{" match_body "}"
 ```
 
-Each match arm uses the same pattern syntax as parameter-pattern dispatch. The
-match scrutinee must be the typed message parameter in the current buildable
-step subset. Match arms are block-delimited and do not use comma separators.
-The step effect list applies to every generated transition, so each arm must
-use exactly the declared effects.
+Each match arm uses constructor or wildcard pattern syntax. Record
+destructuring patterns are source-helper syntax and are rejected in step match
+arms. The match scrutinee must be the typed message parameter in the current
+buildable step subset. Match arms are block-delimited and do not use comma
+separators. The step effect list applies to every generated
+transition, so each arm must use exactly the declared effects.
 
 A state-match `step` uses the normal state parameter plus a message constructor
 or wildcard pattern, then uses a whole-body `match state`:
@@ -228,8 +243,10 @@ source_function =
 ```
 
 Helper block bodies must not contain statements. Helper match bodies match the
-function's typed binding parameter. Helper calls and payload-bearing enum values
-share the same surface syntax:
+function's typed binding parameter. A helper block may also return a `match`
+over an in-scope source value binding; the match arms are exhaustive,
+duplicate-free, immutable, and still expand before lowering. Helper calls and
+payload-bearing enum values share the same surface syntax:
 
 ```text
 call_or_payload_constructor =

@@ -52,6 +52,16 @@ result of the first invalid shape.
 | `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
 | `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |
 | `function ... wildcard pattern is unreachable` | Explicit source function clauses already cover every variant. | Remove the wildcard clause or remove the explicit clauses it should cover. |
+| `record pattern ... has no field ...` | A source helper record pattern names a field outside the matched record. | Bind a declared field from the record. |
+| `record pattern ... binds field ... more than once` | A source helper record pattern repeats one field. | Bind each record field at most once. |
+| `record pattern binding ... conflicts ...` | A source helper record pattern binding reuses a reserved, process, type, or constructor name. | Choose a distinct immutable binding name. |
+| `match record pattern ... must declare exactly one arm` | A helper whole-body match over a record tries to use enum-style multi-arm dispatch. | Use one record destructuring arm for the matched record type. |
+| `match over record ... cannot use a wildcard pattern` | A helper whole-body match over a record tries to use `_`. | Use the record destructuring pattern for the matched record type. |
+| `match record pattern binding ... conflicts ...` | A helper whole-body record match binding reuses an existing source value binding. | Choose a distinct immutable binding name. |
+| `return match scrutinee ... must be a source value binding` | A helper return-match tries to match a name that is not an in-scope immutable source value. | Match the helper parameter or a payload binding introduced by an enclosing source match. |
+| `return match must handle variant ...` | A helper return-match is non-exhaustive. | Add the missing constructor arm or one `_` fallback. |
+| `return match record pattern ... must declare exactly one arm` | A helper return-match over a record tries to use enum-style multi-arm dispatch. | Use one record destructuring arm for the matched record type. |
+| `return match record pattern binding ... conflicts ...` | A helper return-match record binding reuses an existing source value binding. | Choose a distinct immutable binding name. |
 | `payload ... has type ..., expected ...` | A source helper or step payload binding annotation does not match the constructor payload type. | Use the declared payload type. |
 | `match payload binding ... conflicts with an existing source value binding` | A source helper match arm reuses the helper parameter name for a payload binding. | Use a distinct immutable payload binding name. |
 | `value ... is not a variant of enum ...` | A payload-constructor expression names a constructor outside the expected enum. | Use a constructor from the expected enum or call a declared helper. |

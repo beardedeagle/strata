@@ -1,0 +1,37 @@
+module function_record_body_match;
+
+record MainState {
+    phase: JobPhase,
+}
+record Job {
+    phase: JobPhase,
+}
+enum JobPhase {
+    Ready,
+    Done,
+}
+enum MainMsg {
+    Start,
+}
+
+fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
+    match job {
+        Job { phase } => {
+            return phase;
+        }
+    }
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { phase: phase_of(Job { phase: Ready }) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "source helper record body match selected field";
+        return Stop(state);
+    }
+}

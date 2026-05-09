@@ -79,6 +79,17 @@ fn rejects_init_match_binding_on_fieldless_variant() {
 }
 
 #[test]
+fn rejects_record_pattern_in_init_match_arm() {
+    let source = INIT_MATCH.replace("Cold =>", "MainState { readiness } =>");
+
+    let err = check_source(&source).expect_err("record init match arm should fail");
+
+    assert!(err.to_string().contains(
+        "process Main init match pattern MainState destructures a record, but this match expects enum constructors"
+    ));
+}
+
+#[test]
 fn checks_payload_bearing_enum_variants_in_init_match_when_binding_is_unused() {
     let source = r#"
 module init_match_payload_variant;
