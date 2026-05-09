@@ -1,0 +1,164 @@
+use super::support::*;
+
+#[test]
+fn artifact_round_trips_and_validates_magic() {
+    let artifact = valid_artifact();
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains(&format!("schema_version={ARTIFACT_SCHEMA_VERSION}")));
+    assert!(encoded.contains("entry_process=0"));
+    assert!(encoded.contains("type.2.label=WorkerState"));
+    assert!(encoded.contains("process.1.state_value.1.type_id=2"));
+    assert!(encoded.contains("process.1.state_value.1.value=Handled"));
+    assert!(encoded.contains("process.1.state_value.1.label=Handled"));
+    assert!(encoded.contains("process.0.transition.0.next_state=current"));
+    assert!(encoded.contains("process.1.transition.0.next_state=value"));
+    assert!(encoded.contains("process.1.transition.0.next_state_value=1"));
+    assert!(encoded.contains("process.0.process_ref.0.target_process=1"));
+    assert!(encoded.contains("process.0.transition.0.effect_count=2"));
+    assert!(encoded.contains("process.0.transition.0.effect.0=spawn"));
+    assert!(encoded.contains("process.0.transition.0.effect.1=send"));
+    assert!(encoded.contains("process.0.transition.0.action.0.target_process=1"));
+    assert!(encoded.contains("process.0.transition.0.action.0.process_ref=0"));
+    assert!(encoded.contains("process.0.transition.0.action.1.target_process_ref=0"));
+
+    let err = MantleArtifact::decode("not-mta\n").expect_err("bad magic should fail");
+    assert!(err.to_string().contains("invalid Mantle artifact magic"));
+}
+
+#[test]
+fn artifact_round_trips_panic_step_result() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0].step_result = StepResult::Panic;
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("panic artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains("process.1.transition.0.step_result=Panic"));
+}
+
+#[test]
+fn decode_rejects_unknown_step_result() {
+    let encoded = valid_artifact().encode().replace(
+        "process.1.transition.0.step_result=Stop",
+        "process.1.transition.0.step_result=Crash",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unknown step result should fail");
+
+    assert!(
+        err.to_string()
+            .contains("invalid step_result value \"Crash\"")
+    );
+}
+
+#[test]
+fn decode_rejects_unsupported_schema_before_body_fields() {
+    let encoded = format!(
+        "MTA0\nformat={ARTIFACT_FORMAT}\nschema_version=0\nprocess_count={}\n",
+        MAX_PROCESS_COUNT + 1
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unsupported schema should fail first");
+
+    assert!(err.to_string().contains(&format!(
+        "unsupported artifact schema version 0; expected {ARTIFACT_SCHEMA_VERSION}"
+    )));
+}
+
+#[test]
+fn decode_reports_duplicate_fields() {
+    let encoded = valid_artifact().encode().replace(
+        "process.0.debug_name=Main",
+        "process.0.debug_name=Main\nprocess.0.debug_name=Other",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("duplicate field should fail");
+
+    assert!(
+        err.to_string()
+            .contains("duplicate artifact field \"process.0.debug_name\"")
+    );
+}
+
+#[test]
+fn decode_reports_unknown_fields() {
+    let mut encoded = valid_artifact().encode();
+    encoded.push_str("process.0.transition.0.action.0.extra=value\n");
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unknown field should fail");
+
+    assert!(
+        err.to_string()
+            .contains("unknown artifact field \"process.0.transition.0.action.0.extra\"")
+    );
+}
+
+#[test]
+fn decode_rejects_unbounded_process_count_before_allocation() {
+    let encoded = format!(
+        "MTA0\nformat={ARTIFACT_FORMAT}\nschema_version={ARTIFACT_SCHEMA_VERSION}\nprocess_count={}\n",
+        MAX_PROCESS_COUNT + 1
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("process count should be bounded");
+
+    assert!(
+        err.to_string()
+            .contains("process_count must be no greater than")
+    );
+}
+
+#[test]
+fn decode_rejects_unbounded_nested_counts_before_allocation() {
+    let encoded = valid_artifact().encode().replace(
+        "process.0.state_value_count=1",
+        &format!(
+            "process.0.state_value_count={}",
+            MAX_STATE_VALUES_PER_PROCESS + 1
+        ),
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("state value count should be bounded");
+
+    assert!(
+        err.to_string()
+            .contains("process.0.state_value_count must be no greater than")
+    );
+}
+
+#[test]
+fn decode_rejects_unbounded_transition_current_state_before_validation() {
+    let encoded = valid_artifact().encode().replace(
+        "process.1.transition.0.message=0",
+        &format!(
+            "process.1.transition.0.current_state={}\nprocess.1.transition.0.message=0",
+            MAX_STATE_VALUES_PER_PROCESS
+        ),
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("current_state id should be bounded");
+
+    assert!(
+        err.to_string()
+            .contains("process.1.transition.0.current_state must be no greater than")
+    );
+}
+
+#[test]
+fn decode_rejects_unknown_transition_effect() {
+    let encoded = valid_artifact().encode().replace(
+        "process.0.transition.0.effect.1=send",
+        "process.0.transition.0.effect.1=write",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unknown effect should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process.0.transition.0.effect.1: invalid effect value \"write\"")
+    );
+}

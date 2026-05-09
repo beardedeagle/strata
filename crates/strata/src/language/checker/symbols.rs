@@ -141,12 +141,12 @@ fn validate_message_payload_type(
                     enum_decl.name, variant.name, payload_type
                 )));
             };
-            if constructor_symbol == process_ref_type
-                && args.len() == 1
-                && matches!(&args[0], TypeRef::Named(_))
-            {
+            if constructor_symbol == process_ref_type && args.len() == 1 {
                 let TypeRef::Named(target) = &args[0] else {
-                    unreachable!("matches! above proves named target");
+                    return Err(Error::new(format!(
+                        "enum {} variant {} payload type {} must target a named process",
+                        enum_decl.name, variant.name, payload_type
+                    )));
                 };
                 let target_symbol = symbols.resolve(target.as_str()).ok_or_else(|| {
                     Error::new(format!(
