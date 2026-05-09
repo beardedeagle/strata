@@ -2168,7 +2168,7 @@ record SinkState;
 record Job { phase: JobPhase }
 enum JobPhase { Ready }
 enum MainMsg { Start }
-enum SinkMsg { Done(Job) }
+enum SinkMsg { Ack, Done(Job) }
 enum WorkerState { Idle, Working(Job), Done(Job) }
 enum WorkerMsg { Assign(Job), Complete(ProcessRef<Sink>) }
 
@@ -2204,7 +2204,7 @@ proc Worker mailbox bounded(2) {
     fn step(state: WorkerState, Complete(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [send] ~ [] @det {
         match state {
             Idle => {
-                send reply_to Done(Job { phase: Ready });
+                send reply_to Ack;
                 return Stop(Idle);
             }
             Working(job: Job) => {
@@ -2225,6 +2225,10 @@ proc Sink mailbox bounded(1) {
 
     fn init() -> SinkState ! [] ~ [] @det {
         return SinkState;
+    }
+
+    fn step(state: SinkState, Ack) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Continue(state);
     }
 
     fn step(state: SinkState, Done(job: Job)) -> ProcResult<SinkState> ! [] ~ [] @det {
@@ -2252,6 +2256,12 @@ proc Sink mailbox bounded(1) {
         payload.as_ref(),
         Some(CheckedValueTemplate::CurrentStatePayload { .. })
     ));
+    let sink = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Sink")
+        .expect("Sink process should be checked");
+    assert_eq!(sink.transitions().len(), 2);
 }
 
 #[test]

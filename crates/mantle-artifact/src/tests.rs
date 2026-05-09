@@ -919,7 +919,7 @@ fn validate_rejects_unknown_next_state_value_id() {
 
     assert!(
         err.to_string()
-            .contains("process Worker transition next_state id 99 is not a valid state value")
+            .contains("process Worker message id 0 next_state id 99 is not a valid state value")
     );
 }
 
@@ -937,7 +937,7 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
         .expect_err("static next-state template outside state table should fail");
 
     assert!(err.to_string().contains(
-        "process Worker transition 0 next_state_template produced value Missing not admitted by state table"
+        "process Worker message id 0 next_state_template produced value Missing not admitted by state table"
     ));
 }
 
@@ -960,7 +960,7 @@ fn validate_rejects_process_ref_payload_enum_next_state_template() {
         .expect_err("process ref payload next-state template should fail");
 
     assert!(err.to_string().contains(
-        "process Worker transition 0 next_state_template.payload process reference template must be a direct message payload"
+        "process Worker message id 0 next_state_template.payload process reference template must be a direct message payload"
     ));
 }
 
@@ -995,7 +995,7 @@ fn validate_rejects_next_state_template_when_label_matches_but_identity_does_not
         .expect_err("state labels must not admit mismatched typed values");
 
     assert!(err.to_string().contains(
-        "process Worker transition 0 next_state_template produced value Handled not admitted by state table"
+        "process Worker message id 0 next_state_template produced value Handled not admitted by state table"
     ));
 }
 
@@ -1042,7 +1042,7 @@ fn validate_rejects_current_state_payload_template_outside_state_table() {
         .expect_err("unadmitted current-state-derived next state should fail");
 
     assert!(err.to_string().contains(
-        "process Worker transition 0 next_state_template produced value Done(Job{phase:Ready}) not admitted by state table"
+        "process Worker message id 0 current_state id 1 next_state_template produced value Done(Job{phase:Ready}) not admitted by state table"
     ));
 }
 

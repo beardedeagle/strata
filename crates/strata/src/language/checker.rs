@@ -159,7 +159,7 @@ enum StepBodySource<'a> {
 struct StepDiscoveryClause<'a> {
     pattern: StepPattern,
     body: &'a FunctionBlock,
-    state_payload_bindings: Vec<Identifier>,
+    state_payload_bindings: Vec<StatePayloadDiscoveryBinding>,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +209,26 @@ enum StepDispatchStyle {
 struct PatternPayloadParam {
     name: Identifier,
     ty: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StatePayloadDiscoveryBinding {
+    name: Identifier,
+    ty: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiscoveryValueBinding {
+    name: Identifier,
+    ty: TypeRef,
+    label: String,
+}
+
+struct SendPayloadDiscoveryContext<'a, 'types, 'semantic> {
+    sender_cases: &'a [DiscoveredMessageCase],
+    concrete_state_payloads: &'a BTreeMap<String, BTreeSet<String>>,
+    process_refs: &'a BTreeMap<Identifier, CheckedProcessId>,
+    types: &'types mut CheckedTypeInterner<'semantic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -351,6 +371,15 @@ impl MessageCaseTable {
                 collect_explicit_step_variants(module, process, process_id, semantic_index)
             })
             .collect::<Result<Vec<_>>>()?;
+        let concrete_state_payload_domains = module
+            .processes
+            .iter()
+            .enumerate()
+            .map(|(process_index, process)| {
+                let process_id = CheckedProcessId::from_index(process_index)?;
+                collect_concrete_state_payload_domains(module, process, process_id, semantic_index)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let mut iteration_count = 0usize;
         let max_iterations = MAX_MESSAGE_VARIANTS_PER_PROCESS.saturating_mul(builders.len());
@@ -382,16 +411,6 @@ impl MessageCaseTable {
                                 else {
                                     continue;
                                 };
-                                // State payload labels are tied to expanded current-state
-                                // cases, which are not available during message discovery.
-                                if payload.as_ref().is_some_and(|payload| {
-                                    clause
-                                        .state_payload_bindings
-                                        .iter()
-                                        .any(|binding| source_value_uses_binding(payload, binding))
-                                }) {
-                                    continue;
-                                }
                                 let target_process_id = resolve_send_target_process_for_discovery(
                                     process,
                                     semantic_index,
@@ -413,12 +432,20 @@ impl MessageCaseTable {
                                             target_process_id.as_u32()
                                         ))
                                     })?;
-                                changed |= builder.add_payload_case(
+                                let mut discovery_context = SendPayloadDiscoveryContext {
+                                    sender_cases,
+                                    concrete_state_payloads: &concrete_state_payload_domains
+                                        [process_index],
+                                    process_refs: &process_ref_targets[process_index],
+                                    types,
+                                };
+                                changed |= add_discovered_send_payload_cases(
+                                    builder,
                                     target_variant,
                                     payload.as_ref(),
                                     &bindings,
-                                    &process_ref_targets[process_index],
-                                    types,
+                                    &clause.state_payload_bindings,
+                                    &mut discovery_context,
                                 )?;
                             }
                         }
@@ -691,6 +718,111 @@ impl<'a> MessageCaseBuilder<'a> {
         }
         Ok(payloads_by_variant)
     }
+}
+
+fn add_discovered_send_payload_cases(
+    builder: &mut MessageCaseBuilder<'_>,
+    variant_id: CheckedMessageVariantId,
+    payload: Option<&ValueExpr>,
+    message_bindings: &[DiscoveryValueBinding],
+    state_payload_bindings: &[StatePayloadDiscoveryBinding],
+    context: &mut SendPayloadDiscoveryContext<'_, '_, '_>,
+) -> Result<bool> {
+    let mut changed = false;
+    for bindings in discovery_value_binding_sets(
+        payload,
+        message_bindings,
+        state_payload_bindings,
+        context.sender_cases,
+        context.concrete_state_payloads,
+        context.types,
+    )? {
+        let value_bindings = value_bindings_from_discovery(&bindings);
+        changed |= builder.add_payload_case(
+            variant_id,
+            payload,
+            &value_bindings,
+            context.process_refs,
+            context.types,
+        )?;
+    }
+    Ok(changed)
+}
+
+fn discovery_value_binding_sets(
+    payload: Option<&ValueExpr>,
+    message_bindings: &[DiscoveryValueBinding],
+    state_payload_bindings: &[StatePayloadDiscoveryBinding],
+    sender_cases: &[DiscoveredMessageCase],
+    concrete_state_payloads: &BTreeMap<String, BTreeSet<String>>,
+    types: &mut CheckedTypeInterner<'_>,
+) -> Result<Vec<Vec<DiscoveryValueBinding>>> {
+    let Some(payload) = payload else {
+        return Ok(vec![message_bindings.to_vec()]);
+    };
+    let mut binding_sets = vec![message_bindings.to_vec()];
+    for binding in state_payload_bindings {
+        if !source_value_uses_binding(payload, &binding.name) {
+            continue;
+        }
+        let payloads =
+            state_payload_discovery_values(binding, sender_cases, concrete_state_payloads, types)?;
+        if payloads.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut expanded = Vec::with_capacity(binding_sets.len().saturating_mul(payloads.len()));
+        for base in &binding_sets {
+            for payload in &payloads {
+                let mut next = base.clone();
+                next.push(DiscoveryValueBinding {
+                    name: binding.name.clone(),
+                    ty: binding.ty.clone(),
+                    label: payload.label().to_string(),
+                });
+                expanded.push(next);
+            }
+        }
+        binding_sets = expanded;
+    }
+    Ok(binding_sets)
+}
+
+fn state_payload_discovery_values(
+    binding: &StatePayloadDiscoveryBinding,
+    sender_cases: &[DiscoveredMessageCase],
+    concrete_state_payloads: &BTreeMap<String, BTreeSet<String>>,
+    types: &mut CheckedTypeInterner<'_>,
+) -> Result<Vec<CheckedPayloadValue>> {
+    let checked_ty = types.intern(&binding.ty)?;
+    let mut payloads = BTreeMap::new();
+    if let Some(concrete_payloads) = concrete_state_payloads.get(checked_ty.label()) {
+        for label in concrete_payloads {
+            payloads.insert(
+                label.clone(),
+                CheckedPayloadValue::new(checked_ty.clone(), label.clone()),
+            );
+        }
+    }
+    for case in sender_cases {
+        let Some(payload) = case.payload() else {
+            continue;
+        };
+        if payload.ty().label() == checked_ty.label() && payload.process_ref_payload().is_none() {
+            payloads.insert(payload.label().to_string(), payload.clone());
+        }
+    }
+    Ok(payloads.into_values().collect())
+}
+
+fn value_bindings_from_discovery(bindings: &[DiscoveryValueBinding]) -> Vec<ValueBinding<'_>> {
+    bindings
+        .iter()
+        .map(|binding| ValueBinding {
+            name: &binding.name,
+            ty: &binding.ty,
+            label: &binding.label,
+        })
+        .collect()
 }
 
 fn canonical_process_ref_payload_label(
@@ -2870,6 +3002,42 @@ fn preadmit_concrete_step_state_values(
     Ok(())
 }
 
+fn collect_concrete_state_payload_domains(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    let mut local_types = CheckedTypeInterner::new(semantic_index);
+    let mut state_space = StateSpace::new(module, semantic_index, process, &mut local_types)?;
+    check_init(
+        module,
+        semantic_index,
+        process,
+        &mut state_space,
+        &mut local_types,
+    )?;
+    preadmit_concrete_step_state_values(
+        module,
+        process,
+        process_id,
+        semantic_index,
+        &mut state_space,
+        &mut local_types,
+    )?;
+
+    let mut domains: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for state in state_space.values() {
+        if let Some(payload) = state.payload() {
+            domains
+                .entry(payload.ty().label().to_string())
+                .or_default()
+                .insert(payload.label().to_string());
+        }
+    }
+    Ok(domains)
+}
+
 fn step_pattern_binding_names(pattern: &StepPattern) -> Vec<&Identifier> {
     match pattern {
         StepPattern::Variant {
@@ -3276,9 +3444,20 @@ fn step_discovery_clauses<'a>(
                 .map(|arm| {
                     let state_payload_bindings = match &arm.pattern {
                         TypedMatchPattern::Variant {
+                            variant,
                             binding: Some(binding),
-                            ..
-                        } => vec![binding.name.clone()],
+                        } => vec![StatePayloadDiscoveryBinding {
+                            name: binding.name.clone(),
+                            ty: state_enum.variants[*variant]
+                                .payload_type
+                                .clone()
+                                .ok_or_else(|| {
+                                    Error::new(format!(
+                                        "process {} state match pattern {} does not carry a payload",
+                                        process.name, state_enum.variants[*variant].name
+                                    ))
+                                })?,
+                        }],
                         TypedMatchPattern::Variant { binding: None, .. }
                         | TypedMatchPattern::Wildcard => Vec::new(),
                     };
@@ -3363,7 +3542,7 @@ fn matching_message_cases<'a>(
 fn payload_value_bindings<'a>(
     pattern: &'a StepPattern,
     case: &'a DiscoveredMessageCase,
-) -> Vec<ValueBinding<'a>> {
+) -> Vec<DiscoveryValueBinding> {
     match (pattern, case.payload()) {
         (
             StepPattern::Variant {
@@ -3371,10 +3550,10 @@ fn payload_value_bindings<'a>(
                 ..
             },
             Some(payload),
-        ) => vec![ValueBinding {
-            name: &param.name,
-            ty: &param.ty,
-            label: payload.label(),
+        ) => vec![DiscoveryValueBinding {
+            name: param.name.clone(),
+            ty: param.ty.clone(),
+            label: payload.label().to_string(),
         }],
         _ => Vec::new(),
     }

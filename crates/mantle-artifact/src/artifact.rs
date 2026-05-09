@@ -768,13 +768,15 @@ impl ArtifactProcess {
             }
             let current_state_payload_type =
                 self.transition_current_state_payload_type(transition)?;
+            let transition_context = transition.transition_context();
             match &transition.next_state {
                 NextState::Current => {}
                 NextState::Value(state) => {
                     if state.index() >= self.state_values.len() {
                         return Err(Error::new(format!(
-                            "process {} transition next_state id {} is not a valid state value",
+                            "process {} {} next_state id {} is not a valid state value",
                             self.debug_name,
+                            transition_context,
                             state.as_u32()
                         )));
                     }
@@ -787,9 +789,8 @@ impl ArtifactProcess {
                     template.validate_for_received_payload(
                         artifact,
                         &format!(
-                            "process {} transition {} next_state_template",
-                            self.debug_name,
-                            transition.message.as_u32()
+                            "process {} {} next_state_template",
+                            self.debug_name, transition_context
                         ),
                         Some(self.state_type),
                         received_payload_type,
@@ -870,9 +871,9 @@ impl ArtifactProcess {
             return Ok(());
         }
         Err(Error::new(format!(
-            "process {} transition {} next_state_template produced value {} not admitted by state table",
+            "process {} {} next_state_template produced value {} not admitted by state table",
             self.debug_name,
-            transition.message.as_u32(),
+            transition.transition_context(),
             value.label
         )))
     }
@@ -1488,6 +1489,17 @@ pub struct ArtifactTransition {
 }
 
 impl ArtifactTransition {
+    fn transition_context(&self) -> String {
+        match self.current_state {
+            Some(current_state) => format!(
+                "message id {} current_state id {}",
+                self.message.as_u32(),
+                current_state.as_u32()
+            ),
+            None => format!("message id {}", self.message.as_u32()),
+        }
+    }
+
     fn validate_effects(&self, process_debug_name: &str) -> Result<BTreeSet<ArtifactEffect>> {
         validate_count(
             "effect_count",

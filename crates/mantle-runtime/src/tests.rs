@@ -617,7 +617,7 @@ fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
         .expect_err("unadmitted current-state-derived next state should fail loaded admission");
 
     assert!(err.to_string().contains(
-        "process Worker transition 0 next_state_template produced value Done(Job{phase:Ready}) not admitted by state table"
+        "process Worker message id 0 current_state id 1 next_state_template produced value Done(Job{phase:Ready}) not admitted by state table"
     ));
 }
 
