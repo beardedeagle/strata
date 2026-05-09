@@ -179,6 +179,18 @@ fn resolve_source_function_return_record_match_value(
         fields,
         record_value,
     )?;
+    for binding in &pattern_bindings {
+        if context
+            .local_bindings
+            .iter()
+            .any(|existing| existing.name == &binding.name)
+        {
+            return Err(Error::new(format!(
+                "function {} return match record pattern binding {} conflicts with an existing source value binding",
+                context.function.name, binding.name
+            )));
+        }
+    }
     let mut arm_substitutions = context.substitutions.to_vec();
     arm_substitutions.extend(record_substitutions);
     let mut arm_bindings = context.local_bindings.to_vec();
