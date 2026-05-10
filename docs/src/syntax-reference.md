@@ -119,7 +119,10 @@ pattern =
 
 constructor_payload_pattern =
     ident ":" type_ref
-  | pattern
+  | ident "{" record_pattern_fields "}"
+  | "List" list_type_args? "[" list_pattern_items? "]"
+  | "Map" map_type_args? "[" map_pattern_entries? "]"
+  | "_"
 
 record_pattern_fields =
     record_pattern_field ("," record_pattern_field)* ","?
