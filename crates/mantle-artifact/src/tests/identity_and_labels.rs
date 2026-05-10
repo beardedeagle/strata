@@ -126,8 +126,13 @@ fn projection_helpers_reject_duplicate_record_fields() {
 #[test]
 fn projection_helpers_reject_duplicate_map_keys() {
     let keys = vec!["Ready".to_string()];
-    let err = project_canonical_map_value("Map[Ready=>Ready,Ready=>Done]", "Ready", &keys)
-        .expect_err("duplicate map keys must fail closed");
+    let err = project_canonical_map_value(
+        "Map[Ready=>Ready,Ready=>Done]",
+        "Ready",
+        &keys,
+        MapProjectionMode::Exact,
+    )
+    .expect_err("duplicate map keys must fail closed");
 
     assert!(
         err.to_string().contains("duplicates key Ready"),

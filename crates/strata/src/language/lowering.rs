@@ -272,14 +272,19 @@ fn lower_value_template(
             index: *index,
             len: *len,
         }),
-        CheckedValueTemplate::MapValue { ty, map, key, keys } => {
-            Ok(ArtifactValueTemplate::MapValue {
-                ty: types.artifact_id(ty)?,
-                map: Box::new(lower_value_template(map, types)?),
-                key: key.clone(),
-                keys: keys.clone(),
-            })
-        }
+        CheckedValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => Ok(ArtifactValueTemplate::MapValue {
+            ty: types.artifact_id(ty)?,
+            map: Box::new(lower_value_template(map, types)?),
+            key: key.clone(),
+            keys: keys.clone(),
+            projection: *projection,
+        }),
         CheckedValueTemplate::ProcessRef {
             ty,
             target,

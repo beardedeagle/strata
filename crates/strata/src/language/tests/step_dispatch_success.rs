@@ -127,6 +127,119 @@ proc Worker mailbox bounded(3) {
 }
 
 #[test]
+fn checks_subset_map_payload_patterns_in_step_signature_and_match_body() {
+    let source = r#"
+module subset_map_payload_patterns;
+
+enum Phase {
+    Ready,
+    Done,
+}
+record MainState;
+record WorkerState {
+    phase: Phase,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerMsg {
+    Lookup(Map<Phase,Phase,2>),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let body_worker: ProcessRef<BodyWorker> = spawn BodyWorker;
+        send worker Lookup(Map<Phase,Phase,2>[Ready => Done, Done => Ready]);
+        send body_worker Lookup(Map<Phase,Phase,2>[Ready => Done, Done => Ready]);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { phase: Ready };
+    }
+
+    fn step(state: WorkerState, Lookup(Map[Ready => phase, ..])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(WorkerState { phase: phase });
+    }
+}
+
+proc BodyWorker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { phase: Ready };
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match msg {
+            Lookup(Map[Ready => phase, ..]) => {
+                return Stop(WorkerState { phase: phase });
+            }
+        }
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("subset map step patterns should check");
+    let artifact = lower_to_artifact(&checked, source).expect("subset map steps should lower");
+
+    for process_name in ["Worker", "BodyWorker"] {
+        let process = checked
+            .processes()
+            .iter()
+            .find(|process| process.debug_name().as_str() == process_name)
+            .unwrap_or_else(|| panic!("{process_name} should be checked"));
+        assert_eq!(
+            checked_state_labels(process),
+            ["WorkerState{phase:Ready}", "WorkerState{phase:Done}"]
+        );
+    }
+
+    for process_name in ["Worker", "BodyWorker"] {
+        let process = artifact
+            .processes
+            .iter()
+            .find(|process| process.debug_name == process_name)
+            .unwrap_or_else(|| panic!("{process_name} should lower"));
+        let mantle_artifact::NextState::Template(ArtifactValueTemplate::Record { fields, .. }) =
+            &process.transitions[0].next_state
+        else {
+            panic!("{process_name} should lower next state to a record template");
+        };
+        let phase = fields
+            .iter()
+            .find(|field| field.name == "phase")
+            .unwrap_or_else(|| panic!("{process_name} should template phase"));
+        let ArtifactValueTemplate::MapValue {
+            key,
+            keys,
+            projection,
+            ..
+        } = &phase.value
+        else {
+            panic!("{process_name} should project phase from a map payload");
+        };
+        assert_eq!(key, "Ready");
+        assert_eq!(keys.as_slice(), ["Ready"]);
+        assert_eq!(*projection, mantle_artifact::MapProjectionMode::Subset);
+    }
+}
+
+#[test]
 fn checks_wildcard_only_step_pattern() {
     let source = HELLO.replace(
         "fn step(state: MainState, Start)",

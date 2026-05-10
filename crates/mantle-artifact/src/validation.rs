@@ -486,10 +486,17 @@ fn add_value_template_bytes(
             add_field_bytes(total, &format!("{prefix}.len"), &len.to_string())?;
             add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
         }
-        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+        ArtifactValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "map_value")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
             add_field_bytes(total, &format!("{prefix}.key"), key)?;
+            add_field_bytes(total, &format!("{prefix}.projection"), projection.as_str())?;
             add_field_bytes(
                 total,
                 &format!("{prefix}.key_count"),

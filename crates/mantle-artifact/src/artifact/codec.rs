@@ -383,10 +383,17 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
             ));
             encode_value_template(encoded, &format!("{prefix}.list"), list);
         }
-        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+        ArtifactValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
             encoded.push_str(&format!(
-                "{prefix}.kind=map_value\n{prefix}.type_id={}\n{prefix}.key={key}\n{prefix}.key_count={}\n",
+                "{prefix}.kind=map_value\n{prefix}.type_id={}\n{prefix}.key={key}\n{prefix}.projection={}\n{prefix}.key_count={}\n",
                 ty.as_u32(),
+                projection.as_str(),
                 keys.len()
             ));
             for (key_index, expected_key) in keys.iter().enumerate() {
@@ -526,6 +533,8 @@ fn decode_value_template(
         "map_value" => {
             let ty = fields.take_type_id(&format!("{prefix}.type_id"))?;
             let key = fields.take_required(&format!("{prefix}.key"))?;
+            let projection =
+                MapProjectionMode::parse(&fields.take_required(&format!("{prefix}.projection"))?)?;
             let key_count = fields.take_bounded_usize(
                 &format!("{prefix}.key_count"),
                 1,
@@ -539,6 +548,7 @@ fn decode_value_template(
                 ty,
                 key,
                 keys,
+                projection,
                 map: Box::new(decode_value_template(
                     fields,
                     &format!("{prefix}.map"),

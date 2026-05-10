@@ -104,7 +104,13 @@ impl LoadedTemplateAdmission<'_> {
                 };
                 nested.validate_with_depth(&format!("{field}.list"), list, depth + 1)
             }
-            ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+            ArtifactValueTemplate::MapValue {
+                ty,
+                map,
+                key,
+                keys,
+                projection: _,
+            } => {
                 self.reject_projected_process_ref_type(field, *ty)?;
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;

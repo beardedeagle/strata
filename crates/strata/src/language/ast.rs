@@ -228,7 +228,14 @@ pub struct MapPattern {
     pub key_type: Option<TypeRef>,
     pub value_type: Option<TypeRef>,
     pub capacity: Option<usize>,
+    pub completeness: MapPatternCompleteness,
     pub entries: Vec<MapPatternEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MapPatternCompleteness {
+    Exact,
+    Subset,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

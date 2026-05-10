@@ -206,12 +206,13 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/function_collectio
 
 Key source ideas:
 
-- `List<Phase,2>[Ready, Done]` and `Map<Phase,Phase,1>[Ready => Done]` are typed,
+- `List<Phase,2>[Ready, Done]` and `Map<Phase,Phase,2>[Ready => Done, Unknown => Unknown]` are typed,
   bounded immutable collection values.
 - `fn first(List<Phase,2>[phase, _])` dispatches on exact list length and binds
   one immutable element.
-- Helper body and return matches can use list and map patterns with `_`
-  fallback arms.
+- Helper body and return matches can use list patterns, exact map patterns, and
+  subset map patterns such as `Map[Ready => selected, ..]` with `_` fallback
+  arms.
 - The helper expansion leaves Mantle with a resolved `MainState` value, not
   source helper dispatch names.
 
@@ -317,8 +318,8 @@ Key source ideas:
 ## Collection State
 
 `examples/collection_state.str` admits immutable `List<Phase,1>` and
-`Map<Phase,Phase,1>` process states and lowers a received payload into
-collection next-state templates.
+`Map<Phase,Phase,2>` process states and lowers received payloads, including a
+subset map payload projection, into collection next-state templates.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/collection_state.str

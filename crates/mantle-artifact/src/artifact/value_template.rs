@@ -2,6 +2,29 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapProjectionMode {
+    Exact,
+    Subset,
+}
+
+impl MapProjectionMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Subset => "subset",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self> {
+        match value {
+            "exact" => Ok(Self::Exact),
+            "subset" => Ok(Self::Subset),
+            _ => Err(Error::new(format!("invalid map projection mode {value:?}"))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactValueTemplate {
     Literal {
@@ -30,6 +53,7 @@ pub enum ArtifactValueTemplate {
         map: Box<ArtifactValueTemplate>,
         key: String,
         keys: Vec<String>,
+        projection: MapProjectionMode,
     },
     ProcessRef {
         ty: TypeId,
@@ -142,11 +166,17 @@ impl ArtifactValueTemplate {
                 validate_value_label("list element projection label", &label)?;
                 Ok(ArtifactStateValue::with_label(*ty, value, label))
             }
-            Self::MapValue { ty, map, key, keys } => {
+            Self::MapValue {
+                ty,
+                map,
+                key,
+                keys,
+                projection,
+            } => {
                 let map =
                     map.evaluate_state_value(received_payload, current_state_payload, type_label)?;
-                let value = project_canonical_map_value(&map.value, key, keys)?;
-                let label = project_canonical_map_value(&map.label, key, keys)?;
+                let value = project_canonical_map_value(&map.value, key, keys, *projection)?;
+                let label = project_canonical_map_value(&map.label, key, keys, *projection)?;
                 validate_value_label("map value projection value", &value)?;
                 validate_value_label("map value projection label", &label)?;
                 Ok(ArtifactStateValue::with_label(*ty, value, label))
@@ -386,7 +416,13 @@ impl ArtifactValueTemplate {
                     depth + 1,
                 )
             }
-            Self::MapValue { ty, map, key, keys } => {
+            Self::MapValue {
+                ty,
+                map,
+                key,
+                keys,
+                projection: _,
+            } => {
                 reject_projected_process_ref_type(artifact, field, *ty)?;
                 artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
                 validate_projection_keys(field, key, keys)?;
@@ -588,15 +624,34 @@ pub fn project_canonical_list_element(value: &str, index: usize, len: usize) -> 
     })
 }
 
-pub fn project_canonical_map_value(value: &str, key: &str, keys: &[String]) -> Result<String> {
+pub fn project_canonical_map_value(
+    value: &str,
+    key: &str,
+    keys: &[String],
+    projection: MapProjectionMode,
+) -> Result<String> {
     let entries = map_label_entries(value)?;
     let entry_keys = entries.keys().cloned().collect::<Vec<_>>();
-    if entry_keys != keys {
-        return Err(Error::new(format!(
-            "map projection expected keys [{}], found [{}]",
-            keys.join(","),
-            entry_keys.join(",")
-        )));
+    match projection {
+        MapProjectionMode::Exact => {
+            if entry_keys != keys {
+                return Err(Error::new(format!(
+                    "map projection expected exact keys [{}], found [{}]",
+                    keys.join(","),
+                    entry_keys.join(",")
+                )));
+            }
+        }
+        MapProjectionMode::Subset => {
+            for expected_key in keys {
+                if !entries.contains_key(expected_key) {
+                    return Err(Error::new(format!(
+                        "map projection expected key {expected_key}, found [{}]",
+                        entry_keys.join(",")
+                    )));
+                }
+            }
+        }
     }
     entries.get(key).cloned().ok_or_else(|| {
         Error::new(format!(

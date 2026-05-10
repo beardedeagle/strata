@@ -12,8 +12,8 @@ mod value_template;
 
 pub use value_template::{
     ArtifactPayload, ArtifactProcessRefPayload, ArtifactValueTemplate, ArtifactValueTemplateField,
-    ArtifactValueTemplateMapEntry, project_canonical_list_element, project_canonical_map_value,
-    project_canonical_record_field,
+    ArtifactValueTemplateMapEntry, MapProjectionMode, project_canonical_list_element,
+    project_canonical_map_value, project_canonical_record_field,
 };
 
 use crate::{

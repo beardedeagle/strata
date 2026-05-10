@@ -3,8 +3,13 @@ use crate::language::{LIST_TYPE, MAP_TYPE};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::language::checker::source_functions) enum CollectionPatternShape {
-    List { len: usize },
-    Map { keys: Vec<String> },
+    List {
+        len: usize,
+    },
+    Map {
+        keys: Vec<String>,
+        completeness: MapPatternCompleteness,
+    },
 }
 
 pub(in crate::language::checker::source_functions) struct CollectionPatternResolution<'a> {
@@ -161,7 +166,10 @@ pub(in crate::language::checker::source_functions) fn collection_pattern_shape(
                 ));
             };
             let keys = canonical_map_pattern_keys(module, semantic_index, key, pattern)?;
-            Ok(CollectionPatternShape::Map { keys })
+            Ok(CollectionPatternShape::Map {
+                keys,
+                completeness: pattern.completeness,
+            })
         }
         None => Err(Error::new(format!(
             "collection pattern expected List<T,N> or Map<K,V,N>, found {expected_type}"
@@ -305,7 +313,8 @@ fn validate_collection_pattern_source_function_group(
         process_functions,
         semantic_index,
     };
-    let mut seen_shapes = BTreeSet::new();
+    let collection_capacity = collection_pattern_capacity(semantic_index, &collection_type)?;
+    let mut seen_shapes = Vec::new();
     for function in functions {
         validate_pure_source_function_block(owner, function, source_function_block(function)?)?;
         let next_type = collection_pattern_type(function)?;
@@ -331,13 +340,17 @@ fn validate_collection_pattern_source_function_group(
             pattern,
         )?;
         let shape = collection_pattern_shape(module, semantic_index, &collection_type, pattern)?;
-        if !seen_shapes.insert(shape.clone()) {
+        if let Some(overlap) =
+            first_overlapping_collection_pattern(&seen_shapes, &shape, collection_capacity)
+        {
             return Err(Error::new(format!(
-                "{owner} function {} declares duplicate collection pattern {}",
+                "{owner} function {} declares overlapping collection patterns {} and {}",
                 function.name,
+                collection_shape_label(overlap),
                 collection_shape_label(&shape)
             )));
         }
+        seen_shapes.push(shape);
         let body_bindings = pattern_bindings
             .iter()
             .map(|binding| SourceValueBinding {
@@ -452,6 +465,11 @@ fn validate_map_pattern_type(
             pattern.entries.len()
         )));
     }
+    if pattern.completeness == MapPatternCompleteness::Subset && pattern.entries.is_empty() {
+        return Err(Error::new(format!(
+            "{subject} subset map pattern must declare at least one key"
+        )));
+    }
     Ok(())
 }
 
@@ -519,6 +537,7 @@ fn check_map_pattern_bindings(
             path: PayloadBindingPath::MapValue {
                 key,
                 keys: keys.clone(),
+                projection: map_pattern_projection(pattern),
             },
         });
     }
@@ -603,16 +622,143 @@ fn map_pattern_substitutions<'a>(
             substitutions.push((binding, value));
         }
     }
-    if pattern_keys.len() != value_entries.len() {
+    if pattern.completeness == MapPatternCompleteness::Exact
+        && pattern_keys.len() != value_entries.len()
+    {
         return Ok(None);
     }
     Ok(Some(substitutions))
 }
 
-fn collection_shape_label(shape: &CollectionPatternShape) -> String {
+pub(in crate::language::checker::source_functions) fn collection_shape_label(
+    shape: &CollectionPatternShape,
+) -> String {
     match shape {
         CollectionPatternShape::List { len } => format!("List length {len}"),
-        CollectionPatternShape::Map { keys } => format!("Map keys [{}]", keys.join(",")),
+        CollectionPatternShape::Map { keys, completeness } => {
+            let marker = match completeness {
+                MapPatternCompleteness::Exact => "exact",
+                MapPatternCompleteness::Subset => "subset",
+            };
+            format!("Map {marker} keys [{}]", keys.join(","))
+        }
+    }
+}
+
+pub(in crate::language::checker::source_functions) fn collection_pattern_capacity(
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+) -> Result<usize> {
+    match semantic_index.collection_type(expected_type)? {
+        Some(CollectionType::List { capacity, .. } | CollectionType::Map { capacity, .. }) => {
+            Ok(capacity)
+        }
+        None => Err(Error::new(format!(
+            "collection pattern expected List<T,N> or Map<K,V,N>, found {expected_type}"
+        ))),
+    }
+}
+
+pub(in crate::language::checker::source_functions) fn first_overlapping_collection_pattern<'a>(
+    existing: &'a [CollectionPatternShape],
+    candidate: &CollectionPatternShape,
+    capacity: usize,
+) -> Option<&'a CollectionPatternShape> {
+    existing
+        .iter()
+        .find(|shape| collection_pattern_shapes_overlap(shape, candidate, capacity))
+}
+
+fn collection_pattern_shapes_overlap(
+    left: &CollectionPatternShape,
+    right: &CollectionPatternShape,
+    capacity: usize,
+) -> bool {
+    match (left, right) {
+        (
+            CollectionPatternShape::List { len: left },
+            CollectionPatternShape::List { len: right },
+        ) => left == right,
+        (
+            CollectionPatternShape::Map {
+                keys: left,
+                completeness: left_completeness,
+            },
+            CollectionPatternShape::Map {
+                keys: right,
+                completeness: right_completeness,
+            },
+        ) => map_pattern_shapes_overlap(
+            left,
+            *left_completeness,
+            right,
+            *right_completeness,
+            capacity,
+        ),
+        _ => false,
+    }
+}
+
+fn map_pattern_shapes_overlap(
+    left: &[String],
+    left_completeness: MapPatternCompleteness,
+    right: &[String],
+    right_completeness: MapPatternCompleteness,
+    capacity: usize,
+) -> bool {
+    match (left_completeness, right_completeness) {
+        (MapPatternCompleteness::Exact, MapPatternCompleteness::Exact) => left == right,
+        (MapPatternCompleteness::Exact, MapPatternCompleteness::Subset) => {
+            key_set_contains_all(left, right)
+        }
+        (MapPatternCompleteness::Subset, MapPatternCompleteness::Exact) => {
+            key_set_contains_all(right, left)
+        }
+        (MapPatternCompleteness::Subset, MapPatternCompleteness::Subset) => {
+            sorted_key_union_len(left, right) <= capacity
+        }
+    }
+}
+
+fn key_set_contains_all(keys: &[String], required: &[String]) -> bool {
+    required
+        .iter()
+        .all(|required_key| keys.binary_search(required_key).is_ok())
+}
+
+fn sorted_key_union_len(left: &[String], right: &[String]) -> usize {
+    let mut index_left = 0usize;
+    let mut index_right = 0usize;
+    let mut count = 0usize;
+    while index_left < left.len() || index_right < right.len() {
+        match (left.get(index_left), right.get(index_right)) {
+            (Some(left_key), Some(right_key)) if left_key == right_key => {
+                index_left += 1;
+                index_right += 1;
+            }
+            (Some(left_key), Some(right_key)) if left_key < right_key => {
+                index_left += 1;
+            }
+            (Some(_), Some(_)) => {
+                index_right += 1;
+            }
+            (Some(_), None) => {
+                index_left += 1;
+            }
+            (None, Some(_)) => {
+                index_right += 1;
+            }
+            (None, None) => break,
+        }
+        count += 1;
+    }
+    count
+}
+
+fn map_pattern_projection(pattern: &MapPattern) -> MapProjectionMode {
+    match pattern.completeness {
+        MapPatternCompleteness::Exact => MapProjectionMode::Exact,
+        MapPatternCompleteness::Subset => MapProjectionMode::Subset,
     }
 }
 

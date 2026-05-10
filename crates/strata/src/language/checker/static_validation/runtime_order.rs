@@ -81,7 +81,13 @@ fn evaluate_checked_runtime_template(
             validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
             Ok(CheckedPayloadValue::new(ty.clone(), label))
         }
-        CheckedValueTemplate::MapValue { ty, map, key, keys } => {
+        CheckedValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
             let map = evaluate_checked_runtime_template(
                 map,
                 received_payload,
@@ -89,7 +95,7 @@ fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
             )?;
-            let label = project_canonical_map_value(map.label(), key, keys)
+            let label = project_canonical_map_value(map.label(), key, keys, *projection)
                 .map_err(|err| Error::new(err.to_string()))?;
             validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
             Ok(CheckedPayloadValue::new(ty.clone(), label))

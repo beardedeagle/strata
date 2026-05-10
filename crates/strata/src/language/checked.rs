@@ -1,6 +1,6 @@
 use std::fmt;
 
-use mantle_artifact::validate_message_label;
+use mantle_artifact::{MapProjectionMode, validate_message_label};
 
 use super::ast::{Effect, Identifier, Module};
 use super::diagnostic::{Error, Result};
@@ -304,6 +304,7 @@ pub(in crate::language) enum CheckedValueTemplate {
         map: Box<CheckedValueTemplate>,
         key: String,
         keys: Vec<String>,
+        projection: MapProjectionMode,
     },
     ProcessRef {
         ty: CheckedTypeRef,

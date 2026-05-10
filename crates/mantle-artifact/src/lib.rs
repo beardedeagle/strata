@@ -12,8 +12,8 @@ pub use artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
     ArtifactProcessRef, ArtifactProcessRefPayload, ArtifactSendTarget, ArtifactStateValue,
     ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, NextState,
-    StepResult, project_canonical_list_element, project_canonical_map_value,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode,
+    NextState, StepResult, project_canonical_list_element, project_canonical_map_value,
     project_canonical_record_field,
 };
 pub use constants::*;

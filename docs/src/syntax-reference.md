@@ -141,8 +141,10 @@ list_pattern_items =
     collection_pattern_binding ("," collection_pattern_binding)* ","?
 
 map_pattern_entries =
-    value_expr "=>" collection_pattern_binding
-    ("," value_expr "=>" collection_pattern_binding)* ","?
+    ".."
+  | value_expr "=>" collection_pattern_binding
+    ("," value_expr "=>" collection_pattern_binding)*
+    ("," ".." | ","?)
 
 collection_pattern_binding =
     ident
@@ -216,8 +218,10 @@ pattern such as `Assign(job: Job)` binds the received payload as an immutable
 transition-local value. A constructor payload pattern such as
 `Assign(Job { phase })`, `Assign(List[head, _])`, or
 `Assign(Map[Ready => selected])` destructures an immutable concrete payload and
-binds only the selected values. `_` is a wildcard pattern that covers accepted
-variants without explicit clauses.
+binds only the selected values. Map payload patterns are exact unless they end
+with `..`, as in `Assign(Map[Ready => selected, ..])`; the subset marker permits
+additional static keys while requiring the listed keys. `_` is a wildcard pattern
+that covers accepted variants without explicit clauses.
 
 A match `step` uses a typed message parameter and a whole-body
 `match` over that parameter:

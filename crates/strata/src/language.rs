@@ -12,9 +12,9 @@ mod tests;
 pub use ast::{
     CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, Function,
     FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue, MapPattern,
-    MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module, OutputLiteral, Param,
-    Pattern, Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr, Statement,
-    TypeRef, ValueExpr,
+    MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module,
+    OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordValue, RecordValueField,
+    ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 pub use checked::CheckedProgram;
 pub use checker::check_module;

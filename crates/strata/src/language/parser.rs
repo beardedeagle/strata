@@ -1,9 +1,9 @@
 use super::ast::{
     CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, EnumVariant,
     Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
-    MapPattern, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module, OutputLiteral,
-    Param, Pattern, Process, Record, RecordField, RecordPatternField, RecordValue,
-    RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
+    MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm,
+    Module, OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordPatternField,
+    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
@@ -352,11 +352,13 @@ impl Parser {
                     }
                     None => (None, None, None),
                 };
+                let (entries, completeness) = self.parse_map_pattern_entries()?;
                 return Ok(Pattern::Map(MapPattern {
                     key_type,
                     value_type,
                     capacity,
-                    entries: self.parse_map_pattern_entries()?,
+                    completeness,
+                    entries,
                 }));
             }
             if type_args.is_some() {
@@ -466,10 +468,17 @@ impl Parser {
         Ok(elements)
     }
 
-    fn parse_map_pattern_entries(&mut self) -> Result<Vec<MapPatternEntry>> {
+    fn parse_map_pattern_entries(
+        &mut self,
+    ) -> Result<(Vec<MapPatternEntry>, MapPatternCompleteness)> {
         let mut entries = Vec::new();
+        let mut completeness = MapPatternCompleteness::Exact;
         if self.consume_symbol(']') {
-            return Ok(entries);
+            return Ok((entries, completeness));
+        }
+        if self.consume_dotdot() {
+            self.expect_symbol(']')?;
+            return Ok((entries, MapPatternCompleteness::Subset));
         }
         loop {
             let key = self.parse_value_expr()?;
@@ -477,6 +486,11 @@ impl Parser {
             let binding = self.parse_collection_pattern_binding()?;
             entries.push(MapPatternEntry { key, binding });
             if self.consume_symbol(',') {
+                if self.consume_dotdot() {
+                    completeness = MapPatternCompleteness::Subset;
+                    self.expect_symbol(']')?;
+                    break;
+                }
                 if self.consume_symbol(']') {
                     break;
                 }
@@ -485,7 +499,7 @@ impl Parser {
             self.expect_symbol(']')?;
             break;
         }
-        Ok(entries)
+        Ok((entries, completeness))
     }
 
     fn parse_collection_pattern_binding(&mut self) -> Result<CollectionPatternBinding> {
@@ -976,6 +990,15 @@ impl Parser {
 
     fn consume_symbol(&mut self, symbol: char) -> bool {
         if matches!(self.peek_kind(), TokenKind::Symbol(value) if *value == symbol) {
+            self.index += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn consume_dotdot(&mut self) -> bool {
+        if matches!(self.peek_kind(), TokenKind::DotDot) {
             self.index += 1;
             true
         } else {

@@ -12,15 +12,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use mantle_artifact::{
     MAX_ACTIONS_PER_PROCESS, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_TYPE_COUNT, project_canonical_list_element, project_canonical_map_value,
+    MAX_TYPE_COUNT, MapProjectionMode, project_canonical_list_element, project_canonical_map_value,
     project_canonical_record_field,
 };
 
 use super::ast::{
     CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, EnumVariant,
     Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
-    MapPattern, MapValue, MapValueEntry, Match, MatchArm, Module, Param, Pattern, Process, Record,
-    RecordPatternField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
+    MapPattern, MapPatternCompleteness, MapValue, MapValueEntry, Match, MatchArm, Module, Param,
+    Pattern, Process, Record, RecordPatternField, RecordValue, RecordValueField, ReturnExpr,
+    Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
@@ -283,9 +284,18 @@ struct PatternPayloadParam {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PayloadBindingPath {
     Whole,
-    RecordField { field: Identifier },
-    ListIndex { index: usize, len: usize },
-    MapValue { key: String, keys: Vec<String> },
+    RecordField {
+        field: Identifier,
+    },
+    ListIndex {
+        index: usize,
+        len: usize,
+    },
+    MapValue {
+        key: String,
+        keys: Vec<String>,
+        projection: MapProjectionMode,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -996,6 +1006,7 @@ fn check_map_payload_pattern_bindings(
             path: PayloadBindingPath::MapValue {
                 key,
                 keys: keys.clone(),
+                projection: map_pattern_projection(pattern),
             },
         });
     }
@@ -1028,7 +1039,19 @@ fn validate_map_payload_pattern_capacity(
             pattern.entries.len()
         )));
     }
+    if pattern.completeness == MapPatternCompleteness::Subset && pattern.entries.is_empty() {
+        return Err(Error::new(format!(
+            "{subject} {context} subset map payload pattern must declare at least one key"
+        )));
+    }
     Ok(())
+}
+
+fn map_pattern_projection(pattern: &MapPattern) -> MapProjectionMode {
+    match pattern.completeness {
+        MapPatternCompleteness::Exact => MapProjectionMode::Exact,
+        MapPatternCompleteness::Subset => MapProjectionMode::Subset,
+    }
 }
 
 fn payload_binding_label(
@@ -1043,9 +1066,11 @@ fn payload_binding_label(
         PayloadBindingPath::ListIndex { index, len } => {
             Ok(project_canonical_list_element(payload_label, *index, *len).ok())
         }
-        PayloadBindingPath::MapValue { key, keys } => {
-            Ok(project_canonical_map_value(payload_label, key, keys).ok())
-        }
+        PayloadBindingPath::MapValue {
+            key,
+            keys,
+            projection,
+        } => Ok(project_canonical_map_value(payload_label, key, keys, *projection).ok()),
     }
 }
 

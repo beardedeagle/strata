@@ -157,11 +157,16 @@ fn checked_binding_value_template(binding: &ValueTemplateBinding<'_>) -> Checked
             index: *index,
             len: *len,
         },
-        PayloadBindingPath::MapValue { key, keys } => CheckedValueTemplate::MapValue {
+        PayloadBindingPath::MapValue {
+            key,
+            keys,
+            projection,
+        } => CheckedValueTemplate::MapValue {
             ty: binding.checked_ty.clone(),
             map: Box::new(root),
             key: key.clone(),
             keys: keys.clone(),
+            projection: *projection,
         },
     }
 }

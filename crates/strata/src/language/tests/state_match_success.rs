@@ -106,6 +106,124 @@ fn parses_checks_and_lowers_state_payload_match() {
 }
 
 #[test]
+fn state_match_destructures_subset_map_payloads() {
+    let source = r#"
+module subset_map_state_payload_match;
+
+record MainState;
+enum Phase {
+    Ready,
+    Done,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Idle,
+    Working(Map<Phase,Phase,2>),
+    Done(Phase),
+}
+enum WorkerMsg {
+    Begin,
+    Complete,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Begin;
+        send worker Complete;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Begin) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(Working(Map<Phase,Phase,2>[Ready => Done, Done => Ready]));
+    }
+
+    fn step(state: WorkerState, Complete) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match state {
+            Idle => {
+                return Stop(Idle);
+            }
+            Working(Map[Ready => phase, ..]) => {
+                return Stop(Done(phase));
+            }
+            Done(phase: Phase) => {
+                return Stop(Done(phase));
+            }
+        }
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("subset map state match should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+
+    assert_eq!(
+        checked_state_labels(worker),
+        [
+            "Idle",
+            "Working(Map[Done=>Ready,Ready=>Done])",
+            "Done(Done)"
+        ]
+    );
+
+    let artifact =
+        lower_to_artifact(&checked, source).expect("subset map state match should lower");
+    let worker_artifact = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker should lower");
+    let complete_working = worker_artifact
+        .transitions
+        .iter()
+        .find(|transition| transition.current_state == Some(mantle_artifact::StateId::new(1)))
+        .expect("Working state transition should lower");
+    let mantle_artifact::NextState::Template(ArtifactValueTemplate::EnumVariant {
+        variant,
+        payload,
+        ..
+    }) = &complete_working.next_state
+    else {
+        panic!("Working state transition should lower to a Done template");
+    };
+    assert_eq!(variant, "Done");
+    let ArtifactValueTemplate::MapValue {
+        key,
+        keys,
+        projection,
+        ..
+    } = payload.as_ref()
+    else {
+        panic!("Done payload should project from current map state payload");
+    };
+    assert_eq!(key, "Ready");
+    assert_eq!(keys.as_slice(), ["Ready"]);
+    assert_eq!(*projection, mantle_artifact::MapProjectionMode::Subset);
+}
+
+#[test]
 fn state_match_sees_concrete_payload_states_from_other_steps() {
     let source = r#"
 module concrete_state_payload_match;

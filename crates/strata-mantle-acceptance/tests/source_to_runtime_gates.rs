@@ -897,20 +897,44 @@ fn collection_state_checks_builds_and_runs_on_mantle() {
     );
 
     let map_worker = &artifact.processes[2];
-    let map_type = value_type_id(&artifact, "__strata_checked_3_Map_2_1_5_Phase_5_Phase_1");
-    assert_eq!(map_worker.state_values[0].label, "Map[Ready=>Ready]");
-    assert_eq!(map_worker.state_values[1].label, "Map[Ready=>Done]");
+    let map_type = value_type_id(&artifact, "__strata_checked_3_Map_2_1_5_Phase_5_Phase_2");
+    assert_eq!(
+        map_worker.state_values[0].label,
+        "Map[Done=>Ready,Ready=>Ready]"
+    );
+    assert_eq!(
+        map_worker.state_values[1].label,
+        "Map[Done=>Ready,Ready=>Done]"
+    );
     assert_eq!(
         map_worker.transitions[0].next_state,
         mantle_artifact::NextState::Template(ArtifactValueTemplate::Map {
             ty: map_type,
-            entries: vec![ArtifactValueTemplateMapEntry {
-                key: ArtifactValueTemplate::Literal {
-                    ty: phase_type,
-                    value: "Ready".to_string(),
+            entries: vec![
+                ArtifactValueTemplateMapEntry {
+                    key: ArtifactValueTemplate::Literal {
+                        ty: phase_type,
+                        value: "Ready".to_string(),
+                    },
+                    value: ArtifactValueTemplate::MapValue {
+                        ty: phase_type,
+                        map: Box::new(ArtifactValueTemplate::ReceivedPayload { ty: map_type }),
+                        key: "Ready".to_string(),
+                        keys: vec!["Ready".to_string()],
+                        projection: mantle_artifact::MapProjectionMode::Subset,
+                    },
                 },
-                value: ArtifactValueTemplate::ReceivedPayload { ty: phase_type },
-            }],
+                ArtifactValueTemplateMapEntry {
+                    key: ArtifactValueTemplate::Literal {
+                        ty: phase_type,
+                        value: "Done".to_string(),
+                    },
+                    value: ArtifactValueTemplate::Literal {
+                        ty: phase_type,
+                        value: "Ready".to_string(),
+                    },
+                },
+            ],
         })
     );
 
@@ -925,7 +949,7 @@ fn collection_state_checks_builds_and_runs_on_mantle() {
         r#""event":"program_output","pid":3,"process_id":2,"process":"MapWorker","stream":"stdout","output_id":1,"text":"collection map state replaced""#
     ));
     assert!(trace.contains(
-        r#""event":"state_updated","pid":3,"process_id":2,"process":"MapWorker","from_state_id":0,"from":"Map[Ready=>Ready]","to_state_id":1,"to":"Map[Ready=>Done]""#
+        r#""event":"state_updated","pid":3,"process_id":2,"process":"MapWorker","from_state_id":0,"from":"Map[Done=>Ready,Ready=>Ready]","to_state_id":1,"to":"Map[Done=>Ready,Ready=>Done]""#
     ));
 }
 

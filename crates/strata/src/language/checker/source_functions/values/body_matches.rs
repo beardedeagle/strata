@@ -1,6 +1,7 @@
 use super::*;
 use crate::language::checker::source_functions::collection_patterns::{
-    check_collection_pattern_bindings, collection_pattern_shape,
+    check_collection_pattern_bindings, collection_pattern_capacity, collection_pattern_shape,
+    collection_shape_label, first_overlapping_collection_pattern,
 };
 use crate::language::checker::source_functions::record_patterns::check_record_pattern_bindings;
 
@@ -226,7 +227,8 @@ fn validate_source_function_body_collection_match_values(
     collection_type: &TypeRef,
 ) -> Result<()> {
     let mut wildcard_seen = false;
-    let mut shapes = BTreeSet::new();
+    let mut shapes = Vec::new();
+    let capacity = collection_pattern_capacity(scope.semantic_index, collection_type)?;
     for arm in &match_body.arms {
         if !arm.body.statements.is_empty() {
             return Err(Error::new(format!(
@@ -260,12 +262,17 @@ fn validate_source_function_body_collection_match_values(
                     collection_type,
                     &arm.pattern,
                 )?;
-                if !shapes.insert(shape) {
+                if let Some(overlap) =
+                    first_overlapping_collection_pattern(&shapes, &shape, capacity)
+                {
                     return Err(Error::new(format!(
-                        "function {} match declares duplicate collection pattern",
-                        function.name
+                        "function {} match declares overlapping collection patterns {} and {}",
+                        function.name,
+                        collection_shape_label(overlap),
+                        collection_shape_label(&shape)
                     )));
                 }
+                shapes.push(shape);
                 for binding in &pattern_bindings {
                     if bindings
                         .iter()

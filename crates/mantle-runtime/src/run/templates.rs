@@ -76,10 +76,16 @@ pub(super) fn evaluate_runtime_template(
                 process_ref: None,
             })
         }
-        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+        ArtifactValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
             let map =
                 evaluate_runtime_template(program, map, received_payload, step, process_refs)?;
-            let value = project_canonical_map_value(&map.value, key, keys)?;
+            let value = project_canonical_map_value(&map.value, key, keys, *projection)?;
             validate_payload_value_label(&value)?;
             Ok(ArtifactPayload {
                 ty: *ty,

@@ -110,6 +110,217 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn checks_source_function_subset_map_patterns() {
+    let source = r#"
+module source_function_subset_map_patterns;
+
+enum Phase {
+    Ready,
+    Done,
+    Unknown,
+}
+record MainState {
+    signature: Phase,
+    body: Phase,
+    ret: Phase,
+}
+enum MainMsg {
+    Start,
+}
+
+fn ready_signature(Map<Phase,Phase,2>[Ready => selected, ..]) -> Phase ! [] ~ [] @det {
+    return selected;
+}
+
+fn ready_body(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
+    match items {
+        Map[Ready => selected, ..] => {
+            return selected;
+        }
+        _ => {
+            return Unknown;
+        }
+    }
+}
+
+fn ready_return(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
+    return match items {
+        Map[Ready => selected, ..] => {
+            return selected;
+        }
+        _ => {
+            return Unknown;
+        }
+    };
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            signature: ready_signature(Map<Phase,Phase,2>[Ready => Done, Unknown => Unknown]),
+            body: ready_body(Map<Phase,Phase,2>[Ready => Done, Unknown => Unknown]),
+            ret: ready_return(Map<Phase,Phase,2>[Ready => Done, Unknown => Unknown]),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("subset map source helper patterns should check");
+    let artifact = lower_to_artifact(&checked, source).expect("subset map source should lower");
+
+    assert_eq!(
+        artifact_state_labels(&artifact.processes[0]),
+        ["MainState{signature:Done,body:Done,ret:Done}"]
+    );
+}
+
+#[test]
+fn rejects_overlapping_subset_map_source_function_patterns() {
+    let source = r#"
+module overlapping_subset_map_source_function_patterns;
+
+enum Phase {
+    Ready,
+    Done,
+}
+record MainState {
+    selected: Phase,
+}
+enum MainMsg {
+    Start,
+}
+
+fn pick(Map<Phase,Phase,2>[Ready => selected, ..]) -> Phase ! [] ~ [] @det {
+    return selected;
+}
+
+fn pick(Map<Phase,Phase,2>[Done => selected, ..]) -> Phase ! [] ~ [] @det {
+    return selected;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            selected: pick(Map<Phase,Phase,2>[Ready => Ready, Done => Done]),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("overlapping subset patterns should fail");
+
+    assert!(
+        err.to_string()
+            .contains("declares overlapping collection patterns"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn keeps_exact_map_source_function_patterns_exact() {
+    let source = r#"
+module exact_map_source_function_patterns;
+
+enum Phase {
+    Ready,
+    Done,
+}
+record MainState {
+    selected: Phase,
+}
+enum MainMsg {
+    Start,
+}
+
+fn pick(Map<Phase,Phase,2>[Ready => selected]) -> Phase ! [] ~ [] @det {
+    return selected;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            selected: pick(Map<Phase,Phase,2>[Ready => Ready, Done => Done]),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("exact map pattern should reject extra keys");
+
+    assert!(
+        err.to_string()
+            .contains("function pick has no collection pattern for concrete Map"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_empty_subset_map_source_function_pattern() {
+    let source = r#"
+module empty_subset_map_source_function_pattern;
+
+enum Phase {
+    Ready,
+    Done,
+}
+record MainState {
+    selected: Phase,
+}
+enum MainMsg {
+    Start,
+}
+
+fn pick(Map<Phase,Phase,2>[..]) -> Phase ! [] ~ [] @det {
+    return Ready;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            selected: pick(Map<Phase,Phase,2>[Ready => Ready]),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("empty subset map pattern should fail");
+
+    assert!(
+        err.to_string()
+            .contains("subset map pattern must declare at least one key"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn lowers_payload_dependent_list_state_templates() {
     let source = r#"
 module payload_dependent_list_state;
