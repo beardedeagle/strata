@@ -369,11 +369,12 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
 #[test]
 fn in_memory_host_delivers_payload_envelopes_and_template_state() {
     let artifact = payload_artifact();
-    let expected_payload = ArtifactPayload {
+    let expected_payload = RuntimePayload::from_artifact(&ArtifactPayload {
         ty: JOB,
         value: "Job{phase:Ready}".to_string(),
         process_ref: None,
-    };
+    })
+    .expect("expected payload should load");
     let mut host = InMemoryRuntimeHost::default();
 
     let report = run_artifact_with_host(&artifact, &mut host, RunLimits::default())

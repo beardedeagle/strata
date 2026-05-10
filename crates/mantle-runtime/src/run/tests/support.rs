@@ -5,13 +5,16 @@ pub(super) use crate::limits::{
     DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES,
     RunLimits,
 };
-pub(super) use crate::program::LoadedProgram;
+pub(super) use crate::program::{
+    LoadedNextState, LoadedProgram, LoadedValueTemplate, RuntimePayload, RuntimeValue,
+};
 pub(super) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactMessageVariant,
     ArtifactPayload, ArtifactProcess, ArtifactProcessRef, ArtifactProcessRefPayload,
-    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValueTemplateField,
-    MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact,
-    MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
+    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValueTemplate,
+    ArtifactValueTemplateField, MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS,
+    MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, StateId, StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
@@ -159,4 +162,16 @@ pub(super) fn record_template_with_depth(depth: usize) -> ArtifactValueTemplate 
         _ => unreachable!("depth above zero produces a record"),
     }
     template
+}
+
+pub(super) fn loaded_template(template: ArtifactValueTemplate) -> LoadedValueTemplate {
+    LoadedValueTemplate::from_artifact(&template).expect("test template should load")
+}
+
+pub(super) fn loaded_next_state(next_state: NextState) -> LoadedNextState {
+    LoadedNextState::from_artifact(&next_state).expect("test next state should load")
+}
+
+pub(super) fn runtime_payload(payload: ArtifactPayload) -> RuntimePayload {
+    RuntimePayload::from_artifact(&payload).expect("test payload should load")
 }

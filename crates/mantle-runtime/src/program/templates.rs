@@ -2,13 +2,173 @@ use super::*;
 
 pub(super) fn evaluate_loaded_state_value(
     program: &LoadedProgram,
-    template: &ArtifactValueTemplate,
-    received_payload: Option<&mantle_artifact::ArtifactPayload>,
-    current_state_payload: Option<&mantle_artifact::ArtifactPayload>,
-) -> Result<ArtifactStateValue> {
-    template.evaluate_state_value(received_payload, current_state_payload, &|ty| {
-        program.type_label(ty).map(str::to_owned)
-    })
+    template: &LoadedValueTemplate,
+    received_payload: Option<&RuntimePayload>,
+    current_state_payload: Option<&RuntimePayload>,
+) -> Result<LoadedStateValue> {
+    let payload =
+        evaluate_loaded_payload_value(program, template, received_payload, current_state_payload)?;
+    Ok(LoadedStateValue::from_payload(payload))
+}
+
+fn evaluate_loaded_payload_value(
+    program: &LoadedProgram,
+    template: &LoadedValueTemplate,
+    received_payload: Option<&RuntimePayload>,
+    current_state_payload: Option<&RuntimePayload>,
+) -> Result<RuntimePayload> {
+    match template {
+        LoadedValueTemplate::Literal { ty, value } => RuntimePayload::value(*ty, value.clone()),
+        LoadedValueTemplate::ReceivedPayload { ty } => {
+            let payload = received_payload.ok_or_else(|| {
+                Error::new("received payload template requires a payload-bearing message")
+            })?;
+            if payload.ty != *ty {
+                return Err(Error::new(format!(
+                    "received payload has type id {}, expected {}",
+                    payload.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            Ok(payload.clone())
+        }
+        LoadedValueTemplate::CurrentStatePayload { ty } => {
+            let payload = current_state_payload.ok_or_else(|| {
+                Error::new("current state payload template requires a payload-bearing state")
+            })?;
+            if payload.ty != *ty {
+                return Err(Error::new(format!(
+                    "current state payload has type id {}, expected {}",
+                    payload.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            Ok(payload.clone())
+        }
+        LoadedValueTemplate::RecordField { ty, record, field } => {
+            let record = evaluate_loaded_payload_value(
+                program,
+                record,
+                received_payload,
+                current_state_payload,
+            )?;
+            RuntimePayload::value(*ty, record.value.project_record_field(field)?)
+        }
+        LoadedValueTemplate::ListElement {
+            ty,
+            list,
+            index,
+            len,
+        } => {
+            let list = evaluate_loaded_payload_value(
+                program,
+                list,
+                received_payload,
+                current_state_payload,
+            )?;
+            RuntimePayload::value(*ty, list.value.project_list_element(*index, *len)?)
+        }
+        LoadedValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
+            let map = evaluate_loaded_payload_value(
+                program,
+                map,
+                received_payload,
+                current_state_payload,
+            )?;
+            RuntimePayload::value(*ty, map.value.project_map_value(key, keys, *projection)?)
+        }
+        LoadedValueTemplate::ProcessRef { .. } => Err(Error::new(
+            "process reference template requires runtime process reference bindings",
+        )),
+        LoadedValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        } => {
+            let payload = evaluate_loaded_payload_value(
+                program,
+                payload,
+                received_payload,
+                current_state_payload,
+            )?;
+            RuntimePayload::value(
+                *ty,
+                RuntimeValue::EnumVariant {
+                    variant: variant.clone(),
+                    payload: Box::new(payload.value),
+                },
+            )
+        }
+        LoadedValueTemplate::Record { ty, fields } => {
+            let mut values = std::collections::BTreeMap::new();
+            for field in fields {
+                let value = evaluate_loaded_payload_value(
+                    program,
+                    &field.value,
+                    received_payload,
+                    current_state_payload,
+                )?;
+                if values.insert(field.name.clone(), value.value).is_some() {
+                    return Err(Error::new(format!(
+                        "record template duplicates field {}",
+                        field.name
+                    )));
+                }
+            }
+            RuntimePayload::value(
+                *ty,
+                RuntimeValue::Record {
+                    constructor: program.type_label(*ty)?.to_string(),
+                    fields: values,
+                },
+            )
+        }
+        LoadedValueTemplate::List { ty, items } => {
+            let mut values = Vec::with_capacity(items.len());
+            for item in items {
+                values.push(
+                    evaluate_loaded_payload_value(
+                        program,
+                        item,
+                        received_payload,
+                        current_state_payload,
+                    )?
+                    .value,
+                );
+            }
+            RuntimePayload::value(*ty, RuntimeValue::List(values))
+        }
+        LoadedValueTemplate::Map { ty, entries } => {
+            let mut values = std::collections::BTreeMap::new();
+            for entry in entries {
+                let key = evaluate_loaded_payload_value(
+                    program,
+                    &entry.key,
+                    received_payload,
+                    current_state_payload,
+                )?;
+                let value = evaluate_loaded_payload_value(
+                    program,
+                    &entry.value,
+                    received_payload,
+                    current_state_payload,
+                )?;
+                if values.insert(key.value.clone(), value.value).is_some() {
+                    return Err(Error::new(format!(
+                        "map template duplicates key {}",
+                        key.value.label()
+                    )));
+                }
+            }
+            RuntimePayload::value(*ty, RuntimeValue::Map(values))
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -23,14 +183,14 @@ pub(super) struct LoadedTemplateAdmission<'a> {
 }
 
 impl LoadedTemplateAdmission<'_> {
-    pub(super) fn validate(&self, field: &str, template: &ArtifactValueTemplate) -> Result<()> {
+    pub(super) fn validate(&self, field: &str, template: &LoadedValueTemplate) -> Result<()> {
         self.validate_with_depth(field, template, 0)
     }
 
     fn validate_with_depth(
         &self,
         field: &str,
-        template: &ArtifactValueTemplate,
+        template: &LoadedValueTemplate,
         depth: usize,
     ) -> Result<()> {
         if depth > MAX_VALUE_TEMPLATE_DEPTH {
@@ -50,19 +210,19 @@ impl LoadedTemplateAdmission<'_> {
         }
 
         match template {
-            ArtifactValueTemplate::Literal { ty, value } => {
+            LoadedValueTemplate::Literal { ty, value } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
-                validate_payload_value_label(value)
+                validate_payload_value_label(&value.label())
                     .map_err(|err| Error::new(format!("{field}: {err}")))
             }
-            ArtifactValueTemplate::ReceivedPayload { ty } => {
+            LoadedValueTemplate::ReceivedPayload { ty } => {
                 self.validate_received_payload(field, *ty)
             }
-            ArtifactValueTemplate::CurrentStatePayload { ty } => {
+            LoadedValueTemplate::CurrentStatePayload { ty } => {
                 self.validate_current_state_payload(field, *ty)
             }
-            ArtifactValueTemplate::RecordField {
+            LoadedValueTemplate::RecordField {
                 ty,
                 record,
                 field: field_name,
@@ -78,7 +238,7 @@ impl LoadedTemplateAdmission<'_> {
                 };
                 nested.validate_with_depth(&format!("{field}.record"), record, depth + 1)
             }
-            ArtifactValueTemplate::ListElement {
+            LoadedValueTemplate::ListElement {
                 ty,
                 list,
                 index,
@@ -104,7 +264,7 @@ impl LoadedTemplateAdmission<'_> {
                 };
                 nested.validate_with_depth(&format!("{field}.list"), list, depth + 1)
             }
-            ArtifactValueTemplate::MapValue {
+            LoadedValueTemplate::MapValue {
                 ty,
                 map,
                 key,
@@ -122,12 +282,12 @@ impl LoadedTemplateAdmission<'_> {
                 };
                 nested.validate_with_depth(&format!("{field}.map"), map, depth + 1)
             }
-            ArtifactValueTemplate::ProcessRef {
+            LoadedValueTemplate::ProcessRef {
                 ty,
                 target_process,
                 process_ref,
             } => self.validate_process_ref(field, *ty, *target_process, *process_ref),
-            ArtifactValueTemplate::EnumVariant {
+            LoadedValueTemplate::EnumVariant {
                 ty,
                 variant,
                 payload,
@@ -142,17 +302,17 @@ impl LoadedTemplateAdmission<'_> {
                 };
                 nested.validate_with_depth(&format!("{field}.payload"), payload, depth + 1)
             }
-            ArtifactValueTemplate::Record { ty, fields } => {
+            LoadedValueTemplate::Record { ty, fields } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_record(field, fields, depth)
             }
-            ArtifactValueTemplate::List { ty, items } => {
+            LoadedValueTemplate::List { ty, items } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_list(field, items, depth)
             }
-            ArtifactValueTemplate::Map { ty, entries } => {
+            LoadedValueTemplate::Map { ty, entries } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_map(field, entries, depth)
@@ -265,7 +425,7 @@ impl LoadedTemplateAdmission<'_> {
     fn validate_record(
         &self,
         field: &str,
-        fields: &[mantle_artifact::ArtifactValueTemplateField],
+        fields: &[LoadedValueTemplateField],
         depth: usize,
     ) -> Result<()> {
         if fields.is_empty() || fields.len() > MAX_VALUE_TEMPLATE_FIELDS {
@@ -299,7 +459,7 @@ impl LoadedTemplateAdmission<'_> {
     fn validate_list(
         &self,
         field: &str,
-        items: &[ArtifactValueTemplate],
+        items: &[LoadedValueTemplate],
         depth: usize,
     ) -> Result<()> {
         if items.len() > MAX_VALUE_TEMPLATE_FIELDS {
@@ -321,7 +481,7 @@ impl LoadedTemplateAdmission<'_> {
     fn validate_map(
         &self,
         field: &str,
-        entries: &[mantle_artifact::ArtifactValueTemplateMapEntry],
+        entries: &[LoadedValueTemplateMapEntry],
         depth: usize,
     ) -> Result<()> {
         if entries.len() > MAX_VALUE_TEMPLATE_FIELDS {
@@ -348,7 +508,10 @@ impl LoadedTemplateAdmission<'_> {
             )?;
             let key = loaded_static_map_key_value(self.program, &entry.key)?;
             if !keys.insert(key.clone()) {
-                return Err(Error::new(format!("{field} duplicates key {key}")));
+                return Err(Error::new(format!(
+                    "{field} duplicates key {}",
+                    key.label()
+                )));
             }
             nested.validate_with_depth(
                 &format!("{field}.entry.{index}.value"),
@@ -360,31 +523,33 @@ impl LoadedTemplateAdmission<'_> {
     }
 }
 
-fn validate_map_projection_keys(field: &str, key: &str, keys: &[String]) -> Result<()> {
+fn validate_map_projection_keys(
+    field: &str,
+    key: &RuntimeValue,
+    keys: &[RuntimeValue],
+) -> Result<()> {
     if keys.is_empty() || keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
         return Err(Error::new(format!(
             "{field}.key_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
         )));
     }
-    validate_payload_value_label(key).map_err(|err| Error::new(format!("{field}.key: {err}")))?;
+    validate_payload_value_label(&key.label())
+        .map_err(|err| Error::new(format!("{field}.key: {err}")))?;
     let mut seen = BTreeSet::new();
     for expected_key in keys {
-        validate_payload_value_label(expected_key)
+        validate_payload_value_label(&expected_key.label())
             .map_err(|err| Error::new(format!("{field}.expected_key: {err}")))?;
         if !seen.insert(expected_key.clone()) {
             return Err(Error::new(format!(
-                "{field} duplicates expected map key {expected_key}"
+                "{field} duplicates expected map key {}",
+                expected_key.label()
             )));
         }
     }
     if !seen.contains(key) {
         return Err(Error::new(format!(
-            "{field} projection key {key} is not one of the expected map keys"
-        )));
-    }
-    if seen.into_iter().collect::<Vec<_>>() != keys {
-        return Err(Error::new(format!(
-            "{field} expected map keys must be sorted"
+            "{field} projection key {} is not one of the expected map keys",
+            key.label()
         )));
     }
     Ok(())
@@ -392,62 +557,60 @@ fn validate_map_projection_keys(field: &str, key: &str, keys: &[String]) -> Resu
 
 fn loaded_static_map_key_value(
     program: &LoadedProgram,
-    template: &ArtifactValueTemplate,
-) -> Result<String> {
+    template: &LoadedValueTemplate,
+) -> Result<RuntimeValue> {
     evaluate_loaded_state_value(program, template, None, None).map(|value| value.value)
 }
 
-fn loaded_template_is_static_map_key(template: &ArtifactValueTemplate) -> bool {
+fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) -> bool {
     match template {
-        ArtifactValueTemplate::Literal { .. } => true,
-        ArtifactValueTemplate::ReceivedPayload { .. }
-        | ArtifactValueTemplate::CurrentStatePayload { .. }
-        | ArtifactValueTemplate::RecordField { .. }
-        | ArtifactValueTemplate::ListElement { .. }
-        | ArtifactValueTemplate::MapValue { .. }
-        | ArtifactValueTemplate::ProcessRef { .. } => false,
-        ArtifactValueTemplate::EnumVariant { payload, .. } => {
+        LoadedValueTemplate::Literal { .. } => true,
+        LoadedValueTemplate::ReceivedPayload { .. }
+        | LoadedValueTemplate::CurrentStatePayload { .. }
+        | LoadedValueTemplate::RecordField { .. }
+        | LoadedValueTemplate::ListElement { .. }
+        | LoadedValueTemplate::MapValue { .. }
+        | LoadedValueTemplate::ProcessRef { .. } => false,
+        LoadedValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_is_static_map_key(payload)
         }
-        ArtifactValueTemplate::Record { fields, .. } => fields
+        LoadedValueTemplate::Record { fields, .. } => fields
             .iter()
             .all(|field| loaded_template_is_static_map_key(&field.value)),
-        ArtifactValueTemplate::List { items, .. } => {
+        LoadedValueTemplate::List { items, .. } => {
             items.iter().all(loaded_template_is_static_map_key)
         }
-        ArtifactValueTemplate::Map { entries, .. } => entries.iter().all(|entry| {
+        LoadedValueTemplate::Map { entries, .. } => entries.iter().all(|entry| {
             loaded_template_is_static_map_key(&entry.key)
                 && loaded_template_is_static_map_key(&entry.value)
         }),
     }
 }
 
-pub(super) fn loaded_template_depends_on_received_payload(
-    template: &ArtifactValueTemplate,
-) -> bool {
+pub(super) fn loaded_template_depends_on_received_payload(template: &LoadedValueTemplate) -> bool {
     match template {
-        ArtifactValueTemplate::Literal { .. } | ArtifactValueTemplate::ProcessRef { .. } => false,
-        ArtifactValueTemplate::ReceivedPayload { .. } => true,
-        ArtifactValueTemplate::CurrentStatePayload { .. } => false,
-        ArtifactValueTemplate::RecordField { record, .. } => {
+        LoadedValueTemplate::Literal { .. } | LoadedValueTemplate::ProcessRef { .. } => false,
+        LoadedValueTemplate::ReceivedPayload { .. } => true,
+        LoadedValueTemplate::CurrentStatePayload { .. } => false,
+        LoadedValueTemplate::RecordField { record, .. } => {
             loaded_template_depends_on_received_payload(record)
         }
-        ArtifactValueTemplate::ListElement { list, .. } => {
+        LoadedValueTemplate::ListElement { list, .. } => {
             loaded_template_depends_on_received_payload(list)
         }
-        ArtifactValueTemplate::MapValue { map, .. } => {
+        LoadedValueTemplate::MapValue { map, .. } => {
             loaded_template_depends_on_received_payload(map)
         }
-        ArtifactValueTemplate::EnumVariant { payload, .. } => {
+        LoadedValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_depends_on_received_payload(payload)
         }
-        ArtifactValueTemplate::Record { fields, .. } => fields
+        LoadedValueTemplate::Record { fields, .. } => fields
             .iter()
             .any(|field| loaded_template_depends_on_received_payload(&field.value)),
-        ArtifactValueTemplate::List { items, .. } => items
+        LoadedValueTemplate::List { items, .. } => items
             .iter()
             .any(loaded_template_depends_on_received_payload),
-        ArtifactValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
+        LoadedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
             loaded_template_depends_on_received_payload(&entry.key)
                 || loaded_template_depends_on_received_payload(&entry.value)
         }),

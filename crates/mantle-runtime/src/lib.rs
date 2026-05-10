@@ -22,6 +22,7 @@ pub use limits::{
     DEFAULT_MAX_DISPATCHES, DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES,
     DEFAULT_MAX_TRACE_BYTES, RunLimits,
 };
+pub use program::RuntimePayload;
 pub use report::{
     MessageDelivery, ProcessReport, ProcessStatus, RunReport, RuntimeReport, SpawnReport,
 };

@@ -85,11 +85,11 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
             message: MessageId::new(0),
-            payload: Some(ArtifactValueTemplate::ProcessRef {
+            payload: Some(loaded_template(ArtifactValueTemplate::ProcessRef {
                 ty: PROCESS_REF_WORKER,
                 target_process: ProcessId::new(0),
                 process_ref: ProcessRefId::new(0),
-            }),
+            })),
         },
     ];
 
@@ -117,14 +117,14 @@ fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded()
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
             message: MessageId::new(0),
-            payload: Some(ArtifactValueTemplate::RecordField {
+            payload: Some(loaded_template(ArtifactValueTemplate::RecordField {
                 ty: PROCESS_REF_WORKER,
                 record: Box::new(ArtifactValueTemplate::Literal {
                     ty: BOX,
                     value: "Box{reply_to:ProcessRef_Worker}".to_string(),
                 }),
                 field: "reply_to".to_string(),
-            }),
+            })),
         },
     ];
 
@@ -183,14 +183,14 @@ fn runtime_rejects_unspawned_process_ref_payload() {
             worker_pid,
             RuntimeMessageEnvelope::new(
                 MessageId::new(0),
-                Some(ArtifactPayload {
+                Some(runtime_payload(ArtifactPayload {
                     ty: PROCESS_REF_WORKER,
                     value: "type8#99".to_string(),
                     process_ref: Some(ArtifactProcessRefPayload {
                         target_process: ProcessId::new(1),
                         pid: 99,
                     }),
-                }),
+                })),
             ),
             Some(main_pid),
         )
@@ -228,14 +228,14 @@ fn runtime_rejects_process_ref_payload_target_type_mismatch() {
             worker_pid,
             RuntimeMessageEnvelope::new(
                 MessageId::new(0),
-                Some(ArtifactPayload {
+                Some(runtime_payload(ArtifactPayload {
                     ty: PROCESS_REF_WORKER,
                     value: "type8#1".to_string(),
                     process_ref: Some(ArtifactProcessRefPayload {
                         target_process: ProcessId::new(0),
                         pid: main_pid.as_u64(),
                     }),
-                }),
+                })),
             ),
             Some(main_pid),
         )
@@ -257,11 +257,9 @@ fn runtime_rejects_oversized_record_payload_template_value() {
             value: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
         }],
     };
-    let received = ArtifactPayload {
-        ty: JOB,
-        value: "a".repeat(MAX_FIELD_VALUE_BYTES),
-        process_ref: None,
-    };
+    let received =
+        RuntimePayload::value(JOB, RuntimeValue::Atom("a".repeat(MAX_FIELD_VALUE_BYTES)))
+            .expect("test payload should fit exactly");
     let step = ActiveStep {
         pid: RuntimeProcessId::FIRST,
         process_id: ProcessId::new(0),
@@ -274,7 +272,7 @@ fn runtime_rejects_oversized_record_payload_template_value() {
 
     let err = evaluate_runtime_template(
         &program,
-        &template,
+        &loaded_template(template),
         Some(&received),
         &step,
         &BTreeMap::new(),

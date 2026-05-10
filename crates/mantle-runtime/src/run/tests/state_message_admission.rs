@@ -53,7 +53,8 @@ fn runtime_rejects_loaded_unknown_next_state_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[0].transitions[0].current_state = Some(StateId::new(0));
-    program.processes[0].transitions[0].next_state = NextState::Value(StateId::new(1));
+    program.processes[0].transitions[0].next_state =
+        loaded_next_state(NextState::Value(StateId::new(1)));
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
@@ -67,10 +68,10 @@ fn runtime_rejects_loaded_unadmitted_template_state_before_artifact_loaded() {
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[0].transitions[0].current_state = Some(StateId::new(0));
     program.processes[0].transitions[0].next_state =
-        NextState::Template(ArtifactValueTemplate::Literal {
+        loaded_next_state(NextState::Template(ArtifactValueTemplate::Literal {
             ty: MAIN_STATE,
             value: "UnadmittedState".to_string(),
-        });
+        }));
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
@@ -85,13 +86,13 @@ fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_lo
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
     program.processes[1].transitions[0].current_state = Some(StateId::new(0));
     program.processes[1].transitions[0].next_state =
-        NextState::Template(ArtifactValueTemplate::EnumVariant {
+        loaded_next_state(NextState::Template(ArtifactValueTemplate::EnumVariant {
             ty: WORKER_STATE,
             variant: "Routed".to_string(),
             payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
                 ty: PROCESS_REF_WORKER,
             }),
-        });
+        }));
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
@@ -105,7 +106,7 @@ fn runtime_rejects_loaded_payload_dependent_map_template_key_before_artifact_loa
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[1].message_variants[0].payload_type = Some(JOB);
     program.processes[1].transitions[0].next_state =
-        NextState::Template(ArtifactValueTemplate::Map {
+        loaded_next_state(NextState::Template(ArtifactValueTemplate::Map {
             ty: WORKER_STATE,
             entries: vec![mantle_artifact::ArtifactValueTemplateMapEntry {
                 key: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
@@ -114,7 +115,7 @@ fn runtime_rejects_loaded_payload_dependent_map_template_key_before_artifact_loa
                     value: "Job".to_string(),
                 },
             }],
-        });
+        }));
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
@@ -127,7 +128,7 @@ fn runtime_rejects_loaded_duplicate_static_map_template_key_before_artifact_load
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[1].transitions[0].next_state =
-        NextState::Template(ArtifactValueTemplate::Map {
+        loaded_next_state(NextState::Template(ArtifactValueTemplate::Map {
             ty: WORKER_STATE,
             entries: vec![
                 mantle_artifact::ArtifactValueTemplateMapEntry {
@@ -151,7 +152,7 @@ fn runtime_rejects_loaded_duplicate_static_map_template_key_before_artifact_load
                     },
                 },
             ],
-        });
+        }));
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
@@ -164,7 +165,7 @@ fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[0].transitions[0].next_state =
-        NextState::Template(ArtifactValueTemplate::Record {
+        loaded_next_state(NextState::Template(ArtifactValueTemplate::Record {
             ty: MAIN_STATE,
             fields: vec![ArtifactValueTemplateField {
                 name: "item".to_string(),
@@ -173,7 +174,7 @@ fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
                     value: "Item".to_string(),
                 },
             }],
-        });
+        }));
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
@@ -185,8 +186,9 @@ fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
 fn runtime_rejects_loaded_template_depth_overflow_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-    program.processes[0].transitions[0].next_state =
-        NextState::Template(record_template_with_depth(MAX_VALUE_TEMPLATE_DEPTH + 2));
+    program.processes[0].transitions[0].next_state = loaded_next_state(NextState::Template(
+        record_template_with_depth(MAX_VALUE_TEMPLATE_DEPTH + 2),
+    ));
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,

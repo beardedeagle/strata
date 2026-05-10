@@ -14,7 +14,7 @@ pub(crate) enum LoadedAction {
     Send {
         target: LoadedSendTarget,
         message: MessageId,
-        payload: Option<ArtifactValueTemplate>,
+        payload: Option<LoadedValueTemplate>,
     },
 }
 
@@ -36,25 +36,28 @@ impl LoadedAction {
         }
     }
 
-    pub(super) fn from_artifact(action: &ArtifactAction) -> Self {
+    pub(super) fn from_artifact(action: &ArtifactAction) -> Result<Self> {
         match action {
-            ArtifactAction::Emit { output } => Self::Emit { output: *output },
+            ArtifactAction::Emit { output } => Ok(Self::Emit { output: *output }),
             ArtifactAction::Spawn {
                 target,
                 process_ref,
-            } => Self::Spawn {
+            } => Ok(Self::Spawn {
                 target: *target,
                 process_ref: *process_ref,
-            },
+            }),
             ArtifactAction::Send {
                 target,
                 message,
                 payload,
-            } => Self::Send {
+            } => Ok(Self::Send {
                 target: LoadedSendTarget::from_artifact(target),
                 message: *message,
-                payload: payload.clone(),
-            },
+                payload: payload
+                    .as_ref()
+                    .map(LoadedValueTemplate::from_artifact)
+                    .transpose()?,
+            }),
         }
     }
 

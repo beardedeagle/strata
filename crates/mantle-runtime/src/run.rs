@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use mantle_artifact::{
-    ArtifactPayload, ArtifactValueTemplate, Error, MantleArtifact, NextState, OutputId, ProcessId,
-    ProcessRefId, Result, StateId, StepResult,
+    Error, MantleArtifact, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
 };
 
 use accounting::{checked_output_bytes, checked_trace_event_bytes};
@@ -15,7 +14,10 @@ use crate::event::{
 };
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
-use crate::program::{LoadedAction, LoadedProgram, LoadedSendTarget};
+use crate::program::{
+    LoadedAction, LoadedNextState, LoadedProgram, LoadedSendTarget, LoadedValueTemplate,
+    RuntimePayload,
+};
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
 mod accounting;
@@ -517,7 +519,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     fn resolve_template_state(
         &self,
         step: &ActiveStep,
-        template: &ArtifactValueTemplate,
+        template: &LoadedValueTemplate,
     ) -> Result<StateId> {
         let value = self.evaluate_state_template(template, step)?;
         let process = self.program.process(step.process_id)?;
@@ -528,7 +530,8 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             .ok_or_else(|| {
                 Error::new(format!(
                     "process {} next_state template produced value {} not admitted by state table",
-                    step.process_name, value.value
+                    step.process_name,
+                    value.label()
                 ))
             })?;
         StateId::from_index(state_index)
@@ -536,9 +539,9 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     fn evaluate_state_template(
         &self,
-        template: &ArtifactValueTemplate,
+        template: &LoadedValueTemplate,
         step: &ActiveStep,
-    ) -> Result<ArtifactPayload> {
+    ) -> Result<RuntimePayload> {
         evaluate_runtime_template(
             self.program,
             template,
@@ -552,12 +555,12 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &self,
         process_index: usize,
         step: &ActiveStep,
-        next_state: &NextState,
+        next_state: &LoadedNextState,
     ) -> Result<StateId> {
         match next_state {
-            NextState::Current => Ok(self.processes[process_index].state),
-            NextState::Value(state) => Ok(*state),
-            NextState::Template(template) => self.resolve_template_state(step, template),
+            LoadedNextState::Current => Ok(self.processes[process_index].state),
+            LoadedNextState::Value(state) => Ok(*state),
+            LoadedNextState::Template(template) => self.resolve_template_state(step, template),
         }
     }
 
