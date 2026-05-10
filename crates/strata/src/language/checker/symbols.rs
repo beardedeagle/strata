@@ -110,14 +110,16 @@ fn validate_record_fields(
                 record.name, field.name
             )));
         }
-        validate_source_value_type(symbols, types, list_type, map_type, &field.ty).map_err(
-            |_| {
-                Error::new(format!(
-                    "record {} field {} uses undeclared type {}",
-                    record.name, field.name, field.ty
-                ))
-            },
-        )?;
+        if let Err(err) = validate_source_value_type(symbols, types, list_type, map_type, &field.ty)
+        {
+            if collection_type_signature_error(symbols, list_type, map_type, &field.ty) {
+                return Err(err);
+            }
+            return Err(Error::new(format!(
+                "record {} field {} uses undeclared type {}",
+                record.name, field.name, field.ty
+            )));
+        }
     }
     Ok(())
 }
@@ -189,15 +191,22 @@ fn validate_message_payload_type(
                     enum_decl.name, variant.name, payload_type, target
                 )));
             }
-            if validate_source_value_type(
+            if let Err(err) = validate_source_value_type(
                 context.symbols,
                 context.types,
                 context.list_type,
                 context.map_type,
                 payload_type,
-            )
-            .is_ok()
-            {
+            ) {
+                if collection_type_signature_error(
+                    context.symbols,
+                    context.list_type,
+                    context.map_type,
+                    payload_type,
+                ) {
+                    return Err(err);
+                }
+            } else {
                 return Ok(());
             }
             return Err(Error::new(format!(
@@ -233,14 +242,54 @@ fn validate_source_value_type(
                 validate_collection_capacity(ty, const_args[0])?;
                 return validate_source_value_type(symbols, types, list_type, map_type, &args[0]);
             }
+            if constructor_symbol == list_type {
+                return Err(Error::new(format!(
+                    "list type {ty} must declare exactly one element type and one numeric capacity"
+                )));
+            }
             if constructor_symbol == map_type && args.len() == 2 && const_args.len() == 1 {
                 validate_collection_capacity(ty, const_args[0])?;
                 validate_source_value_type(symbols, types, list_type, map_type, &args[0])?;
                 return validate_source_value_type(symbols, types, list_type, map_type, &args[1]);
             }
+            if constructor_symbol == map_type {
+                return Err(Error::new(format!(
+                    "map type {ty} must declare exactly two type arguments and one numeric capacity"
+                )));
+            }
             Err(Error::new(format!("type {ty} is not declared")))
         }
     }
+}
+
+fn collection_type_signature_error(
+    symbols: &SymbolTable,
+    list_type: Symbol,
+    map_type: Symbol,
+    ty: &TypeRef,
+) -> bool {
+    let TypeRef::Applied {
+        constructor,
+        args,
+        const_args,
+    } = ty
+    else {
+        return false;
+    };
+    let Some(constructor_symbol) = symbols.resolve(constructor.as_str()) else {
+        return false;
+    };
+    if constructor_symbol == list_type {
+        return args.len() != 1
+            || const_args.len() != 1
+            || const_args[0] > MAX_VALUE_TEMPLATE_FIELDS;
+    }
+    if constructor_symbol == map_type {
+        return args.len() != 2
+            || const_args.len() != 1
+            || const_args[0] > MAX_VALUE_TEMPLATE_FIELDS;
+    }
+    false
 }
 
 fn type_decl_from_tables(

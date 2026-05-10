@@ -738,6 +738,45 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn rejects_unbounded_list_record_field_with_collection_diagnostic() {
+    let source = r#"
+module unbounded_list_record_field;
+
+record Box {
+    items: List<Phase>,
+}
+enum Phase {
+    Ready,
+}
+enum MainMsg {
+    Start,
+}
+
+proc Main mailbox bounded(1) {
+    type State = Box;
+    type Msg = MainMsg;
+
+    fn init() -> Box ! [] ~ [] @det {
+        return Box{items: List<Phase,1>[Ready]};
+    }
+
+    fn step(state: Box, Start) -> ProcResult<Box> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("unbounded record field list type should fail");
+
+    assert!(
+        err.to_string().contains(
+            "list type List<Phase> must declare exactly one element type and one numeric capacity"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_unbounded_map_type() {
     let source = r#"
 module unbounded_map_type;
@@ -771,6 +810,80 @@ proc Main mailbox bounded(1) {
             "map type Map<Phase,Phase> must declare exactly two type arguments and one numeric capacity"
         ),
         "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_unbounded_map_payload_with_collection_diagnostic() {
+    let source = r#"
+module unbounded_map_payload;
+
+record Unit;
+enum Phase {
+    Ready,
+}
+enum MainMsg {
+    Start,
+    Replace(Map<Phase,Phase>),
+}
+
+proc Main mailbox bounded(1) {
+    type State = Unit;
+    type Msg = MainMsg;
+
+    fn init() -> Unit ! [] ~ [] @det {
+        return Unit;
+    }
+
+    fn step(state: Unit, Start) -> ProcResult<Unit> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("unbounded payload map type should fail");
+
+    assert!(
+        err.to_string().contains(
+            "map type Map<Phase,Phase> must declare exactly two type arguments and one numeric capacity"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_capacity_overflow_with_parser_byte_offset() {
+    let source = r#"
+module collection_capacity_overflow;
+
+record Unit;
+enum Phase {
+    Ready,
+}
+enum MainMsg {
+    Start,
+}
+
+proc Main mailbox bounded(1) {
+    type State = List<Phase,999999999999999999999999999999999999999999999999999999999999999>;
+    type Msg = MainMsg;
+
+    fn init() -> List<Phase,1> ! [] ~ [] @det {
+        return List<Phase,1>[Ready];
+    }
+
+    fn step(state: List<Phase,1>, Start) -> ProcResult<List<Phase,1>> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = parse_source(source).expect_err("oversized collection capacity should fail parsing");
+    let message = err.to_string();
+
+    assert!(
+        message.contains("type List numeric capacity must fit in usize at byte"),
+        "unexpected error: {message}"
     );
 }
 

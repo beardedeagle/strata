@@ -909,8 +909,9 @@ impl Parser {
     }
 
     fn parse_capacity_arg(&mut self, constructor: &Identifier) -> Result<usize> {
-        self.expect_number()?.parse::<usize>().map_err(|_| {
-            Error::new(format!(
+        let capacity = self.expect_number()?;
+        capacity.parse::<usize>().map_err(|_| {
+            self.error_previous(format!(
                 "type {constructor} numeric capacity must fit in usize"
             ))
         })
