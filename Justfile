@@ -117,9 +117,15 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_payload_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_payload_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_payload_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_collection_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_collection_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_collection_match.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/state_payload_enum.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/state_payload_enum.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/collection_state.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/collection_state.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/collection_state.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/state_payload_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/state_payload_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta

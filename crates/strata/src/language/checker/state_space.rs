@@ -55,6 +55,18 @@ impl<'module> StateSpace<'module> {
                 values,
             });
         }
+        if semantic_index
+            .collection_type(&process.state_type)?
+            .is_some()
+        {
+            return Ok(Self {
+                module,
+                process_name: &process.name,
+                state_type: &process.state_type,
+                checked_state_type,
+                values: Vec::new(),
+            });
+        }
 
         let enum_decl = semantic_index.enum_decl(module, &process.state_type)?;
         if enum_decl.variants.is_empty() {
@@ -213,7 +225,10 @@ impl<'module> StateSpace<'module> {
                     )),
                 ))
             }
-            ValueExpr::Call { .. } | ValueExpr::Record(_) => Ok(CheckedStateValue::new(
+            ValueExpr::Call { .. }
+            | ValueExpr::Record(_)
+            | ValueExpr::List(_)
+            | ValueExpr::Map(_) => Ok(CheckedStateValue::new(
                 self.checked_state_type.clone(),
                 label,
             )),

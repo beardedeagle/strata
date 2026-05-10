@@ -364,6 +364,38 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
                 ty.as_u32()
             ));
         }
+        ArtifactValueTemplate::RecordField { ty, record, field } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=record_field\n{prefix}.type_id={}\n{prefix}.field_name={field}\n",
+                ty.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.record"), record);
+        }
+        ArtifactValueTemplate::ListElement {
+            ty,
+            list,
+            index,
+            len,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=list_element\n{prefix}.type_id={}\n{prefix}.index={index}\n{prefix}.len={len}\n",
+                ty.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.list"), list);
+        }
+        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=map_value\n{prefix}.type_id={}\n{prefix}.key={key}\n{prefix}.key_count={}\n",
+                ty.as_u32(),
+                keys.len()
+            ));
+            for (key_index, expected_key) in keys.iter().enumerate() {
+                encoded.push_str(&format!(
+                    "{prefix}.expected_key.{key_index}={expected_key}\n"
+                ));
+            }
+            encode_value_template(encoded, &format!("{prefix}.map"), map);
+        }
         ArtifactValueTemplate::ProcessRef {
             ty,
             target_process,
@@ -397,6 +429,28 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
                 let field_prefix = format!("{prefix}.field.{field_index}");
                 encoded.push_str(&format!("{field_prefix}.name={}\n", field.name));
                 encode_value_template(encoded, &format!("{field_prefix}.value"), &field.value);
+            }
+        }
+        ArtifactValueTemplate::List { ty, items } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=list\n{prefix}.type_id={}\n{prefix}.item_count={}\n",
+                ty.as_u32(),
+                items.len()
+            ));
+            for (item_index, item) in items.iter().enumerate() {
+                encode_value_template(encoded, &format!("{prefix}.item.{item_index}"), item);
+            }
+        }
+        ArtifactValueTemplate::Map { ty, entries } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=map\n{prefix}.type_id={}\n{prefix}.entry_count={}\n",
+                ty.as_u32(),
+                entries.len()
+            ));
+            for (entry_index, entry) in entries.iter().enumerate() {
+                let entry_prefix = format!("{prefix}.entry.{entry_index}");
+                encode_value_template(encoded, &format!("{entry_prefix}.key"), &entry.key);
+                encode_value_template(encoded, &format!("{entry_prefix}.value"), &entry.value);
             }
         }
     }
@@ -442,6 +496,56 @@ fn decode_value_template(
         "current_state_payload" => Ok(ArtifactValueTemplate::CurrentStatePayload {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
         }),
+        "record_field" => Ok(ArtifactValueTemplate::RecordField {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            field: fields.take_required(&format!("{prefix}.field_name"))?,
+            record: Box::new(decode_value_template(
+                fields,
+                &format!("{prefix}.record"),
+                depth + 1,
+            )?),
+        }),
+        "list_element" => Ok(ArtifactValueTemplate::ListElement {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            index: fields.take_bounded_usize(
+                &format!("{prefix}.index"),
+                0,
+                MAX_VALUE_TEMPLATE_FIELDS - 1,
+            )?,
+            len: fields.take_bounded_usize(
+                &format!("{prefix}.len"),
+                1,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?,
+            list: Box::new(decode_value_template(
+                fields,
+                &format!("{prefix}.list"),
+                depth + 1,
+            )?),
+        }),
+        "map_value" => {
+            let ty = fields.take_type_id(&format!("{prefix}.type_id"))?;
+            let key = fields.take_required(&format!("{prefix}.key"))?;
+            let key_count = fields.take_bounded_usize(
+                &format!("{prefix}.key_count"),
+                1,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?;
+            let mut keys = Vec::with_capacity(key_count);
+            for key_index in 0..key_count {
+                keys.push(fields.take_required(&format!("{prefix}.expected_key.{key_index}"))?);
+            }
+            Ok(ArtifactValueTemplate::MapValue {
+                ty,
+                key,
+                keys,
+                map: Box::new(decode_value_template(
+                    fields,
+                    &format!("{prefix}.map"),
+                    depth + 1,
+                )?),
+            })
+        }
         "process_ref" => Ok(ArtifactValueTemplate::ProcessRef {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
             target_process: fields.take_process_id(&format!("{prefix}.target_process"))?,
@@ -479,6 +583,44 @@ fn decode_value_template(
                 ty,
                 fields: record_fields,
             })
+        }
+        "list" => {
+            let ty = fields.take_type_id(&format!("{prefix}.type_id"))?;
+            let item_count = fields.take_bounded_usize(
+                &format!("{prefix}.item_count"),
+                0,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?;
+            let mut items = Vec::with_capacity(item_count);
+            for item_index in 0..item_count {
+                items.push(decode_value_template(
+                    fields,
+                    &format!("{prefix}.item.{item_index}"),
+                    depth + 1,
+                )?);
+            }
+            Ok(ArtifactValueTemplate::List { ty, items })
+        }
+        "map" => {
+            let ty = fields.take_type_id(&format!("{prefix}.type_id"))?;
+            let entry_count = fields.take_bounded_usize(
+                &format!("{prefix}.entry_count"),
+                0,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?;
+            let mut entries = Vec::with_capacity(entry_count);
+            for entry_index in 0..entry_count {
+                let entry_prefix = format!("{prefix}.entry.{entry_index}");
+                entries.push(ArtifactValueTemplateMapEntry {
+                    key: decode_value_template(fields, &format!("{entry_prefix}.key"), depth + 1)?,
+                    value: decode_value_template(
+                        fields,
+                        &format!("{entry_prefix}.value"),
+                        depth + 1,
+                    )?,
+                });
+            }
+            Ok(ArtifactValueTemplate::Map { ty, entries })
         }
         value => Err(Error::new(format!("invalid {kind_key} value {value:?}"))),
     }

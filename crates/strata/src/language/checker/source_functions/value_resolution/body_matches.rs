@@ -1,4 +1,5 @@
 use super::*;
+use crate::language::checker::source_functions::collection_patterns::resolve_collection_pattern_value_bindings;
 
 struct BodyMatchResolutionContext<'ctx, 'module, 'value, 'local, 'outer> {
     scope: &'ctx SourceFunctionScope<'module>,
@@ -53,9 +54,12 @@ pub(super) fn resolve_source_function_body_match_value(
     if let Ok(record_decl) = scope.semantic_index.record_decl(scope.module, &param.ty) {
         return resolve_source_function_body_record_match_value(&context, record_decl, arg);
     }
+    if scope.semantic_index.collection_type(&param.ty)?.is_some() {
+        return resolve_source_function_body_collection_match_value(&context, &param.ty, arg);
+    }
 
     Err(Error::new(format!(
-        "function {} match scrutinee {} must be a declared record or enum source value",
+        "function {} match scrutinee {} must be a declared record, enum, list, or map source value",
         function.name, match_body.scrutinee
     )))
 }
@@ -86,39 +90,34 @@ fn resolve_source_function_body_enum_match_value(
     };
     let arms = check_typed_match_arms(&pattern_context, &context.match_body.arms)?;
     let mut wildcard = None;
-    for arm in arms {
+    for (arm, source_arm) in arms.into_iter().zip(&context.match_body.arms) {
         match arm.pattern {
-            TypedMatchPattern::Variant { variant, binding } if variant == selected_variant => {
-                if let Some(binding) = binding {
-                    let Some(payload) = selected_payload else {
-                        return Err(Error::new(format!(
-                            "function {} match pattern {} requires a payload value",
-                            context.function.name, enum_decl.variants[variant].name
-                        )));
-                    };
-                    let mut arm_substitutions = context.substitutions.to_vec();
-                    let mut arm_bindings = context.local_bindings.to_vec();
-                    arm_substitutions.push((&binding.name, payload));
-                    arm_bindings.push(SourceValueBinding {
-                        name: &binding.name,
-                        ty: &binding.ty,
-                    });
-                    return resolve_source_function_block_return_value(
+            TypedMatchPattern::Variant { variant, .. } if variant == selected_variant => {
+                let (pattern_substitutions, pattern_bindings) =
+                    resolve_constructor_payload_pattern_bindings(
                         context.scope,
                         context.function,
-                        arm.body,
-                        &arm_substitutions,
-                        &arm_bindings,
-                        context.bindings,
-                        context.depth + 1,
-                    );
-                }
+                        &enum_decl.variants[variant].name,
+                        &enum_decl.variants[variant],
+                        match &source_arm.pattern {
+                            Pattern::Constructor { payload, .. } => payload.as_ref(),
+                            _ => None,
+                        },
+                        selected_payload,
+                    )?;
+                let mut arm_substitutions = context.substitutions.to_vec();
+                arm_substitutions.extend(pattern_substitutions);
+                let mut arm_bindings = context.local_bindings.to_vec();
+                arm_bindings.extend(pattern_bindings.iter().map(|binding| SourceValueBinding {
+                    name: &binding.name,
+                    ty: &binding.ty,
+                }));
                 return resolve_source_function_block_return_value(
                     context.scope,
                     context.function,
                     arm.body,
-                    context.substitutions,
-                    context.local_bindings,
+                    &arm_substitutions,
+                    &arm_bindings,
                     context.bindings,
                     context.depth + 1,
                 );
@@ -237,5 +236,102 @@ fn record_body_match_pattern_error(
             "function {} match over record {} cannot use a wildcard pattern",
             function.name, record_decl.name
         )),
+        Pattern::List(_) => Error::new(format!(
+            "function {} match list pattern cannot match record {}",
+            function.name, record_decl.name
+        )),
+        Pattern::Map(_) => Error::new(format!(
+            "function {} match map pattern cannot match record {}",
+            function.name, record_decl.name
+        )),
     }
+}
+
+fn resolve_source_function_body_collection_match_value(
+    context: &BodyMatchResolutionContext<'_, '_, '_, '_, '_>,
+    collection_type: &TypeRef,
+    selected: &ValueExpr,
+) -> Result<ValueExpr> {
+    let mut wildcard = None;
+    for arm in &context.match_body.arms {
+        match &arm.pattern {
+            Pattern::Wildcard => {
+                wildcard = Some(&arm.body);
+            }
+            Pattern::List(_) | Pattern::Map(_) => {
+                let Some(resolution) = resolve_collection_pattern_value_bindings(
+                    context.scope.module,
+                    context.scope.semantic_index,
+                    context.function.name.as_str(),
+                    "match dispatch",
+                    collection_type,
+                    &arm.pattern,
+                    selected,
+                )?
+                else {
+                    continue;
+                };
+                for binding in &resolution.bindings {
+                    if context
+                        .local_bindings
+                        .iter()
+                        .any(|existing| existing.name == &binding.name)
+                    {
+                        return Err(Error::new(format!(
+                            "function {} match collection pattern binding {} conflicts with an existing source value binding",
+                            context.function.name, binding.name
+                        )));
+                    }
+                }
+                let mut arm_substitutions = context.substitutions.to_vec();
+                arm_substitutions.extend(resolution.substitutions);
+                let mut arm_bindings = context.local_bindings.to_vec();
+                arm_bindings.extend(
+                    resolution
+                        .bindings
+                        .iter()
+                        .map(|binding| SourceValueBinding {
+                            name: &binding.name,
+                            ty: &binding.ty,
+                        }),
+                );
+                return resolve_source_function_block_return_value(
+                    context.scope,
+                    context.function,
+                    &arm.body,
+                    &arm_substitutions,
+                    &arm_bindings,
+                    context.bindings,
+                    context.depth + 1,
+                );
+            }
+            Pattern::Constructor { name, .. } => {
+                return Err(Error::new(format!(
+                    "function {} match pattern {} expects an enum constructor, but scrutinee is {}",
+                    context.function.name, name, collection_type
+                )));
+            }
+            Pattern::Record { name, .. } => {
+                return Err(Error::new(format!(
+                    "function {} match pattern {} destructures a record, but scrutinee is {}",
+                    context.function.name, name, collection_type
+                )));
+            }
+        }
+    }
+    if let Some(body) = wildcard {
+        return resolve_source_function_block_return_value(
+            context.scope,
+            context.function,
+            body,
+            context.substitutions,
+            context.local_bindings,
+            context.bindings,
+            context.depth + 1,
+        );
+    }
+    Err(Error::new(format!(
+        "function {} match has no collection pattern for concrete {}",
+        context.function.name, selected
+    )))
 }

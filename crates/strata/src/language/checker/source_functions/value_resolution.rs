@@ -1,3 +1,6 @@
+use super::collection_patterns::{
+    collection_pattern_type, resolve_collection_pattern_value_bindings,
+};
 use super::record_patterns::{check_record_pattern_bindings, record_pattern_type};
 use super::values::{check_source_value_type, resolve_source_value_expr};
 use super::*;
@@ -76,28 +79,29 @@ pub(super) fn resolve_pattern_source_function_call(
         match pattern {
             Pattern::Constructor {
                 name,
-                binding: payload_binding,
+                payload: payload_pattern,
             } => {
                 let variant =
                     scope
                         .semantic_index
                         .enum_variant_index(scope.module, &enum_type, name)?;
                 if variant == selected_variant {
-                    let mut substitutions = Vec::new();
-                    let mut local_bindings = Vec::new();
-                    if let Some(payload_binding) = payload_binding {
-                        let Some(payload) = selected_payload else {
-                            return Err(Error::new(format!(
-                                "function {} signature pattern {} requires a payload value",
-                                function.name, name
-                            )));
-                        };
-                        substitutions.push((&payload_binding.name, payload));
-                        local_bindings.push(SourceValueBinding {
-                            name: &payload_binding.name,
-                            ty: &payload_binding.ty,
-                        });
-                    }
+                    let (substitutions, pattern_bindings) =
+                        resolve_constructor_payload_pattern_bindings(
+                            scope,
+                            function,
+                            name,
+                            &enum_decl.variants[variant],
+                            payload_pattern.as_ref(),
+                            selected_payload,
+                        )?;
+                    let local_bindings = pattern_bindings
+                        .iter()
+                        .map(|binding| SourceValueBinding {
+                            name: &binding.name,
+                            ty: &binding.ty,
+                        })
+                        .collect::<Vec<_>>();
                     let returned = resolve_source_function_block_return_value(
                         scope,
                         function,
@@ -125,6 +129,12 @@ pub(super) fn resolve_pattern_source_function_call(
                     function.name
                 )));
             }
+            Pattern::List(_) | Pattern::Map(_) => {
+                return Err(Error::new(format!(
+                    "function {} cannot mix enum and collection pattern clauses",
+                    function.name
+                )));
+            }
         }
     }
 
@@ -145,6 +155,114 @@ pub(super) fn resolve_pattern_source_function_call(
         "function {} has no pattern for variant {} of enum {}",
         functions[0].name, variant_name, enum_decl.name
     )))
+}
+
+fn resolve_constructor_payload_pattern_bindings<'a>(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    variant_name: &Identifier,
+    variant: &EnumVariant,
+    payload_pattern: Option<&'a ConstructorPayloadPattern>,
+    selected_payload: Option<&'a ValueExpr>,
+) -> Result<(Vec<SourceSubstitution<'a>>, Vec<PatternPayloadParam>)> {
+    let Some(payload_pattern) = payload_pattern else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let Some(payload_type) = &variant.payload_type else {
+        return Err(Error::new(format!(
+            "function {} signature pattern {} does not carry a payload",
+            function.name, variant_name
+        )));
+    };
+    let Some(payload) = selected_payload else {
+        return Err(Error::new(format!(
+            "function {} signature pattern {} requires a payload value",
+            function.name, variant_name
+        )));
+    };
+    match payload_pattern {
+        ConstructorPayloadPattern::Binding(binding) => Ok((
+            vec![(&binding.name, payload)],
+            vec![PatternPayloadParam {
+                name: binding.name.clone(),
+                ty: binding.ty.clone(),
+                path: PayloadBindingPath::Whole,
+            }],
+        )),
+        ConstructorPayloadPattern::Destructure(pattern) => {
+            resolve_destructured_payload_pattern(scope, function, payload_type, pattern, payload)
+        }
+    }
+}
+
+fn resolve_destructured_payload_pattern<'a>(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    payload_type: &TypeRef,
+    pattern: &'a Pattern,
+    payload: &'a ValueExpr,
+) -> Result<(Vec<SourceSubstitution<'a>>, Vec<PatternPayloadParam>)> {
+    match pattern {
+        Pattern::Record { name, fields } => {
+            let record = scope
+                .semantic_index
+                .record_decl(scope.module, payload_type)?;
+            if record.name != *name {
+                return Err(Error::new(format!(
+                    "function {} signature record payload pattern {name} cannot match record {}",
+                    function.name, record.name
+                )));
+            }
+            let ValueExpr::Record(record_value) = payload else {
+                return Err(Error::new(format!(
+                    "function {} signature record payload pattern {name} requires a concrete record value",
+                    function.name
+                )));
+            };
+            let subject = format!("function {}", function.name);
+            let (substitutions, bindings) = resolve_record_pattern_value_bindings(
+                scope.semantic_index,
+                &subject,
+                record,
+                fields,
+                record_value,
+            )?;
+            Ok((substitutions, bindings))
+        }
+        Pattern::List(_) | Pattern::Map(_) => {
+            resolve_collection_payload_pattern(scope, function, payload_type, pattern, payload)
+        }
+        Pattern::Wildcard => Ok((Vec::new(), Vec::new())),
+        Pattern::Constructor { name, .. } => Err(Error::new(format!(
+            "function {} nested constructor payload pattern {name} is not supported in this source slice",
+            function.name
+        ))),
+    }
+}
+
+fn resolve_collection_payload_pattern<'a>(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    payload_type: &TypeRef,
+    pattern: &'a Pattern,
+    payload: &'a ValueExpr,
+) -> Result<(Vec<SourceSubstitution<'a>>, Vec<PatternPayloadParam>)> {
+    let Some(resolution) = resolve_collection_pattern_value_bindings(
+        scope.module,
+        scope.semantic_index,
+        function.name.as_str(),
+        "signature payload pattern",
+        payload_type,
+        pattern,
+        payload,
+    )?
+    else {
+        return Err(Error::new(format!(
+            "function {} signature collection payload pattern does not match concrete {}",
+            function.name, payload
+        )));
+    };
+    Ok((resolution.substitutions, resolution.bindings))
 }
 
 pub(super) fn resolve_record_pattern_source_function_call(
@@ -201,6 +319,74 @@ pub(super) fn resolve_record_pattern_source_function_call(
         depth + 1,
     )?;
     resolve_source_value_expr(scope, expected_type, &returned, bindings, depth + 1)
+}
+
+pub(super) fn resolve_collection_pattern_source_function_call(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    functions: &[&Function],
+    arg: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let first = functions
+        .first()
+        .ok_or_else(|| Error::new("collection pattern function group is empty"))?;
+    let collection_type = collection_pattern_type(first)?;
+    let resolved_arg =
+        resolve_source_value_expr(scope, &collection_type, arg, bindings, depth + 1)?;
+    check_source_value_type(scope, &collection_type, &resolved_arg, bindings)?;
+
+    for function in functions {
+        let FunctionParam::Pattern(pattern) = &function.params[0] else {
+            return Err(Error::new(format!(
+                "function {} cannot mix binding and collection pattern clauses",
+                function.name
+            )));
+        };
+        let next_type = collection_pattern_type(function)?;
+        if !scope.semantic_index.same_type(&collection_type, &next_type) {
+            return Err(Error::new(format!(
+                "function {} collection pattern has type {}, expected {}",
+                function.name, next_type, collection_type
+            )));
+        }
+        let Some(resolution) = resolve_collection_pattern_value_bindings(
+            scope.module,
+            scope.semantic_index,
+            function.name.as_str(),
+            "pattern dispatch",
+            &collection_type,
+            pattern,
+            &resolved_arg,
+        )?
+        else {
+            continue;
+        };
+        let local_bindings = resolution
+            .bindings
+            .iter()
+            .map(|binding| SourceValueBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+            })
+            .collect::<Vec<_>>();
+        let returned = resolve_source_function_block_return_value(
+            scope,
+            function,
+            source_function_block(function)?,
+            &resolution.substitutions,
+            &local_bindings,
+            bindings,
+            depth + 1,
+        )?;
+        return resolve_source_value_expr(scope, expected_type, &returned, bindings, depth + 1);
+    }
+
+    Err(Error::new(format!(
+        "function {} has no collection pattern for concrete {}",
+        first.name, resolved_arg
+    )))
 }
 
 fn resolve_record_pattern_value_bindings<'a>(
@@ -333,6 +519,9 @@ fn concrete_source_enum_value<'a>(
         ValueExpr::Call { .. } | ValueExpr::Record(_) => Err(Error::new(format!(
             "function {function_name} {usage} requires a concrete enum constructor argument"
         ))),
+        ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
+            "function {function_name} {usage} requires a concrete enum constructor argument"
+        ))),
     }
 }
 
@@ -348,6 +537,9 @@ fn concrete_source_record_value<'a>(
                 "function {function_name} {usage} requires a concrete record value argument"
             )))
         }
+        ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
+            "function {function_name} {usage} requires a concrete record value argument"
+        ))),
     }
 }
 
@@ -378,6 +570,28 @@ fn substitute_source_value_bindings(
                 .map(|field| RecordValueField {
                     name: field.name,
                     value: substitute_source_value_bindings(field.value, bindings),
+                })
+                .collect(),
+        }),
+        ValueExpr::List(list) => ValueExpr::List(ListValue {
+            element_type: list.element_type,
+            capacity: list.capacity,
+            items: list
+                .items
+                .into_iter()
+                .map(|item| substitute_source_value_bindings(item, bindings))
+                .collect(),
+        }),
+        ValueExpr::Map(map) => ValueExpr::Map(MapValue {
+            key_type: map.key_type,
+            value_type: map.value_type,
+            capacity: map.capacity,
+            entries: map
+                .entries
+                .into_iter()
+                .map(|entry| MapValueEntry {
+                    key: substitute_source_value_bindings(entry.key, bindings),
+                    value: substitute_source_value_bindings(entry.value, bindings),
                 })
                 .collect(),
         }),

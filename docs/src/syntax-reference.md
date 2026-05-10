@@ -111,9 +111,15 @@ param_binding =
 
 pattern =
     ident
-  | ident "(" ident ":" type_ref ")"
+  | ident "(" constructor_payload_pattern ")"
   | ident "{" record_pattern_fields "}"
+  | "List" list_type_args? "[" list_pattern_items? "]"
+  | "Map" map_type_args? "[" map_pattern_entries? "]"
   | "_"
+
+constructor_payload_pattern =
+    ident ":" type_ref
+  | pattern
 
 record_pattern_fields =
     record_pattern_field ("," record_pattern_field)* ","?
@@ -121,6 +127,23 @@ record_pattern_fields =
 record_pattern_field =
     ident
   | ident ":" ident
+
+list_type_args =
+    "<" type_ref "," number ">"
+
+map_type_args =
+    "<" type_ref "," type_ref "," number ">"
+
+list_pattern_items =
+    collection_pattern_binding ("," collection_pattern_binding)* ","?
+
+map_pattern_entries =
+    value_expr "=>" collection_pattern_binding
+    ("," value_expr "=>" collection_pattern_binding)* ","?
+
+collection_pattern_binding =
+    ident
+  | "_"
 
 effect_list =
     "[" (effect ("," effect)* ","?)? "]"
@@ -159,17 +182,17 @@ match_arm =
 ```
 
 Patterns are source-level binding and decomposition syntax. This source slice
-admits constructor patterns, constructor payload bindings, record destructuring
-patterns, and `_` wildcards. Buildable semantic consumers are normal source
-function signatures and match bodies, helper return-match expressions, fieldless
-enum `init` matches, and actor `step` message dispatch. Record destructuring
-patterns are accepted in normal source helper signatures, helper match bodies,
-and helper return-match expressions over record source bindings. Actor `step`
-bodies may also match the current process state parameter when the process
-state type is an enum. Normal source helpers, actor `step` dispatch, and
-current-state matches accept constructor payload bindings. Source helper calls
-still expand before lowering; enum pattern dispatch requires a concrete enum
-constructor value and record destructuring requires a concrete record value.
+admits constructor patterns, constructor payload bindings, constructor payload
+destructuring, record destructuring patterns, list/map collection patterns, and
+`_` wildcards. Buildable semantic consumers are normal source function
+signatures and match bodies, helper return-match expressions, fieldless enum
+`init` matches, actor `step` message dispatch, and message-specific
+`match state` step bodies. Record/list/map destructuring patterns are accepted
+in normal source helper signatures, helper match bodies, helper return-match
+expressions, message constructor payloads, and current-state enum payloads when
+the payload has the matching type. Source helper calls still expand before
+lowering; enum pattern dispatch requires a concrete enum constructor value and
+record/list/map destructuring requires a concrete value.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message
@@ -178,7 +201,7 @@ constructor or wildcard pattern:
 ```text
 parameter_pattern_step_function =
     "fn" "step" "(" "state" ":" type_ref ","
-        (ident | ident "(" ident ":" type_ref ")" | "_") ")"
+        (ident | ident "(" constructor_payload_pattern ")" | "_") ")"
     "->" "ProcResult" "<" type_ref ">"
     "!" effect_list "~" "[]" "@det"
     "{" block_body "}"
@@ -187,8 +210,11 @@ parameter_pattern_step_function =
 The first `type_ref` must name the process state type. An `ident` after the
 comma is a message constructor accepted by the process message type. A payload
 pattern such as `Assign(job: Job)` binds the received payload as an immutable
-transition-local value. `_` is a wildcard pattern that covers accepted variants
-without explicit clauses.
+transition-local value. A constructor payload pattern such as
+`Assign(Job { phase })`, `Assign(List[head, _])`, or
+`Assign(Map[Ready => selected])` destructures an immutable concrete payload and
+binds only the selected values. `_` is a wildcard pattern that covers accepted
+variants without explicit clauses.
 
 A match `step` uses a typed message parameter and a whole-body
 `match` over that parameter:
@@ -201,11 +227,11 @@ match_step_function =
     "{" match_body "}"
 ```
 
-Each match arm uses constructor or wildcard pattern syntax. Record
-destructuring patterns are source-helper syntax and are rejected in step match
-arms. The match scrutinee must be the typed message parameter in the current
-buildable step subset. Match arms are block-delimited and do not use comma
-separators. The step effect list applies to every generated
+Each match arm uses constructor or wildcard pattern syntax. Constructor payload
+patterns may bind or destructure record, list, and map payloads. The match
+scrutinee must be the typed message parameter in the current buildable step
+subset. Match arms are block-delimited and do not use comma separators. The
+step effect list applies to every generated
 transition, so each arm must use exactly the declared effects.
 
 A state-match `step` uses the normal state parameter plus a message constructor
@@ -214,19 +240,20 @@ or wildcard pattern, then uses a whole-body `match state`:
 ```text
 state_match_step_function =
     "fn" "step" "(" "state" ":" type_ref ","
-        (ident | ident "(" ident ":" type_ref ")" | "_") ")"
+        (ident | ident "(" constructor_payload_pattern ")" | "_") ")"
     "->" "ProcResult" "<" type_ref ">"
     "!" effect_list "~" "[]" "@det"
     "{" "match" "state" "{" match_arm+ "}" "}"
 ```
 
 State-match arms resolve against the declared process state enum. Payload
-variants must bind their payload with an explicit type, such as
-`Working(job: Job)`. Fieldless variants must not bind a payload. Bindings are
-immutable and transition-local. Each generated transition is keyed by the
-message ID and the admitted current state ID; state changes still occur only by
-returning a whole state value through `Continue(...)`, `Stop(...)`, or
-`Panic(...)`.
+variants may bind their whole payload with an explicit type, such as
+`Working(job: Job)`, or destructure a concrete record/list/map payload, such as
+`Working(Job { phase })`. Fieldless variants must not bind or destructure a
+payload. Bindings are immutable and transition-local. Each generated transition
+is keyed by the message ID and the admitted current state ID; state changes
+still occur only by returning a whole state value through `Continue(...)`,
+`Stop(...)`, or `Panic(...)`.
 
 A normal source helper is a module-level function or a process-local function
 whose name is not `init` or `step`:
@@ -296,13 +323,19 @@ variants reject payload values.
 ```text
 type_ref =
     ident
-  | ident "<" type_ref ("," type_ref)* ","? ">"
+  | ident "<" type_arg ("," type_arg)* ","? ">"
+
+type_arg =
+    type_ref
+  | number
 ```
 
 The built-in generic types accepted by checking are
 `ProcResult<StateType>` as a `step` return type and
 `ProcessRef<ProcessName>` in spawn bindings, message payload declarations, and
-payload-binding step patterns.
+payload-binding step patterns. `List<T,N>` and `Map<K,V,N>` are accepted source
+value types when their element, key, and value arguments are source value types
+and `N` is a numeric capacity.
 
 ## Values
 
@@ -315,14 +348,27 @@ value_expr =
     ident
   | ident "(" value_expr ")"
   | ident "{" record_value_field ("," record_value_field)* ","? "}"
+  | "List" list_type_args? "[" value_expr_list? "]"
+  | "Map" map_type_args? "[" map_value_entries? "]"
 
 record_value_field =
     ident ":" value_expr
+
+value_expr_list =
+    value_expr ("," value_expr)* ","?
+
+map_value_entries =
+    value_expr "=>" value_expr
+    ("," value_expr "=>" value_expr)* ","?
 ```
 
 The parenthesized value expression is typed during checking. It is a helper call
 when `ident` names a visible source helper and a payload-bearing enum value when
 `ident` names a constructor of the expected enum type.
+
+List and map constructors are explicit. Optional type and capacity arguments are
+admitted for readability; the checker still validates each value against the
+expected bounded source value type.
 
 `init` returns a state value. `step` returns `Continue(value)`, `Stop(value)`,
 or `Panic(value)`.
@@ -345,6 +391,6 @@ ident =
 ```
 
 `as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
-The single `_` token is reserved for wildcard patterns. `ProcResult` and
-`ProcessRef` are reserved type names because they name built-in transition and
-process-reference types.
+The single `_` token is reserved for wildcard patterns. `ProcResult`,
+`ProcessRef`, `List`, and `Map` are reserved type names because they name
+built-in transition, process-reference, and collection types.

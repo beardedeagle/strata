@@ -143,6 +143,7 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
                 return_type: TypeRef::Applied {
                     constructor: ident("ProcResult"),
                     args: vec![state_type],
+                    const_args: Vec::new(),
                 },
                 effects: Vec::new(),
                 may: Vec::new(),

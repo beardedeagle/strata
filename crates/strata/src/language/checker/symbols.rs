@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
+use mantle_artifact::MAX_VALUE_TEMPLATE_FIELDS;
+
 use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, TypeRef};
 use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
-use super::super::{PROC_RESULT_TYPE, PROCESS_REF_TYPE};
+use super::super::{LIST_TYPE, MAP_TYPE, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
 use super::CHECKED_TYPE_LABEL_PREFIX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -93,6 +95,8 @@ fn reject_internal_type_label_prefix(name: &str) -> Result<()> {
 fn validate_record_fields(
     symbols: &SymbolTable,
     types: &BTreeMap<Symbol, TypeDecl>,
+    list_type: Symbol,
+    map_type: Symbol,
     record: &Record,
 ) -> Result<()> {
     let mut field_names = BTreeMap::new();
@@ -106,55 +110,78 @@ fn validate_record_fields(
                 record.name, field.name
             )));
         }
-        type_decl_from_tables(symbols, types, &field.ty).map_err(|_| {
-            Error::new(format!(
-                "record {} field {} uses undeclared type {}",
-                record.name, field.name, field.ty
-            ))
-        })?;
+        validate_source_value_type(symbols, types, list_type, map_type, &field.ty).map_err(
+            |_| {
+                Error::new(format!(
+                    "record {} field {} uses undeclared type {}",
+                    record.name, field.name, field.ty
+                ))
+            },
+        )?;
     }
     Ok(())
 }
 
-fn validate_message_payload_type(
-    symbols: &SymbolTable,
-    types: &BTreeMap<Symbol, TypeDecl>,
-    processes: &BTreeMap<Symbol, CheckedProcessId>,
+#[derive(Debug, Clone, Copy)]
+struct MessagePayloadTypeContext<'a> {
+    symbols: &'a SymbolTable,
+    types: &'a BTreeMap<Symbol, TypeDecl>,
+    processes: &'a BTreeMap<Symbol, CheckedProcessId>,
     process_ref_type: Symbol,
+    list_type: Symbol,
+    map_type: Symbol,
+}
+
+fn validate_message_payload_type(
+    context: MessagePayloadTypeContext<'_>,
     enum_decl: &Enum,
     variant: &EnumVariant,
     payload_type: &TypeRef,
 ) -> Result<()> {
     match payload_type {
         TypeRef::Named(_) => {
-            type_decl_from_tables(symbols, types, payload_type).map_err(|_| {
+            validate_source_value_type(
+                context.symbols,
+                context.types,
+                context.list_type,
+                context.map_type,
+                payload_type,
+            )
+            .map_err(|_| {
                 Error::new(format!(
                     "enum {} variant {} uses undeclared payload type {}",
                     enum_decl.name, variant.name, payload_type
                 ))
             })?;
         }
-        TypeRef::Applied { constructor, args } => {
-            let Some(constructor_symbol) = symbols.resolve(constructor.as_str()) else {
+        TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } => {
+            let Some(constructor_symbol) = context.symbols.resolve(constructor.as_str()) else {
                 return Err(Error::new(format!(
-                    "enum {} variant {} payload type {} must be a named record, enum, or process reference type",
+                    "enum {} variant {} payload type {} must be a named record, enum, list, map, or process reference type",
                     enum_decl.name, variant.name, payload_type
                 )));
             };
-            if constructor_symbol == process_ref_type && args.len() == 1 {
+            if constructor_symbol == context.process_ref_type
+                && args.len() == 1
+                && const_args.is_empty()
+            {
                 let TypeRef::Named(target) = &args[0] else {
                     return Err(Error::new(format!(
                         "enum {} variant {} payload type {} must target a named process",
                         enum_decl.name, variant.name, payload_type
                     )));
                 };
-                let target_symbol = symbols.resolve(target.as_str()).ok_or_else(|| {
+                let target_symbol = context.symbols.resolve(target.as_str()).ok_or_else(|| {
                     Error::new(format!(
                         "enum {} variant {} payload type {} targets undeclared process {}",
                         enum_decl.name, variant.name, payload_type, target
                     ))
                 })?;
-                if processes.contains_key(&target_symbol) {
+                if context.processes.contains_key(&target_symbol) {
                     return Ok(());
                 }
                 return Err(Error::new(format!(
@@ -162,13 +189,58 @@ fn validate_message_payload_type(
                     enum_decl.name, variant.name, payload_type, target
                 )));
             }
+            if validate_source_value_type(
+                context.symbols,
+                context.types,
+                context.list_type,
+                context.map_type,
+                payload_type,
+            )
+            .is_ok()
+            {
+                return Ok(());
+            }
             return Err(Error::new(format!(
-                "enum {} variant {} payload type {} must be a named record, enum, or process reference type",
+                "enum {} variant {} payload type {} must be a named record, enum, list, map, or process reference type",
                 enum_decl.name, variant.name, payload_type
             )));
         }
     }
     Ok(())
+}
+
+fn validate_source_value_type(
+    symbols: &SymbolTable,
+    types: &BTreeMap<Symbol, TypeDecl>,
+    list_type: Symbol,
+    map_type: Symbol,
+    ty: &TypeRef,
+) -> Result<()> {
+    match ty {
+        TypeRef::Named(_) => {
+            type_decl_from_tables(symbols, types, ty)?;
+            Ok(())
+        }
+        TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } => {
+            let constructor_symbol = symbols
+                .resolve(constructor.as_str())
+                .ok_or_else(|| Error::new(format!("type {ty} is not declared")))?;
+            if constructor_symbol == list_type && args.len() == 1 && const_args.len() == 1 {
+                validate_collection_capacity(ty, const_args[0])?;
+                return validate_source_value_type(symbols, types, list_type, map_type, &args[0]);
+            }
+            if constructor_symbol == map_type && args.len() == 2 && const_args.len() == 1 {
+                validate_collection_capacity(ty, const_args[0])?;
+                validate_source_value_type(symbols, types, list_type, map_type, &args[0])?;
+                return validate_source_value_type(symbols, types, list_type, map_type, &args[1]);
+            }
+            Err(Error::new(format!("type {ty} is not declared")))
+        }
+    }
 }
 
 fn type_decl_from_tables(
@@ -193,6 +265,8 @@ pub(super) struct SemanticIndex {
     symbols: SymbolTable,
     proc_result_type: Symbol,
     process_ref_type: Symbol,
+    list_type: Symbol,
+    map_type: Symbol,
     types: BTreeMap<Symbol, TypeDecl>,
     processes: BTreeMap<Symbol, CheckedProcessId>,
     enum_variants: Vec<BTreeMap<Symbol, usize>>,
@@ -210,11 +284,15 @@ impl SemanticIndex {
         let _module_symbol = symbols.intern(&module.name)?;
         let proc_result_type = symbols.intern(&Identifier::new(PROC_RESULT_TYPE)?)?;
         let process_ref_type = symbols.intern(&Identifier::new(PROCESS_REF_TYPE)?)?;
+        let list_type = symbols.intern(&Identifier::new(LIST_TYPE)?)?;
+        let map_type = symbols.intern(&Identifier::new(MAP_TYPE)?)?;
 
         for (index, record) in module.records.iter().enumerate() {
             let symbol = symbols.intern(&record.name)?;
             reject_reserved_type_name(record.name.as_str(), symbol, proc_result_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, process_ref_type)?;
+            reject_reserved_type_name(record.name.as_str(), symbol, list_type)?;
+            reject_reserved_type_name(record.name.as_str(), symbol, map_type)?;
             reject_internal_type_label_prefix(record.name.as_str())?;
             if records.insert(symbol, index).is_some() {
                 return Err(Error::new(format!(
@@ -238,6 +316,8 @@ impl SemanticIndex {
             let symbol = symbols.intern(&item.name)?;
             reject_reserved_type_name(item.name.as_str(), symbol, proc_result_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, process_ref_type)?;
+            reject_reserved_type_name(item.name.as_str(), symbol, list_type)?;
+            reject_reserved_type_name(item.name.as_str(), symbol, map_type)?;
             reject_internal_type_label_prefix(item.name.as_str())?;
             if enums.insert(symbol, index).is_some() {
                 return Err(Error::new(format!(
@@ -283,10 +363,14 @@ impl SemanticIndex {
             for variant in &item.variants {
                 if let Some(payload_type) = &variant.payload_type {
                     validate_message_payload_type(
-                        &symbols,
-                        &types,
-                        &processes,
-                        process_ref_type,
+                        MessagePayloadTypeContext {
+                            symbols: &symbols,
+                            types: &types,
+                            processes: &processes,
+                            process_ref_type,
+                            list_type,
+                            map_type,
+                        },
                         item,
                         variant,
                         payload_type,
@@ -296,13 +380,15 @@ impl SemanticIndex {
         }
 
         for record in &module.records {
-            validate_record_fields(&symbols, &types, record)?;
+            validate_record_fields(&symbols, &types, list_type, map_type, record)?;
         }
 
         Ok(Self {
             symbols,
             proc_result_type,
             process_ref_type,
+            list_type,
+            map_type,
             types,
             processes,
             enum_variants,
@@ -338,13 +424,16 @@ impl SemanticIndex {
                 TypeRef::Applied {
                     constructor: left_constructor,
                     args: left_args,
+                    const_args: left_const_args,
                 },
                 TypeRef::Applied {
                     constructor: right_constructor,
                     args: right_args,
+                    const_args: right_const_args,
                 },
             ) => {
                 left_args.len() == right_args.len()
+                    && left_const_args == right_const_args
                     && self.same_identifier(left_constructor, right_constructor)
                     && left_args
                         .iter()
@@ -356,19 +445,30 @@ impl SemanticIndex {
     }
 
     pub(super) fn is_proc_result_of(&self, ty: &TypeRef, state_type: &TypeRef) -> bool {
-        let TypeRef::Applied { constructor, args } = ty else {
+        let TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } = ty
+        else {
             return false;
         };
         let Some(constructor_symbol) = self.symbols.resolve(constructor.as_str()) else {
             return false;
         };
         args.len() == 1
+            && const_args.is_empty()
             && constructor_symbol == self.proc_result_type
             && self.same_type(&args[0], state_type)
     }
 
     pub(super) fn process_ref_target_type(&self, ty: &TypeRef) -> Result<Option<CheckedProcessId>> {
-        let TypeRef::Applied { constructor, args } = ty else {
+        let TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } = ty
+        else {
             return Ok(None);
         };
         let Some(constructor_symbol) = self.symbols.resolve(constructor.as_str()) else {
@@ -377,7 +477,7 @@ impl SemanticIndex {
         if constructor_symbol != self.process_ref_type {
             return Ok(None);
         }
-        if args.len() != 1 {
+        if args.len() != 1 || !const_args.is_empty() {
             return Err(Error::new(format!(
                 "process reference type {ty} must declare exactly one target process"
             )));
@@ -388,6 +488,49 @@ impl SemanticIndex {
             )));
         };
         self.process_id(target).map(Some)
+    }
+
+    pub(super) fn collection_type<'a>(
+        &self,
+        ty: &'a TypeRef,
+    ) -> Result<Option<CollectionType<'a>>> {
+        let TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } = ty
+        else {
+            return Ok(None);
+        };
+        let Some(constructor_symbol) = self.symbols.resolve(constructor.as_str()) else {
+            return Ok(None);
+        };
+        if constructor_symbol == self.list_type {
+            if args.len() != 1 || const_args.len() != 1 {
+                return Err(Error::new(format!(
+                    "list type {ty} must declare exactly one element type and one numeric capacity"
+                )));
+            }
+            validate_collection_capacity(ty, const_args[0])?;
+            return Ok(Some(CollectionType::List {
+                element: &args[0],
+                capacity: const_args[0],
+            }));
+        }
+        if constructor_symbol == self.map_type {
+            if args.len() != 2 || const_args.len() != 1 {
+                return Err(Error::new(format!(
+                    "map type {ty} must declare exactly two type arguments and one numeric capacity"
+                )));
+            }
+            validate_collection_capacity(ty, const_args[0])?;
+            return Ok(Some(CollectionType::Map {
+                key: &args[0],
+                value: &args[1],
+                capacity: const_args[0],
+            }));
+        }
+        Ok(None)
     }
 
     fn type_decl(&self, ty: &TypeRef) -> Result<TypeDecl> {
@@ -420,6 +563,14 @@ impl SemanticIndex {
 
     pub(super) fn is_source_value_type(&self, ty: &TypeRef) -> bool {
         self.type_decl(ty).is_ok()
+            || validate_source_value_type(
+                &self.symbols,
+                &self.types,
+                self.list_type,
+                self.map_type,
+                ty,
+            )
+            .is_ok()
     }
 
     pub(super) fn enum_variant_index(
@@ -616,10 +767,35 @@ impl SemanticIndex {
         let Some(symbol) = self.symbols.resolve(name.as_str()) else {
             return false;
         };
+        if symbol == self.list_type || symbol == self.map_type {
+            return true;
+        }
         self.types.contains_key(&symbol)
             || self
                 .enum_variants
                 .iter()
                 .any(|variants| variants.contains_key(&symbol))
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum CollectionType<'a> {
+    List {
+        element: &'a TypeRef,
+        capacity: usize,
+    },
+    Map {
+        key: &'a TypeRef,
+        value: &'a TypeRef,
+        capacity: usize,
+    },
+}
+
+fn validate_collection_capacity(ty: &TypeRef, capacity: usize) -> Result<()> {
+    if capacity > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "collection type {ty} capacity must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    Ok(())
 }

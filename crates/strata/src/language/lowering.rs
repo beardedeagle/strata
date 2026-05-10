@@ -2,8 +2,8 @@ use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
     ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactSendTarget,
     ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
-    ArtifactValueTemplateField, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
@@ -254,6 +254,32 @@ fn lower_value_template(
                 ty: types.artifact_id(ty)?,
             })
         }
+        CheckedValueTemplate::RecordField { ty, record, field } => {
+            Ok(ArtifactValueTemplate::RecordField {
+                ty: types.artifact_id(ty)?,
+                record: Box::new(lower_value_template(record, types)?),
+                field: field.to_string(),
+            })
+        }
+        CheckedValueTemplate::ListElement {
+            ty,
+            list,
+            index,
+            len,
+        } => Ok(ArtifactValueTemplate::ListElement {
+            ty: types.artifact_id(ty)?,
+            list: Box::new(lower_value_template(list, types)?),
+            index: *index,
+            len: *len,
+        }),
+        CheckedValueTemplate::MapValue { ty, map, key, keys } => {
+            Ok(ArtifactValueTemplate::MapValue {
+                ty: types.artifact_id(ty)?,
+                map: Box::new(lower_value_template(map, types)?),
+                key: key.clone(),
+                keys: keys.clone(),
+            })
+        }
         CheckedValueTemplate::ProcessRef {
             ty,
             target,
@@ -280,6 +306,25 @@ fn lower_value_template(
                     Ok(ArtifactValueTemplateField {
                         name: field.name().to_string(),
                         value: lower_value_template(field.value(), types)?,
+                    })
+                })
+                .collect::<mantle_artifact::Result<Vec<_>>>()?,
+        }),
+        CheckedValueTemplate::List { ty, items } => Ok(ArtifactValueTemplate::List {
+            ty: types.artifact_id(ty)?,
+            items: items
+                .iter()
+                .map(|item| lower_value_template(item, types))
+                .collect::<mantle_artifact::Result<Vec<_>>>()?,
+        }),
+        CheckedValueTemplate::Map { ty, entries } => Ok(ArtifactValueTemplate::Map {
+            ty: types.artifact_id(ty)?,
+            entries: entries
+                .iter()
+                .map(|entry| {
+                    Ok(ArtifactValueTemplateMapEntry {
+                        key: lower_value_template(entry.key(), types)?,
+                        value: lower_value_template(entry.value(), types)?,
                     })
                 })
                 .collect::<mantle_artifact::Result<Vec<_>>>()?,

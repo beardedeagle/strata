@@ -119,11 +119,13 @@ The runnable examples are:
 - `examples/init_match.str`;
 - `examples/function_match.str`;
 - `examples/function_payload_match.str`;
+- `examples/function_collection_match.str`;
 - `examples/function_return_match.str`;
 - `examples/function_record_pattern.str`;
 - `examples/function_record_return_match.str`;
 - `examples/function_record_body_match.str`;
 - `examples/state_payload_enum.str`;
+- `examples/collection_state.str`;
 - `examples/state_payload_match.str`;
 - `examples/actor_instances.str`;
 - `examples/actor_payloads.str`;

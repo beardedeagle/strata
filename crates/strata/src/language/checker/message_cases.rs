@@ -106,7 +106,7 @@ impl MessageCaseTable {
                             &clause.pattern,
                             &explicit_step_variants[process_index],
                         ) {
-                            let bindings = payload_value_bindings(&clause.pattern, sender_case);
+                            let bindings = payload_value_bindings(&clause.pattern, sender_case)?;
                             for statement in &clause.body.statements {
                                 let Statement::Send {
                                     target,
@@ -482,7 +482,21 @@ fn discovery_value_binding_sets(
                 next.push(DiscoveryValueBinding {
                     name: binding.name.clone(),
                     ty: binding.ty.clone(),
-                    label: payload.label().to_string(),
+                    label: payload_binding_label(
+                        payload.label(),
+                        &PatternPayloadParam {
+                            name: binding.name.clone(),
+                            ty: binding.ty.clone(),
+                            path: binding.path.clone(),
+                        },
+                    )?
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "state payload {} does not match binding {}",
+                            payload.label(),
+                            binding.name
+                        ))
+                    })?,
                 });
                 expanded.push(next);
             }
@@ -498,7 +512,7 @@ fn state_payload_discovery_values(
     concrete_state_payloads: &BTreeMap<String, BTreeSet<String>>,
     types: &mut CheckedTypeInterner<'_>,
 ) -> Result<Vec<CheckedPayloadValue>> {
-    let checked_ty = types.intern(&binding.ty)?;
+    let checked_ty = types.intern(&binding.payload_ty)?;
     let mut payloads = BTreeMap::new();
     if let Some(concrete_payloads) = concrete_state_payloads.get(checked_ty.label()) {
         for label in concrete_payloads {

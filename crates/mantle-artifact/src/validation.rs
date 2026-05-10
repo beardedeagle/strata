@@ -468,6 +468,42 @@ fn add_value_template_bytes(
             add_field_bytes(total, &format!("{prefix}.kind"), "current_state_payload")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
         }
+        ArtifactValueTemplate::RecordField { ty, record, field } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "record_field")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, &format!("{prefix}.field_name"), field)?;
+            add_value_template_bytes(total, &format!("{prefix}.record"), record)?;
+        }
+        ArtifactValueTemplate::ListElement {
+            ty,
+            list,
+            index,
+            len,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "list_element")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, &format!("{prefix}.index"), &index.to_string())?;
+            add_field_bytes(total, &format!("{prefix}.len"), &len.to_string())?;
+            add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
+        }
+        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "map_value")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, &format!("{prefix}.key"), key)?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.key_count"),
+                &keys.len().to_string(),
+            )?;
+            for (key_index, expected_key) in keys.iter().enumerate() {
+                add_field_bytes(
+                    total,
+                    &format!("{prefix}.expected_key.{key_index}"),
+                    expected_key,
+                )?;
+            }
+            add_value_template_bytes(total, &format!("{prefix}.map"), map)?;
+        }
         ArtifactValueTemplate::ProcessRef {
             ty,
             target_process,
@@ -508,6 +544,32 @@ fn add_value_template_bytes(
                 let field_prefix = format!("{prefix}.field.{field_index}");
                 add_field_bytes(total, &format!("{field_prefix}.name"), &field.name)?;
                 add_value_template_bytes(total, &format!("{field_prefix}.value"), &field.value)?;
+            }
+        }
+        ArtifactValueTemplate::List { ty, items } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "list")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.item_count"),
+                &items.len().to_string(),
+            )?;
+            for (item_index, item) in items.iter().enumerate() {
+                add_value_template_bytes(total, &format!("{prefix}.item.{item_index}"), item)?;
+            }
+        }
+        ArtifactValueTemplate::Map { ty, entries } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "map")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.entry_count"),
+                &entries.len().to_string(),
+            )?;
+            for (entry_index, entry) in entries.iter().enumerate() {
+                let entry_prefix = format!("{prefix}.entry.{entry_index}");
+                add_value_template_bytes(total, &format!("{entry_prefix}.key"), &entry.key)?;
+                add_value_template_bytes(total, &format!("{entry_prefix}.value"), &entry.value)?;
             }
         }
     }

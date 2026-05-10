@@ -193,19 +193,54 @@ pub enum FunctionParam {
 pub enum Pattern {
     Constructor {
         name: Identifier,
-        binding: Option<Param>,
+        payload: Option<ConstructorPayloadPattern>,
     },
     Record {
         name: Identifier,
         fields: Vec<RecordPatternField>,
     },
+    List(ListPattern),
+    Map(MapPattern),
     Wildcard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConstructorPayloadPattern {
+    Binding(Param),
+    Destructure(Box<Pattern>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordPatternField {
     pub field: Identifier,
     pub binding: Identifier,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListPattern {
+    pub element_type: Option<TypeRef>,
+    pub capacity: Option<usize>,
+    pub elements: Vec<CollectionPatternBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapPattern {
+    pub key_type: Option<TypeRef>,
+    pub value_type: Option<TypeRef>,
+    pub capacity: Option<usize>,
+    pub entries: Vec<MapPatternEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapPatternEntry {
+    pub key: ValueExpr,
+    pub binding: CollectionPatternBinding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectionPatternBinding {
+    Binding(Identifier),
+    Wildcard,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,6 +294,7 @@ pub enum TypeRef {
     Applied {
         constructor: Identifier,
         args: Vec<TypeRef>,
+        const_args: Vec<usize>,
     },
 }
 
@@ -279,13 +315,26 @@ impl fmt::Display for TypeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Named(name) => f.write_str(name.as_str()),
-            Self::Applied { constructor, args } => {
+            Self::Applied {
+                constructor,
+                args,
+                const_args,
+            } => {
                 write!(f, "{constructor}<")?;
+                let mut needs_comma = false;
                 for (index, arg) in args.iter().enumerate() {
                     if index > 0 {
                         f.write_str(",")?;
                     }
                     write!(f, "{arg}")?;
+                    needs_comma = true;
+                }
+                for value in const_args {
+                    if needs_comma {
+                        f.write_str(",")?;
+                    }
+                    write!(f, "{value}")?;
+                    needs_comma = true;
                 }
                 f.write_str(">")
             }
@@ -346,6 +395,8 @@ pub enum ValueExpr {
         payload: Box<ValueExpr>,
     },
     Record(RecordValue),
+    List(ListValue),
+    Map(MapValue),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -360,6 +411,27 @@ pub struct RecordValueField {
     pub value: ValueExpr,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListValue {
+    pub element_type: Option<TypeRef>,
+    pub capacity: Option<usize>,
+    pub items: Vec<ValueExpr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapValue {
+    pub key_type: Option<TypeRef>,
+    pub value_type: Option<TypeRef>,
+    pub capacity: Option<usize>,
+    pub entries: Vec<MapValueEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapValueEntry {
+    pub key: ValueExpr,
+    pub value: ValueExpr,
+}
+
 impl fmt::Display for ValueExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -367,6 +439,8 @@ impl fmt::Display for ValueExpr {
             Self::Call { name, arg } => write!(f, "{name}({arg})"),
             Self::EnumVariant { name, payload } => write!(f, "{name}({payload})"),
             Self::Record(value) => write!(f, "{value}"),
+            Self::List(value) => write!(f, "{value}"),
+            Self::Map(value) => write!(f, "{value}"),
         }
     }
 }
@@ -381,5 +455,41 @@ impl fmt::Display for RecordValue {
             write!(f, "{}:{}", field.name, field.value)?;
         }
         f.write_str("}")
+    }
+}
+
+impl fmt::Display for ListValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("List")?;
+        if let (Some(element_type), Some(capacity)) = (&self.element_type, self.capacity) {
+            write!(f, "<{element_type},{capacity}>")?;
+        }
+        f.write_str("[")?;
+        for (index, item) in self.items.iter().enumerate() {
+            if index > 0 {
+                f.write_str(",")?;
+            }
+            write!(f, "{item}")?;
+        }
+        f.write_str("]")
+    }
+}
+
+impl fmt::Display for MapValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Map")?;
+        if let (Some(key_type), Some(value_type), Some(capacity)) =
+            (&self.key_type, &self.value_type, self.capacity)
+        {
+            write!(f, "<{key_type},{value_type},{capacity}>")?;
+        }
+        f.write_str("[")?;
+        for (index, entry) in self.entries.iter().enumerate() {
+            if index > 0 {
+                f.write_str(",")?;
+            }
+            write!(f, "{}=>{}", entry.key, entry.value)?;
+        }
+        f.write_str("]")
     }
 }

@@ -100,6 +100,41 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
 }
 
 #[test]
+fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    program.processes[0].transitions[0].effect_authority =
+        crate::program::LoadedEffectAuthority::from_artifact(&[
+            ArtifactEffect::Spawn,
+            ArtifactEffect::Send,
+        ]);
+    program.processes[0].transitions[0].actions = vec![
+        LoadedAction::Spawn {
+            target: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        },
+        LoadedAction::Send {
+            target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            message: MessageId::new(0),
+            payload: Some(ArtifactValueTemplate::RecordField {
+                ty: PROCESS_REF_WORKER,
+                record: Box::new(ArtifactValueTemplate::Literal {
+                    ty: BOX,
+                    value: "Box{reply_to:ProcessRef_Worker}".to_string(),
+                }),
+                field: "reply_to".to_string(),
+            }),
+        },
+    ];
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main transition 0 send payload process reference template must be a direct message payload",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_received_process_ref_send_without_payload_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

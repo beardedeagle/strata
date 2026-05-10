@@ -45,7 +45,7 @@ result of the first invalid shape.
 | --- | --- | --- |
 | `function ... conflicts with a declared type or value constructor` | A source function name collides with a type or enum constructor. | Choose a distinct function name. |
 | `function ... must declare exactly one parameter` | A normal source function uses an arity outside the current buildable call form. | Use one typed binding parameter or one pattern parameter clause. |
-| `function ... must use a declared record or enum type` | A source function parameter or return type names something outside the source value type set. | Use a declared `record` or `enum` type. |
+| `function ... must use a declared record, enum, list, or map type` | A source function parameter or return type names something outside the source value type set. | Use a declared `record` or `enum` type, or `List<T,N>` / `Map<K,V,N>` over source value types. |
 | `function ... must not declare effects` / `function ... must not perform statements` | A normal source function tries to perform runtime behavior. | Keep normal functions pure; perform `emit`, `spawn`, and `send` only in `step`. |
 | `function ... may-behaviors must be empty` / `function ... must be deterministic` | A normal source function is not in the deterministic buildable subset. | Use `~ [] @det`. |
 | `function ... is not declared` | A value expression calls an unknown function. | Declare a module function or process-local helper with that name. |
@@ -59,6 +59,11 @@ result of the first invalid shape.
 | `record pattern binding ... is declared more than once` | A source helper record pattern binds two fields to the same local name. | Use one distinct immutable binding name per field. |
 | `record pattern binding ... conflicts ...` | A source helper record pattern binding reuses a reserved, process, type, or constructor name. | Choose a distinct immutable binding name. |
 | `requires a concrete record value argument` | A record destructuring helper or helper match is trying to destructure a value that is not concrete after source helper expansion. | Pass a concrete record value into the helper or match a source binding that resolves to one. |
+| `requires a concrete list value argument` / `requires a concrete map value argument` | A collection destructuring helper or helper match is trying to destructure a value that is not concrete after source helper expansion. | Pass a concrete `List[...]` or `Map[...]` value into the helper, or match a source binding that resolves to one. |
+| `map pattern duplicates key ...` / `map value ... duplicates key ...` | A map pattern or map value repeats the same canonical key. | Keep each map key once. |
+| `map value type ... keys must be static source values` | A runtime-bound map value tries to derive a map key from a payload or state binding. | Use static source keys in this slice; model dynamic-key dictionaries separately once key-set IFC semantics exist. |
+| `collection pattern binding ... conflicts ...` | A list or map helper pattern binding reuses an existing source value binding or declared value name. | Choose a distinct immutable binding name. |
+| `list payload pattern must bind at least one value` / `map payload pattern must bind at least one value` | A constructor payload pattern tries to use a collection shape test without binding any projected value. | Bind at least one immutable element/value, or use the message constructor without payload destructuring when the payload can be ignored. |
 | `match record pattern ... must declare exactly one arm` | A helper whole-body match over a record tries to use enum-style multi-arm dispatch. | Use one record destructuring arm for the matched record type. |
 | `match over record ... cannot use a wildcard pattern` | A helper whole-body match over a record tries to use `_`. | Use the record destructuring pattern for the matched record type. |
 | `match record pattern binding ... conflicts ...` | A helper whole-body record match binding reuses an existing source value binding. | Choose a distinct immutable binding name. |
@@ -93,13 +98,13 @@ result of the first invalid shape.
 | `sends message ... not accepted by ...` | The target process message enum has no such variant. | Send a declared target message variant. |
 | `message ... requires a payload` | A send omits the payload for a payload variant. | Pass one value with `send worker Variant(value);`. |
 | `message ... does not accept a payload` | A send passes a payload to a unit variant. | Remove the payload argument or send a payload variant. |
-| `payload type ... must be a named record, enum, or process reference type` | A payload variant uses an unsupported applied/generic type. | Declare a named record or enum type, or use `ProcessRef<TargetProcess>`. |
+| `payload type ... must be a named record, enum, list, map, or process reference type` | A payload variant uses an unsupported applied/generic type. | Declare a named record or enum type, use `List<T,N>` / `Map<K,V,N>` over source values, or use `ProcessRef<TargetProcess>`. |
 | `step pattern payload ... has type ... expected ...` | A step payload binding annotation does not match the variant payload type. | Use the declared payload type in the parameter pattern. |
 | `payload binding ... conflicts` / `process reference ... conflicts with payload binding` | A local immutable binding shadows `state`, a process, a type, a value constructor, or another local binding in the same transition. | Use distinct immutable binding names. |
 | `payload has type ..., expected ...` | A runtime envelope or artifact payload template carries the wrong value type. | Match the payload value type to the target message variant. |
 | `payload ... exceeds maximum length` | A payload value label is too large for the artifact or runtime trace boundary. | Use a smaller payload value or split the payload into smaller fields/messages. |
 | `payload ... is not a bound process reference` | A `ProcessRef<T>` payload send uses a value that is not a process reference. | Pass an immutable process reference binding or received `ProcessRef<T>` payload. |
-| `process references must be direct message payloads` / `process reference template must be a direct message payload` | A process reference payload is nested inside a record, enum, or next-state template. | Send `ProcessRef<T>` only as the direct payload of a message that declares `ProcessRef<T>`. |
+| `process references must be direct message payloads` / `process reference template must be a direct message payload` | A process reference payload is nested inside a record, enum, collection, or next-state template. | Send `ProcessRef<T>` only as the direct payload of a message that declares `ProcessRef<T>`. |
 
 ## Match Errors
 

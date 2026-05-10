@@ -177,7 +177,7 @@ proc Main mailbox bounded(1) {"#,
     let err = check_source(&source).expect_err("undeclared function parameter type should fail");
 
     assert!(err.to_string().contains(
-        "module function unused parameter input must use a declared record or enum type, found Missing"
+        "module function unused parameter input must use a declared record, enum, list, or map type, found Missing"
     ));
 }
 
@@ -195,7 +195,7 @@ proc Main mailbox bounded(1) {"#,
     let err = check_source(&source).expect_err("undeclared function return type should fail");
 
     assert!(err.to_string().contains(
-        "module function unused return type must use a declared record or enum type, found Missing"
+        "module function unused return type must use a declared record, enum, list, or map type, found Missing"
     ));
 }
 

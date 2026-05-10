@@ -7,24 +7,32 @@ pub(super) fn check_step_transition(
     types: &mut CheckedTypeInterner<'_>,
     input: StepTransitionInput<'_>,
 ) -> Result<CheckedTransition> {
-    let payload_template_binding = input.payload_binding.map(|binding| ValueTemplateBinding {
-        name: &binding.name,
-        ty: &binding.ty,
-        checked_ty: &binding.checked_ty,
-        source: ValueTemplateSource::ReceivedPayload,
-    });
-    let state_template_binding = input
-        .state_payload_binding
-        .map(|binding| ValueTemplateBinding {
-            name: &binding.name,
-            ty: &binding.ty,
-            checked_ty: &binding.checked_ty,
-            source: ValueTemplateSource::CurrentStatePayload,
-        });
-    let template_bindings = payload_template_binding
-        .iter()
-        .chain(state_template_binding.iter())
-        .copied()
+    let payload_template_bindings =
+        input
+            .payload_bindings
+            .iter()
+            .map(|binding| ValueTemplateBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+                checked_ty: &binding.checked_ty,
+                root_checked_ty: &binding.checked_payload_ty,
+                source: ValueTemplateSource::ReceivedPayload,
+                path: &binding.path,
+            });
+    let state_template_bindings =
+        input
+            .state_payload_bindings
+            .iter()
+            .map(|binding| ValueTemplateBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+                checked_ty: &binding.checked_ty,
+                root_checked_ty: &binding.checked_payload_ty,
+                source: ValueTemplateSource::CurrentStatePayload,
+                path: &binding.path,
+            });
+    let template_bindings = payload_template_bindings
+        .chain(state_template_bindings)
         .collect::<Vec<_>>();
     let function_scope = SourceFunctionScope {
         module: context.module,
@@ -33,13 +41,13 @@ pub(super) fn check_step_transition(
         semantic_index: context.semantic_index,
     };
     let mut source_bindings = Vec::new();
-    if let Some(binding) = input.payload_binding {
+    for binding in input.payload_bindings {
         source_bindings.push(SourceValueBinding {
             name: &binding.name,
             ty: &binding.ty,
         });
     }
-    if let Some(binding) = input.state_payload_binding {
+    for binding in input.state_payload_bindings {
         source_bindings.push(SourceValueBinding {
             name: &binding.name,
             ty: &binding.ty,
@@ -71,7 +79,7 @@ pub(super) fn check_step_transition(
                 payload,
             } => {
                 let send_target =
-                    resolve_checked_send_target(context, input.payload_binding, target)?;
+                    resolve_checked_send_target(context, input.payload_bindings, target)?;
                 let message_id = resolve_send_message_case(
                     context,
                     types,
@@ -138,8 +146,8 @@ pub(super) fn check_step_transition(
             types,
             input.variant,
             &state_arg,
-            input.payload_binding,
-            input.state_payload_binding,
+            input.payload_bindings,
+            input.state_payload_bindings,
         )?;
         CheckedNextState::Template(template)
     } else {
@@ -167,7 +175,7 @@ struct ResolvedCheckedSendTarget {
 
 fn resolve_checked_send_target(
     context: &StepCheckContext<'_>,
-    payload_binding: Option<&StepPayloadBinding>,
+    payload_bindings: &[StepPayloadBinding],
     target: &Identifier,
 ) -> Result<ResolvedCheckedSendTarget> {
     if let Some(binding) = context.process_ref_index.get(target) {
@@ -176,25 +184,26 @@ fn resolve_checked_send_target(
             target_process: binding.target,
         });
     }
-    if let Some(binding) = payload_binding {
-        if binding.name == *target {
-            let target_process = context
-                .semantic_index
-                .process_ref_target_type(&binding.ty)?
-                .ok_or_else(|| {
-                    Error::new(format!(
-                        "process {} send target {} is not a process reference payload",
-                        context.process.name, target
-                    ))
-                })?;
-            return Ok(ResolvedCheckedSendTarget {
-                target: CheckedSendTarget::ReceivedPayload {
-                    ty: binding.checked_ty.clone(),
-                    target: target_process,
-                },
-                target_process,
-            });
-        }
+    if let Some(binding) = payload_bindings
+        .iter()
+        .find(|binding| binding.name == *target)
+    {
+        let target_process = context
+            .semantic_index
+            .process_ref_target_type(&binding.ty)?
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} send target {} is not a process reference payload",
+                    context.process.name, target
+                ))
+            })?;
+        return Ok(ResolvedCheckedSendTarget {
+            target: CheckedSendTarget::ReceivedPayload {
+                ty: binding.checked_ty.clone(),
+                target: target_process,
+            },
+            target_process,
+        });
     }
     Err(Error::new(format!(
         "process {} sends to undeclared process reference {}",
@@ -344,20 +353,44 @@ fn populate_template_state_values(
     types: &mut CheckedTypeInterner<'_>,
     variant: CheckedMessageVariantId,
     state_arg: &ValueExpr,
-    payload_binding: Option<&StepPayloadBinding>,
-    state_payload_binding: Option<&StepStatePayloadBinding>,
+    payload_bindings: &[StepPayloadBinding],
+    state_payload_bindings: &[StepStatePayloadBinding],
 ) -> Result<()> {
-    if let Some(binding) = payload_binding {
+    if !payload_bindings.is_empty() {
         for payload in context
             .message_cases
             .payload_values(context.process_id, variant)?
         {
-            let mut bindings = vec![ValueBinding {
-                name: &binding.name,
-                ty: &binding.ty,
-                label: payload.label(),
-            }];
-            if let Some(state_binding) = state_payload_binding {
+            let payload_labels = payload_bindings
+                .iter()
+                .map(|binding| {
+                    let projected = payload_binding_label(
+                        payload.label(),
+                        &PatternPayloadParam {
+                            name: binding.name.clone(),
+                            ty: binding.ty.clone(),
+                            path: binding.path.clone(),
+                        },
+                    )?;
+                    projected.ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} message payload {} does not match step pattern binding {}",
+                            context.process.name,
+                            payload.label(),
+                            binding.name
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let mut bindings = Vec::new();
+            for (binding, label) in payload_bindings.iter().zip(&payload_labels) {
+                bindings.push(ValueBinding {
+                    name: &binding.name,
+                    ty: &binding.ty,
+                    label,
+                });
+            }
+            for state_binding in state_payload_bindings {
                 bindings.push(ValueBinding {
                     name: &state_binding.name,
                     ty: &state_binding.ty,
@@ -373,16 +406,20 @@ fn populate_template_state_values(
         }
         return Ok(());
     }
-    if let Some(binding) = state_payload_binding {
+    if !state_payload_bindings.is_empty() {
+        let bindings = state_payload_bindings
+            .iter()
+            .map(|binding| ValueBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+                label: &binding.label,
+            })
+            .collect::<Vec<_>>();
         state_space.resolve_state_value_with_bindings(
             context.semantic_index,
             types,
             state_arg,
-            &[ValueBinding {
-                name: &binding.name,
-                ty: &binding.ty,
-                label: &binding.label,
-            }],
+            &bindings,
         )?;
     }
     Ok(())

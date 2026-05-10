@@ -113,6 +113,29 @@ fn validate_payload_value_label_defines_artifact_metadata_boundary() {
 }
 
 #[test]
+fn projection_helpers_reject_duplicate_record_fields() {
+    let err = project_canonical_record_field("Job{phase:Ready,phase:Done}", "phase")
+        .expect_err("duplicate record fields must fail closed");
+
+    assert!(
+        err.to_string().contains("duplicates field phase"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn projection_helpers_reject_duplicate_map_keys() {
+    let keys = vec!["Ready".to_string()];
+    let err = project_canonical_map_value("Map[Ready=>Ready,Ready=>Done]", "Ready", &keys)
+        .expect_err("duplicate map keys must fail closed");
+
+    assert!(
+        err.to_string().contains("duplicates key Ready"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn validate_rejects_invalid_type_label_identifier() {
     let mut artifact = valid_artifact();
     artifact.types[JOB.index()].label = "not-valid".to_string();

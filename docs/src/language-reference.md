@@ -18,9 +18,10 @@ Mantle artifact internals.
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
-| Patterns | Constructor patterns, constructor payload bindings, record destructuring patterns in source helper signatures, helper match bodies, helper return-match expressions, and `_` wildcards. |
-| Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, payload sends, and payload-binding step patterns. |
-| Pattern dispatch | Function signature patterns, source function match bodies, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, and whole-body `match state` inside message-specific step clauses. |
+| Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
+| Patterns | Constructor patterns, constructor payload bindings, record/list/map payload destructuring in helpers and step/state matches, helper return-match expressions, and `_` wildcards. |
+| Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
+| Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, and whole-body `match state` inside message-specific step clauses. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
 The `module` declaration names a source unit. It does not create an import
@@ -88,8 +89,8 @@ _
 ```
 
 `as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
-`ProcResult` and `ProcessRef` are reserved type names because they name built-in
-transition and process-reference types.
+`ProcResult`, `ProcessRef`, `List`, and `Map` are reserved type names because
+they name built-in transition, process-reference, and collection types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
 artifact metadata. Checked process-reference artifact labels under that prefix
 are keyed by resolved process IDs, not source process names.
@@ -140,6 +141,24 @@ Assigned(Job { phase: Ready })
 The checker resolves this form against the expected enum type. If the identifier
 names a source helper instead, it is expanded as a helper call; constructor and
 helper names cannot collide silently.
+
+## Collections
+
+Lists and maps are immutable source values with explicit numeric capacities.
+They can be used as source helper parameters and return values, record fields,
+process state types, and message payloads when their element, key, and value
+types are source value types.
+
+```strata
+List<Phase,2>[Ready, Done]
+Map<Phase,Phase,1>[Ready => Done]
+```
+
+Collection constructors are explicit. Bare `[Ready, Done]` and `{ Ready: Done }`
+forms are not admitted in this slice. Map keys are canonical source values; a
+map value or map pattern that repeats a canonical key is rejected. Runtime-bound
+map value keys must be static source values in this slice; dynamic-key
+dictionary or subset map matching is deferred.
 
 ## Enums
 
@@ -253,6 +272,19 @@ fn renamed_phase(Job { phase: current }) -> JobPhase ! [] ~ [] @det {
 }
 ```
 
+Source helper signatures may also dispatch on exact immutable collection
+shapes:
+
+```strata
+fn first(List<Phase,2>[phase, _]) -> Phase ! [] ~ [] @det {
+    return phase;
+}
+
+fn lookup(Map<Phase,Phase,1>[Ready => selected]) -> Phase ! [] ~ [] @det {
+    return selected;
+}
+```
+
 A helper may also use a whole-body match over its typed binding parameter:
 
 ```strata
@@ -275,6 +307,22 @@ fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
     match job {
         Job { phase } => {
             return phase;
+        }
+    }
+}
+```
+
+Whole-body helper matches can destructure exact list and map shapes. A wildcard
+arm may provide a fallback for collection shapes that are not listed:
+
+```strata
+fn first_or_unknown(items: List<Phase,1>) -> Phase ! [] ~ [] @det {
+    match items {
+        List[phase] => {
+            return phase;
+        }
+        _ => {
+            return Unknown;
         }
     }
 }
@@ -307,14 +355,31 @@ fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
 }
 ```
 
+Collection return matches use the same exact-shape collection patterns:
+
+```strata
+fn ready_value(items: Map<Phase,Phase,1>) -> Phase ! [] ~ [] @det {
+    return match items {
+        Map[Ready => selected] => {
+            return selected;
+        }
+        _ => {
+            return Unknown;
+        }
+    };
+}
+```
+
 Enum matches are exhaustive, duplicate-free, and immutable. Record body matches
 and return matches use one record pattern arm for the matched record type.
-Payload-bearing source helper patterns and record destructuring patterns bind
-immutable source values. A helper call must provide a concrete enum constructor
-value for signature-pattern, whole-body match, or enum helper return-match
-dispatch. Record destructuring helpers require a concrete record value
-argument. Helpers are still expanded before lowering and do not become runtime
-dispatch entries.
+Collection patterns match exact list length or exact map key set, with `_`
+available as a collection fallback in helper match bodies and return matches.
+Payload-bearing source helper patterns and record/list/map destructuring
+patterns bind immutable source values. A helper call must provide a concrete
+enum constructor value for signature-pattern, whole-body match, or enum helper
+return-match dispatch. Record and collection destructuring helpers require a
+concrete value argument after source helper expansion. Helpers are still
+expanded before lowering and do not become runtime dispatch entries.
 
 ## Statements
 
@@ -378,12 +443,11 @@ process ID. Source names remain diagnostics and trace metadata.
 
 Patterns are source-level syntax for typed value decomposition. The current
 runnable subset admits constructor patterns, constructor payload bindings,
-record destructuring patterns in source helper signatures, helper match bodies,
-and helper return-match expressions, and wildcards. Normal source helpers may
-match concrete enum values or destructure concrete record values, `init` may use
-one whole-body match over a fieldless enum constructor to select the initial
-state, and actor message dispatch may use one whole-body match over the typed
-message parameter:
+record/list/map payload destructuring, helper return-match expressions, and
+wildcards. Normal source helpers may match concrete enum values or destructure
+concrete record/list/map values, `init` may use one whole-body match over a
+fieldless enum constructor to select the initial state, and actor message
+dispatch may use one whole-body match over the typed message parameter:
 
 ```strata
 fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -401,11 +465,12 @@ fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] 
 ```
 
 Step `match` is an authoring form for the same semantics as step parameter
-patterns, including typed payload bindings. Checking resolves each arm into
-typed message-keyed transitions before lowering. Mantle still dispatches by
-admitted message IDs and payload type IDs, not by source strings. In this
-buildable step subset the match scrutinee must be the typed message parameter,
-and match arms are block-delimited without comma separators.
+patterns, including typed payload bindings and record/list/map payload
+destructuring. Checking resolves each arm into typed message-keyed transitions
+before lowering. Mantle still dispatches by admitted message IDs and payload
+type IDs, not by source strings. In this buildable step subset the match
+scrutinee must be the typed message parameter, and match arms are
+block-delimited without comma separators.
 
 A message-specific `step` may instead match the current state parameter when
 the process state type is an enum:
@@ -430,11 +495,12 @@ fn step(state: WorkerState, Complete) -> ProcResult<WorkerState> ! [emit] ~ [] @
 ```
 
 State-match arms resolve against the declared process state enum and are
-exhaustive over its variants. Payload-bearing state variants must bind their
-payload with the declared payload type. The binding is immutable and local to
-that transition arm. Lowering emits typed Mantle transitions keyed by admitted
-message ID plus admitted current state ID, and runtime selection fails closed
-if the current state is not admitted.
+exhaustive over its variants. Payload-bearing state variants may bind the whole
+payload with the declared payload type or destructure a concrete record/list/map
+payload. Each binding is immutable and local to that transition arm. Lowering
+emits typed Mantle transitions keyed by admitted message ID plus admitted
+current state ID, and runtime selection fails closed if the current state is not
+admitted.
 
 An `init` match is checked against the enum that owns the scrutinee constructor.
 It must be exhaustive, duplicate-free, and statement-free; each arm returns an
@@ -495,6 +561,30 @@ parameter, process declarations, type names, or value constructors.
 Process-reference bindings in the same transition cannot shadow a payload
 binding.
 
+Record, list, and map payloads can also be destructured directly in step
+parameter patterns, `match msg` arms, and `match state` arms:
+
+```strata
+fn step(state: WorkerState, Assign(Job { phase })) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Continue(WorkerState { seen: phase });
+}
+
+fn step(state: WorkerState, Items(List[phase, _])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Continue(WorkerState { seen: phase });
+}
+
+fn step(state: WorkerState, Lookup(Map[Ready => phase])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Continue(WorkerState { seen: phase });
+}
+```
+
+These bindings are immutable projections of the concrete payload value. A
+record field, list element, or map value can be used in whole-value state
+returns and downstream payloads, but process references still remain valid only
+as direct message payload bindings. Shape-only collection payload patterns such
+as `Items(List[_])` or `Lookup(Map[Ready => _])` are not admitted in this slice;
+use the constructor pattern without destructuring when the payload is ignored.
+
 If a process accepts more than one message, it can declare explicit clauses for
 specific constructors and one wildcard clause for the remaining variants:
 
@@ -541,12 +631,14 @@ Passing the `state` parameter preserves the supplied state:
 return Stop(state);
 ```
 
-Passing a record value or enum variant creates an explicit whole-value state
-replacement:
+Passing a record value, enum variant, list, or map creates an explicit
+whole-value state replacement:
 
 ```strata
 return Continue(WorkerState { phase: Idle });
 return Continue(Working(Job { phase: Ready }));
+return Continue(List<Phase,2>[Ready, Done]);
+return Continue(Map<Phase,Phase,1>[Ready => Done]);
 return Stop(Handled);
 return Panic(Failed);
 ```

@@ -42,7 +42,7 @@ pub(super) fn check_init(
             state_space,
             types,
             body,
-            None,
+            &[],
             "init body",
         ),
         FunctionBody::Match(match_body) => {
@@ -85,15 +85,15 @@ fn check_init_match(
     let mut selected_state = None;
     let mut wildcard_state = None;
     for arm in arms {
-        let payload_binding = match &arm.pattern {
-            TypedMatchPattern::Variant { binding, .. } => binding.as_ref(),
-            TypedMatchPattern::Wildcard => None,
+        let payload_bindings = match &arm.pattern {
+            TypedMatchPattern::Variant { bindings, .. } => bindings.as_slice(),
+            TypedMatchPattern::Wildcard => &[],
         };
         let state = resolve_init_return_block_value(
             process,
             scope,
             arm.body,
-            payload_binding,
+            payload_bindings,
             "init match arm",
         )?;
         match arm.pattern {
@@ -122,10 +122,10 @@ fn check_init_return_block(
     state_space: &mut StateSpace<'_>,
     types: &mut CheckedTypeInterner<'_>,
     body: &FunctionBlock,
-    payload_binding: Option<&PatternPayloadParam>,
+    payload_bindings: &[PatternPayloadParam],
     context: &str,
 ) -> Result<CheckedStateId> {
-    let value = resolve_init_return_block_value(process, scope, body, payload_binding, context)?;
+    let value = resolve_init_return_block_value(process, scope, body, payload_bindings, context)?;
     state_space.resolve_state_value(scope.semantic_index, types, &value)
 }
 
@@ -133,7 +133,7 @@ fn resolve_init_return_block_value(
     process: &Process,
     scope: &SourceFunctionScope<'_>,
     body: &FunctionBlock,
-    payload_binding: Option<&PatternPayloadParam>,
+    payload_bindings: &[PatternPayloadParam],
     context: &str,
 ) -> Result<ValueExpr> {
     if !body.statements.is_empty() {
@@ -154,16 +154,15 @@ fn resolve_init_return_block_value(
             )));
         }
     };
-    let bindings = payload_binding
-        .map(|binding| {
-            vec![SourceValueBinding {
-                name: &binding.name,
-                ty: &binding.ty,
-            }]
+    let bindings = payload_bindings
+        .iter()
+        .map(|binding| SourceValueBinding {
+            name: &binding.name,
+            ty: &binding.ty,
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
     let value = resolve_source_value_expr(scope, &process.state_type, &value, &bindings, 0)?;
-    if let Some(binding) = payload_binding {
+    for binding in payload_bindings {
         if source_value_uses_binding(&value, &binding.name) {
             return Err(Error::new(format!(
                 "process {} {context} cannot use payload binding {} in returned state",

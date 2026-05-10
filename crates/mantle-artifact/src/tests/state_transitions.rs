@@ -100,6 +100,73 @@ fn validate_rejects_next_state_template_when_label_matches_but_identity_does_not
 }
 
 #[test]
+fn validate_rejects_payload_dependent_map_template_key() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants[0] = ArtifactMessageVariant::payload("Ping", JOB);
+    artifact.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Map {
+            ty: WORKER_STATE,
+            entries: vec![ArtifactValueTemplateMapEntry {
+                key: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
+                value: ArtifactValueTemplate::Literal {
+                    ty: JOB,
+                    value: "Job".to_string(),
+                },
+            }],
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("payload-dependent map template keys should fail");
+
+    assert!(
+        err.to_string()
+            .contains("next_state_template.entry.0.key must be a static value template")
+    );
+}
+
+#[test]
+fn validate_rejects_duplicate_static_map_template_key() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Map {
+            ty: WORKER_STATE,
+            entries: vec![
+                ArtifactValueTemplateMapEntry {
+                    key: ArtifactValueTemplate::Literal {
+                        ty: JOB,
+                        value: "Job".to_string(),
+                    },
+                    value: ArtifactValueTemplate::Literal {
+                        ty: JOB,
+                        value: "Ready".to_string(),
+                    },
+                },
+                ArtifactValueTemplateMapEntry {
+                    key: ArtifactValueTemplate::Literal {
+                        ty: JOB,
+                        value: "Job".to_string(),
+                    },
+                    value: ArtifactValueTemplate::Literal {
+                        ty: JOB,
+                        value: "Done".to_string(),
+                    },
+                },
+            ],
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("duplicate static map template keys should fail");
+
+    assert!(
+        err.to_string()
+            .contains("next_state_template duplicates key Job"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn validate_rejects_current_state_payload_template_outside_state_table() {
     let mut artifact = valid_artifact();
     let mut working = ArtifactStateValue::with_label(

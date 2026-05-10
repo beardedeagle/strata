@@ -20,7 +20,8 @@ fn rejects_payload_state_match_without_payload_binding() {
 
     assert!(
         err.to_string()
-            .contains("process Worker state match pattern Working requires a payload binding")
+            .contains("process Worker state match pattern Working requires a payload binding"),
+        "unexpected error: {err}"
     );
 }
 

@@ -1,4 +1,7 @@
 use super::*;
+use crate::language::checker::source_functions::collection_patterns::{
+    check_collection_pattern_bindings, collection_pattern_shape,
+};
 use crate::language::checker::source_functions::record_patterns::check_record_pattern_bindings;
 
 pub(super) fn validate_binding_source_function_match_body(
@@ -36,9 +39,19 @@ pub(super) fn validate_binding_source_function_match_body(
             record_decl,
         );
     }
+    if semantic_index.collection_type(&param.ty)?.is_some() {
+        return validate_binding_source_function_collection_match_body(
+            module,
+            semantic_index,
+            owner,
+            function,
+            param,
+            match_body,
+        );
+    }
 
     Err(Error::new(format!(
-        "{owner} function {} match scrutinee {} must be a declared record or enum source value",
+        "{owner} function {} match scrutinee {} must be a declared record, enum, list, or map source value",
         function.name, match_body.scrutinee
     )))
 }
@@ -123,5 +136,70 @@ fn source_function_record_body_match_pattern_error(
             "{owner} function {} match over record {} cannot use a wildcard pattern",
             function.name, record_decl.name
         )),
+        Pattern::List(_) => Error::new(format!(
+            "{owner} function {} match list pattern cannot match record {}",
+            function.name, record_decl.name
+        )),
+        Pattern::Map(_) => Error::new(format!(
+            "{owner} function {} match map pattern cannot match record {}",
+            function.name, record_decl.name
+        )),
     }
+}
+
+fn validate_binding_source_function_collection_match_body(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    owner: &str,
+    function: &Function,
+    param: &Param,
+    match_body: &Match,
+) -> Result<()> {
+    let mut wildcard_seen = false;
+    let mut shapes = BTreeSet::new();
+    for arm in &match_body.arms {
+        validate_pure_source_function_block(owner, function, &arm.body)?;
+        match &arm.pattern {
+            Pattern::Wildcard => {
+                if wildcard_seen {
+                    return Err(Error::new(format!(
+                        "{owner} function {} match declares duplicate wildcard pattern",
+                        function.name
+                    )));
+                }
+                wildcard_seen = true;
+            }
+            Pattern::List(_) | Pattern::Map(_) => {
+                let subject = format!("{owner} function {} match", function.name);
+                check_collection_pattern_bindings(
+                    module,
+                    semantic_index,
+                    &subject,
+                    &param.ty,
+                    &arm.pattern,
+                )?;
+                let shape =
+                    collection_pattern_shape(module, semantic_index, &param.ty, &arm.pattern)?;
+                if !shapes.insert(shape.clone()) {
+                    return Err(Error::new(format!(
+                        "{owner} function {} match declares duplicate collection pattern",
+                        function.name
+                    )));
+                }
+            }
+            Pattern::Constructor { name, .. } => {
+                return Err(Error::new(format!(
+                    "{owner} function {} match pattern {} expects an enum constructor, but scrutinee is {}",
+                    function.name, name, param.ty
+                )));
+            }
+            Pattern::Record { name, .. } => {
+                return Err(Error::new(format!(
+                    "{owner} function {} match pattern {} destructures a record, but scrutinee is {}",
+                    function.name, name, param.ty
+                )));
+            }
+        }
+    }
+    Ok(())
 }

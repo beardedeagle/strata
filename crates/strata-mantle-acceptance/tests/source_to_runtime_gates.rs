@@ -7,7 +7,7 @@ use std::sync::Once;
 
 use mantle_artifact::{
     ArtifactEffect, ArtifactTypeKind, ArtifactValueTemplate, ArtifactValueTemplateField,
-    MantleArtifact, ProcessId, TypeId, read_artifact,
+    ArtifactValueTemplateMapEntry, MantleArtifact, ProcessId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -701,6 +701,31 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn function_collection_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/function_collection_match.str",
+        "target/strata/function_collection_match.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("source helper collection match selected values"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let artifact = gate.read_artifact("target/strata/function_collection_match.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.state_values[0].label, "MainState{selected:Ready}");
+
+    let trace = gate.read_trace("function_collection_match");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{selected:Ready}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper collection match selected values""#
+    ));
+}
+
+#[test]
 fn function_return_match_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(
@@ -839,6 +864,68 @@ fn state_payload_enum_checks_builds_and_runs_on_mantle() {
     )));
     assert!(trace.contains(
         r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"Idle","to_state_id":1,"to":"Working(Job{phase:Ready})""#
+    ));
+}
+
+#[test]
+fn collection_state_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/collection_state.str",
+        "target/strata/collection_state.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("collection state replaced"));
+    assert!(stdout.contains("collection map state replaced"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+    assert!(stdout.contains("mantle: stopped MapWorker normally"));
+
+    let artifact = gate.read_artifact("target/strata/collection_state.mta");
+    let worker = &artifact.processes[1];
+    let list_type = value_type_id(&artifact, "__strata_checked_4_List_1_1_5_Phase_1");
+    let phase_type = value_type_id(&artifact, "Phase");
+    assert_eq!(worker.state_values[0].label, "List[Ready]");
+    assert_eq!(worker.state_values[1].label, "List[Done]");
+    assert_eq!(
+        worker.transitions[0].next_state,
+        mantle_artifact::NextState::Template(ArtifactValueTemplate::List {
+            ty: list_type,
+            items: vec![ArtifactValueTemplate::ReceivedPayload { ty: phase_type }],
+        })
+    );
+
+    let map_worker = &artifact.processes[2];
+    let map_type = value_type_id(&artifact, "__strata_checked_3_Map_2_1_5_Phase_5_Phase_1");
+    assert_eq!(map_worker.state_values[0].label, "Map[Ready=>Ready]");
+    assert_eq!(map_worker.state_values[1].label, "Map[Ready=>Done]");
+    assert_eq!(
+        map_worker.transitions[0].next_state,
+        mantle_artifact::NextState::Template(ArtifactValueTemplate::Map {
+            ty: map_type,
+            entries: vec![ArtifactValueTemplateMapEntry {
+                key: ArtifactValueTemplate::Literal {
+                    ty: phase_type,
+                    value: "Ready".to_string(),
+                },
+                value: ArtifactValueTemplate::ReceivedPayload { ty: phase_type },
+            }],
+        })
+    );
+
+    let trace = gate.read_trace("collection_state");
+    assert!(trace.contains(
+        r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":0,"text":"collection state replaced""#
+    ));
+    assert!(trace.contains(
+        r#""event":"state_updated","pid":2,"process_id":1,"process":"Worker","from_state_id":0,"from":"List[Ready]","to_state_id":1,"to":"List[Done]""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":3,"process_id":2,"process":"MapWorker","stream":"stdout","output_id":1,"text":"collection map state replaced""#
+    ));
+    assert!(trace.contains(
+        r#""event":"state_updated","pid":3,"process_id":2,"process":"MapWorker","from_state_id":0,"from":"Map[Ready=>Ready]","to_state_id":1,"to":"Map[Ready=>Done]""#
     ));
 }
 

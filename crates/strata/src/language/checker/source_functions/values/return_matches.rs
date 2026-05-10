@@ -1,4 +1,7 @@
 use super::*;
+use crate::language::checker::source_functions::collection_patterns::{
+    check_collection_pattern_bindings, collection_pattern_shape,
+};
 use crate::language::checker::source_functions::record_patterns::check_record_pattern_bindings;
 
 pub(super) fn validate_source_function_return_match(
@@ -40,9 +43,23 @@ pub(super) fn validate_source_function_return_match(
             record_decl,
         );
     }
+    if scope
+        .semantic_index
+        .collection_type(scrutinee.ty)?
+        .is_some()
+    {
+        return validate_source_function_return_collection_match(
+            scope,
+            function,
+            expected_type,
+            match_body,
+            bindings,
+            scrutinee.ty,
+        );
+    }
 
     Err(Error::new(format!(
-        "function {} return match scrutinee {} must be a declared record or enum source value",
+        "function {} return match scrutinee {} must be a declared record, enum, list, or map source value",
         function.name, match_body.scrutinee
     )))
 }
@@ -76,20 +93,22 @@ fn validate_source_function_return_enum_match(
         }
         let mut arm_bindings = bindings.to_vec();
         if let TypedMatchPattern::Variant {
-            binding: Some(payload),
+            bindings: payload_bindings,
             ..
         } = &arm.pattern
         {
-            if bindings.iter().any(|binding| binding.name == &payload.name) {
-                return Err(Error::new(format!(
-                    "function {} return match payload binding {} conflicts with an existing source value binding",
-                    function.name, payload.name
-                )));
+            for payload in payload_bindings {
+                if bindings.iter().any(|binding| binding.name == &payload.name) {
+                    return Err(Error::new(format!(
+                        "function {} return match payload binding {} conflicts with an existing source value binding",
+                        function.name, payload.name
+                    )));
+                }
+                arm_bindings.push(SourceValueBinding {
+                    name: &payload.name,
+                    ty: &payload.ty,
+                });
             }
-            arm_bindings.push(SourceValueBinding {
-                name: &payload.name,
-                ty: &payload.ty,
-            });
         }
         validate_source_function_return_expr(
             scope,
@@ -184,5 +203,110 @@ fn source_function_record_return_match_pattern_error(
             "function {} return match over record {} cannot use a wildcard pattern",
             function.name, record_decl.name
         )),
+        Pattern::List(_) => Error::new(format!(
+            "function {} return match list pattern cannot match record {}",
+            function.name, record_decl.name
+        )),
+        Pattern::Map(_) => Error::new(format!(
+            "function {} return match map pattern cannot match record {}",
+            function.name, record_decl.name
+        )),
     }
+}
+
+fn validate_source_function_return_collection_match(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    expected_type: &TypeRef,
+    match_body: &Match,
+    bindings: &[SourceValueBinding<'_>],
+    collection_type: &TypeRef,
+) -> Result<()> {
+    let mut wildcard_seen = false;
+    let mut shapes = BTreeSet::new();
+    for arm in &match_body.arms {
+        if !arm.body.statements.is_empty() {
+            return Err(Error::new(format!(
+                "function {} return match arms must not perform statements",
+                function.name
+            )));
+        }
+        let mut arm_bindings = bindings.to_vec();
+        match &arm.pattern {
+            Pattern::Wildcard => {
+                if wildcard_seen {
+                    return Err(Error::new(format!(
+                        "function {} return match declares duplicate wildcard pattern",
+                        function.name
+                    )));
+                }
+                wildcard_seen = true;
+            }
+            Pattern::List(_) | Pattern::Map(_) => {
+                let subject = format!("function {} return match", function.name);
+                let pattern_bindings = check_collection_pattern_bindings(
+                    scope.module,
+                    scope.semantic_index,
+                    &subject,
+                    collection_type,
+                    &arm.pattern,
+                )?;
+                let shape = collection_pattern_shape(
+                    scope.module,
+                    scope.semantic_index,
+                    collection_type,
+                    &arm.pattern,
+                )?;
+                if !shapes.insert(shape) {
+                    return Err(Error::new(format!(
+                        "function {} return match declares duplicate collection pattern",
+                        function.name
+                    )));
+                }
+                for binding in &pattern_bindings {
+                    if bindings
+                        .iter()
+                        .any(|existing| existing.name == &binding.name)
+                    {
+                        return Err(Error::new(format!(
+                            "function {} return match collection pattern binding {} conflicts with an existing source value binding",
+                            function.name, binding.name
+                        )));
+                    }
+                    arm_bindings.push(SourceValueBinding {
+                        name: &binding.name,
+                        ty: &binding.ty,
+                    });
+                }
+                validate_source_function_return_expr(
+                    scope,
+                    function,
+                    expected_type,
+                    &arm.body.returns,
+                    &arm_bindings,
+                )?;
+                continue;
+            }
+            Pattern::Constructor { name, .. } => {
+                return Err(Error::new(format!(
+                    "function {} return match pattern {} expects an enum constructor, but scrutinee is {}",
+                    function.name, name, collection_type
+                )));
+            }
+            Pattern::Record { name, .. } => {
+                return Err(Error::new(format!(
+                    "function {} return match pattern {} destructures a record, but scrutinee is {}",
+                    function.name, name, collection_type
+                )));
+            }
+        }
+        validate_source_function_return_expr(
+            scope,
+            function,
+            expected_type,
+            &arm.body.returns,
+            &arm_bindings,
+        )?;
+    }
+    Ok(())
 }
