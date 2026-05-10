@@ -91,6 +91,9 @@ pub(in crate::language::checker::source_functions) fn check_record_pattern_bindi
         bindings.push(PatternPayloadParam {
             name: field.binding.clone(),
             ty: field_decl.ty.clone(),
+            path: PayloadBindingPath::RecordField {
+                field: field.field.clone(),
+            },
         });
     }
     Ok(bindings)

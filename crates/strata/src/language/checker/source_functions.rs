@@ -1,10 +1,14 @@
 use super::*;
 
+mod collection_patterns;
 mod match_bodies;
 mod record_patterns;
 mod value_resolution;
 mod values;
 
+use collection_patterns::{
+    validate_list_pattern_source_function_group, validate_map_pattern_source_function_group,
+};
 use match_bodies::validate_binding_source_function_match_body;
 use record_patterns::validate_record_pattern_source_function_group;
 use values::validate_source_function_body_values;
@@ -146,6 +150,20 @@ fn validate_source_function_group(
             process,
             functions,
         ),
+        SourceFunctionParamKind::ListPattern => validate_list_pattern_source_function_group(
+            module,
+            semantic_index,
+            owner,
+            process,
+            functions,
+        ),
+        SourceFunctionParamKind::MapPattern => validate_map_pattern_source_function_group(
+            module,
+            semantic_index,
+            owner,
+            process,
+            functions,
+        ),
     }
 }
 
@@ -214,7 +232,7 @@ fn validate_source_function_declared_value_type(
         return Ok(());
     }
     Err(Error::new(format!(
-        "{owner} function {} {position} must use a declared record or enum type, found {ty}",
+        "{owner} function {} {position} must use a declared record, enum, list, or map type, found {ty}",
         function.name
     )))
 }
@@ -328,6 +346,17 @@ fn collect_source_value_expr_calls<'a>(value: &'a ValueExpr, calls: &mut BTreeSe
                 collect_source_value_expr_calls(&field.value, calls);
             }
         }
+        ValueExpr::List(list) => {
+            for item in &list.items {
+                collect_source_value_expr_calls(item, calls);
+            }
+        }
+        ValueExpr::Map(map) => {
+            for entry in &map.entries {
+                collect_source_value_expr_calls(&entry.key, calls);
+                collect_source_value_expr_calls(&entry.value, calls);
+            }
+        }
     }
 }
 
@@ -337,6 +366,8 @@ fn source_function_param_kind(function: &Function) -> Result<SourceFunctionParam
         [FunctionParam::Pattern(Pattern::Record { .. })] => {
             Ok(SourceFunctionParamKind::RecordPattern)
         }
+        [FunctionParam::Pattern(Pattern::List(_))] => Ok(SourceFunctionParamKind::ListPattern),
+        [FunctionParam::Pattern(Pattern::Map(_))] => Ok(SourceFunctionParamKind::MapPattern),
         [FunctionParam::Pattern(_)] => Ok(SourceFunctionParamKind::EnumPattern),
         _ => Err(Error::new(format!(
             "function {} must declare exactly one parameter in this source slice",
@@ -416,7 +447,7 @@ fn validate_enum_pattern_source_function_group(
 
     for function in functions {
         validate_pure_source_function_block(owner, function, source_function_block(function)?)?;
-        match &function.params[0] {
+        let pattern_bindings = match &function.params[0] {
             FunctionParam::Pattern(pattern) => {
                 let subject = format!("{owner} function {}", function.name);
                 let pattern_context = PatternCheckContext {
@@ -431,7 +462,7 @@ fn validate_enum_pattern_source_function_group(
                 };
                 let checked_pattern = check_typed_match_pattern(&pattern_context, pattern)?;
                 match checked_pattern {
-                    TypedMatchPattern::Variant { variant, .. } => {
+                    TypedMatchPattern::Variant { variant, bindings } => {
                         if explicit_arms[variant] {
                             return Err(Error::new(format!(
                                 "{owner} function {} declares duplicate pattern for variant {}",
@@ -439,6 +470,7 @@ fn validate_enum_pattern_source_function_group(
                             )));
                         }
                         explicit_arms[variant] = true;
+                        bindings
                     }
                     TypedMatchPattern::Wildcard => {
                         if wildcard_seen {
@@ -448,6 +480,7 @@ fn validate_enum_pattern_source_function_group(
                             )));
                         }
                         wildcard_seen = true;
+                        Vec::new()
                     }
                 }
             }
@@ -457,17 +490,14 @@ fn validate_enum_pattern_source_function_group(
                     function.name
                 )));
             }
-        }
-        let body_bindings = match &function.params[0] {
-            FunctionParam::Pattern(Pattern::Constructor {
-                binding: Some(payload),
-                ..
-            }) => vec![SourceValueBinding {
-                name: &payload.name,
-                ty: &payload.ty,
-            }],
-            _ => Vec::new(),
         };
+        let body_bindings = pattern_bindings
+            .iter()
+            .map(|binding| SourceValueBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+            })
+            .collect::<Vec<_>>();
         validate_source_function_body_values(&scope, function, &body_bindings)?;
     }
 
@@ -576,4 +606,27 @@ fn source_function_body_scope<'a>(
     } else {
         *scope
     }
+}
+
+pub(in crate::language::checker::source_functions) fn validate_source_pattern_binding_name(
+    subject: &str,
+    semantic_index: &SemanticIndex,
+    binding: &Identifier,
+) -> Result<()> {
+    if binding.as_str() == STEP_STATE_PARAMETER_NAME {
+        return Err(Error::new(format!(
+            "{subject} pattern binding {binding} conflicts with a reserved state parameter name"
+        )));
+    }
+    if semantic_index.process_id(binding).is_ok() {
+        return Err(Error::new(format!(
+            "{subject} pattern binding {binding} conflicts with a process declaration"
+        )));
+    }
+    if semantic_index.identifier_conflicts_with_declared_value(binding) {
+        return Err(Error::new(format!(
+            "{subject} pattern binding {binding} conflicts with a declared type or value constructor"
+        )));
+    }
+    Ok(())
 }

@@ -1,12 +1,13 @@
 use super::ast::{
-    Determinism, Effect, Enum, EnumVariant, Function, FunctionBlock, FunctionBody, FunctionParam,
-    Identifier, Match, MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record,
-    RecordField, RecordPatternField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
-    ValueExpr,
+    CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, EnumVariant,
+    Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
+    MapPattern, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module, OutputLiteral,
+    Param, Pattern, Process, Record, RecordField, RecordPatternField, RecordValue,
+    RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
-use super::{MAX_SOURCE_BYTES, MAX_TYPE_NESTING, MAX_VALUE_NESTING};
+use super::{LIST_TYPE, MAP_TYPE, MAX_SOURCE_BYTES, MAX_TYPE_NESTING, MAX_VALUE_NESTING};
 
 pub fn parse_source(source: &str) -> Result<Module> {
     Parser::new(source)?.parse_module()
@@ -15,6 +16,11 @@ pub fn parse_source(source: &str) -> Result<Module> {
 struct Parser {
     tokens: Vec<Token>,
     index: usize,
+}
+
+struct CollectionTypeArgs {
+    types: Vec<TypeRef>,
+    capacity: usize,
 }
 
 impl Parser {
@@ -318,20 +324,182 @@ impl Parser {
         }
 
         let name = Identifier::new(value)?;
+        if name.as_str() == LIST_TYPE {
+            let type_args = self.parse_optional_collection_type_args(&name, 1)?;
+            if self.consume_symbol('[') {
+                let (element_type, capacity) = match type_args {
+                    Some(mut args) => (Some(args.types.remove(0)), Some(args.capacity)),
+                    None => (None, None),
+                };
+                return Ok(Pattern::List(ListPattern {
+                    element_type,
+                    capacity,
+                    elements: self.parse_list_pattern_elements()?,
+                }));
+            }
+            if type_args.is_some() {
+                return Err(self.error_here("list patterns must use List<T,N>[...]"));
+            }
+        }
+        if name.as_str() == MAP_TYPE {
+            let type_args = self.parse_optional_collection_type_args(&name, 2)?;
+            if self.consume_symbol('[') {
+                let (key_type, value_type, capacity) = match type_args {
+                    Some(mut args) => {
+                        let value_type = args.types.remove(1);
+                        let key_type = args.types.remove(0);
+                        (Some(key_type), Some(value_type), Some(args.capacity))
+                    }
+                    None => (None, None, None),
+                };
+                return Ok(Pattern::Map(MapPattern {
+                    key_type,
+                    value_type,
+                    capacity,
+                    entries: self.parse_map_pattern_entries()?,
+                }));
+            }
+            if type_args.is_some() {
+                return Err(self.error_here("map patterns must use Map<K,V,N>[...]"));
+            }
+        }
         if self.consume_symbol('{') {
             let fields = self.parse_record_pattern_fields(&name)?;
             return Ok(Pattern::Record { name, fields });
         }
-        let binding = if self.consume_symbol('(') {
-            let name = self.expect_identifier()?;
-            self.expect_symbol(':')?;
-            let ty = self.parse_type()?;
+        let payload = if self.consume_symbol('(') {
+            let value = self.expect_ident()?;
+            let payload = if self.consume_symbol(':') {
+                let ty = self.parse_type()?;
+                ConstructorPayloadPattern::Binding(Param {
+                    name: Identifier::new(value)?,
+                    ty,
+                })
+            } else if self.starts_payload_destructuring_pattern(&value) {
+                ConstructorPayloadPattern::Destructure(Box::new(self.parse_pattern(value)?))
+            } else {
+                return Err(self.error_previous(format!(
+                    "constructor payload pattern {name}({value}) must bind the payload as {value}: Type or destructure a record, list, map, or wildcard"
+                )));
+            };
             self.expect_symbol(')')?;
-            Some(Param { name, ty })
+            Some(payload)
         } else {
             None
         };
-        Ok(Pattern::Constructor { name, binding })
+        Ok(Pattern::Constructor { name, payload })
+    }
+
+    fn starts_payload_destructuring_pattern(&self, value: &str) -> bool {
+        value == "_"
+            || self.peek_symbol('{')
+            || ((value == LIST_TYPE || value == MAP_TYPE)
+                && (self.peek_symbol('[') || self.peek_symbol('<')))
+    }
+
+    fn parse_optional_collection_type_args(
+        &mut self,
+        constructor: &Identifier,
+        expected_type_count: usize,
+    ) -> Result<Option<CollectionTypeArgs>> {
+        if !self.consume_symbol('<') {
+            return Ok(None);
+        }
+        let mut type_args = Vec::new();
+        let mut capacity = None;
+        if self.consume_symbol('>') {
+            return Err(self.error_previous(format!(
+                "type {constructor} must declare {expected_type_count} type arguments and one numeric capacity"
+            )));
+        }
+        loop {
+            if self.peek_number() {
+                if capacity.is_some() {
+                    return Err(self.error_here(format!(
+                        "type {constructor} must declare exactly one numeric capacity"
+                    )));
+                }
+                capacity = Some(self.parse_capacity_arg(constructor)?);
+            } else if capacity.is_some() {
+                return Err(self.error_here(format!(
+                    "type {constructor} must declare type arguments before its numeric capacity"
+                )));
+            } else {
+                type_args.push(self.parse_type_with_depth(1)?);
+            }
+            if self.consume_symbol(',') {
+                if self.consume_symbol('>') {
+                    break;
+                }
+                continue;
+            }
+            self.expect_symbol('>')?;
+            break;
+        }
+        if type_args.len() != expected_type_count || capacity.is_none() {
+            return Err(self.error_previous(format!(
+                "type {constructor} must declare {expected_type_count} type arguments and one numeric capacity"
+            )));
+        }
+        Ok(Some(CollectionTypeArgs {
+            types: type_args,
+            capacity: capacity.expect("capacity checked above"),
+        }))
+    }
+
+    fn parse_list_pattern_elements(&mut self) -> Result<Vec<CollectionPatternBinding>> {
+        let mut elements = Vec::new();
+        if self.consume_symbol(']') {
+            return Ok(elements);
+        }
+        loop {
+            elements.push(self.parse_collection_pattern_binding()?);
+            if self.consume_symbol(',') {
+                if self.consume_symbol(']') {
+                    break;
+                }
+                continue;
+            }
+            self.expect_symbol(']')?;
+            break;
+        }
+        Ok(elements)
+    }
+
+    fn parse_map_pattern_entries(&mut self) -> Result<Vec<MapPatternEntry>> {
+        let mut entries = Vec::new();
+        if self.consume_symbol(']') {
+            return Ok(entries);
+        }
+        loop {
+            let key = self.parse_value_expr()?;
+            self.expect_fat_arrow()?;
+            let binding = self.parse_collection_pattern_binding()?;
+            entries.push(MapPatternEntry { key, binding });
+            if self.consume_symbol(',') {
+                if self.consume_symbol(']') {
+                    break;
+                }
+                continue;
+            }
+            self.expect_symbol(']')?;
+            break;
+        }
+        Ok(entries)
+    }
+
+    fn parse_collection_pattern_binding(&mut self) -> Result<CollectionPatternBinding> {
+        if self.peek_keyword("mut") || self.peek_keyword("var") {
+            return Err(self.error_here(
+                "collection pattern bindings are immutable; mutable bindings are not supported",
+            ));
+        }
+        let binding = self.expect_ident()?;
+        if binding == "_" {
+            Ok(CollectionPatternBinding::Wildcard)
+        } else {
+            Ok(CollectionPatternBinding::Binding(Identifier::new(binding)?))
+        }
     }
 
     fn parse_record_pattern_fields(
@@ -477,13 +645,25 @@ impl Parser {
             return Ok(TypeRef::named(name));
         }
         let mut args = Vec::new();
+        let mut const_args = Vec::new();
+        let mut seen_const_arg = false;
         if self.consume_symbol('>') {
             return Err(self.error_previous(format!(
                 "type {name} must declare at least one type argument"
             )));
         }
         loop {
-            args.push(self.parse_type_with_depth(depth + 1)?);
+            if self.peek_number() {
+                seen_const_arg = true;
+                const_args.push(self.parse_capacity_arg(&name)?);
+            } else {
+                if seen_const_arg {
+                    return Err(self.error_here(format!(
+                        "type {name} must declare type arguments before numeric arguments"
+                    )));
+                }
+                args.push(self.parse_type_with_depth(depth + 1)?);
+            }
             if self.consume_symbol(',') {
                 if self.consume_symbol('>') {
                     break;
@@ -496,6 +676,7 @@ impl Parser {
         Ok(TypeRef::Applied {
             constructor: name,
             args,
+            const_args,
         })
     }
 
@@ -564,6 +745,45 @@ impl Parser {
             )));
         }
         let name = self.expect_identifier()?;
+        if name.as_str() == LIST_TYPE {
+            let type_args = self.parse_optional_collection_type_args(&name, 1)?;
+            if self.consume_symbol('[') {
+                let (element_type, capacity) = match type_args {
+                    Some(mut args) => (Some(args.types.remove(0)), Some(args.capacity)),
+                    None => (None, None),
+                };
+                return Ok(ValueExpr::List(ListValue {
+                    element_type,
+                    capacity,
+                    items: self.parse_list_value_items(depth)?,
+                }));
+            }
+            if type_args.is_some() {
+                return Err(self.error_here("list values must use List<T,N>[...]"));
+            }
+        }
+        if name.as_str() == MAP_TYPE {
+            let type_args = self.parse_optional_collection_type_args(&name, 2)?;
+            if self.consume_symbol('[') {
+                let (key_type, value_type, capacity) = match type_args {
+                    Some(mut args) => {
+                        let value_type = args.types.remove(1);
+                        let key_type = args.types.remove(0);
+                        (Some(key_type), Some(value_type), Some(args.capacity))
+                    }
+                    None => (None, None, None),
+                };
+                return Ok(ValueExpr::Map(MapValue {
+                    key_type,
+                    value_type,
+                    capacity,
+                    entries: self.parse_map_value_entries(depth)?,
+                }));
+            }
+            if type_args.is_some() {
+                return Err(self.error_here("map values must use Map<K,V,N>[...]"));
+            }
+        }
         if self.consume_symbol('(') {
             let arg = self.parse_value_expr_with_depth(depth + 1)?;
             self.expect_symbol(')')?;
@@ -577,6 +797,47 @@ impl Parser {
         }
         let fields = self.parse_record_value_fields(&name, depth)?;
         Ok(ValueExpr::Record(RecordValue { name, fields }))
+    }
+
+    fn parse_list_value_items(&mut self, depth: usize) -> Result<Vec<ValueExpr>> {
+        let mut items = Vec::new();
+        if self.consume_symbol(']') {
+            return Ok(items);
+        }
+        loop {
+            items.push(self.parse_value_expr_with_depth(depth + 1)?);
+            if self.consume_symbol(',') {
+                if self.consume_symbol(']') {
+                    break;
+                }
+                continue;
+            }
+            self.expect_symbol(']')?;
+            break;
+        }
+        Ok(items)
+    }
+
+    fn parse_map_value_entries(&mut self, depth: usize) -> Result<Vec<MapValueEntry>> {
+        let mut entries = Vec::new();
+        if self.consume_symbol(']') {
+            return Ok(entries);
+        }
+        loop {
+            let key = self.parse_value_expr_with_depth(depth + 1)?;
+            self.expect_fat_arrow()?;
+            let value = self.parse_value_expr_with_depth(depth + 1)?;
+            entries.push(MapValueEntry { key, value });
+            if self.consume_symbol(',') {
+                if self.consume_symbol(']') {
+                    break;
+                }
+                continue;
+            }
+            self.expect_symbol(']')?;
+            break;
+        }
+        Ok(entries)
     }
 
     fn parse_record_value_fields(
@@ -652,6 +913,19 @@ impl Parser {
         } else {
             Err(self.error_here("expected number"))
         }
+    }
+
+    fn peek_number(&self) -> bool {
+        matches!(self.peek_kind(), TokenKind::Number(_))
+    }
+
+    fn parse_capacity_arg(&mut self, constructor: &Identifier) -> Result<usize> {
+        let capacity = self.expect_number()?;
+        capacity.parse::<usize>().map_err(|_| {
+            self.error_previous(format!(
+                "type {constructor} numeric capacity must fit in usize"
+            ))
+        })
     }
 
     fn expect_string_literal(&mut self) -> Result<String> {

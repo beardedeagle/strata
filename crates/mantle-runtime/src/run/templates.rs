@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use mantle_artifact::{
     ArtifactPayload, ArtifactProcessRefPayload, ArtifactValueTemplate, Error, ProcessRefId, Result,
+    project_canonical_list_element, project_canonical_map_value, project_canonical_record_field,
     validate_payload_value_label,
 };
 
@@ -47,6 +48,44 @@ pub(super) fn evaluate_runtime_template(
                 )));
             }
             Ok(payload.clone())
+        }
+        ArtifactValueTemplate::RecordField { ty, record, field } => {
+            let record =
+                evaluate_runtime_template(program, record, received_payload, step, process_refs)?;
+            let value = project_canonical_record_field(&record.value, field)?;
+            validate_payload_value_label(&value)?;
+            Ok(ArtifactPayload {
+                ty: *ty,
+                value,
+                process_ref: None,
+            })
+        }
+        ArtifactValueTemplate::ListElement {
+            ty,
+            list,
+            index,
+            len,
+        } => {
+            let list =
+                evaluate_runtime_template(program, list, received_payload, step, process_refs)?;
+            let value = project_canonical_list_element(&list.value, *index, *len)?;
+            validate_payload_value_label(&value)?;
+            Ok(ArtifactPayload {
+                ty: *ty,
+                value,
+                process_ref: None,
+            })
+        }
+        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+            let map =
+                evaluate_runtime_template(program, map, received_payload, step, process_refs)?;
+            let value = project_canonical_map_value(&map.value, key, keys)?;
+            validate_payload_value_label(&value)?;
+            Ok(ArtifactPayload {
+                ty: *ty,
+                value,
+                process_ref: None,
+            })
         }
         ArtifactValueTemplate::ProcessRef {
             ty,
@@ -98,6 +137,60 @@ pub(super) fn evaluate_runtime_template(
                 parts.push(format!("{}:{}", field.name, value.value));
             }
             let value = format!("{type_label}{{{}}}", parts.join(","));
+            validate_payload_value_label(&value)?;
+            Ok(ArtifactPayload {
+                ty: *ty,
+                value,
+                process_ref: None,
+            })
+        }
+        ArtifactValueTemplate::List { ty, items } => {
+            let mut parts = Vec::with_capacity(items.len());
+            for item in items {
+                let value =
+                    evaluate_runtime_template(program, item, received_payload, step, process_refs)?;
+                parts.push(value.value);
+            }
+            let value = format!("List[{}]", parts.join(","));
+            validate_payload_value_label(&value)?;
+            Ok(ArtifactPayload {
+                ty: *ty,
+                value,
+                process_ref: None,
+            })
+        }
+        ArtifactValueTemplate::Map { ty, entries } => {
+            let mut parts = BTreeMap::new();
+            for entry in entries {
+                let key = evaluate_runtime_template(
+                    program,
+                    &entry.key,
+                    received_payload,
+                    step,
+                    process_refs,
+                )?;
+                let value = evaluate_runtime_template(
+                    program,
+                    &entry.value,
+                    received_payload,
+                    step,
+                    process_refs,
+                )?;
+                if parts.insert(key.value.clone(), value.value).is_some() {
+                    return Err(Error::new(format!(
+                        "map template duplicates key {}",
+                        key.value
+                    )));
+                }
+            }
+            let value = format!(
+                "Map[{}]",
+                parts
+                    .into_iter()
+                    .map(|(key, value)| format!("{key}=>{value}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
             validate_payload_value_label(&value)?;
             Ok(ArtifactPayload {
                 ty: *ty,

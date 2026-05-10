@@ -464,6 +464,15 @@ impl ArtifactProcess {
             ArtifactValueTemplate::Literal { .. }
             | ArtifactValueTemplate::ReceivedPayload { .. }
             | ArtifactValueTemplate::CurrentStatePayload { .. } => Ok(()),
+            ArtifactValueTemplate::RecordField { record, .. } => {
+                self.validate_template_process_refs(artifact, record, spawned_refs)
+            }
+            ArtifactValueTemplate::ListElement { list, .. } => {
+                self.validate_template_process_refs(artifact, list, spawned_refs)
+            }
+            ArtifactValueTemplate::MapValue { map, .. } => {
+                self.validate_template_process_refs(artifact, map, spawned_refs)
+            }
             ArtifactValueTemplate::ProcessRef {
                 ty,
                 target_process,
@@ -499,6 +508,19 @@ impl ArtifactProcess {
             ArtifactValueTemplate::Record { fields, .. } => {
                 for field in fields {
                     self.validate_template_process_refs(artifact, &field.value, spawned_refs)?;
+                }
+                Ok(())
+            }
+            ArtifactValueTemplate::List { items, .. } => {
+                for item in items {
+                    self.validate_template_process_refs(artifact, item, spawned_refs)?;
+                }
+                Ok(())
+            }
+            ArtifactValueTemplate::Map { entries, .. } => {
+                for entry in entries {
+                    self.validate_template_process_refs(artifact, &entry.key, spawned_refs)?;
+                    self.validate_template_process_refs(artifact, &entry.value, spawned_refs)?;
                 }
                 Ok(())
             }

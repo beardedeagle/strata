@@ -438,7 +438,7 @@ proc Worker mailbox bounded(1) {
     let err = check_source(source).expect_err("generic payload type should fail");
 
     assert!(err.to_string().contains(
-        "payload type ProcResult<Job> must be a named record, enum, or process reference type"
+        "payload type ProcResult<Job> must be a named record, enum, list, map, or process reference type"
     ));
 }
 

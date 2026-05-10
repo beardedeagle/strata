@@ -11,13 +11,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
     MAX_ACTIONS_PER_PROCESS, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_TYPE_COUNT,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
+    MAX_TYPE_COUNT, project_canonical_list_element, project_canonical_map_value,
+    project_canonical_record_field,
 };
 
 use super::ast::{
-    Determinism, Effect, Enum, EnumVariant, Function, FunctionBlock, FunctionBody, FunctionParam,
-    Identifier, Match, MatchArm, Module, Param, Pattern, Process, Record, RecordPatternField,
-    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
+    CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, EnumVariant,
+    Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
+    MapPattern, MapValue, MapValueEntry, Match, MatchArm, Module, Param, Pattern, Process, Record,
+    RecordPatternField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
     CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
@@ -41,7 +44,7 @@ use state_space::{
 };
 use static_validation::validate_action_references;
 use steps::{check_step, check_step_shape, pattern_binding_subject, validate_pattern_binding_name};
-use symbols::SemanticIndex;
+use symbols::{CollectionType, SemanticIndex};
 
 const STEP_STATE_PARAMETER_NAME: &str = "state";
 pub(super) const CHECKED_TYPE_LABEL_PREFIX: &str = "__strata_checked_";
@@ -114,7 +117,62 @@ fn checked_type_label(
     }
     match ty {
         TypeRef::Named(name) => Ok(name.to_string()),
-        TypeRef::Applied { constructor, .. } => Ok(constructor.to_string()),
+        TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } => {
+            let mut label = format!(
+                "{CHECKED_TYPE_LABEL_PREFIX}{}",
+                checked_type_label_component(&TypeRef::Named(constructor.clone()))?
+            );
+            label.push('_');
+            label.push_str(&args.len().to_string());
+            label.push('_');
+            label.push_str(&const_args.len().to_string());
+            for arg in args {
+                label.push('_');
+                label.push_str(&checked_type_label_component(arg)?);
+            }
+            for value in const_args {
+                label.push('_');
+                label.push_str(&value.to_string());
+            }
+            if label.len() > MAX_IDENTIFIER_BYTES {
+                return Err(Error::new(format!(
+                    "checked type label for {ty} exceeds maximum identifier length of {MAX_IDENTIFIER_BYTES} bytes"
+                )));
+            }
+            Ok(label)
+        }
+    }
+}
+
+fn checked_type_label_component(ty: &TypeRef) -> Result<String> {
+    match ty {
+        TypeRef::Named(name) => Ok(format!("{}_{}", name.as_str().len(), name)),
+        TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } => {
+            let mut label = format!(
+                "{}_{}_{}_{}",
+                constructor.as_str().len(),
+                constructor,
+                args.len(),
+                const_args.len()
+            );
+            for arg in args {
+                label.push('_');
+                label.push_str(&checked_type_label_component(arg)?);
+            }
+            for value in const_args {
+                label.push('_');
+                label.push_str(&value.to_string());
+            }
+            Ok(label)
+        }
     }
 }
 
@@ -157,7 +215,7 @@ struct ProcessRefCollectionContext<'a> {
 struct StepBodyClause<'a> {
     step: &'a Function,
     body: StepBodySource<'a>,
-    payload_param: Option<PatternPayloadParam>,
+    payload_params: Vec<PatternPayloadParam>,
 }
 
 #[derive(Debug, Clone)]
@@ -177,9 +235,9 @@ struct StepClause<'a> {
     step: &'a Function,
     variant: CheckedMessageVariantId,
     message: CheckedMessageId,
-    payload_binding: Option<StepPayloadBinding>,
+    payload_bindings: Vec<StepPayloadBinding>,
     current_state: Option<CheckedStateId>,
-    state_payload_binding: Option<StepStatePayloadBinding>,
+    state_payload_bindings: Vec<StepStatePayloadBinding>,
     body: &'a FunctionBlock,
 }
 
@@ -187,8 +245,8 @@ struct StepTransitionInput<'a> {
     current_state: Option<CheckedStateId>,
     variant: CheckedMessageVariantId,
     message: CheckedMessageId,
-    payload_binding: Option<&'a StepPayloadBinding>,
-    state_payload_binding: Option<&'a StepStatePayloadBinding>,
+    payload_bindings: &'a [StepPayloadBinding],
+    state_payload_bindings: &'a [StepStatePayloadBinding],
     body: &'a FunctionBlock,
     declared_effects: &'a [Effect],
 }
@@ -197,7 +255,7 @@ struct StepTransitionInput<'a> {
 enum StepPattern {
     Variant {
         message: CheckedMessageVariantId,
-        binding: Option<PatternPayloadParam>,
+        bindings: Vec<PatternPayloadParam>,
     },
     Wildcard,
 }
@@ -219,12 +277,23 @@ enum StepDispatchStyle {
 struct PatternPayloadParam {
     name: Identifier,
     ty: TypeRef,
+    path: PayloadBindingPath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PayloadBindingPath {
+    Whole,
+    RecordField { field: Identifier },
+    ListIndex { index: usize, len: usize },
+    MapValue { key: String, keys: Vec<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StatePayloadDiscoveryBinding {
     name: Identifier,
+    payload_ty: TypeRef,
     ty: TypeRef,
+    path: PayloadBindingPath,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,23 +313,29 @@ struct SendPayloadDiscoveryContext<'a, 'types, 'semantic> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StepPayloadBinding {
     name: Identifier,
+    payload_ty: TypeRef,
     ty: TypeRef,
+    checked_payload_ty: CheckedTypeRef,
     checked_ty: CheckedTypeRef,
+    path: PayloadBindingPath,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StepStatePayloadBinding {
     name: Identifier,
+    payload_ty: TypeRef,
     ty: TypeRef,
+    checked_payload_ty: CheckedTypeRef,
     checked_ty: CheckedTypeRef,
     label: String,
+    path: PayloadBindingPath,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TypedMatchPattern {
     Variant {
         variant: usize,
-        binding: Option<PatternPayloadParam>,
+        bindings: Vec<PatternPayloadParam>,
     },
     Wildcard,
 }
@@ -312,6 +387,8 @@ enum SourceFunctionParamKind {
     Binding,
     EnumPattern,
     RecordPattern,
+    ListPattern,
+    MapPattern,
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
@@ -547,44 +624,54 @@ fn check_typed_match_pattern(
     pattern: &Pattern,
 ) -> Result<TypedMatchPattern> {
     match pattern {
-        Pattern::Constructor { name, binding } => {
+        Pattern::Constructor { name, payload } => {
             let variant_index = context.semantic_index.enum_variant_index(
                 context.module,
                 context.enum_type,
                 name,
             )?;
             let variant = &context.enum_decl.variants[variant_index];
-            let binding = check_pattern_payload_binding(
+            let bindings = check_pattern_payload_bindings(
+                context.module,
                 context.semantic_index,
                 variant,
-                binding.as_ref(),
+                payload.as_ref(),
                 context.label,
                 context.payload_context,
                 context.binding_context,
             )?;
             Ok(TypedMatchPattern::Variant {
                 variant: variant_index,
-                binding,
+                bindings,
             })
         }
         Pattern::Record { name, .. } => Err(Error::new(format!(
             "{} {} pattern {name} destructures a record, but this match expects enum constructors",
             context.subject, context.label
         ))),
+        Pattern::List(_) => Err(Error::new(format!(
+            "{} {} pattern List[...] destructures a list, but this match expects enum constructors",
+            context.subject, context.label
+        ))),
+        Pattern::Map(_) => Err(Error::new(format!(
+            "{} {} pattern Map[...] destructures a map, but this match expects enum constructors",
+            context.subject, context.label
+        ))),
         Pattern::Wildcard => Ok(TypedMatchPattern::Wildcard),
     }
 }
 
-fn check_pattern_payload_binding(
+fn check_pattern_payload_bindings(
+    module: &Module,
     semantic_index: &SemanticIndex,
     variant: &EnumVariant,
-    binding: Option<&Param>,
+    payload: Option<&ConstructorPayloadPattern>,
     context: &str,
     payload_context: PatternPayloadContext,
     binding_context: PatternBindingContext<'_>,
-) -> Result<Option<PatternPayloadParam>> {
-    match (&variant.payload_type, binding) {
-        (None, None) => Ok(None),
+) -> Result<Vec<PatternPayloadParam>> {
+    match (&variant.payload_type, payload) {
+        (None, None) => Ok(Vec::new()),
         (None, Some(_)) => {
             let noun = match payload_context {
                 PatternPayloadContext::StepPattern => "message",
@@ -596,20 +683,368 @@ fn check_pattern_payload_binding(
                 variant.name
             )))
         }
-        (Some(_), None) => Ok(None),
-        (Some(payload_type), Some(binding)) => {
-            validate_pattern_binding_name(binding_context, semantic_index, &binding.name)?;
-            if !semantic_index.same_type(&binding.ty, payload_type) {
-                let subject = pattern_binding_subject(binding_context);
+        (Some(_), None) => Ok(Vec::new()),
+        (Some(payload_type), Some(ConstructorPayloadPattern::Binding(binding))) => {
+            check_whole_payload_binding(
+                semantic_index,
+                binding_context,
+                binding,
+                payload_type,
+                context,
+            )
+        }
+        (Some(payload_type), Some(ConstructorPayloadPattern::Destructure(pattern))) => {
+            check_destructured_payload_bindings(
+                module,
+                semantic_index,
+                binding_context,
+                context,
+                payload_type,
+                pattern,
+            )
+        }
+    }
+}
+
+fn check_whole_payload_binding(
+    semantic_index: &SemanticIndex,
+    binding_context: PatternBindingContext<'_>,
+    binding: &Param,
+    payload_type: &TypeRef,
+    context: &str,
+) -> Result<Vec<PatternPayloadParam>> {
+    validate_pattern_binding_name(binding_context, semantic_index, &binding.name)?;
+    if !semantic_index.same_type(&binding.ty, payload_type) {
+        let subject = pattern_binding_subject(binding_context);
+        return Err(Error::new(format!(
+            "{subject} {context} payload {} has type {}, expected {}",
+            binding.name, binding.ty, payload_type
+        )));
+    }
+    Ok(vec![PatternPayloadParam {
+        name: binding.name.clone(),
+        ty: binding.ty.clone(),
+        path: PayloadBindingPath::Whole,
+    }])
+}
+
+fn check_destructured_payload_bindings(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    binding_context: PatternBindingContext<'_>,
+    context: &str,
+    payload_type: &TypeRef,
+    pattern: &Pattern,
+) -> Result<Vec<PatternPayloadParam>> {
+    let subject = pattern_binding_subject(binding_context);
+    match pattern {
+        Pattern::Record { name, fields } => {
+            let record = semantic_index.record_decl(module, payload_type).map_err(|_| {
+                Error::new(format!(
+                    "{subject} {context} record payload pattern {name} cannot match payload type {payload_type}"
+                ))
+            })?;
+            if record.name != *name {
                 return Err(Error::new(format!(
-                    "{subject} {context} payload {} has type {}, expected {}",
-                    binding.name, binding.ty, payload_type
+                    "{subject} {context} record payload pattern {name} cannot match record {}",
+                    record.name
                 )));
             }
-            Ok(Some(PatternPayloadParam {
-                name: binding.name.clone(),
-                ty: binding.ty.clone(),
-            }))
+            check_record_payload_pattern_bindings(
+                semantic_index,
+                binding_context,
+                context,
+                record,
+                fields,
+            )
+        }
+        Pattern::List(pattern) => {
+            let Some(CollectionType::List { element, capacity }) =
+                semantic_index.collection_type(payload_type)?
+            else {
+                return Err(Error::new(format!(
+                    "{subject} {context} list payload pattern cannot match payload type {payload_type}"
+                )));
+            };
+            if let Some(pattern_type) = &pattern.element_type
+                && !semantic_index.same_type(pattern_type, element)
+            {
+                return Err(Error::new(format!(
+                    "{subject} {context} list payload pattern has element type {pattern_type}, expected {element}"
+                )));
+            }
+            validate_list_payload_pattern_capacity(
+                &subject,
+                context,
+                payload_type,
+                pattern,
+                capacity,
+            )?;
+            check_list_payload_pattern_bindings(
+                semantic_index,
+                binding_context,
+                context,
+                element,
+                pattern,
+            )
+        }
+        Pattern::Map(pattern) => {
+            let Some(CollectionType::Map {
+                key,
+                value,
+                capacity,
+            }) = semantic_index.collection_type(payload_type)?
+            else {
+                return Err(Error::new(format!(
+                    "{subject} {context} map payload pattern cannot match payload type {payload_type}"
+                )));
+            };
+            if let Some(pattern_key_type) = &pattern.key_type
+                && !semantic_index.same_type(pattern_key_type, key)
+            {
+                return Err(Error::new(format!(
+                    "{subject} {context} map payload pattern has key type {pattern_key_type}, expected {key}"
+                )));
+            }
+            if let Some(pattern_value_type) = &pattern.value_type
+                && !semantic_index.same_type(pattern_value_type, value)
+            {
+                return Err(Error::new(format!(
+                    "{subject} {context} map payload pattern has value type {pattern_value_type}, expected {value}"
+                )));
+            }
+            validate_map_payload_pattern_capacity(
+                &subject,
+                context,
+                payload_type,
+                pattern,
+                capacity,
+            )?;
+            check_map_payload_pattern_bindings(
+                module,
+                semantic_index,
+                binding_context,
+                context,
+                key,
+                value,
+                pattern,
+            )
+        }
+        Pattern::Constructor { name, .. } => Err(Error::new(format!(
+            "{subject} {context} nested constructor payload pattern {name} is not supported in this source slice"
+        ))),
+        Pattern::Wildcard => Ok(Vec::new()),
+    }
+}
+
+fn check_record_payload_pattern_bindings(
+    semantic_index: &SemanticIndex,
+    binding_context: PatternBindingContext<'_>,
+    context: &str,
+    record: &Record,
+    fields: &[RecordPatternField],
+) -> Result<Vec<PatternPayloadParam>> {
+    if fields.is_empty() {
+        let subject = pattern_binding_subject(binding_context);
+        return Err(Error::new(format!(
+            "{subject} {context} record payload pattern {} must bind at least one field",
+            record.name
+        )));
+    }
+
+    let mut seen_fields = BTreeSet::new();
+    let mut seen_bindings = BTreeSet::new();
+    let mut bindings = Vec::with_capacity(fields.len());
+    for field in fields {
+        let subject = pattern_binding_subject(binding_context);
+        if !seen_fields.insert(field.field.as_str()) {
+            return Err(Error::new(format!(
+                "{subject} {context} record payload pattern {} binds field {} more than once",
+                record.name, field.field
+            )));
+        }
+        let Some(field_decl) = record
+            .fields
+            .iter()
+            .find(|candidate| candidate.name == field.field)
+        else {
+            return Err(Error::new(format!(
+                "{subject} {context} record payload pattern {} has no field {}",
+                record.name, field.field
+            )));
+        };
+        if !seen_bindings.insert(field.binding.as_str()) {
+            return Err(Error::new(format!(
+                "{subject} {context} payload binding {} is declared more than once",
+                field.binding
+            )));
+        }
+        validate_pattern_binding_name(binding_context, semantic_index, &field.binding)?;
+        bindings.push(PatternPayloadParam {
+            name: field.binding.clone(),
+            ty: field_decl.ty.clone(),
+            path: PayloadBindingPath::RecordField {
+                field: field.field.clone(),
+            },
+        });
+    }
+    Ok(bindings)
+}
+
+fn check_list_payload_pattern_bindings(
+    semantic_index: &SemanticIndex,
+    binding_context: PatternBindingContext<'_>,
+    context: &str,
+    element_type: &TypeRef,
+    pattern: &ListPattern,
+) -> Result<Vec<PatternPayloadParam>> {
+    let mut seen_bindings = BTreeSet::new();
+    let mut bindings = Vec::new();
+    for (index, binding) in pattern.elements.iter().enumerate() {
+        let CollectionPatternBinding::Binding(name) = binding else {
+            continue;
+        };
+        let subject = pattern_binding_subject(binding_context);
+        if !seen_bindings.insert(name.as_str()) {
+            return Err(Error::new(format!(
+                "{subject} {context} list payload pattern binding {name} is declared more than once"
+            )));
+        }
+        validate_pattern_binding_name(binding_context, semantic_index, name)?;
+        bindings.push(PatternPayloadParam {
+            name: name.clone(),
+            ty: element_type.clone(),
+            path: PayloadBindingPath::ListIndex {
+                index,
+                len: pattern.elements.len(),
+            },
+        });
+    }
+    if bindings.is_empty() {
+        let subject = pattern_binding_subject(binding_context);
+        return Err(Error::new(format!(
+            "{subject} {context} list payload pattern must bind at least one value in this source slice"
+        )));
+    }
+    Ok(bindings)
+}
+
+fn validate_list_payload_pattern_capacity(
+    subject: &str,
+    context: &str,
+    payload_type: &TypeRef,
+    pattern: &ListPattern,
+    capacity: usize,
+) -> Result<()> {
+    if let Some(pattern_capacity) = pattern.capacity
+        && pattern_capacity != capacity
+    {
+        return Err(Error::new(format!(
+            "{subject} {context} list payload pattern has capacity {pattern_capacity}, expected {capacity}"
+        )));
+    }
+    if pattern.elements.len() > capacity {
+        return Err(Error::new(format!(
+            "{subject} {context} list payload pattern length {} exceeds capacity {capacity} for {payload_type}",
+            pattern.elements.len()
+        )));
+    }
+    Ok(())
+}
+
+fn check_map_payload_pattern_bindings(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    binding_context: PatternBindingContext<'_>,
+    context: &str,
+    key_type: &TypeRef,
+    value_type: &TypeRef,
+    pattern: &MapPattern,
+) -> Result<Vec<PatternPayloadParam>> {
+    let mut seen_keys = BTreeSet::new();
+    let mut entry_keys = Vec::with_capacity(pattern.entries.len());
+    for entry in &pattern.entries {
+        let key = canonical_source_value_with_bindings(
+            module,
+            semantic_index,
+            key_type,
+            &entry.key,
+            &[],
+        )?;
+        if !seen_keys.insert(key.clone()) {
+            return Err(Error::new(format!("map pattern duplicates key {key}")));
+        }
+        entry_keys.push(key);
+    }
+    let keys = seen_keys.into_iter().collect::<Vec<_>>();
+    let mut seen_bindings = BTreeSet::new();
+    let mut bindings = Vec::new();
+    for (entry, key) in pattern.entries.iter().zip(entry_keys) {
+        let CollectionPatternBinding::Binding(name) = &entry.binding else {
+            continue;
+        };
+        let subject = pattern_binding_subject(binding_context);
+        if !seen_bindings.insert(name.as_str()) {
+            return Err(Error::new(format!(
+                "{subject} {context} map payload pattern binding {name} is declared more than once"
+            )));
+        }
+        validate_pattern_binding_name(binding_context, semantic_index, name)?;
+        bindings.push(PatternPayloadParam {
+            name: name.clone(),
+            ty: value_type.clone(),
+            path: PayloadBindingPath::MapValue {
+                key,
+                keys: keys.clone(),
+            },
+        });
+    }
+    if bindings.is_empty() {
+        let subject = pattern_binding_subject(binding_context);
+        return Err(Error::new(format!(
+            "{subject} {context} map payload pattern must bind at least one value in this source slice"
+        )));
+    }
+    Ok(bindings)
+}
+
+fn validate_map_payload_pattern_capacity(
+    subject: &str,
+    context: &str,
+    payload_type: &TypeRef,
+    pattern: &MapPattern,
+    capacity: usize,
+) -> Result<()> {
+    if let Some(pattern_capacity) = pattern.capacity
+        && pattern_capacity != capacity
+    {
+        return Err(Error::new(format!(
+            "{subject} {context} map payload pattern has capacity {pattern_capacity}, expected {capacity}"
+        )));
+    }
+    if pattern.entries.len() > capacity {
+        return Err(Error::new(format!(
+            "{subject} {context} map payload pattern entry count {} exceeds capacity {capacity} for {payload_type}",
+            pattern.entries.len()
+        )));
+    }
+    Ok(())
+}
+
+fn payload_binding_label(
+    payload_label: &str,
+    binding: &PatternPayloadParam,
+) -> Result<Option<String>> {
+    match &binding.path {
+        PayloadBindingPath::Whole => Ok(Some(payload_label.to_string())),
+        PayloadBindingPath::RecordField { field } => {
+            Ok(project_canonical_record_field(payload_label, field.as_str()).ok())
+        }
+        PayloadBindingPath::ListIndex { index, len } => {
+            Ok(project_canonical_list_element(payload_label, *index, *len).ok())
+        }
+        PayloadBindingPath::MapValue { key, keys } => {
+            Ok(project_canonical_map_value(payload_label, key, keys).ok())
         }
     }
 }

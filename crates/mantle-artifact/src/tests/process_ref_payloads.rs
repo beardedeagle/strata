@@ -172,6 +172,35 @@ fn validate_rejects_nested_process_ref_payload_template() {
 }
 
 #[test]
+fn validate_rejects_projected_process_ref_payload_template() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
+        "Assign",
+        PROCESS_REF_WORKER,
+    )];
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::RecordField {
+            ty: PROCESS_REF_WORKER,
+            record: Box::new(ArtifactValueTemplate::Literal {
+                ty: BOX,
+                value: "Box{reply_to:ProcessRef_Worker}".to_string(),
+            }),
+            field: "reply_to".to_string(),
+        }),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("projected process reference template should fail");
+
+    assert!(err.to_string().contains(
+        "process Main transition 0 send payload process reference template must be a direct message payload"
+    ));
+}
+
+#[test]
 fn validate_rejects_received_payload_template_without_payload_message() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];

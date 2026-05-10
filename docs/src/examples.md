@@ -14,25 +14,29 @@ Read them in this order:
    pattern matching outside actor dispatch.
 7. `function_payload_match.str` for payload-bearing enum construction and
    matching in normal source helpers.
-8. `function_return_match.str` for helper return-match expressions.
-9. `function_record_pattern.str` for source helper record destructuring
+8. `function_collection_match.str` for immutable list/map source values and
+   collection patterns in normal source helpers.
+9. `function_return_match.str` for helper return-match expressions.
+10. `function_record_pattern.str` for source helper record destructuring
    patterns.
-10. `function_record_return_match.str` for helper return-match record
+11. `function_record_return_match.str` for helper return-match record
    destructuring.
-11. `function_record_body_match.str` for whole-body helper match record
+12. `function_record_body_match.str` for whole-body helper match record
    destructuring.
-12. `state_payload_enum.str` for payload-bearing process state enum transitions.
-13. `state_payload_match.str` for matching immutable current process state
+13. `state_payload_enum.str` for payload-bearing process state enum transitions.
+14. `collection_state.str` for immutable collection state and payload-dependent
+   collection next-state templates.
+15. `state_payload_match.str` for matching immutable current process state
    payloads.
-14. `actor_instances.str` for multiple runtime instances of one process
+16. `actor_instances.str` for multiple runtime instances of one process
    definition.
-15. `actor_payloads.str` for typed message payloads and immutable payload
+17. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-16. `actor_payload_match.str` for the same payload binding through a whole-body
+18. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-17. `actor_reply.str` for transporting typed process references through message
+19. `actor_reply.str` for transporting typed process references through message
    payloads.
-18. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+20. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -189,6 +193,28 @@ Key source ideas:
 - `state_for(Assigned(job))` proves a process-local helper can wrap a received
   immutable payload into a source enum value before lowering.
 
+## Function Collection Match
+
+`examples/function_collection_match.str` uses immutable `List<T,N>` and
+`Map<K,V,N>` source values in normal source helpers.
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_collection_match.str
+cargo run -p strata --bin strata -- build examples/function_collection_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_collection_match.mta
+```
+
+Key source ideas:
+
+- `List<Phase,2>[Ready, Done]` and `Map<Phase,Phase,1>[Ready => Done]` are typed,
+  bounded immutable collection values.
+- `fn first(List<Phase,2>[phase, _])` dispatches on exact list length and binds
+  one immutable element.
+- Helper body and return matches can use list and map patterns with `_`
+  fallback arms.
+- The helper expansion leaves Mantle with a resolved `MainState` value, not
+  source helper dispatch names.
+
 ## Function Return Match
 
 `examples/function_return_match.str` uses a helper `return match` expression to
@@ -287,6 +313,28 @@ Key source ideas:
 - Mantle receives a next-state value template and admits the resulting
   `Working(Job{phase:Ready})` only because it is present in the typed state
   table.
+
+## Collection State
+
+`examples/collection_state.str` admits immutable `List<Phase,1>` and
+`Map<Phase,Phase,1>` process states and lowers a received payload into
+collection next-state templates.
+
+```sh
+cargo run -p strata --bin strata -- check examples/collection_state.str
+cargo run -p strata --bin strata -- build examples/collection_state.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/collection_state.mta
+```
+
+Key source ideas:
+
+- `type State = List<Phase,1>;` and `type State = Map<Phase,Phase,1>;` make
+  worker states collection values rather than records or enums.
+- `return Stop(List<Phase,1>[next]);` and
+  `return Stop(Map<Phase,Phase,1>[Ready => next]);` create new immutable whole
+  collection states from the received payload binding.
+- Mantle receives list and map value templates and evaluates them during
+  runtime execution.
 
 ## State Payload Match
 

@@ -100,6 +100,66 @@ fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_lo
 }
 
 #[test]
+fn runtime_rejects_loaded_payload_dependent_map_template_key_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].message_variants[0].payload_type = Some(JOB);
+    program.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Map {
+            ty: WORKER_STATE,
+            entries: vec![mantle_artifact::ArtifactValueTemplateMapEntry {
+                key: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
+                value: ArtifactValueTemplate::Literal {
+                    ty: JOB,
+                    value: "Job".to_string(),
+                },
+            }],
+        });
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker message id 0 next_state_template.entry.0.key must be a static value template",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_duplicate_static_map_template_key_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Map {
+            ty: WORKER_STATE,
+            entries: vec![
+                mantle_artifact::ArtifactValueTemplateMapEntry {
+                    key: ArtifactValueTemplate::Literal {
+                        ty: JOB,
+                        value: "Job".to_string(),
+                    },
+                    value: ArtifactValueTemplate::Literal {
+                        ty: JOB,
+                        value: "Ready".to_string(),
+                    },
+                },
+                mantle_artifact::ArtifactValueTemplateMapEntry {
+                    key: ArtifactValueTemplate::Literal {
+                        ty: JOB,
+                        value: "Job".to_string(),
+                    },
+                    value: ArtifactValueTemplate::Literal {
+                        ty: JOB,
+                        value: "Done".to_string(),
+                    },
+                },
+            ],
+        });
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker message id 0 next_state_template duplicates key Job",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

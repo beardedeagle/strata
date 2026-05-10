@@ -51,10 +51,10 @@ proc Worker mailbox bounded(1) {
         worker.steps[0].params[1],
         FunctionParam::Pattern(Pattern::Constructor {
             name: Identifier::new("Assign").expect("Assign identifier"),
-            binding: Some(Param {
+            payload: Some(ConstructorPayloadPattern::Binding(Param {
                 name: Identifier::new("job").expect("job identifier"),
                 ty: TypeRef::Named(Identifier::new("Job").expect("Job identifier")),
-            }),
+            })),
         })
     );
 

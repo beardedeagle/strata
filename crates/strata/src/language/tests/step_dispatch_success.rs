@@ -14,6 +14,7 @@ fn parses_step_return_type_as_structured_type_ref() {
             args: vec![TypeRef::Named(
                 Identifier::new("MainState").expect("MainState identifier")
             )],
+            const_args: Vec::new(),
         }
     );
     assert_eq!(
@@ -25,7 +26,7 @@ fn parses_step_return_type_as_structured_type_ref() {
             }),
             FunctionParam::Pattern(Pattern::Constructor {
                 name: Identifier::new("Start").expect("Start identifier"),
-                binding: None,
+                payload: None,
             }),
         ]
     );
@@ -356,4 +357,215 @@ proc Worker mailbox bounded(1) {
         only_transition(worker).next_state(),
         CheckedNextState::Template(_)
     ));
+}
+
+#[test]
+fn step_signature_destructures_record_list_and_map_payloads() {
+    let source = r#"
+module step_signature_payload_destructuring;
+
+record MainState;
+record WorkerState { seen: Phase }
+record Job { phase: Phase }
+enum Phase { Ready, Done }
+enum MainMsg { Start }
+enum WorkerMsg {
+    Assign(Job),
+    Items(List<Phase,2>),
+    Lookup(Map<Phase,Phase,1>),
+    Finish,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        send worker Items(List<Phase,2>[Done, Ready]);
+        send worker Lookup(Map<Phase,Phase,1>[Ready => Done]);
+        send worker Finish;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(4) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { seen: Ready };
+    }
+
+    fn step(state: WorkerState, Assign(Job { phase })) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(WorkerState { seen: phase });
+    }
+
+    fn step(state: WorkerState, Items(List[phase, _])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(WorkerState { seen: phase });
+    }
+
+    fn step(state: WorkerState, Lookup(Map[Ready => phase])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(WorkerState { seen: phase });
+    }
+
+    fn step(state: WorkerState, Finish) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("step signatures should destructure payloads");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        checked_state_labels(worker),
+        ["WorkerState{seen:Ready}", "WorkerState{seen:Done}"]
+    );
+}
+
+#[test]
+fn match_step_body_destructures_record_list_and_map_payloads() {
+    let source = r#"
+module match_step_payload_destructuring;
+
+record MainState;
+record WorkerState { seen: Phase }
+record Job { phase: Phase }
+enum Phase { Ready, Done }
+enum MainMsg { Start }
+enum WorkerMsg {
+    Assign(Job),
+    Items(List<Phase,2>),
+    Lookup(Map<Phase,Phase,1>),
+    Finish,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(Job { phase: Ready });
+        send worker Items(List<Phase,2>[Done, Ready]);
+        send worker Lookup(Map<Phase,Phase,1>[Ready => Done]);
+        send worker Finish;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(4) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { seen: Ready };
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match msg {
+            Assign(Job { phase }) => {
+                return Continue(WorkerState { seen: phase });
+            }
+            Items(List[phase, _]) => {
+                return Continue(WorkerState { seen: phase });
+            }
+            Lookup(Map[Ready => phase]) => {
+                return Continue(WorkerState { seen: phase });
+            }
+            Finish => {
+                return Stop(state);
+            }
+        }
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("match step should destructure payloads");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        checked_state_labels(worker),
+        ["WorkerState{seen:Ready}", "WorkerState{seen:Done}"]
+    );
+}
+
+#[test]
+fn state_match_destructures_record_list_and_map_payloads() {
+    let source = r#"
+module state_match_payload_destructuring;
+
+record MainState;
+record Job { phase: Phase }
+enum Phase { Ready, Done }
+enum WorkerState {
+    Holding(Job),
+    Listed(List<Phase,1>),
+    Mapped(Map<Phase,Phase,1>),
+}
+enum MainMsg { Start }
+enum WorkerMsg { Advance }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Advance;
+        send worker Advance;
+        send worker Advance;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(3) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Holding(Job { phase: Ready });
+    }
+
+    fn step(state: WorkerState, Advance) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match state {
+            Holding(Job { phase }) => {
+                return Continue(Listed(List<Phase,1>[phase]));
+            }
+            Listed(List[phase]) => {
+                return Continue(Mapped(Map<Phase,Phase,1>[Ready => phase]));
+            }
+            Mapped(Map[Ready => phase]) => {
+                return Stop(Holding(Job { phase: phase }));
+            }
+        }
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("state match should destructure payloads");
+    let worker = &checked.processes()[1];
+
+    assert_eq!(
+        checked_state_labels(worker),
+        [
+            "Holding(Job{phase:Ready})",
+            "Listed(List[Ready])",
+            "Mapped(Map[Ready=>Ready])",
+        ]
+    );
 }

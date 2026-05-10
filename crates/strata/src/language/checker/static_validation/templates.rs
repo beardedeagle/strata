@@ -1,6 +1,9 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{validate_payload_value_label, validate_state_value_label};
+use mantle_artifact::{
+    project_canonical_list_element, project_canonical_map_value, project_canonical_record_field,
+    validate_payload_value_label, validate_state_value_label,
+};
 
 use super::process_refs::{
     message_payload_type, process_ref_target, validate_process_ref_type_target,
@@ -115,6 +118,21 @@ pub(super) fn validate_value_template_binding_types(
             }
             Ok(())
         }
+        CheckedValueTemplate::RecordField { record, .. } => validate_value_template_binding_types(
+            record,
+            received_payload_type,
+            current_state_payload_type,
+        ),
+        CheckedValueTemplate::ListElement { list, .. } => validate_value_template_binding_types(
+            list,
+            received_payload_type,
+            current_state_payload_type,
+        ),
+        CheckedValueTemplate::MapValue { map, .. } => validate_value_template_binding_types(
+            map,
+            received_payload_type,
+            current_state_payload_type,
+        ),
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
         CheckedValueTemplate::EnumVariant { payload, .. } => validate_value_template_binding_types(
             payload,
@@ -125,6 +143,31 @@ pub(super) fn validate_value_template_binding_types(
             for field in fields {
                 validate_value_template_binding_types(
                     field.value(),
+                    received_payload_type,
+                    current_state_payload_type,
+                )?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::List { items, .. } => {
+            for item in items {
+                validate_value_template_binding_types(
+                    item,
+                    received_payload_type,
+                    current_state_payload_type,
+                )?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::Map { entries, .. } => {
+            for entry in entries {
+                validate_value_template_binding_types(
+                    entry.key(),
+                    received_payload_type,
+                    current_state_payload_type,
+                )?;
+                validate_value_template_binding_types(
+                    entry.value(),
                     received_payload_type,
                     current_state_payload_type,
                 )?;
@@ -143,6 +186,20 @@ pub(super) fn validate_value_template_payload_labels(
         }
         CheckedValueTemplate::ReceivedPayload { .. }
         | CheckedValueTemplate::CurrentStatePayload { .. } => Ok(()),
+        CheckedValueTemplate::RecordField { record, .. } => {
+            validate_value_template_payload_labels(record)
+        }
+        CheckedValueTemplate::ListElement { list, .. } => {
+            validate_value_template_payload_labels(list)
+        }
+        CheckedValueTemplate::MapValue { map, key, keys, .. } => {
+            validate_payload_value_label(key).map_err(|err| Error::new(err.to_string()))?;
+            for expected_key in keys {
+                validate_payload_value_label(expected_key)
+                    .map_err(|err| Error::new(err.to_string()))?;
+            }
+            validate_value_template_payload_labels(map)
+        }
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             validate_value_template_payload_labels(payload)
@@ -150,6 +207,19 @@ pub(super) fn validate_value_template_payload_labels(
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 validate_value_template_payload_labels(field.value())?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::List { items, .. } => {
+            for item in items {
+                validate_value_template_payload_labels(item)?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::Map { entries, .. } => {
+            for entry in entries {
+                validate_value_template_payload_labels(entry.key())?;
+                validate_value_template_payload_labels(entry.value())?;
             }
             Ok(())
         }
@@ -167,6 +237,15 @@ pub(super) fn validate_value_template_process_refs(
         CheckedValueTemplate::Literal(_)
         | CheckedValueTemplate::ReceivedPayload { .. }
         | CheckedValueTemplate::CurrentStatePayload { .. } => Ok(()),
+        CheckedValueTemplate::RecordField { record, .. } => {
+            validate_value_template_process_refs(processes, process, record, spawned_refs, false)
+        }
+        CheckedValueTemplate::ListElement { list, .. } => {
+            validate_value_template_process_refs(processes, process, list, spawned_refs, false)
+        }
+        CheckedValueTemplate::MapValue { map, .. } => {
+            validate_value_template_process_refs(processes, process, map, spawned_refs, false)
+        }
         CheckedValueTemplate::ProcessRef {
             ty,
             target,
@@ -213,6 +292,37 @@ pub(super) fn validate_value_template_process_refs(
             }
             Ok(())
         }
+        CheckedValueTemplate::List { items, .. } => {
+            for item in items {
+                validate_value_template_process_refs(
+                    processes,
+                    process,
+                    item,
+                    spawned_refs,
+                    false,
+                )?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::Map { entries, .. } => {
+            for entry in entries {
+                validate_value_template_process_refs(
+                    processes,
+                    process,
+                    entry.key(),
+                    spawned_refs,
+                    false,
+                )?;
+                validate_value_template_process_refs(
+                    processes,
+                    process,
+                    entry.value(),
+                    spawned_refs,
+                    false,
+                )?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -236,6 +346,24 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
             }
             Ok(())
         }
+        CheckedValueTemplate::RecordField { ty, record, .. } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            reject_process_ref_template_in_next_state(record)
+        }
+        CheckedValueTemplate::ListElement { ty, list, .. } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            reject_process_ref_template_in_next_state(list)
+        }
+        CheckedValueTemplate::MapValue { ty, map, .. } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            reject_process_ref_template_in_next_state(map)
+        }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference templates are not valid next-state values",
         )),
@@ -245,6 +373,19 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 reject_process_ref_template_in_next_state(field.value())?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::List { items, .. } => {
+            for item in items {
+                reject_process_ref_template_in_next_state(item)?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::Map { entries, .. } => {
+            for entry in entries {
+                reject_process_ref_template_in_next_state(entry.key())?;
+                reject_process_ref_template_in_next_state(entry.value())?;
             }
             Ok(())
         }
@@ -260,6 +401,15 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
         CheckedValueTemplate::Literal(_) => false,
         CheckedValueTemplate::ReceivedPayload { .. } => true,
         CheckedValueTemplate::CurrentStatePayload { .. } => false,
+        CheckedValueTemplate::RecordField { record, .. } => {
+            checked_template_depends_on_received_payload(record)
+        }
+        CheckedValueTemplate::ListElement { list, .. } => {
+            checked_template_depends_on_received_payload(list)
+        }
+        CheckedValueTemplate::MapValue { map, .. } => {
+            checked_template_depends_on_received_payload(map)
+        }
         CheckedValueTemplate::ProcessRef { .. } => false,
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             checked_template_depends_on_received_payload(payload)
@@ -267,6 +417,13 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
         CheckedValueTemplate::Record { fields, .. } => fields
             .iter()
             .any(|field| checked_template_depends_on_received_payload(field.value())),
+        CheckedValueTemplate::List { items, .. } => items
+            .iter()
+            .any(checked_template_depends_on_received_payload),
+        CheckedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
+            checked_template_depends_on_received_payload(entry.key())
+                || checked_template_depends_on_received_payload(entry.value())
+        }),
     }
 }
 
@@ -308,6 +465,33 @@ fn evaluate_checked_template(
             }
             Ok(payload.clone())
         }
+        CheckedValueTemplate::RecordField { ty, record, field } => {
+            let record =
+                evaluate_checked_template(record, received_payload, current_state_payload)?;
+            let label = project_canonical_record_field(record.label(), field.as_str())
+                .map_err(|err| Error::new(err.to_string()))?;
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
+        }
+        CheckedValueTemplate::ListElement {
+            ty,
+            list,
+            index,
+            len,
+        } => {
+            let list = evaluate_checked_template(list, received_payload, current_state_payload)?;
+            let label = project_canonical_list_element(list.label(), *index, *len)
+                .map_err(|err| Error::new(err.to_string()))?;
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
+        }
+        CheckedValueTemplate::MapValue { ty, map, key, keys } => {
+            let map = evaluate_checked_template(map, received_payload, current_state_payload)?;
+            let label = project_canonical_map_value(map.label(), key, keys)
+                .map_err(|err| Error::new(err.to_string()))?;
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
+        }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires static runtime process reference bindings",
         )),
@@ -333,6 +517,51 @@ fn evaluate_checked_template(
                 parts.push(format!("{}:{}", field.name(), value.label()));
             }
             let label = format!("{ty}{{{}}}", parts.join(","));
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
+        }
+        CheckedValueTemplate::List { ty, items } => {
+            let mut parts = Vec::with_capacity(items.len());
+            for item in items {
+                let value =
+                    evaluate_checked_template(item, received_payload, current_state_payload)?;
+                parts.push(value.label().to_string());
+            }
+            let label = format!("List[{}]", parts.join(","));
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), label))
+        }
+        CheckedValueTemplate::Map { ty, entries } => {
+            let mut parts = BTreeMap::new();
+            for entry in entries {
+                let key = evaluate_checked_template(
+                    entry.key(),
+                    received_payload,
+                    current_state_payload,
+                )?;
+                let value = evaluate_checked_template(
+                    entry.value(),
+                    received_payload,
+                    current_state_payload,
+                )?;
+                if parts
+                    .insert(key.label().to_string(), value.label().to_string())
+                    .is_some()
+                {
+                    return Err(Error::new(format!(
+                        "map template duplicates key {}",
+                        key.label()
+                    )));
+                }
+            }
+            let label = format!(
+                "Map[{}]",
+                parts
+                    .into_iter()
+                    .map(|(key, value)| format!("{key}=>{value}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
             validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
             Ok(CheckedPayloadValue::new(ty.clone(), label))
         }

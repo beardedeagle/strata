@@ -3,11 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use mantle_artifact::{MAX_STATE_VALUES_PER_PROCESS, validate_state_value_label};
 
 use super::super::super::MAX_VALUE_NESTING;
-use super::super::super::ast::{Identifier, Module, Record, TypeRef, ValueExpr};
+use super::super::super::ast::{
+    Identifier, ListValue, MapValue, Module, Record, TypeRef, ValueExpr,
+};
 use super::super::super::checked::CheckedStateValue;
 use super::super::super::diagnostic::{Error, Result};
 use super::super::STEP_STATE_PARAMETER_NAME;
-use super::super::symbols::SemanticIndex;
+use super::super::symbols::{CollectionType, SemanticIndex};
 
 pub(in crate::language::checker) struct ValueBinding<'a> {
     pub(in crate::language::checker) name: &'a Identifier,
@@ -60,6 +62,14 @@ pub(in crate::language::checker) fn source_value_uses_binding(
             .fields
             .iter()
             .any(|field| source_value_uses_binding(&field.value, binding)),
+        ValueExpr::List(list) => list
+            .items
+            .iter()
+            .any(|item| source_value_uses_binding(item, binding)),
+        ValueExpr::Map(map) => map.entries.iter().any(|entry| {
+            source_value_uses_binding(&entry.key, binding)
+                || source_value_uses_binding(&entry.value, binding)
+        }),
     }
 }
 
@@ -104,6 +114,17 @@ pub(super) fn canonical_value(
             module,
             semantic_index,
             record,
+            value,
+            bindings,
+            context,
+            depth,
+        );
+    }
+    if semantic_index.collection_type(expected_type)?.is_some() {
+        return canonical_collection_value(
+            module,
+            semantic_index,
+            expected_type,
             value,
             bindings,
             context,
@@ -181,11 +202,168 @@ fn canonical_enum_value(
             validate_state_value_label(&value).map_err(|err| Error::new(err.to_string()))?;
             Ok(value)
         }
-        ValueExpr::Call { .. } | ValueExpr::Record(_) => Err(Error::new(format!(
-            "expected enum variant value for enum {}",
-            enum_decl.name
-        ))),
+        ValueExpr::Call { .. } | ValueExpr::Record(_) | ValueExpr::List(_) | ValueExpr::Map(_) => {
+            Err(Error::new(format!(
+                "expected enum variant value for enum {}",
+                enum_decl.name
+            )))
+        }
     }
+}
+
+fn canonical_collection_value(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[ValueBinding<'_>],
+    context: CanonicalValueContext,
+    depth: usize,
+) -> Result<String> {
+    let collection_type = semantic_index
+        .collection_type(expected_type)?
+        .ok_or_else(|| Error::new(format!("type {expected_type} is not a collection type")))?;
+    match collection_type {
+        CollectionType::List { element, capacity } => {
+            let ValueExpr::List(list) = value else {
+                return Err(Error::new(format!(
+                    "list value type {expected_type} must be constructed with List<T,N>[...]"
+                )));
+            };
+            validate_list_value_type(semantic_index, expected_type, list, element, capacity)?;
+            let mut parts = Vec::with_capacity(list.items.len());
+            for item in &list.items {
+                parts.push(canonical_value(
+                    module,
+                    semantic_index,
+                    element,
+                    item,
+                    bindings,
+                    context,
+                    depth + 1,
+                )?);
+            }
+            let label = format!("List[{}]", parts.join(","));
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(label)
+        }
+        CollectionType::Map {
+            key,
+            value: item,
+            capacity,
+        } => {
+            let ValueExpr::Map(map) = value else {
+                return Err(Error::new(format!(
+                    "map value type {expected_type} must be constructed with Map<K,V,N>[...]"
+                )));
+            };
+            validate_map_value_type(semantic_index, expected_type, map, key, item, capacity)?;
+            let mut entries = BTreeMap::new();
+            for entry in &map.entries {
+                let key_label = canonical_value(
+                    module,
+                    semantic_index,
+                    key,
+                    &entry.key,
+                    bindings,
+                    context,
+                    depth + 1,
+                )?;
+                let value_label = canonical_value(
+                    module,
+                    semantic_index,
+                    item,
+                    &entry.value,
+                    bindings,
+                    context,
+                    depth + 1,
+                )?;
+                if entries.insert(key_label.clone(), value_label).is_some() {
+                    return Err(Error::new(format!(
+                        "map value {expected_type} duplicates key {key_label}"
+                    )));
+                }
+            }
+            let label = format!(
+                "Map[{}]",
+                entries
+                    .into_iter()
+                    .map(|(key, value)| format!("{key}=>{value}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
+            Ok(label)
+        }
+    }
+}
+
+fn validate_list_value_type(
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    list: &ListValue,
+    element_type: &TypeRef,
+    capacity: usize,
+) -> Result<()> {
+    if let Some(declared_element) = &list.element_type
+        && !semantic_index.same_type(declared_element, element_type)
+    {
+        return Err(Error::new(format!(
+            "list value has element type {declared_element}, expected {element_type} for {expected_type}"
+        )));
+    }
+    if let Some(declared_capacity) = list.capacity
+        && declared_capacity != capacity
+    {
+        return Err(Error::new(format!(
+            "list value has capacity {declared_capacity}, expected {capacity} for {expected_type}"
+        )));
+    }
+    if list.items.len() > capacity {
+        return Err(Error::new(format!(
+            "list value length {} exceeds capacity {capacity} for {expected_type}",
+            list.items.len()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_map_value_type(
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    map: &MapValue,
+    key_type: &TypeRef,
+    value_type: &TypeRef,
+    capacity: usize,
+) -> Result<()> {
+    if let Some(declared_key) = &map.key_type
+        && !semantic_index.same_type(declared_key, key_type)
+    {
+        return Err(Error::new(format!(
+            "map value has key type {declared_key}, expected {key_type} for {expected_type}"
+        )));
+    }
+    if let Some(declared_value) = &map.value_type
+        && !semantic_index.same_type(declared_value, value_type)
+    {
+        return Err(Error::new(format!(
+            "map value has value type {declared_value}, expected {value_type} for {expected_type}"
+        )));
+    }
+    if let Some(declared_capacity) = map.capacity
+        && declared_capacity != capacity
+    {
+        return Err(Error::new(format!(
+            "map value has capacity {declared_capacity}, expected {capacity} for {expected_type}"
+        )));
+    }
+    if map.entries.len() > capacity {
+        return Err(Error::new(format!(
+            "map value entry count {} exceeds capacity {capacity} for {expected_type}",
+            map.entries.len()
+        )));
+    }
+    Ok(())
 }
 
 fn canonical_record_value(

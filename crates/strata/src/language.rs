@@ -10,9 +10,11 @@ mod parser;
 mod tests;
 
 pub use ast::{
-    Determinism, Effect, Enum, Function, FunctionBlock, FunctionBody, FunctionParam, Identifier,
-    Match, MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record, RecordField,
-    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
+    CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, Function,
+    FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue, MapPattern,
+    MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module, OutputLiteral, Param,
+    Pattern, Process, Record, RecordField, RecordValue, RecordValueField, ReturnExpr, Statement,
+    TypeRef, ValueExpr,
 };
 pub use checked::CheckedProgram;
 pub use checker::check_module;
@@ -28,6 +30,8 @@ const MAX_TYPE_NESTING: usize = 32;
 const MAX_VALUE_NESTING: usize = 32;
 const PROC_RESULT_TYPE: &str = "ProcResult";
 const PROCESS_REF_TYPE: &str = "ProcessRef";
+const LIST_TYPE: &str = "List";
+const MAP_TYPE: &str = "Map";
 
 pub fn check_source(source: &str) -> Result<CheckedProgram> {
     let module = parse_source(source)?;

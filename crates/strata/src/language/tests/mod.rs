@@ -8,6 +8,7 @@ mod message_payload_process_refs;
 mod message_payload_validation;
 mod payload_limits;
 mod process_refs;
+mod source_function_collection_patterns;
 mod source_function_core;
 mod source_function_patterns;
 mod source_function_record_patterns;

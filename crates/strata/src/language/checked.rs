@@ -288,6 +288,23 @@ pub(in crate::language) enum CheckedValueTemplate {
     CurrentStatePayload {
         ty: CheckedTypeRef,
     },
+    RecordField {
+        ty: CheckedTypeRef,
+        record: Box<CheckedValueTemplate>,
+        field: Identifier,
+    },
+    ListElement {
+        ty: CheckedTypeRef,
+        list: Box<CheckedValueTemplate>,
+        index: usize,
+        len: usize,
+    },
+    MapValue {
+        ty: CheckedTypeRef,
+        map: Box<CheckedValueTemplate>,
+        key: String,
+        keys: Vec<String>,
+    },
     ProcessRef {
         ty: CheckedTypeRef,
         target: CheckedProcessId,
@@ -302,6 +319,14 @@ pub(in crate::language) enum CheckedValueTemplate {
         ty: CheckedTypeRef,
         fields: Vec<CheckedValueTemplateField>,
     },
+    List {
+        ty: CheckedTypeRef,
+        items: Vec<CheckedValueTemplate>,
+    },
+    Map {
+        ty: CheckedTypeRef,
+        entries: Vec<CheckedValueTemplateMapEntry>,
+    },
 }
 
 impl CheckedValueTemplate {
@@ -310,9 +335,14 @@ impl CheckedValueTemplate {
             Self::Literal(value) => value.ty(),
             Self::ReceivedPayload { ty }
             | Self::CurrentStatePayload { ty }
+            | Self::RecordField { ty, .. }
+            | Self::ListElement { ty, .. }
+            | Self::MapValue { ty, .. }
             | Self::ProcessRef { ty, .. }
             | Self::EnumVariant { ty, .. }
-            | Self::Record { ty, .. } => ty,
+            | Self::Record { ty, .. }
+            | Self::List { ty, .. }
+            | Self::Map { ty, .. } => ty,
         }
     }
 }
@@ -330,6 +360,26 @@ impl CheckedValueTemplateField {
 
     pub(in crate::language) fn name(&self) -> &Identifier {
         &self.name
+    }
+
+    pub(in crate::language) fn value(&self) -> &CheckedValueTemplate {
+        &self.value
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedValueTemplateMapEntry {
+    key: CheckedValueTemplate,
+    value: CheckedValueTemplate,
+}
+
+impl CheckedValueTemplateMapEntry {
+    pub(in crate::language) fn new(key: CheckedValueTemplate, value: CheckedValueTemplate) -> Self {
+        Self { key, value }
+    }
+
+    pub(in crate::language) fn key(&self) -> &CheckedValueTemplate {
+        &self.key
     }
 
     pub(in crate::language) fn value(&self) -> &CheckedValueTemplate {

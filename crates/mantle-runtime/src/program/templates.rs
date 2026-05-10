@@ -62,6 +62,60 @@ impl LoadedTemplateAdmission<'_> {
             ArtifactValueTemplate::CurrentStatePayload { ty } => {
                 self.validate_current_state_payload(field, *ty)
             }
+            ArtifactValueTemplate::RecordField {
+                ty,
+                record,
+                field: field_name,
+            } => {
+                self.reject_projected_process_ref_type(field, *ty)?;
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                validate_loaded_ident_field(&format!("{field}.field_name"), field_name)?;
+                let nested = Self {
+                    expected_type: None,
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.record"), record, depth + 1)
+            }
+            ArtifactValueTemplate::ListElement {
+                ty,
+                list,
+                index,
+                len,
+            } => {
+                self.reject_projected_process_ref_type(field, *ty)?;
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                if *len == 0 || *len > MAX_VALUE_TEMPLATE_FIELDS {
+                    return Err(Error::new(format!(
+                        "{field}.len must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
+                    )));
+                }
+                if *index >= *len {
+                    return Err(Error::new(format!(
+                        "{field}.index {index} is outside list length {len}"
+                    )));
+                }
+                let nested = Self {
+                    expected_type: None,
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.list"), list, depth + 1)
+            }
+            ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+                self.reject_projected_process_ref_type(field, *ty)?;
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                validate_map_projection_keys(field, key, keys)?;
+                let nested = Self {
+                    expected_type: None,
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.map"), map, depth + 1)
+            }
             ArtifactValueTemplate::ProcessRef {
                 ty,
                 target_process,
@@ -87,7 +141,29 @@ impl LoadedTemplateAdmission<'_> {
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_record(field, fields, depth)
             }
+            ArtifactValueTemplate::List { ty, items } => {
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_list(field, items, depth)
+            }
+            ArtifactValueTemplate::Map { ty, entries } => {
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_map(field, entries, depth)
+            }
         }
+    }
+
+    fn reject_projected_process_ref_type(&self, field: &str, ty: TypeId) -> Result<()> {
+        if matches!(
+            self.program.type_entry(ty)?.kind,
+            ArtifactTypeKind::ProcessRef { .. }
+        ) {
+            return Err(Error::new(format!(
+                "{field} process reference template must be a direct message payload"
+            )));
+        }
+        Ok(())
     }
 
     fn validate_received_payload(&self, field: &str, ty: TypeId) -> Result<()> {
@@ -213,6 +289,131 @@ impl LoadedTemplateAdmission<'_> {
         }
         Ok(())
     }
+
+    fn validate_list(
+        &self,
+        field: &str,
+        items: &[ArtifactValueTemplate],
+        depth: usize,
+    ) -> Result<()> {
+        if items.len() > MAX_VALUE_TEMPLATE_FIELDS {
+            return Err(Error::new(format!(
+                "{field}.item_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+            )));
+        }
+        let nested = Self {
+            expected_type: None,
+            allow_direct_process_ref: false,
+            ..*self
+        };
+        for (index, item) in items.iter().enumerate() {
+            nested.validate_with_depth(&format!("{field}.item.{index}"), item, depth + 1)?;
+        }
+        Ok(())
+    }
+
+    fn validate_map(
+        &self,
+        field: &str,
+        entries: &[mantle_artifact::ArtifactValueTemplateMapEntry],
+        depth: usize,
+    ) -> Result<()> {
+        if entries.len() > MAX_VALUE_TEMPLATE_FIELDS {
+            return Err(Error::new(format!(
+                "{field}.entry_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+            )));
+        }
+        let nested = Self {
+            expected_type: None,
+            allow_direct_process_ref: false,
+            ..*self
+        };
+        let mut keys = BTreeSet::new();
+        for (index, entry) in entries.iter().enumerate() {
+            if !loaded_template_is_static_map_key(&entry.key) {
+                return Err(Error::new(format!(
+                    "{field}.entry.{index}.key must be a static value template"
+                )));
+            }
+            nested.validate_with_depth(
+                &format!("{field}.entry.{index}.key"),
+                &entry.key,
+                depth + 1,
+            )?;
+            let key = loaded_static_map_key_value(self.program, &entry.key)?;
+            if !keys.insert(key.clone()) {
+                return Err(Error::new(format!("{field} duplicates key {key}")));
+            }
+            nested.validate_with_depth(
+                &format!("{field}.entry.{index}.value"),
+                &entry.value,
+                depth + 1,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_map_projection_keys(field: &str, key: &str, keys: &[String]) -> Result<()> {
+    if keys.is_empty() || keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "{field}.key_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    validate_payload_value_label(key).map_err(|err| Error::new(format!("{field}.key: {err}")))?;
+    let mut seen = BTreeSet::new();
+    for expected_key in keys {
+        validate_payload_value_label(expected_key)
+            .map_err(|err| Error::new(format!("{field}.expected_key: {err}")))?;
+        if !seen.insert(expected_key.clone()) {
+            return Err(Error::new(format!(
+                "{field} duplicates expected map key {expected_key}"
+            )));
+        }
+    }
+    if !seen.contains(key) {
+        return Err(Error::new(format!(
+            "{field} projection key {key} is not one of the expected map keys"
+        )));
+    }
+    if seen.into_iter().collect::<Vec<_>>() != keys {
+        return Err(Error::new(format!(
+            "{field} expected map keys must be sorted"
+        )));
+    }
+    Ok(())
+}
+
+fn loaded_static_map_key_value(
+    program: &LoadedProgram,
+    template: &ArtifactValueTemplate,
+) -> Result<String> {
+    evaluate_loaded_state_value(program, template, None, None).map(|value| value.value)
+}
+
+fn loaded_template_is_static_map_key(template: &ArtifactValueTemplate) -> bool {
+    match template {
+        ArtifactValueTemplate::Literal { .. } => true,
+        ArtifactValueTemplate::ReceivedPayload { .. }
+        | ArtifactValueTemplate::CurrentStatePayload { .. }
+        | ArtifactValueTemplate::RecordField { .. }
+        | ArtifactValueTemplate::ListElement { .. }
+        | ArtifactValueTemplate::MapValue { .. }
+        | ArtifactValueTemplate::ProcessRef { .. } => false,
+        ArtifactValueTemplate::EnumVariant { payload, .. } => {
+            loaded_template_is_static_map_key(payload)
+        }
+        ArtifactValueTemplate::Record { fields, .. } => fields
+            .iter()
+            .all(|field| loaded_template_is_static_map_key(&field.value)),
+        ArtifactValueTemplate::List { items, .. } => {
+            items.iter().all(loaded_template_is_static_map_key)
+        }
+        ArtifactValueTemplate::Map { entries, .. } => entries.iter().all(|entry| {
+            loaded_template_is_static_map_key(&entry.key)
+                && loaded_template_is_static_map_key(&entry.value)
+        }),
+    }
 }
 
 pub(super) fn loaded_template_depends_on_received_payload(
@@ -222,11 +423,27 @@ pub(super) fn loaded_template_depends_on_received_payload(
         ArtifactValueTemplate::Literal { .. } | ArtifactValueTemplate::ProcessRef { .. } => false,
         ArtifactValueTemplate::ReceivedPayload { .. } => true,
         ArtifactValueTemplate::CurrentStatePayload { .. } => false,
+        ArtifactValueTemplate::RecordField { record, .. } => {
+            loaded_template_depends_on_received_payload(record)
+        }
+        ArtifactValueTemplate::ListElement { list, .. } => {
+            loaded_template_depends_on_received_payload(list)
+        }
+        ArtifactValueTemplate::MapValue { map, .. } => {
+            loaded_template_depends_on_received_payload(map)
+        }
         ArtifactValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_depends_on_received_payload(payload)
         }
         ArtifactValueTemplate::Record { fields, .. } => fields
             .iter()
             .any(|field| loaded_template_depends_on_received_payload(&field.value)),
+        ArtifactValueTemplate::List { items, .. } => items
+            .iter()
+            .any(loaded_template_depends_on_received_payload),
+        ArtifactValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
+            loaded_template_depends_on_received_payload(&entry.key)
+                || loaded_template_depends_on_received_payload(&entry.value)
+        }),
     }
 }

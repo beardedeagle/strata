@@ -63,23 +63,30 @@ pub(in crate::language::checker) fn step_discovery_clauses<'a>(
                 .into_iter()
                 .map(|arm| {
                     let state_payload_bindings = match &arm.pattern {
-                        TypedMatchPattern::Variant {
-                            variant,
-                            binding: Some(binding),
-                        } => vec![StatePayloadDiscoveryBinding {
-                            name: binding.name.clone(),
-                            ty: state_enum.variants[*variant]
-                                .payload_type
-                                .clone()
-                                .ok_or_else(|| {
-                                    Error::new(format!(
-                                        "process {} state match pattern {} does not carry a payload",
-                                        process.name, state_enum.variants[*variant].name
-                                    ))
-                                })?,
-                        }],
-                        TypedMatchPattern::Variant { binding: None, .. }
-                        | TypedMatchPattern::Wildcard => Vec::new(),
+                        TypedMatchPattern::Variant { variant, bindings } => {
+                            let variant_decl = &state_enum.variants[*variant];
+                            if bindings.is_empty() {
+                                Vec::new()
+                            } else {
+                                let payload_ty =
+                                    variant_decl.payload_type.clone().ok_or_else(|| {
+                                        Error::new(format!(
+                                            "process {} state match pattern {} does not carry a payload",
+                                            process.name, variant_decl.name
+                                        ))
+                                    })?;
+                                bindings
+                                    .iter()
+                                    .map(|binding| StatePayloadDiscoveryBinding {
+                                        name: binding.name.clone(),
+                                        payload_ty: payload_ty.clone(),
+                                        ty: binding.ty.clone(),
+                                        path: binding.path.clone(),
+                                    })
+                                    .collect()
+                            }
+                        }
+                        TypedMatchPattern::Wildcard => Vec::new(),
                     };
                     Ok(StepDiscoveryClause {
                         pattern: pattern.clone(),
@@ -162,20 +169,25 @@ pub(in crate::language::checker) fn matching_message_cases<'a>(
 pub(in crate::language::checker) fn payload_value_bindings<'a>(
     pattern: &'a StepPattern,
     case: &'a DiscoveredMessageCase,
-) -> Vec<DiscoveryValueBinding> {
+) -> Result<Vec<DiscoveryValueBinding>> {
     match (pattern, case.payload()) {
-        (
-            StepPattern::Variant {
-                binding: Some(param),
-                ..
-            },
-            Some(payload),
-        ) => vec![DiscoveryValueBinding {
-            name: param.name.clone(),
-            ty: param.ty.clone(),
-            label: payload.label().to_string(),
-        }],
-        _ => Vec::new(),
+        (StepPattern::Variant { bindings, .. }, Some(payload)) => bindings
+            .iter()
+            .map(|param| {
+                Ok(DiscoveryValueBinding {
+                    name: param.name.clone(),
+                    ty: param.ty.clone(),
+                    label: payload_binding_label(payload.label(), param)?.ok_or_else(|| {
+                        Error::new(format!(
+                            "message payload {} does not match pattern binding {}",
+                            payload.label(),
+                            param.name
+                        ))
+                    })?,
+                })
+            })
+            .collect(),
+        _ => Ok(Vec::new()),
     }
 }
 
@@ -189,21 +201,17 @@ pub(in crate::language::checker) fn resolve_send_target_process_for_discovery(
     if let Some(target_process) = process_refs.get(target) {
         return Ok(*target_process);
     }
-    if let StepPattern::Variant {
-        binding: Some(param),
-        ..
-    } = pattern
+    if let StepPattern::Variant { bindings, .. } = pattern
+        && let Some(param) = bindings.iter().find(|binding| binding.name == *target)
     {
-        if param.name == *target {
-            return semantic_index
-                .process_ref_target_type(&param.ty)?
-                .ok_or_else(|| {
-                    Error::new(format!(
-                        "process {} send target {} is not a process reference payload",
-                        process.name, target
-                    ))
-                });
-        }
+        return semantic_index
+            .process_ref_target_type(&param.ty)?
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} send target {} is not a process reference payload",
+                    process.name, target
+                ))
+            });
     }
     Err(Error::new(format!(
         "process {} sends to undeclared process reference {}",
@@ -235,18 +243,31 @@ fn check_step_typed_pattern(
     message_pattern: &Pattern,
 ) -> Result<TypedMatchPattern> {
     match message_pattern {
-        Pattern::Constructor { name, binding } => {
+        Pattern::Constructor { name, payload } => {
             let message = semantic_index.message_id_for_step_pattern(module, process_id, name)?;
             let variant = semantic_index.message_variant(module, process_id, message)?;
-            let binding =
-                check_step_payload_pattern(process, semantic_index, variant, binding.as_ref())?;
+            let bindings = check_step_payload_pattern(
+                module,
+                process,
+                semantic_index,
+                variant,
+                payload.as_ref(),
+            )?;
             Ok(TypedMatchPattern::Variant {
                 variant: message.index(),
-                binding,
+                bindings,
             })
         }
         Pattern::Record { name, .. } => Err(Error::new(format!(
             "process {} step pattern {name} destructures a record, but step patterns expect message constructors",
+            process.name
+        ))),
+        Pattern::List(_) => Err(Error::new(format!(
+            "process {} step pattern List[...] destructures a list, but step patterns expect message constructors",
+            process.name
+        ))),
+        Pattern::Map(_) => Err(Error::new(format!(
+            "process {} step pattern Map[...] destructures a map, but step patterns expect message constructors",
             process.name
         ))),
         Pattern::Wildcard => Ok(TypedMatchPattern::Wildcard),
@@ -255,9 +276,9 @@ fn check_step_typed_pattern(
 
 fn step_pattern_from_typed(pattern: TypedMatchPattern) -> Result<StepPattern> {
     match pattern {
-        TypedMatchPattern::Variant { variant, binding } => Ok(StepPattern::Variant {
+        TypedMatchPattern::Variant { variant, bindings } => Ok(StepPattern::Variant {
             message: CheckedMessageVariantId::from_index(variant)?,
-            binding,
+            bindings,
         }),
         TypedMatchPattern::Wildcard => Ok(StepPattern::Wildcard),
     }
@@ -344,15 +365,17 @@ pub(in crate::language::checker) fn check_step_shape(
 }
 
 fn check_step_payload_pattern(
+    module: &Module,
     process: &Process,
     semantic_index: &SemanticIndex,
     variant: &EnumVariant,
-    binding: Option<&Param>,
-) -> Result<Option<PatternPayloadParam>> {
-    check_pattern_payload_binding(
+    payload: Option<&ConstructorPayloadPattern>,
+) -> Result<Vec<PatternPayloadParam>> {
+    check_pattern_payload_bindings(
+        module,
         semantic_index,
         variant,
-        binding,
+        payload,
         "step pattern",
         PatternPayloadContext::StepPattern,
         PatternBindingContext::Step { process },

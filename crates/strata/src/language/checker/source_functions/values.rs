@@ -1,7 +1,8 @@
+use super::collection_patterns::collection_pattern_type;
 use super::record_patterns::record_pattern_type;
 use super::value_resolution::{
-    resolve_binding_source_function_call, resolve_pattern_source_function_call,
-    resolve_record_pattern_source_function_call,
+    resolve_binding_source_function_call, resolve_collection_pattern_source_function_call,
+    resolve_pattern_source_function_call, resolve_record_pattern_source_function_call,
 };
 use super::*;
 
@@ -117,6 +118,159 @@ fn validate_source_function_value_expr(
             }
             Ok(())
         }
+        ValueExpr::List(list) => {
+            let Some(CollectionType::List { element, capacity }) =
+                scope.semantic_index.collection_type(expected_type)?
+            else {
+                return check_source_value_type(scope, expected_type, value, bindings);
+            };
+            validate_list_value_type(scope.semantic_index, expected_type, list, element, capacity)?;
+            for item in &list.items {
+                validate_source_function_value_expr(scope, element, item, bindings)?;
+            }
+            Ok(())
+        }
+        ValueExpr::Map(map) => {
+            let Some(CollectionType::Map {
+                key,
+                value: item,
+                capacity,
+            }) = scope.semantic_index.collection_type(expected_type)?
+            else {
+                return check_source_value_type(scope, expected_type, value, bindings);
+            };
+            validate_map_value_type(
+                scope.semantic_index,
+                expected_type,
+                map,
+                key,
+                item,
+                capacity,
+            )?;
+            validate_concrete_map_value_keys(scope, key, map, bindings)?;
+            for entry in &map.entries {
+                validate_source_function_value_expr(scope, key, &entry.key, bindings)?;
+                validate_source_function_value_expr(scope, item, &entry.value, bindings)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_list_value_type(
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    list: &ListValue,
+    element_type: &TypeRef,
+    capacity: usize,
+) -> Result<()> {
+    if let Some(declared_element) = &list.element_type
+        && !semantic_index.same_type(declared_element, element_type)
+    {
+        return Err(Error::new(format!(
+            "list value has element type {declared_element}, expected {element_type} for {expected_type}"
+        )));
+    }
+    if let Some(declared_capacity) = list.capacity
+        && declared_capacity != capacity
+    {
+        return Err(Error::new(format!(
+            "list value has capacity {declared_capacity}, expected {capacity} for {expected_type}"
+        )));
+    }
+    if list.items.len() > capacity {
+        return Err(Error::new(format!(
+            "list value length {} exceeds capacity {capacity} for {expected_type}",
+            list.items.len()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_map_value_type(
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    map: &MapValue,
+    key_type: &TypeRef,
+    value_type: &TypeRef,
+    capacity: usize,
+) -> Result<()> {
+    if let Some(declared_key) = &map.key_type
+        && !semantic_index.same_type(declared_key, key_type)
+    {
+        return Err(Error::new(format!(
+            "map value has key type {declared_key}, expected {key_type} for {expected_type}"
+        )));
+    }
+    if let Some(declared_value) = &map.value_type
+        && !semantic_index.same_type(declared_value, value_type)
+    {
+        return Err(Error::new(format!(
+            "map value has value type {declared_value}, expected {value_type} for {expected_type}"
+        )));
+    }
+    if let Some(declared_capacity) = map.capacity
+        && declared_capacity != capacity
+    {
+        return Err(Error::new(format!(
+            "map value has capacity {declared_capacity}, expected {capacity} for {expected_type}"
+        )));
+    }
+    if map.entries.len() > capacity {
+        return Err(Error::new(format!(
+            "map value entry count {} exceeds capacity {capacity} for {expected_type}",
+            map.entries.len()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_concrete_map_value_keys(
+    scope: &SourceFunctionScope<'_>,
+    key_type: &TypeRef,
+    map: &MapValue,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let value_bindings = bindings
+        .iter()
+        .map(|binding| ValueBinding {
+            name: binding.name,
+            ty: binding.ty,
+            label: binding.name.as_str(),
+        })
+        .collect::<Vec<_>>();
+    let mut seen = BTreeSet::new();
+    for entry in &map.entries {
+        if source_value_contains_call(&entry.key) {
+            continue;
+        }
+        let key = canonical_source_value_with_bindings(
+            scope.module,
+            scope.semantic_index,
+            key_type,
+            &entry.key,
+            &value_bindings,
+        )?;
+        if !seen.insert(key.clone()) {
+            return Err(Error::new(format!("map value duplicates key {key}")));
+        }
+    }
+    Ok(())
+}
+
+fn source_value_contains_call(value: &ValueExpr) -> bool {
+    match value {
+        ValueExpr::Identifier(_) => false,
+        ValueExpr::Call { .. } => true,
+        ValueExpr::EnumVariant { payload, .. } => source_value_contains_call(payload),
+        ValueExpr::Record(record) => record
+            .fields
+            .iter()
+            .any(|field| source_value_contains_call(&field.value)),
+        ValueExpr::List(list) => list.items.iter().any(source_value_contains_call),
+        ValueExpr::Map(map) => map.entries.iter().any(|entry| {
+            source_value_contains_call(&entry.key) || source_value_contains_call(&entry.value)
+        }),
     }
 }
 
@@ -203,6 +357,10 @@ fn validate_source_function_call(
             let record_type = record_pattern_type(first)?;
             validate_source_function_value_expr(scope, &record_type, arg, bindings)
         }
+        SourceFunctionParamKind::ListPattern | SourceFunctionParamKind::MapPattern => {
+            let collection_type = collection_pattern_type(first)?;
+            validate_source_function_value_expr(scope, &collection_type, arg, bindings)
+        }
     }
 }
 
@@ -252,7 +410,67 @@ pub(in crate::language::checker) fn resolve_source_value_expr(
         ValueExpr::Record(record) => {
             resolve_record_source_value_expr(scope, expected_type, record, bindings, depth + 1)
         }
+        ValueExpr::List(list) => {
+            resolve_list_source_value_expr(scope, expected_type, list, bindings, depth + 1)
+        }
+        ValueExpr::Map(map) => {
+            resolve_map_source_value_expr(scope, expected_type, map, bindings, depth + 1)
+        }
     }
+}
+
+fn resolve_list_source_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    list: &ListValue,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let Some(CollectionType::List { element, .. }) =
+        scope.semantic_index.collection_type(expected_type)?
+    else {
+        return Ok(ValueExpr::List(list.clone()));
+    };
+    let items = list
+        .items
+        .iter()
+        .map(|item| resolve_source_value_expr(scope, element, item, bindings, depth + 1))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(ValueExpr::List(ListValue {
+        element_type: list.element_type.clone(),
+        capacity: list.capacity,
+        items,
+    }))
+}
+
+fn resolve_map_source_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    map: &MapValue,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let Some(CollectionType::Map { key, value, .. }) =
+        scope.semantic_index.collection_type(expected_type)?
+    else {
+        return Ok(ValueExpr::Map(map.clone()));
+    };
+    let entries = map
+        .entries
+        .iter()
+        .map(|entry| {
+            Ok(MapValueEntry {
+                key: resolve_source_value_expr(scope, key, &entry.key, bindings, depth + 1)?,
+                value: resolve_source_value_expr(scope, value, &entry.value, bindings, depth + 1)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(ValueExpr::Map(MapValue {
+        key_type: map.key_type.clone(),
+        value_type: map.value_type.clone(),
+        capacity: map.capacity,
+        entries,
+    }))
 }
 
 fn resolve_record_source_value_expr(
@@ -449,6 +667,16 @@ fn resolve_source_function_call(
                 scope,
                 expected_type,
                 first,
+                arg,
+                bindings,
+                depth + 1,
+            )
+        }
+        SourceFunctionParamKind::ListPattern | SourceFunctionParamKind::MapPattern => {
+            resolve_collection_pattern_source_function_call(
+                scope,
+                expected_type,
+                functions,
                 arg,
                 bindings,
                 depth + 1,

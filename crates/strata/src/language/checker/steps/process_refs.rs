@@ -23,8 +23,8 @@ pub(super) fn collect_process_refs(
         collect_process_refs_from_block(
             &context,
             clause.body,
-            clause.payload_binding.as_ref(),
-            clause.state_payload_binding.as_ref(),
+            &clause.payload_bindings,
+            &clause.state_payload_bindings,
             &mut process_refs,
             &mut process_ref_index,
         )?;
@@ -75,8 +75,8 @@ pub(in crate::language::checker) fn collect_message_case_process_refs(
 pub(super) fn collect_process_refs_from_block(
     context: &ProcessRefCollectionContext<'_>,
     block: &FunctionBlock,
-    payload_binding: Option<&StepPayloadBinding>,
-    state_payload_binding: Option<&StepStatePayloadBinding>,
+    payload_bindings: &[StepPayloadBinding],
+    state_payload_bindings: &[StepStatePayloadBinding],
     process_refs: &mut Vec<CheckedProcessRef>,
     process_ref_index: &mut BTreeMap<Identifier, ProcessRefBinding>,
 ) -> Result<()> {
@@ -84,21 +84,20 @@ pub(super) fn collect_process_refs_from_block(
         let Statement::LetProcessRef { name, ty, target } = statement else {
             continue;
         };
-        if let Some(binding) = payload_binding {
-            if binding.name == *name {
-                return Err(Error::new(format!(
-                    "process {} process reference {} conflicts with payload binding",
-                    context.process.name, name
-                )));
-            }
+        if payload_bindings.iter().any(|binding| binding.name == *name) {
+            return Err(Error::new(format!(
+                "process {} process reference {} conflicts with payload binding",
+                context.process.name, name
+            )));
         }
-        if let Some(binding) = state_payload_binding {
-            if binding.name == *name {
-                return Err(Error::new(format!(
-                    "process {} process reference {} conflicts with state payload binding",
-                    context.process.name, name
-                )));
-            }
+        if state_payload_bindings
+            .iter()
+            .any(|binding| binding.name == *name)
+        {
+            return Err(Error::new(format!(
+                "process {} process reference {} conflicts with state payload binding",
+                context.process.name, name
+            )));
         }
         validate_process_ref_name(context.process, context.semantic_index, name)?;
         let annotated_target =
@@ -170,13 +169,18 @@ fn process_ref_type_target(
     process_ref: &Identifier,
     ty: &TypeRef,
 ) -> Result<CheckedProcessId> {
-    let TypeRef::Applied { constructor, args } = ty else {
+    let TypeRef::Applied {
+        constructor,
+        args,
+        const_args,
+    } = ty
+    else {
         return Err(Error::new(format!(
             "process {} process reference {} must be typed as {PROCESS_REF_TYPE}<ProcessName>",
             process.name, process_ref
         )));
     };
-    if constructor.as_str() != PROCESS_REF_TYPE || args.len() != 1 {
+    if constructor.as_str() != PROCESS_REF_TYPE || args.len() != 1 || !const_args.is_empty() {
         return Err(Error::new(format!(
             "process {} process reference {} must be typed as {PROCESS_REF_TYPE}<ProcessName>",
             process.name, process_ref
