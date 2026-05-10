@@ -114,6 +114,23 @@ fn rejects_typed_msg_step_parameter() {
 }
 
 #[test]
+fn rejects_constructor_payload_binding_without_type_at_parse_time() {
+    let source = payload_source_with(
+        "send worker Assign(Job { phase: Ready });",
+        "fn step(state: WorkerState, Assign(job))",
+    );
+
+    let err = parse_source(&source).expect_err("untyped payload binding should fail parsing");
+
+    assert!(
+        err.to_string().contains(
+            "constructor payload pattern Assign(job) must bind the payload as job: Type or destructure a record, list, map, or wildcard"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_match_with_wrong_target() {
     let source = ACTOR_PING.replace(
         r#"fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
