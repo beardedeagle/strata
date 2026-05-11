@@ -1,3 +1,4 @@
+use super::values::{validate_map_projection_keys, validate_non_process_ref_value};
 use super::*;
 
 pub(super) fn evaluate_loaded_state_value(
@@ -520,51 +521,6 @@ impl LoadedTemplateAdmission<'_> {
         }
         Ok(())
     }
-}
-
-fn validate_map_projection_keys(
-    field: &str,
-    key: &RuntimeValue,
-    keys: &[RuntimeValue],
-) -> Result<()> {
-    if keys.is_empty() || keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
-        return Err(Error::new(format!(
-            "{field}.key_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
-        )));
-    }
-    validate_non_process_ref_value(&format!("{field}.key"), key)?;
-    let mut seen = BTreeSet::new();
-    for expected_key in keys {
-        validate_non_process_ref_value(&format!("{field}.expected_key"), expected_key)?;
-        if !seen.insert(expected_key.clone()) {
-            return Err(Error::new(format!(
-                "{field} duplicates expected map key {}",
-                expected_key.label()
-            )));
-        }
-    }
-    if !seen.contains(key) {
-        return Err(Error::new(format!(
-            "{field} projection key {} is not one of the expected map keys",
-            key.label()
-        )));
-    }
-    if seen.into_iter().collect::<Vec<_>>() != keys {
-        return Err(Error::new(format!(
-            "{field} expected map keys must be sorted"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_non_process_ref_value(field: &str, value: &RuntimeValue) -> Result<()> {
-    value.validate(field)?;
-    if value.contains_process_ref() {
-        return Err(Error::new(format!(
-            "{field} must not contain a process reference value"
-        )));
-    }
-    Ok(())
 }
 
 fn loaded_static_map_key_value(

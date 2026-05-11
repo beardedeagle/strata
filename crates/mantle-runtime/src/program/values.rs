@@ -228,7 +228,7 @@ impl LoadedValueTemplate {
                 keys,
                 projection,
             } => {
-                validate_map_projection_keys(key, keys)?;
+                validate_map_projection_keys("map projection", key, keys)?;
                 Ok(Self::MapValue {
                     ty: *ty,
                     map: Box::new(Self::from_artifact(map)?),
@@ -296,43 +296,42 @@ impl LoadedValueTemplate {
     }
 }
 
-fn validate_map_projection_keys(key: &RuntimeValue, keys: &[RuntimeValue]) -> Result<()> {
-    if keys.is_empty() {
-        return Err(Error::new(
-            "map projection key_count must be greater than zero",
-        ));
-    }
-    if keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
+pub(super) fn validate_map_projection_keys(
+    field: &str,
+    key: &RuntimeValue,
+    keys: &[RuntimeValue],
+) -> Result<()> {
+    if keys.is_empty() || keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
         return Err(Error::new(format!(
-            "map projection key_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+            "{field}.key_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
         )));
     }
-    validate_non_process_ref_value("map projection key", key)?;
+    validate_non_process_ref_value(&format!("{field}.key"), key)?;
     let mut seen = BTreeSet::new();
     for expected_key in keys {
-        validate_non_process_ref_value("map projection expected key", expected_key)?;
+        validate_non_process_ref_value(&format!("{field}.expected_key"), expected_key)?;
         if !seen.insert(expected_key.clone()) {
             return Err(Error::new(format!(
-                "map projection duplicates expected map key {}",
+                "{field} duplicates expected map key {}",
                 expected_key.label()
             )));
         }
     }
     if !seen.contains(key) {
         return Err(Error::new(format!(
-            "map projection key {} is not one of the expected map keys",
+            "{field} projection key {} is not one of the expected map keys",
             key.label()
         )));
     }
     if seen.into_iter().collect::<Vec<_>>() != keys {
-        return Err(Error::new(
-            "map projection expected keys must be sorted canonically",
-        ));
+        return Err(Error::new(format!(
+            "{field} expected map keys must be sorted canonically"
+        )));
     }
     Ok(())
 }
 
-fn validate_non_process_ref_value(field: &str, value: &RuntimeValue) -> Result<()> {
+pub(super) fn validate_non_process_ref_value(field: &str, value: &RuntimeValue) -> Result<()> {
     value.validate(field)?;
     if value.contains_process_ref() {
         return Err(Error::new(format!(
