@@ -66,4 +66,6 @@ name = "strata-mantle-acceptance"
 version = "0.1.0"
 dependencies = [
  "mantle-artifact",
+ "mantle-runtime",
+ "strata",
 ]

@@ -27,8 +27,9 @@ just source-to-runtime-gates
 
 The standard CI workflow installs `just` and calls `just ci-rust` on Linux,
 macOS, and Windows. The Linux quality job calls `just ci-quality`, which runs
-formatting, check, tests, clippy, build, tool metadata validation, toolchain
-policy validation, mdBook, source-to-runtime gates, and diff hygiene.
+formatting, check, tests, clippy, performance smoke checks, build, tool metadata
+validation, toolchain policy validation, mdBook, source-to-runtime gates, and
+diff hygiene.
 
 CI uses GitHub-owned, SHA-pinned checkout and cache actions. The cache stores
 Cargo registry/git data and per-job build target directories. It does not cache
@@ -41,6 +42,22 @@ For local Linux CI parity through `act`:
 just ci-local
 ```
 
+## Performance Smoke
+
+`just performance-smoke` runs a stable in-memory source-to-runtime timing smoke
+test over `examples/collection_state.str`. It measures repeated Strata checking
+and lowering, then repeated Mantle in-memory execution of the lowered artifact.
+
+The gate uses intentionally broad budgets. It is meant to catch severe
+regressions in compilation or runtime paths without making PR CI depend on
+microbenchmark noise from shared runners.
+
+Useful local command:
+
+```sh
+just performance-smoke
+```
+
 ## Fuzzing
 
 The fuzz harnesses live under `fuzz/` and run with `cargo-fuzz` on nightly Rust.
@@ -49,6 +66,10 @@ They cover three initial boundaries:
 - parsing, checking, and lowering arbitrary UTF-8 source;
 - decoding and re-encoding arbitrary UTF-8 artifact text;
 - running valid lowered artifacts through the in-memory runtime host.
+
+Committed seed corpora under `fuzz/seeds/` keep the smoke runs exercising valid
+collection, template, and source-to-runtime examples even before mutation finds
+those forms from random input.
 
 Useful local commands:
 

@@ -29,6 +29,9 @@ test:
 lint:
     cargo +{{stable_toolchain}} clippy --workspace --all-targets -- -D warnings
 
+performance-smoke:
+    cargo +{{stable_toolchain}} test -p strata-mantle-acceptance --test performance_smoke -- --ignored --nocapture
+
 build:
     cargo +{{stable_toolchain}} build
 
@@ -191,7 +194,7 @@ source-to-runtime-failure-gates: build
         exit 1
     fi
 
-quality: fmt-check check test lint metadata-check toolchain-policy-check docs source-to-runtime-gates diff-check
+quality: fmt-check check test lint performance-smoke metadata-check toolchain-policy-check docs source-to-runtime-gates diff-check
 
 ci-native: quality
 
@@ -267,9 +270,17 @@ fuzz-build:
     cargo +{{nightly_toolchain}} fuzz build mantle_runtime_from_source
 
 fuzz-smoke:
-    cargo +{{nightly_toolchain}} fuzz run strata_parse_check_lower -- -runs=256
-    cargo +{{nightly_toolchain}} fuzz run mantle_artifact_decode -- -runs=256
-    cargo +{{nightly_toolchain}} fuzz run mantle_runtime_from_source -- -runs=128
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    mkdir -p \
+        fuzz/corpus/strata_parse_check_lower \
+        fuzz/corpus/mantle_artifact_decode \
+        fuzz/corpus/mantle_runtime_from_source
+
+    cargo +{{nightly_toolchain}} fuzz run strata_parse_check_lower fuzz/corpus/strata_parse_check_lower fuzz/seeds/strata_parse_check_lower -- -runs=256
+    cargo +{{nightly_toolchain}} fuzz run mantle_artifact_decode fuzz/corpus/mantle_artifact_decode fuzz/seeds/mantle_artifact_decode -- -runs=256
+    cargo +{{nightly_toolchain}} fuzz run mantle_runtime_from_source fuzz/corpus/mantle_runtime_from_source fuzz/seeds/mantle_runtime_from_source -- -runs=128
 
 fuzz-ci: fuzz-build fuzz-lint fuzz-smoke
 
@@ -278,7 +289,10 @@ miri-setup:
 
 miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p mantle-artifact artifact_round_trips_and_validates_magic
+    cargo +{{nightly_toolchain}} miri test -p mantle-artifact map_projection_rejects_duplicate_expected_keys
+    cargo +{{nightly_toolchain}} miri test -p mantle-artifact validate_rejects_payload_dependent_map_template_key
     cargo +{{nightly_toolchain}} miri test -p strata parses_and_checks_hello
+    cargo +{{nightly_toolchain}} miri test -p strata checks_source_function_subset_map_patterns
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
 
 miri-ci: miri-setup miri-smoke
