@@ -1213,3 +1213,49 @@ proc Main mailbox bounded(1) {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn rejects_source_helper_runtime_dependent_map_key_state_template() {
+    let source = r#"
+module source_helper_runtime_dependent_map_key_state_template;
+
+record Unit;
+enum Phase {
+    Ready,
+    Done,
+}
+enum MainMsg {
+    Start,
+    Replace(Phase),
+}
+
+fn keyed(next: Phase) -> Map<Phase,Phase,1> ! [] ~ [] @det {
+    return Map<Phase,Phase,1>[next => Ready];
+}
+
+proc Main mailbox bounded(1) {
+    type State = Map<Phase,Phase,1>;
+    type Msg = MainMsg;
+
+    fn init() -> Map<Phase,Phase,1> ! [] ~ [] @det {
+        return Map<Phase,Phase,1>[Ready => Ready];
+    }
+
+    fn step(state: Map<Phase,Phase,1>, Start) -> ProcResult<Map<Phase,Phase,1>> ! [] ~ [] @det {
+        return Stop(state);
+    }
+
+    fn step(state: Map<Phase,Phase,1>, Replace(next: Phase)) -> ProcResult<Map<Phase,Phase,1>> ! [] ~ [] @det {
+        return Continue(keyed(next));
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("helper-bound runtime map keys should fail");
+
+    assert!(
+        err.to_string()
+            .contains("map value type Map<Phase,Phase,1> keys must be static source values"),
+        "unexpected error: {err}"
+    );
+}
