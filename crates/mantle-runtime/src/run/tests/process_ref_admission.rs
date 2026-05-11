@@ -263,7 +263,8 @@ fn runtime_rejects_oversized_record_payload_template_value() {
     items.push(short_atom);
     let received = RuntimePayload::value(JOB, RuntimeValue::List(items))
         .expect("test payload should fit exactly");
-    assert_eq!(received.label().len(), MAX_FIELD_VALUE_BYTES);
+    let label: &str = received.label();
+    assert_eq!(label.len(), MAX_FIELD_VALUE_BYTES);
     let step = ActiveStep {
         pid: RuntimeProcessId::FIRST,
         process_id: ProcessId::new(0),

@@ -453,24 +453,25 @@ fn runtime_preflights_template_state_before_process_outputs() {
 }
 
 #[test]
-fn runtime_rejects_template_state_when_label_matches_but_identity_does_not() {
+fn runtime_rejects_state_value_label_mismatch_before_trace() {
     let mut artifact = payload_artifact();
-    artifact.processes[1].state_values[1] = state_value_with_label(
-        WORKER_STATE,
-        "WorkerState{job:Job{phase:Spoofed}}",
-        "WorkerState{job:Job{phase:Ready}}",
-    );
+    artifact.processes[1].state_values[1] = ArtifactStateValue {
+        ty: WORKER_STATE,
+        value: artifact_value("WorkerState{job:Job{phase:Spoofed}}"),
+        label: "WorkerState{job:Job{phase:Ready}}".to_string(),
+        payload: None,
+    };
     let mut host = InMemoryRuntimeHost::default();
 
     let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
-        .expect_err("typed state identity mismatch should fail");
+        .expect_err("state label mismatch should fail before runtime trace");
 
     assert!(err.to_string().contains(
-        "process Worker next_state template produced value WorkerState{job:Job{phase:Ready}} not admitted by state table"
+        "state value label WorkerState{job:Job{phase:Ready}} does not match canonical value label WorkerState{job:Job{phase:Spoofed}}"
     ));
     assert!(
-        host.stdout().is_empty(),
-        "worker output must not be emitted after invalid typed state identity"
+        host.events().is_empty(),
+        "state label mismatch must fail before ArtifactLoaded"
     );
 }
 
@@ -576,11 +577,7 @@ fn loaded_program_rejects_transition_current_state_outside_state_table() {
 #[test]
 fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
     let mut artifact = valid_artifact();
-    let mut working = state_value_with_label(
-        WORKER_STATE,
-        "Working(Job{phase:Ready})",
-        "Working(Job{phase:Ready})",
-    );
+    let mut working = state_value(WORKER_STATE, "Working(Job{phase:Ready})");
     working.payload = Some(artifact_payload(JOB, "Job{phase:Ready}"));
     artifact.processes[1].state_values = vec![state_value(WORKER_STATE, "Idle"), working];
     artifact.processes[1].transitions = vec![
@@ -1046,11 +1043,6 @@ fn artifact_value(value: &str) -> ArtifactValue {
 
 fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {
     ArtifactStateValue::new(ty, artifact_value(value)).expect("test state value should be valid")
-}
-
-fn state_value_with_label(ty: TypeId, value: &str, label: &str) -> ArtifactStateValue {
-    ArtifactStateValue::with_label(ty, artifact_value(value), label)
-        .expect("test labeled state value should be valid")
 }
 
 fn artifact_payload(ty: TypeId, value: &str) -> ArtifactPayload {

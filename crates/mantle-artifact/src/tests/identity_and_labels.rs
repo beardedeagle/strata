@@ -41,13 +41,25 @@ fn validate_accepts_structured_state_value_labels() {
 
     artifact
         .validate()
-        .expect("structured state labels should remain display metadata");
+        .expect("structured state labels should validate");
 
     let decoded =
         MantleArtifact::decode(&artifact.encode()).expect("structured labels should decode");
     assert_eq!(
         decoded.processes[0].state_values,
         artifact.processes[0].state_values
+    );
+}
+
+#[test]
+fn artifact_state_value_rejects_non_canonical_label() {
+    let err = ArtifactStateValue::with_label(MAIN_STATE, artifact_value("MainState"), "Spoofed")
+        .expect_err("state labels must match typed state values");
+
+    assert!(
+        err.to_string()
+            .contains("state value label Spoofed does not match canonical value label MainState"),
+        "unexpected error: {err}"
     );
 }
 
@@ -210,6 +222,27 @@ fn artifact_value_validate_rejects_invalid_shape_before_materializing_label() {
     assert!(
         err.to_string()
             .contains("oversized list.item_count must be no greater than"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn validate_rejects_programmatic_state_value_label_mismatch() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].state_values[0] = ArtifactStateValue {
+        ty: MAIN_STATE,
+        value: artifact_value("MainState"),
+        label: "Spoofed".to_string(),
+        payload: None,
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("programmatic state label mismatch should fail validation");
+
+    assert!(
+        err.to_string()
+            .contains("state value label Spoofed does not match canonical value label MainState"),
         "unexpected error: {err}"
     );
 }

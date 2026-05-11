@@ -4,6 +4,7 @@ use mantle_artifact::{
     ArtifactPayload, ArtifactProcessRefPayload, ArtifactStateValue, ArtifactValue,
     ArtifactValueTemplate, ArtifactValueTemplateMapEntry, Error, MAX_VALUE_TEMPLATE_FIELDS,
     MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
+    validate_state_value_identity_label,
 };
 
 use crate::event::RuntimeProcessId;
@@ -14,6 +15,7 @@ pub(crate) type RuntimeValue = ArtifactValue;
 pub struct RuntimePayload {
     pub(crate) ty: TypeId,
     pub(crate) value: RuntimeValue,
+    label: String,
     pub(crate) process_ref: Option<ArtifactProcessRefPayload>,
 }
 
@@ -34,6 +36,7 @@ impl RuntimePayload {
             return Ok(Self {
                 ty: payload.ty,
                 value,
+                label: expected_label,
                 process_ref: Some(process_ref),
             });
         }
@@ -45,6 +48,7 @@ impl RuntimePayload {
         Ok(Self {
             ty: payload.ty,
             value: payload.value.clone(),
+            label: payload.value.label(),
             process_ref: payload.process_ref,
         })
     }
@@ -58,6 +62,7 @@ impl RuntimePayload {
         }
         Ok(Self {
             ty,
+            label: value.label(),
             value,
             process_ref: None,
         })
@@ -72,6 +77,7 @@ impl RuntimePayload {
         value.validate("process reference payload value")?;
         Ok(Self {
             ty,
+            label: value.label(),
             value,
             process_ref: Some(ArtifactProcessRefPayload {
                 target_process,
@@ -84,8 +90,8 @@ impl RuntimePayload {
         self.ty
     }
 
-    pub fn label(&self) -> String {
-        self.value.label()
+    pub fn label(&self) -> &str {
+        self.label.as_str()
     }
 
     pub fn process_ref(&self) -> Option<ArtifactProcessRefPayload> {
@@ -109,6 +115,7 @@ impl LoadedStateValue {
                 "process reference payloads are not valid state values",
             ));
         }
+        validate_state_value_identity_label(&state.value, &state.label)?;
         Ok(Self {
             ty: state.ty,
             value: state.value.clone(),
@@ -122,7 +129,7 @@ impl LoadedStateValue {
     }
 
     pub(crate) fn from_payload(payload: RuntimePayload) -> Self {
-        let label = payload.label();
+        let label = payload.label;
         Self {
             ty: payload.ty,
             value: payload.value,

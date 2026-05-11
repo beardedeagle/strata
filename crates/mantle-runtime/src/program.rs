@@ -31,7 +31,7 @@ use mantle_artifact::{
     MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
     MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
     OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId, validate_message_label,
-    validate_state_value_label,
+    validate_state_value_identity_label,
 };
 
 #[derive(Debug, Clone)]
@@ -418,9 +418,8 @@ impl LoadedProcess {
                     self.debug_name, state.label
                 )));
             }
-            validate_state_value_label(&state.label).map_err(|err| {
-                Error::new(format!("process {} state label: {err}", self.debug_name))
-            })?;
+            validate_state_value_identity_label(&state.value, &state.label)
+                .map_err(|err| Error::new(format!("process {} {err}", self.debug_name)))?;
             if state.ty != self.state_type {
                 return Err(Error::new(format!(
                     "process {} loaded state value {} has type id {}, expected {}",

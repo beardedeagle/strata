@@ -113,11 +113,6 @@ pub(super) fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {
     ArtifactStateValue::new(ty, artifact_value(value)).expect("test state value should be valid")
 }
 
-pub(super) fn state_value_with_label(ty: TypeId, value: &str, label: &str) -> ArtifactStateValue {
-    ArtifactStateValue::with_label(ty, artifact_value(value), label)
-        .expect("test labeled state value should be valid")
-}
-
 pub(super) fn artifact_payload(ty: TypeId, value: &str) -> ArtifactPayload {
     ArtifactPayload::value(ty, artifact_value(value))
         .expect("test artifact payload should be valid")

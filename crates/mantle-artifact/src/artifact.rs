@@ -3,8 +3,8 @@ use std::fmt;
 
 use crate::validation::{
     validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
-    validate_source_hash, validate_state_value_label, validate_unique_message_variant_list,
-    validate_unique_state_value_list, validate_value_label,
+    validate_source_hash, validate_state_value_identity_label,
+    validate_unique_message_variant_list, validate_unique_state_value_list, validate_value_label,
 };
 mod codec;
 mod process_validation;
@@ -376,12 +376,13 @@ impl ArtifactStateValue {
     }
 
     pub fn with_label(ty: TypeId, value: ArtifactValue, label: impl AsRef<str>) -> Result<Self> {
+        let label = label.as_ref();
         value.validate_without_process_ref("state value")?;
-        validate_state_value_label(label.as_ref())?;
+        validate_state_value_identity_label(&value, label)?;
         Ok(Self {
             ty,
             value,
-            label: label.as_ref().to_string(),
+            label: label.to_string(),
             payload: None,
         })
     }

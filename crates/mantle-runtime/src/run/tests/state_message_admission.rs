@@ -61,6 +61,18 @@ fn runtime_rejects_loaded_invalid_state_value_shape_before_artifact_loaded() {
 }
 
 #[test]
+fn runtime_rejects_loaded_state_value_label_mismatch_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].state_values[0].label = "Spoofed".to_string();
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main state value label Spoofed does not match canonical value label MainState",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_unknown_next_state_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

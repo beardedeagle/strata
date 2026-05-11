@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use crate::{
     ARTIFACT_MAGIC, ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTypeKind, ArtifactValueTemplate, Error, MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES,
-    MAX_IDENTIFIER_BYTES, MantleArtifact, NextState, Result, TypeId,
+    ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate, Error, MAX_ARTIFACT_BYTES,
+    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MantleArtifact, NextState, Result, TypeId,
 };
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
@@ -61,7 +61,7 @@ pub(crate) fn validate_unique_state_value_list(values: &[ArtifactStateValue]) ->
     let mut seen = BTreeSet::new();
     for value in values {
         value.value.validate_without_process_ref("state value")?;
-        validate_state_value_label(&value.label)?;
+        validate_state_value_identity_label(&value.value, &value.label)?;
         if !seen.insert((value.ty, value.value.clone())) {
             return Err(Error::new(format!(
                 "duplicate state value {} with type id {}",
@@ -73,7 +73,7 @@ pub(crate) fn validate_unique_state_value_list(values: &[ArtifactStateValue]) ->
     Ok(())
 }
 
-/// Validates display metadata labels used for artifact state values.
+/// Validates metadata labels used for artifact state values.
 pub fn validate_state_value_label(value: &str) -> Result<()> {
     if value.len() > MAX_FIELD_VALUE_BYTES {
         return Err(Error::new(format!(
@@ -84,6 +84,17 @@ pub fn validate_state_value_label(value: &str) -> Result<()> {
         return Err(Error::new(
             "state values must be non-empty and contain no control characters",
         ));
+    }
+    Ok(())
+}
+
+pub fn validate_state_value_identity_label(value: &ArtifactValue, label: &str) -> Result<()> {
+    validate_state_value_label(label)?;
+    let canonical = value.label();
+    if label != canonical {
+        return Err(Error::new(format!(
+            "state value label {label} does not match canonical value label {canonical}"
+        )));
     }
     Ok(())
 }
