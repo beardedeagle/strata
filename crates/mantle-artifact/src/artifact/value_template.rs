@@ -1,6 +1,18 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use super::*;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ArtifactRecordField {
+    pub name: String,
+    pub value: ArtifactValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ArtifactMapEntry {
+    pub key: ArtifactValue,
+    pub value: ArtifactValue,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapProjectionMode {
@@ -34,10 +46,10 @@ pub enum ArtifactValue {
     },
     Record {
         constructor: String,
-        fields: BTreeMap<String, ArtifactValue>,
+        fields: Vec<ArtifactRecordField>,
     },
     List(Vec<ArtifactValue>),
-    Map(BTreeMap<ArtifactValue, ArtifactValue>),
+    Map(Vec<ArtifactMapEntry>),
     ProcessRef {
         type_id: TypeId,
         pid: u64,
@@ -98,9 +110,19 @@ impl ArtifactValue {
                     1,
                     MAX_VALUE_TEMPLATE_FIELDS,
                 )?;
-                for (name, value) in fields {
+                let mut seen = BTreeSet::new();
+                for entry in fields {
+                    let name = entry.name.as_str();
                     validate_ident_field(&format!("{field}.field"), name)?;
-                    value.validate_shape(&format!("{field}.field.{name}"), depth + 1)?;
+                    if !seen.insert(name) {
+                        return Err(Error::new(format!(
+                            "{field} duplicates field {}",
+                            entry.name
+                        )));
+                    }
+                    entry
+                        .value
+                        .validate_shape(&format!("{field}.field.{name}"), depth + 1)?;
                 }
                 Ok(())
             }
@@ -123,9 +145,20 @@ impl ArtifactValue {
                     0,
                     MAX_VALUE_TEMPLATE_FIELDS,
                 )?;
-                for (index, (key, value)) in entries.iter().enumerate() {
-                    key.validate_shape(&format!("{field}.entry.{index}.key"), depth + 1)?;
-                    value.validate_shape(&format!("{field}.entry.{index}.value"), depth + 1)?;
+                let mut keys = BTreeSet::new();
+                for (index, entry) in entries.iter().enumerate() {
+                    entry
+                        .key
+                        .validate_shape(&format!("{field}.entry.{index}.key"), depth + 1)?;
+                    if !keys.insert(entry.key.clone()) {
+                        return Err(Error::new(format!(
+                            "{field} duplicates key {}",
+                            entry.key.label()
+                        )));
+                    }
+                    entry
+                        .value
+                        .validate_shape(&format!("{field}.entry.{index}.value"), depth + 1)?;
                 }
                 Ok(())
             }
@@ -153,7 +186,7 @@ impl ArtifactValue {
                 "{constructor}{{{}}}",
                 fields
                     .iter()
-                    .map(|(field, value)| format!("{field}:{}", value.label()))
+                    .map(|field| format!("{}:{}", field.name, field.value.label()))
                     .collect::<Vec<_>>()
                     .join(",")
             ),
@@ -169,7 +202,7 @@ impl ArtifactValue {
                 "Map[{}]",
                 entries
                     .iter()
-                    .map(|(key, value)| format!("{}=>{}", key.label(), value.label()))
+                    .map(|entry| format!("{}=>{}", entry.key.label(), entry.value.label()))
                     .collect::<Vec<_>>()
                     .join(",")
             ),
@@ -181,11 +214,13 @@ impl ArtifactValue {
         match self {
             Self::Atom(_) => false,
             Self::EnumVariant { payload, .. } => payload.contains_process_ref(),
-            Self::Record { fields, .. } => fields.values().any(ArtifactValue::contains_process_ref),
-            Self::List(items) => items.iter().any(ArtifactValue::contains_process_ref),
-            Self::Map(entries) => entries
+            Self::Record { fields, .. } => fields
                 .iter()
-                .any(|(key, value)| key.contains_process_ref() || value.contains_process_ref()),
+                .any(|field| field.value.contains_process_ref()),
+            Self::List(items) => items.iter().any(ArtifactValue::contains_process_ref),
+            Self::Map(entries) => entries.iter().any(|entry| {
+                entry.key.contains_process_ref() || entry.value.contains_process_ref()
+            }),
             Self::ProcessRef { .. } => true,
         }
     }
@@ -197,12 +232,16 @@ impl ArtifactValue {
                 self.label()
             )));
         };
-        fields.get(field).cloned().ok_or_else(|| {
-            Error::new(format!(
-                "record projection field {field} is not present in {}",
-                self.label()
-            ))
-        })
+        fields
+            .iter()
+            .find(|entry| entry.name == field)
+            .map(|entry| entry.value.clone())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "record projection field {field} is not present in {}",
+                    self.label()
+                ))
+            })
     }
 
     pub fn project_list_element(&self, index: usize, len: usize) -> Result<Self> {
@@ -239,13 +278,16 @@ impl ArtifactValue {
                 self.label()
             )));
         };
-        let entry_keys = entries.keys().cloned().collect::<Vec<_>>();
+        let entry_keys = entries
+            .iter()
+            .map(|entry| entry.key.clone())
+            .collect::<Vec<_>>();
         match projection {
             MapProjectionMode::Exact => {
                 if entry_keys.len() != keys.len()
                     || !keys
                         .iter()
-                        .all(|expected_key| entries.contains_key(expected_key))
+                        .all(|expected_key| entries.iter().any(|entry| entry.key == *expected_key))
                 {
                     return Err(Error::new(format!(
                         "map projection expected exact keys [{}], found [{}]",
@@ -256,7 +298,7 @@ impl ArtifactValue {
             }
             MapProjectionMode::Subset => {
                 for expected_key in keys {
-                    if !entries.contains_key(expected_key) {
+                    if !entries.iter().any(|entry| entry.key == *expected_key) {
                         return Err(Error::new(format!(
                             "map projection expected key {}, found [{}]",
                             expected_key.label(),
@@ -266,13 +308,17 @@ impl ArtifactValue {
                 }
             }
         }
-        entries.get(key).cloned().ok_or_else(|| {
-            Error::new(format!(
-                "map projection key {} is not present in {}",
-                key.label(),
-                self.label()
-            ))
-        })
+        entries
+            .iter()
+            .find(|entry| entry.key == *key)
+            .map(|entry| entry.value.clone())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "map projection key {} is not present in {}",
+                    key.label(),
+                    self.label()
+                ))
+            })
     }
 }
 
@@ -448,19 +494,24 @@ impl ArtifactValueTemplate {
             }
             Self::Record { ty, fields } => {
                 let ty_label = type_label(*ty)?;
-                let mut values = BTreeMap::new();
+                let mut values = Vec::with_capacity(fields.len());
+                let mut seen = BTreeSet::new();
                 for field in fields {
                     let value = field.value.evaluate_state_value(
                         received_payload,
                         current_state_payload,
                         type_label,
                     )?;
-                    if values.insert(field.name.clone(), value.value).is_some() {
+                    if !seen.insert(field.name.as_str()) {
                         return Err(Error::new(format!(
                             "record template duplicates field {}",
                             field.name
                         )));
                     }
+                    values.push(ArtifactRecordField {
+                        name: field.name.clone(),
+                        value: value.value,
+                    });
                 }
                 let value = ArtifactValue::Record {
                     constructor: ty_label,
@@ -484,7 +535,8 @@ impl ArtifactValueTemplate {
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::Map { ty, entries } => {
-                let mut values = BTreeMap::new();
+                let mut values = Vec::with_capacity(entries.len());
+                let mut seen = BTreeSet::new();
                 for entry in entries {
                     let key = entry.key.evaluate_state_value(
                         received_payload,
@@ -496,12 +548,16 @@ impl ArtifactValueTemplate {
                         current_state_payload,
                         type_label,
                     )?;
-                    if values.insert(key.value.clone(), value.value).is_some() {
+                    if !seen.insert(key.value.clone()) {
                         return Err(Error::new(format!(
                             "map template duplicates key {}",
                             key.value.label()
                         )));
                     }
+                    values.push(ArtifactMapEntry {
+                        key: key.value,
+                        value: value.value,
+                    });
                 }
                 let value = ArtifactValue::Map(values);
                 validate_value_label("map template value", &value.label())?;
@@ -904,7 +960,6 @@ fn parse_value(label: &str, depth: usize) -> Result<ArtifactValue> {
 }
 
 fn parse_record(constructor: &str, body: &str, depth: usize) -> Result<ArtifactValue> {
-    let mut fields = BTreeMap::new();
     if body.is_empty() {
         return Err(Error::new(format!(
             "fieldless record values use {constructor}; braced record values must declare at least one field"
@@ -916,6 +971,8 @@ fn parse_record(constructor: &str, body: &str, depth: usize) -> Result<ArtifactV
             "record value {constructor}{{{body}}} field count exceeds {MAX_VALUE_TEMPLATE_FIELDS}"
         )));
     }
+    let mut fields = Vec::with_capacity(parts.len());
+    let mut seen = BTreeSet::new();
     for part in parts {
         let index = top_level_char(part, ':').ok_or_else(|| {
             Error::new(format!(
@@ -924,14 +981,15 @@ fn parse_record(constructor: &str, body: &str, depth: usize) -> Result<ArtifactV
         })?;
         let name = &part[..index];
         validate_ident_field("artifact record field", name)?;
-        if fields
-            .insert(name.to_string(), parse_value(&part[index + 1..], depth)?)
-            .is_some()
-        {
+        if !seen.insert(name) {
             return Err(Error::new(format!(
                 "record value {constructor}{{{body}}} duplicates field {name}"
             )));
         }
+        fields.push(ArtifactRecordField {
+            name: name.to_string(),
+            value: parse_value(&part[index + 1..], depth)?,
+        });
     }
     Ok(ArtifactValue::Record {
         constructor: constructor.to_string(),
@@ -958,7 +1016,7 @@ fn parse_list(body: &str, depth: usize) -> Result<ArtifactValue> {
 }
 
 fn parse_map(label: &str, body: &str, depth: usize) -> Result<ArtifactValue> {
-    let mut entries = BTreeMap::new();
+    let mut entries = Vec::new();
     if !body.is_empty() {
         let parts = split_top_level(body, ',')?;
         if parts.len() > MAX_VALUE_TEMPLATE_FIELDS {
@@ -966,19 +1024,22 @@ fn parse_map(label: &str, body: &str, depth: usize) -> Result<ArtifactValue> {
                 "map value {label} entry count exceeds {MAX_VALUE_TEMPLATE_FIELDS}"
             )));
         }
+        entries.reserve(parts.len());
+        let mut seen = BTreeSet::new();
         for part in parts {
             let index = top_level_fat_arrow(part)
                 .ok_or_else(|| Error::new(format!("map value {label} contains malformed entry")))?;
             let key = parse_value(&part[..index], depth)?;
-            if entries
-                .insert(key.clone(), parse_value(&part[index + 2..], depth)?)
-                .is_some()
-            {
+            if !seen.insert(key.clone()) {
                 return Err(Error::new(format!(
                     "map value {label} duplicates key {}",
                     key.label()
                 )));
             }
+            entries.push(ArtifactMapEntry {
+                key,
+                value: parse_value(&part[index + 2..], depth)?,
+            });
         }
     }
     Ok(ArtifactValue::Map(entries))

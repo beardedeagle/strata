@@ -557,7 +557,7 @@ proc Worker mailbox bounded(1) {
 
     assert!(
         err.to_string().contains(
-            "message payload Map[Done=>Ready,Ready=>Done] does not match pattern binding phase"
+            "message payload Map[Ready=>Done,Done=>Ready] does not match pattern binding phase"
         ),
         "unexpected error: {err}"
     );

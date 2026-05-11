@@ -609,7 +609,7 @@ fn function_match_checks_builds_and_runs_on_mantle() {
     assert_eq!(main.init_state, mantle_artifact::StateId::new(0));
     assert_eq!(
         main.state_values[0].label,
-        "MainState{body:WarmReady,signature:WarmReady}"
+        "MainState{signature:WarmReady,body:WarmReady}"
     );
 
     let worker = &artifact.processes[1];
@@ -637,7 +637,7 @@ fn function_match_checks_builds_and_runs_on_mantle() {
 
     let trace = gate.read_trace("function_match");
     assert!(trace.contains(
-        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{body:WarmReady,signature:WarmReady}""#
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{signature:WarmReady,body:WarmReady}""#
     ));
     assert!(trace.contains(
         r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source functions selected WarmReady""#
@@ -665,7 +665,7 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
     let main = &artifact.processes[0];
     assert_eq!(
         main.state_values[0].label,
-        "MainState{body:Active(Job{phase:Done}),signature:Active(Job{phase:Ready})}"
+        "MainState{signature:Active(Job{phase:Ready}),body:Active(Job{phase:Done})}"
     );
 
     let worker = &artifact.processes[1];
@@ -695,7 +695,7 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
     let payload_type = format!(r#""payload_type_id":{}"#, job_type.as_u32());
     let trace = gate.read_trace("function_payload_match");
     assert!(trace.contains(
-        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{body:Active(Job{phase:Done}),signature:Active(Job{phase:Ready})}""#
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{signature:Active(Job{phase:Ready}),body:Active(Job{phase:Done})}""#
     ));
     assert!(trace.contains(&format!(
         r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}""#
@@ -905,11 +905,11 @@ fn collection_state_checks_builds_and_runs_on_mantle() {
     let map_type = value_type_id(&artifact, "__strata_checked_3_Map_2_1_5_Phase_5_Phase_2");
     assert_eq!(
         map_worker.state_values[0].label,
-        "Map[Done=>Ready,Ready=>Ready]"
+        "Map[Ready=>Ready,Done=>Ready]"
     );
     assert_eq!(
         map_worker.state_values[1].label,
-        "Map[Done=>Ready,Ready=>Done]"
+        "Map[Ready=>Done,Done=>Ready]"
     );
     assert_eq!(
         map_worker.transitions[0].next_state,
@@ -954,7 +954,7 @@ fn collection_state_checks_builds_and_runs_on_mantle() {
         r#""event":"program_output","pid":3,"process_id":2,"process":"MapWorker","stream":"stdout","output_id":1,"text":"collection map state replaced""#
     ));
     assert!(trace.contains(
-        r#""event":"state_updated","pid":3,"process_id":2,"process":"MapWorker","from_state_id":0,"from":"Map[Done=>Ready,Ready=>Ready]","to_state_id":1,"to":"Map[Done=>Ready,Ready=>Done]""#
+        r#""event":"state_updated","pid":3,"process_id":2,"process":"MapWorker","from_state_id":0,"from":"Map[Ready=>Ready,Done=>Ready]","to_state_id":1,"to":"Map[Ready=>Done,Done=>Ready]""#
     ));
 }
 

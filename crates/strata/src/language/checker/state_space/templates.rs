@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::ArtifactValue;
+use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
 
 use super::super::super::MAX_VALUE_NESTING;
 use super::super::super::ast::{
@@ -249,29 +249,20 @@ fn checked_record_template(
     let declared_fields = record
         .fields
         .iter()
-        .map(|field| field.name.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut provided = BTreeMap::new();
+        .map(|field| (field.name.as_str(), &field.ty))
+        .collect::<BTreeMap<_, _>>();
+    let mut provided = BTreeSet::new();
+    let mut fields = Vec::with_capacity(record.fields.len());
     for field in &value.fields {
-        if provided.insert(field.name.as_str(), &field.value).is_some() {
+        if !provided.insert(field.name.as_str()) {
             return Err(Error::new(format!(
                 "record value {} duplicates field {}",
                 record.name, field.name
             )));
         }
-        if !declared_fields.contains(field.name.as_str()) {
+        let Some(field_ty) = declared_fields.get(field.name.as_str()) else {
             return Err(Error::new(format!(
                 "record value {} declares unknown field {}",
-                record.name, field.name
-            )));
-        }
-    }
-
-    let mut fields = Vec::with_capacity(record.fields.len());
-    for field in &record.fields {
-        let Some(value) = provided.get(field.name.as_str()) else {
-            return Err(Error::new(format!(
-                "record value {} is missing field {}",
                 record.name, field.name
             )));
         };
@@ -281,12 +272,20 @@ fn checked_record_template(
                 module,
                 semantic_index,
                 types,
-                &field.ty,
-                value,
+                field_ty,
+                &field.value,
                 bindings,
                 depth + 1,
             )?,
         ));
+    }
+    for field in &record.fields {
+        if !provided.contains(field.name.as_str()) {
+            return Err(Error::new(format!(
+                "record value {} is missing field {}",
+                record.name, field.name
+            )));
+        }
     }
 
     Ok(CheckedValueTemplate::Record {
@@ -483,12 +482,16 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
             payload: Box::new(checked_static_source_value(payload)?),
         }),
         CheckedValueTemplate::Record { ty, fields } => {
-            let mut values = BTreeMap::new();
+            let mut values = Vec::with_capacity(fields.len());
+            let mut seen = BTreeSet::new();
             for field in fields {
-                values.insert(
-                    field.name().to_string(),
-                    checked_static_source_value(field.value())?,
-                );
+                if !seen.insert(field.name()) {
+                    return None;
+                }
+                values.push(ArtifactRecordField {
+                    name: field.name().to_string(),
+                    value: checked_static_source_value(field.value())?,
+                });
             }
             Some(ArtifactValue::Record {
                 constructor: ty.label().to_string(),
@@ -503,13 +506,15 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
             Some(ArtifactValue::List(values))
         }
         CheckedValueTemplate::Map { entries, .. } => {
-            let mut values = BTreeMap::new();
+            let mut values = Vec::with_capacity(entries.len());
+            let mut seen = BTreeSet::new();
             for entry in entries {
                 let key = checked_static_source_value(entry.key())?;
                 let value = checked_static_source_value(entry.value())?;
-                if values.insert(key, value).is_some() {
+                if !seen.insert(key.clone()) {
                     return None;
                 }
+                values.push(ArtifactMapEntry { key, value });
             }
             Some(ArtifactValue::Map(values))
         }

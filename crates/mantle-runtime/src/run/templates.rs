@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{Error, ProcessRefId, Result};
+use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, Error, ProcessRefId, Result};
 
 use super::model::ActiveStep;
 use crate::event::RuntimeProcessId;
@@ -98,7 +98,8 @@ pub(super) fn evaluate_runtime_template(
         }
         LoadedValueTemplate::Record { ty, fields } => {
             let type_label = program.type_label(*ty)?;
-            let mut values = BTreeMap::new();
+            let mut values = Vec::with_capacity(fields.len());
+            let mut seen = BTreeSet::new();
             for field in fields {
                 let value = evaluate_runtime_template(
                     program,
@@ -107,12 +108,16 @@ pub(super) fn evaluate_runtime_template(
                     step,
                     process_refs,
                 )?;
-                if values.insert(field.name.clone(), value.value).is_some() {
+                if !seen.insert(field.name.as_str()) {
                     return Err(Error::new(format!(
                         "record template duplicates field {}",
                         field.name
                     )));
                 }
+                values.push(ArtifactRecordField {
+                    name: field.name.clone(),
+                    value: value.value,
+                });
             }
             RuntimePayload::value(
                 *ty,
@@ -132,7 +137,8 @@ pub(super) fn evaluate_runtime_template(
             RuntimePayload::value(*ty, RuntimeValue::List(values))
         }
         LoadedValueTemplate::Map { ty, entries } => {
-            let mut values = BTreeMap::new();
+            let mut values = Vec::with_capacity(entries.len());
+            let mut seen = BTreeSet::new();
             for entry in entries {
                 let key = evaluate_runtime_template(
                     program,
@@ -148,12 +154,16 @@ pub(super) fn evaluate_runtime_template(
                     step,
                     process_refs,
                 )?;
-                if values.insert(key.value.clone(), value.value).is_some() {
+                if !seen.insert(key.value.clone()) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
                         key.value.label()
                     )));
                 }
+                values.push(ArtifactMapEntry {
+                    key: key.value,
+                    value: value.value,
+                });
             }
             RuntimePayload::value(*ty, RuntimeValue::Map(values))
         }

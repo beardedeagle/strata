@@ -183,7 +183,7 @@ proc Worker mailbox bounded(2) {
         checked_state_labels(worker),
         [
             "Idle",
-            "Working(Map[Done=>Ready,Ready=>Done])",
+            "Working(Map[Ready=>Done,Done=>Ready])",
             "Done(Done)"
         ]
     );

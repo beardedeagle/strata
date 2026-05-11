@@ -1,6 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use mantle_artifact::{ArtifactValue, MAX_VALUE_TEMPLATE_FIELDS};
+use mantle_artifact::{
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, MAX_VALUE_TEMPLATE_FIELDS,
+};
 
 use super::process_refs::{
     message_payload_type, process_ref_target, validate_process_ref_type_target,
@@ -310,17 +312,16 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
             payload: Box::new(checked_static_template_value(payload)?),
         }),
         CheckedValueTemplate::Record { ty, fields } => {
-            let mut values = BTreeMap::new();
+            let mut values = Vec::with_capacity(fields.len());
+            let mut seen = BTreeSet::new();
             for field in fields {
-                if values
-                    .insert(
-                        field.name().to_string(),
-                        checked_static_template_value(field.value())?,
-                    )
-                    .is_some()
-                {
+                if !seen.insert(field.name()) {
                     return None;
                 }
+                values.push(ArtifactRecordField {
+                    name: field.name().to_string(),
+                    value: checked_static_template_value(field.value())?,
+                });
             }
             Some(ArtifactValue::Record {
                 constructor: ty.label().to_string(),
@@ -335,13 +336,15 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
             Some(ArtifactValue::List(values))
         }
         CheckedValueTemplate::Map { entries, .. } => {
-            let mut values = BTreeMap::new();
+            let mut values = Vec::with_capacity(entries.len());
+            let mut seen = BTreeSet::new();
             for entry in entries {
                 let key = checked_static_template_value(entry.key())?;
                 let value = checked_static_template_value(entry.value())?;
-                if values.insert(key, value).is_some() {
+                if !seen.insert(key.clone()) {
                     return None;
                 }
+                values.push(ArtifactMapEntry { key, value });
             }
             Some(ArtifactValue::Map(values))
         }
@@ -675,22 +678,24 @@ fn evaluate_checked_template(
             ))
         }
         CheckedValueTemplate::Record { ty, fields } => {
-            let mut values = BTreeMap::new();
+            let mut values = Vec::with_capacity(fields.len());
+            let mut seen = BTreeSet::new();
             for field in fields {
                 let value = evaluate_checked_template(
                     field.value(),
                     received_payload,
                     current_state_payload,
                 )?;
-                if values
-                    .insert(field.name().to_string(), checked_payload_value(&value)?)
-                    .is_some()
-                {
+                if !seen.insert(field.name()) {
                     return Err(Error::new(format!(
                         "record template duplicates field {}",
                         field.name()
                     )));
                 }
+                values.push(ArtifactRecordField {
+                    name: field.name().to_string(),
+                    value: checked_payload_value(&value)?,
+                });
             }
             Ok(CheckedPayloadValue::new(
                 ty.clone(),
@@ -713,7 +718,8 @@ fn evaluate_checked_template(
             ))
         }
         CheckedValueTemplate::Map { ty, entries } => {
-            let mut values = BTreeMap::new();
+            let mut values = Vec::with_capacity(entries.len());
+            let mut seen = BTreeSet::new();
             for entry in entries {
                 let key = evaluate_checked_template(
                     entry.key(),
@@ -727,12 +733,16 @@ fn evaluate_checked_template(
                 )?;
                 let key_value = checked_payload_value(&key)?;
                 let item_value = checked_payload_value(&value)?;
-                if values.insert(key_value.clone(), item_value).is_some() {
+                if !seen.insert(key_value.clone()) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
                         key_value.label()
                     )));
                 }
+                values.push(ArtifactMapEntry {
+                    key: key_value,
+                    value: item_value,
+                });
             }
             Ok(CheckedPayloadValue::new(
                 ty.clone(),

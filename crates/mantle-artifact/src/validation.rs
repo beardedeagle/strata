@@ -90,10 +90,10 @@ pub fn validate_state_value_label(value: &str) -> Result<()> {
 
 pub fn validate_state_value_identity_label(value: &ArtifactValue, label: &str) -> Result<()> {
     validate_state_value_label(label)?;
-    let canonical = value.label();
-    if label != canonical {
+    let expected_label = value.label();
+    if label != expected_label {
         return Err(Error::new(format!(
-            "state value label {label} does not match canonical value label {canonical}"
+            "state value label {label} does not match ordered value label {expected_label}"
         )));
     }
     Ok(())

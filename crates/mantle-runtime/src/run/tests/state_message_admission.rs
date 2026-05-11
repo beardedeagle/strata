@@ -68,7 +68,7 @@ fn runtime_rejects_loaded_state_value_label_mismatch_before_artifact_loaded() {
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process Main state value label Spoofed does not match canonical value label MainState",
+        "process Main state value label Spoofed does not match ordered value label MainState",
     );
 }
 

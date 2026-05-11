@@ -11,8 +11,9 @@ mod process_validation;
 mod value_template;
 
 pub use value_template::{
-    ArtifactPayload, ArtifactProcessRefPayload, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MapProjectionMode,
+    ArtifactMapEntry, ArtifactPayload, ArtifactProcessRefPayload, ArtifactRecordField,
+    ArtifactValue, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, MapProjectionMode,
 };
 
 use crate::{

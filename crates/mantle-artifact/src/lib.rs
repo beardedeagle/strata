@@ -9,11 +9,11 @@ mod io;
 mod validation;
 
 pub use artifact::{
-    ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
-    ArtifactProcessRef, ArtifactProcessRefPayload, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode,
-    NextState, StepResult,
+    ArtifactAction, ArtifactEffect, ArtifactMapEntry, ArtifactMessageVariant, ArtifactPayload,
+    ArtifactProcess, ArtifactProcessRef, ArtifactProcessRefPayload, ArtifactRecordField,
+    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind,
+    ArtifactValue, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode, NextState, StepResult,
 };
 pub use constants::*;
 pub use error::{Error, Result};

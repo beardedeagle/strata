@@ -1,5 +1,4 @@
 use super::support::*;
-use std::collections::BTreeMap;
 
 #[test]
 fn validate_accepts_language_neutral_source_language() {
@@ -52,13 +51,13 @@ fn validate_accepts_structured_state_value_labels() {
 }
 
 #[test]
-fn artifact_state_value_rejects_non_canonical_label() {
+fn artifact_state_value_rejects_mismatched_ordered_label() {
     let err = ArtifactStateValue::with_label(MAIN_STATE, artifact_value("MainState"), "Spoofed")
         .expect_err("state labels must match typed state values");
 
     assert!(
         err.to_string()
-            .contains("state value label Spoofed does not match canonical value label MainState"),
+            .contains("state value label Spoofed does not match ordered value label MainState"),
         "unexpected error: {err}"
     );
 }
@@ -162,10 +161,24 @@ fn artifact_value_parse_rejects_empty_record_values() {
 }
 
 #[test]
+fn artifact_value_labels_preserve_record_and_map_entry_order() {
+    let record = ArtifactValue::parse("MainState{signature:WarmReady,body:WarmReady}")
+        .expect("ordered record value should parse");
+    assert_eq!(
+        record.label(),
+        "MainState{signature:WarmReady,body:WarmReady}"
+    );
+
+    let map = ArtifactValue::parse("Map[Ready=>Done,Done=>Ready]")
+        .expect("ordered map value should parse");
+    assert_eq!(map.label(), "Map[Ready=>Done,Done=>Ready]");
+}
+
+#[test]
 fn artifact_value_validate_rejects_empty_record_shape() {
     let value = ArtifactValue::Record {
         constructor: "MainState".to_string(),
-        fields: BTreeMap::new(),
+        fields: Vec::new(),
     };
 
     let err = value
@@ -180,12 +193,62 @@ fn artifact_value_validate_rejects_empty_record_shape() {
 }
 
 #[test]
+fn artifact_value_validate_rejects_programmatic_duplicate_record_fields() {
+    let value = ArtifactValue::Record {
+        constructor: "MainState".to_string(),
+        fields: vec![
+            ArtifactRecordField {
+                name: "phase".to_string(),
+                value: artifact_value("Ready"),
+            },
+            ArtifactRecordField {
+                name: "phase".to_string(),
+                value: artifact_value("Done"),
+            },
+        ],
+    };
+
+    let err = value
+        .validate("record value")
+        .expect_err("programmatic duplicate record fields must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("record value duplicates field phase"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn projection_helpers_reject_duplicate_map_keys() {
     let err = ArtifactValue::parse("Map[Ready=>Ready,Ready=>Done]")
         .expect_err("duplicate map keys must fail closed");
 
     assert!(
         err.to_string().contains("duplicates key Ready"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn artifact_value_validate_rejects_programmatic_duplicate_map_keys() {
+    let value = ArtifactValue::Map(vec![
+        ArtifactMapEntry {
+            key: artifact_value("Ready"),
+            value: artifact_value("Ready"),
+        },
+        ArtifactMapEntry {
+            key: artifact_value("Ready"),
+            value: artifact_value("Done"),
+        },
+    ]);
+
+    let err = value
+        .validate("map value")
+        .expect_err("programmatic duplicate map keys must fail closed");
+
+    assert!(
+        err.to_string().contains("map value duplicates key Ready"),
         "unexpected error: {err}"
     );
 }
@@ -227,7 +290,7 @@ fn artifact_value_validate_rejects_invalid_shape_before_materializing_label() {
 }
 
 #[test]
-fn validate_rejects_programmatic_state_value_label_mismatch() {
+fn validate_rejects_programmatic_state_value_ordered_label_mismatch() {
     let mut artifact = valid_artifact();
     artifact.processes[0].state_values[0] = ArtifactStateValue {
         ty: MAIN_STATE,
@@ -242,7 +305,7 @@ fn validate_rejects_programmatic_state_value_label_mismatch() {
 
     assert!(
         err.to_string()
-            .contains("state value label Spoofed does not match canonical value label MainState"),
+            .contains("state value label Spoofed does not match ordered value label MainState"),
         "unexpected error: {err}"
     );
 }
@@ -274,7 +337,7 @@ fn validate_rejects_programmatic_empty_record_state_value_shape() {
     let mut artifact = valid_artifact();
     let invalid = ArtifactValue::Record {
         constructor: "MainState".to_string(),
-        fields: BTreeMap::new(),
+        fields: Vec::new(),
     };
     artifact.processes[0].state_values[0] = ArtifactStateValue {
         ty: MAIN_STATE,

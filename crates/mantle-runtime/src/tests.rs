@@ -467,7 +467,7 @@ fn runtime_rejects_state_value_label_mismatch_before_trace() {
         .expect_err("state label mismatch should fail before runtime trace");
 
     assert!(err.to_string().contains(
-        "state value label WorkerState{job:Job{phase:Ready}} does not match canonical value label WorkerState{job:Job{phase:Spoofed}}"
+        "state value label WorkerState{job:Job{phase:Ready}} does not match ordered value label WorkerState{job:Job{phase:Spoofed}}"
     ));
     assert!(
         host.events().is_empty(),

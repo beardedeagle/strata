@@ -54,12 +54,13 @@ Artifact type identity is carried by a Mantle type table. Process
 labels are metadata only; Mantle does not parse source type strings such as
 process-reference spellings to decide runtime behavior.
 
-State value tables carry a type ID, typed value identity, canonical value label,
+State value tables carry a type ID, typed value identity, ordered value label,
 and optional typed payload metadata for each admitted state. The label must match
-the canonical rendering of the typed value. Mantle admission and runtime
-next-state resolution use the type ID and value identity. State-match payload
-templates use the admitted current state's typed payload metadata. Labels remain
-trace and diagnostic metadata, not runtime dispatch keys.
+the rendering of the typed value, preserving record field and map entry order
+from the admitted value. Mantle admission and runtime next-state resolution use
+the type ID and value identity. State-match payload templates use the admitted
+current state's typed payload metadata. Labels remain trace and diagnostic
+metadata, not runtime dispatch keys.
 
 Process references are encoded as per-process reference tables. A spawn action
 binds a process-reference ID to a runtime process instance for the transition.

@@ -30,7 +30,7 @@ fn parses_checks_and_lowers_source_functions_with_pattern_matching() {
     let worker = &checked.processes()[1];
     assert_eq!(
         checked_state_labels(main),
-        ["MainState{body:WarmReady,signature:WarmReady}"]
+        ["MainState{signature:WarmReady,body:WarmReady}"]
     );
     assert_eq!(
         checked_state_labels(worker),
@@ -48,7 +48,7 @@ fn parses_checks_and_lowers_source_functions_with_pattern_matching() {
         lower_to_artifact(&checked, FUNCTION_MATCH).expect("function match should lower");
     assert_eq!(
         artifact_state_labels(&artifact.processes[0]),
-        ["MainState{body:WarmReady,signature:WarmReady}"]
+        ["MainState{signature:WarmReady,body:WarmReady}"]
     );
     assert_eq!(
         artifact_state_labels(&artifact.processes[1]),
@@ -83,7 +83,7 @@ fn parses_checks_and_lowers_source_functions_with_payload_matching() {
     let worker = &checked.processes()[1];
     assert_eq!(
         checked_state_labels(main),
-        ["MainState{body:Active(Job{phase:Done}),signature:Active(Job{phase:Ready})}"]
+        ["MainState{signature:Active(Job{phase:Ready}),body:Active(Job{phase:Done})}"]
     );
     assert_eq!(
         checked_state_labels(worker),
@@ -101,7 +101,7 @@ fn parses_checks_and_lowers_source_functions_with_payload_matching() {
         .expect("function payload match should lower");
     assert_eq!(
         artifact_state_labels(&artifact.processes[0]),
-        ["MainState{body:Active(Job{phase:Done}),signature:Active(Job{phase:Ready})}"]
+        ["MainState{signature:Active(Job{phase:Ready}),body:Active(Job{phase:Done})}"]
     );
     assert_eq!(
         artifact_state_labels(&artifact.processes[1]),
