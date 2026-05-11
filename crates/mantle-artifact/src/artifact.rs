@@ -4,7 +4,7 @@ use std::fmt;
 use crate::validation::{
     validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
     validate_source_hash, validate_state_value_identity_label,
-    validate_unique_message_variant_list, validate_unique_state_value_list, validate_value_label,
+    validate_unique_message_variant_list, validate_unique_state_value_list,
 };
 mod codec;
 mod process_validation;
