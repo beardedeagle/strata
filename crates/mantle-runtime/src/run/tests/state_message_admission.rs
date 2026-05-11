@@ -243,7 +243,7 @@ fn runtime_rejects_loaded_unsorted_map_projection_keys_before_artifact_loaded() 
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "next_state_template expected map keys must be sorted",
+        "next_state_template expected map keys must be sorted canonically",
     );
 }
 

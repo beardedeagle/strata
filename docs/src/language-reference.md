@@ -165,9 +165,16 @@ Map[Ready => selected]     // exact key set
 Map[Ready => selected, ..] // Ready must exist; extra keys are allowed
 ```
 
-Overlapping subset map patterns are rejected instead of relying on source order.
+Overlapping exact and subset map patterns are rejected instead of relying on
+source order or specificity. Subset overlap is capacity-aware: two subset
+patterns overlap when one bounded map can contain both required key sets.
 Runtime-bound map value keys must be static source values in this slice;
 dynamic-key dictionaries remain deferred.
+
+Record field order and map entry order are preserved in source-authored values,
+emitted artifact values, labels, and traces. Projection still addresses map
+entries by key, and this slice does not expose source-level map iteration or
+order-dependent dispatch.
 
 ## Enums
 

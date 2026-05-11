@@ -912,7 +912,7 @@ fn validate_projection_keys(
     }
     if seen.into_iter().collect::<Vec<_>>() != keys {
         return Err(Error::new(format!(
-            "{field} expected map keys must be sorted"
+            "{field} expected map keys must be sorted canonically"
         )));
     }
     Ok(())
