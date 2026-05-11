@@ -1,4 +1,5 @@
 use super::support::*;
+use std::collections::BTreeMap;
 
 #[test]
 fn validate_accepts_language_neutral_source_language() {
@@ -124,6 +125,37 @@ fn projection_helpers_reject_duplicate_record_fields() {
 }
 
 #[test]
+fn artifact_value_parse_rejects_empty_record_values() {
+    let err =
+        ArtifactValue::parse("MainState{}").expect_err("empty record values must use atom syntax");
+
+    assert!(
+        err.to_string().contains(
+            "fieldless record values use MainState; braced record values must declare at least one field"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn artifact_value_validate_rejects_empty_record_shape() {
+    let value = ArtifactValue::Record {
+        constructor: "MainState".to_string(),
+        fields: BTreeMap::new(),
+    };
+
+    let err = value
+        .validate("empty record")
+        .expect_err("programmatic empty record values must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("empty record.field_count must be greater than zero"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn projection_helpers_reject_duplicate_map_keys() {
     let err = ArtifactValue::parse("Map[Ready=>Ready,Ready=>Done]")
         .expect_err("duplicate map keys must fail closed");
@@ -188,6 +220,31 @@ fn validate_rejects_programmatic_invalid_state_value_shape() {
     assert!(
         err.to_string()
             .contains("artifact field state value must be an identifier"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn validate_rejects_programmatic_empty_record_state_value_shape() {
+    let mut artifact = valid_artifact();
+    let invalid = ArtifactValue::Record {
+        constructor: "MainState".to_string(),
+        fields: BTreeMap::new(),
+    };
+    artifact.processes[0].state_values[0] = ArtifactStateValue {
+        ty: MAIN_STATE,
+        value: invalid,
+        label: "MainState{}".to_string(),
+        payload: None,
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("empty record state value should fail artifact validation");
+
+    assert!(
+        err.to_string()
+            .contains("state value.field_count must be greater than zero"),
         "unexpected error: {err}"
     );
 }

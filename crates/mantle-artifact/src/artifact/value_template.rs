@@ -91,7 +91,7 @@ impl ArtifactValue {
                 validate_count(
                     &format!("{field}.field_count"),
                     fields.len(),
-                    0,
+                    1,
                     MAX_VALUE_TEMPLATE_FIELDS,
                 )?;
                 for (name, value) in fields {
@@ -901,29 +901,32 @@ fn parse_value(label: &str, depth: usize) -> Result<ArtifactValue> {
 
 fn parse_record(constructor: &str, body: &str, depth: usize) -> Result<ArtifactValue> {
     let mut fields = BTreeMap::new();
-    if !body.is_empty() {
-        let parts = split_top_level(body, ',')?;
-        if parts.len() > MAX_VALUE_TEMPLATE_FIELDS {
+    if body.is_empty() {
+        return Err(Error::new(format!(
+            "fieldless record values use {constructor}; braced record values must declare at least one field"
+        )));
+    }
+    let parts = split_top_level(body, ',')?;
+    if parts.len() > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "record value {constructor}{{{body}}} field count exceeds {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    for part in parts {
+        let index = top_level_char(part, ':').ok_or_else(|| {
+            Error::new(format!(
+                "record value {constructor}{{{body}}} contains malformed field"
+            ))
+        })?;
+        let name = &part[..index];
+        validate_ident_field("artifact record field", name)?;
+        if fields
+            .insert(name.to_string(), parse_value(&part[index + 1..], depth)?)
+            .is_some()
+        {
             return Err(Error::new(format!(
-                "record value {constructor}{{{body}}} field count exceeds {MAX_VALUE_TEMPLATE_FIELDS}"
+                "record value {constructor}{{{body}}} duplicates field {name}"
             )));
-        }
-        for part in parts {
-            let index = top_level_char(part, ':').ok_or_else(|| {
-                Error::new(format!(
-                    "record value {constructor}{{{body}}} contains malformed field"
-                ))
-            })?;
-            let name = &part[..index];
-            validate_ident_field("artifact record field", name)?;
-            if fields
-                .insert(name.to_string(), parse_value(&part[index + 1..], depth)?)
-                .is_some()
-            {
-                return Err(Error::new(format!(
-                    "record value {constructor}{{{body}}} duplicates field {name}"
-                )));
-            }
         }
     }
     Ok(ArtifactValue::Record {
