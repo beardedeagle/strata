@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use crate::{
     ARTIFACT_MAGIC, ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTypeKind, ArtifactValueTemplate, Error, MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES,
-    MAX_IDENTIFIER_BYTES, MantleArtifact, NextState, Result, TypeId,
+    ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate, Error, MAX_ARTIFACT_BYTES,
+    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MantleArtifact, NextState, Result, TypeId,
 };
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
@@ -60,12 +60,12 @@ pub(crate) fn validate_unique_state_value_list(values: &[ArtifactStateValue]) ->
     }
     let mut seen = BTreeSet::new();
     for value in values {
-        validate_value_label("state value", &value.value)?;
-        validate_state_value_label(&value.label)?;
-        if !seen.insert((value.ty, value.value.as_str())) {
+        value.value.validate_without_process_ref("state value")?;
+        validate_state_value_identity_label(&value.value, &value.label)?;
+        if !seen.insert((value.ty, value.value.clone())) {
             return Err(Error::new(format!(
                 "duplicate state value {} with type id {}",
-                value.value,
+                value.value.label(),
                 value.ty.as_u32()
             )));
         }
@@ -73,7 +73,7 @@ pub(crate) fn validate_unique_state_value_list(values: &[ArtifactStateValue]) ->
     Ok(())
 }
 
-/// Validates display metadata labels used for artifact state values.
+/// Validates metadata labels used for artifact state values.
 pub fn validate_state_value_label(value: &str) -> Result<()> {
     if value.len() > MAX_FIELD_VALUE_BYTES {
         return Err(Error::new(format!(
@@ -84,6 +84,17 @@ pub fn validate_state_value_label(value: &str) -> Result<()> {
         return Err(Error::new(
             "state values must be non-empty and contain no control characters",
         ));
+    }
+    Ok(())
+}
+
+pub fn validate_state_value_identity_label(value: &ArtifactValue, label: &str) -> Result<()> {
+    validate_state_value_label(label)?;
+    let expected_label = value.label();
+    if label != expected_label {
+        return Err(Error::new(format!(
+            "state value label {label} does not match ordered value label {expected_label}"
+        )));
     }
     Ok(())
 }
@@ -203,7 +214,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
             add_field_bytes(
                 &mut encoded_len,
                 &format!("{value_prefix}.value"),
-                &value.value,
+                &value.value.label(),
             )?;
             add_field_bytes(
                 &mut encoded_len,
@@ -219,7 +230,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                 add_field_bytes(
                     &mut encoded_len,
                     &format!("{value_prefix}.payload_value"),
-                    &payload.value,
+                    &payload.value.label(),
                 )?;
             }
         }
@@ -458,7 +469,7 @@ fn add_value_template_bytes(
         ArtifactValueTemplate::Literal { ty, value } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "literal")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.value"), value)?;
+            add_field_bytes(total, &format!("{prefix}.value"), &value.label())?;
         }
         ArtifactValueTemplate::ReceivedPayload { ty } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "received_payload")?;
@@ -486,10 +497,17 @@ fn add_value_template_bytes(
             add_field_bytes(total, &format!("{prefix}.len"), &len.to_string())?;
             add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
         }
-        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+        ArtifactValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "map_value")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.key"), key)?;
+            add_field_bytes(total, &format!("{prefix}.key"), &key.label())?;
+            add_field_bytes(total, &format!("{prefix}.projection"), projection.as_str())?;
             add_field_bytes(
                 total,
                 &format!("{prefix}.key_count"),
@@ -499,7 +517,7 @@ fn add_value_template_bytes(
                 add_field_bytes(
                     total,
                     &format!("{prefix}.expected_key.{key_index}"),
-                    expected_key,
+                    &expected_key.label(),
                 )?;
             }
             add_value_template_bytes(total, &format!("{prefix}.map"), map)?;

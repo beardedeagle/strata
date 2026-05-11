@@ -224,13 +224,13 @@ fn hex_digit(value: u32) -> char {
     }
 }
 
-fn payload_json(payload: &Option<mantle_artifact::ArtifactPayload>) -> String {
+fn payload_json(payload: &Option<crate::program::RuntimePayload>) -> String {
     match payload {
         Some(payload) => {
             let mut json = format!(
                 ",\"payload_type_id\":{},\"payload\":\"{}\"",
                 payload.ty.as_u32(),
-                json_escape(&payload.value)
+                json_escape(payload.label())
             );
             if let Some(process_ref) = payload.process_ref {
                 json.push_str(&format!(

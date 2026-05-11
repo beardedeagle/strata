@@ -26,12 +26,87 @@ pub(super) fn validate_action_references(
 ) -> Result<()> {
     for (process_index, process) in processes.iter().enumerate() {
         let process_id = CheckedProcessId::from_index(process_index)?;
+        validate_checked_state_table(process)?;
         for transition in process.transitions() {
             validate_transition(processes, process, process_id, *entry_process, transition)?;
         }
         validate_transition_coverage(process)?;
     }
     validate_static_runtime_order(processes, *entry_process, *entry_message)?;
+    Ok(())
+}
+
+fn validate_checked_state_table(process: &CheckedProcess) -> Result<()> {
+    if process.state_values().is_empty() {
+        return Err(Error::new(format!(
+            "process {} state_value_count must be greater than zero",
+            process.debug_name()
+        )));
+    }
+    if process.init_state().index() >= process.state_values().len() {
+        return Err(Error::new(format!(
+            "process {} init_state id {} is not a valid state value",
+            process.debug_name(),
+            process.init_state().as_u32()
+        )));
+    }
+
+    let mut states = BTreeSet::new();
+    for state in process.state_values() {
+        if state.ty() != process.state_type() {
+            return Err(Error::new(format!(
+                "process {} state value {} has type {}, expected {}",
+                process.debug_name(),
+                state.label(),
+                state.ty(),
+                process.state_type()
+            )));
+        }
+        state
+            .value()
+            .validate("state value")
+            .map_err(|err| Error::new(err.to_string()))?;
+        if state.value().contains_process_ref() {
+            return Err(Error::new(format!(
+                "process {} state value {} carries a process reference value",
+                process.debug_name(),
+                state.label()
+            )));
+        }
+        if let Some(payload) = state.payload() {
+            if payload.process_ref_payload().is_some() {
+                return Err(Error::new(format!(
+                    "process {} state value {} carries a process reference payload",
+                    process.debug_name(),
+                    state.label()
+                )));
+            }
+            let value = payload.value().ok_or_else(|| {
+                Error::new(format!(
+                    "process {} state value {} carries a process reference payload",
+                    process.debug_name(),
+                    state.label()
+                ))
+            })?;
+            value
+                .validate("state value payload")
+                .map_err(|err| Error::new(err.to_string()))?;
+            if value.contains_process_ref() {
+                return Err(Error::new(format!(
+                    "process {} state value {} carries a process reference payload",
+                    process.debug_name(),
+                    state.label()
+                )));
+            }
+        }
+        if !states.insert((state.ty().id(), state.value().clone())) {
+            return Err(Error::new(format!(
+                "process {} declares duplicate state value {}",
+                process.debug_name(),
+                state.label()
+            )));
+        }
+    }
     Ok(())
 }
 

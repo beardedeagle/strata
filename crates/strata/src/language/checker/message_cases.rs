@@ -248,7 +248,8 @@ struct MessageCaseBuilder<'a> {
     semantic_index: &'a SemanticIndex,
     process: &'a Process,
     process_id: CheckedProcessId,
-    payload_cases: BTreeMap<CheckedMessageVariantId, BTreeMap<String, CheckedPayloadValue>>,
+    payload_cases:
+        BTreeMap<CheckedMessageVariantId, BTreeMap<PayloadDomainKey, CheckedPayloadValue>>,
 }
 
 impl<'a> MessageCaseBuilder<'a> {
@@ -317,27 +318,29 @@ impl<'a> MessageCaseBuilder<'a> {
                     &source_bindings,
                     0,
                 )?;
-                let label = if let Some(target) =
+                let checked_type = types.intern(payload_type)?;
+                let payload = if let Some(target) =
                     self.semantic_index.process_ref_target_type(payload_type)?
                 {
-                    canonical_process_ref_payload_label(
+                    let label = canonical_process_ref_payload_label(
                         payload_type,
                         target,
                         &payload,
                         bindings,
                         process_refs,
-                    )?
+                    )?;
+                    CheckedPayloadValue::process_ref(checked_type, label, target, 0)
                 } else {
-                    canonical_source_value_with_bindings(
+                    let value = canonical_source_value_with_bindings(
                         self.module,
                         self.semantic_index,
                         payload_type,
                         &payload,
                         bindings,
-                    )?
+                    )?;
+                    CheckedPayloadValue::new(checked_type, value)
                 };
-                let checked_type = types.intern(payload_type)?;
-                Ok(self.insert_payload_case(variant_id, checked_type, label))
+                Ok(self.insert_payload_case(variant_id, payload))
             }
         }
     }
@@ -345,14 +348,14 @@ impl<'a> MessageCaseBuilder<'a> {
     fn insert_payload_case(
         &mut self,
         variant_id: CheckedMessageVariantId,
-        payload_type: CheckedTypeRef,
-        label: String,
+        payload: CheckedPayloadValue,
     ) -> bool {
         let payloads = self.payload_cases.entry(variant_id).or_default();
-        if payloads.contains_key(&label) {
+        let key = PayloadDomainKey::from_payload(&payload);
+        if payloads.contains_key(&key) {
             return false;
         }
-        payloads.insert(label.clone(), CheckedPayloadValue::new(payload_type, label));
+        payloads.insert(key, payload);
         true
     }
 
@@ -440,6 +443,7 @@ fn add_discovered_send_payload_cases(
         state_payload_bindings,
         context.sender_cases,
         context.concrete_state_payloads,
+        builder.semantic_index,
         context.types,
     )? {
         let value_bindings = value_bindings_from_discovery(&bindings);
@@ -459,7 +463,8 @@ fn discovery_value_binding_sets(
     message_bindings: &[DiscoveryValueBinding],
     state_payload_bindings: &[StatePayloadDiscoveryBinding],
     sender_cases: &[DiscoveredMessageCase],
-    concrete_state_payloads: &BTreeMap<String, BTreeSet<String>>,
+    concrete_state_payloads: &[ConcreteStatePayloadDomain],
+    semantic_index: &SemanticIndex,
     types: &mut CheckedTypeInterner<'_>,
 ) -> Result<Vec<Vec<DiscoveryValueBinding>>> {
     let Some(payload) = payload else {
@@ -470,8 +475,13 @@ fn discovery_value_binding_sets(
         if !source_value_uses_binding(payload, &binding.name) {
             continue;
         }
-        let payloads =
-            state_payload_discovery_values(binding, sender_cases, concrete_state_payloads, types)?;
+        let payloads = state_payload_discovery_values(
+            binding,
+            sender_cases,
+            concrete_state_payloads,
+            semantic_index,
+            types,
+        )?;
         if payloads.is_empty() {
             return Ok(Vec::new());
         }
@@ -479,24 +489,33 @@ fn discovery_value_binding_sets(
         for base in &binding_sets {
             for payload in &payloads {
                 let mut next = base.clone();
+                let (label, value) = checked_payload_binding(
+                    payload,
+                    &PatternPayloadParam {
+                        name: binding.name.clone(),
+                        ty: binding.ty.clone(),
+                        path: binding.path.clone(),
+                    },
+                )?
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "state payload {} does not match binding {}",
+                        payload.label(),
+                        binding.name
+                    ))
+                })?;
+                let value = value.ok_or_else(|| {
+                    Error::new(format!(
+                        "state payload {} does not match binding {}",
+                        payload.label(),
+                        binding.name
+                    ))
+                })?;
                 next.push(DiscoveryValueBinding {
                     name: binding.name.clone(),
                     ty: binding.ty.clone(),
-                    label: payload_binding_label(
-                        payload.label(),
-                        &PatternPayloadParam {
-                            name: binding.name.clone(),
-                            ty: binding.ty.clone(),
-                            path: binding.path.clone(),
-                        },
-                    )?
-                    .ok_or_else(|| {
-                        Error::new(format!(
-                            "state payload {} does not match binding {}",
-                            payload.label(),
-                            binding.name
-                        ))
-                    })?,
+                    label,
+                    value: Some(value),
                 });
                 expanded.push(next);
             }
@@ -509,25 +528,27 @@ fn discovery_value_binding_sets(
 fn state_payload_discovery_values(
     binding: &StatePayloadDiscoveryBinding,
     sender_cases: &[DiscoveredMessageCase],
-    concrete_state_payloads: &BTreeMap<String, BTreeSet<String>>,
+    concrete_state_payloads: &[ConcreteStatePayloadDomain],
+    semantic_index: &SemanticIndex,
     types: &mut CheckedTypeInterner<'_>,
 ) -> Result<Vec<CheckedPayloadValue>> {
     let checked_ty = types.intern(&binding.payload_ty)?;
-    let mut payloads = BTreeMap::new();
-    if let Some(concrete_payloads) = concrete_state_payloads.get(checked_ty.label()) {
-        for label in concrete_payloads {
-            payloads.insert(
-                label.clone(),
-                CheckedPayloadValue::new(checked_ty.clone(), label.clone()),
-            );
+    let mut payloads: BTreeMap<PayloadDomainKey, CheckedPayloadValue> = BTreeMap::new();
+    if let Some(domain) = concrete_state_payloads
+        .iter()
+        .find(|domain| semantic_index.same_type(&domain.ty, &binding.payload_ty))
+    {
+        for value in &domain.values {
+            let payload = CheckedPayloadValue::new(checked_ty.clone(), value.clone());
+            payloads.insert(PayloadDomainKey::from_payload(&payload), payload);
         }
     }
     for case in sender_cases {
         let Some(payload) = case.payload() else {
             continue;
         };
-        if payload.ty().label() == checked_ty.label() && payload.process_ref_payload().is_none() {
-            payloads.insert(payload.label().to_string(), payload.clone());
+        if payload.ty() == &checked_ty && payload.process_ref_payload().is_none() {
+            payloads.insert(PayloadDomainKey::from_payload(payload), payload.clone());
         }
     }
     Ok(payloads.into_values().collect())
@@ -539,7 +560,8 @@ fn value_bindings_from_discovery(bindings: &[DiscoveryValueBinding]) -> Vec<Valu
         .map(|binding| ValueBinding {
             name: &binding.name,
             ty: &binding.ty,
-            label: &binding.label,
+            label: binding.label.clone(),
+            value: binding.value.clone(),
         })
         .collect()
 }

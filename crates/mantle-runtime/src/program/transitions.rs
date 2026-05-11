@@ -59,7 +59,7 @@ pub(super) fn load_transitions(process: &ArtifactProcess) -> Result<Vec<LoadedTr
                     transition.message.as_u32()
                 )));
             }
-            Ok(LoadedTransition::from_artifact(transition))
+            LoadedTransition::from_artifact(transition)
         })
         .collect()
 }

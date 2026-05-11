@@ -3,17 +3,17 @@ use std::fmt;
 
 use crate::validation::{
     validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
-    validate_source_hash, validate_unique_message_variant_list, validate_unique_state_value_list,
-    validate_value_label,
+    validate_source_hash, validate_state_value_identity_label,
+    validate_unique_message_variant_list, validate_unique_state_value_list, validate_value_label,
 };
 mod codec;
 mod process_validation;
 mod value_template;
 
 pub use value_template::{
-    ArtifactPayload, ArtifactProcessRefPayload, ArtifactValueTemplate, ArtifactValueTemplateField,
-    ArtifactValueTemplateMapEntry, project_canonical_list_element, project_canonical_map_value,
-    project_canonical_record_field,
+    ArtifactMapEntry, ArtifactPayload, ArtifactProcessRefPayload, ArtifactRecordField,
+    ArtifactValue, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, MapProjectionMode,
 };
 
 use crate::{
@@ -366,29 +366,37 @@ impl ArtifactMessageVariant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactStateValue {
     pub ty: TypeId,
-    pub value: String,
+    pub value: ArtifactValue,
     pub label: String,
     pub payload: Option<ArtifactPayload>,
 }
 
 impl ArtifactStateValue {
-    pub fn new(ty: TypeId, value: impl Into<String>) -> Self {
-        let value = value.into();
-        Self {
-            ty,
-            label: value.clone(),
-            value,
-            payload: None,
-        }
+    pub fn new(ty: TypeId, value: ArtifactValue) -> Result<Self> {
+        Self::from_value(ty, value)
     }
 
-    pub fn with_label(ty: TypeId, value: impl Into<String>, label: impl Into<String>) -> Self {
-        Self {
+    pub fn with_label(ty: TypeId, value: ArtifactValue, label: impl AsRef<str>) -> Result<Self> {
+        let label = label.as_ref();
+        value.validate_without_process_ref("state value")?;
+        validate_state_value_identity_label(&value, label)?;
+        Ok(Self {
             ty,
-            value: value.into(),
-            label: label.into(),
+            value,
+            label: label.to_string(),
             payload: None,
-        }
+        })
+    }
+
+    pub fn from_value(ty: TypeId, value: ArtifactValue) -> Result<Self> {
+        value.validate_without_process_ref("state value")?;
+        let label = value.label();
+        Ok(Self {
+            ty,
+            value,
+            label,
+            payload: None,
+        })
     }
 
     fn has_same_identity(&self, other: &Self) -> bool {

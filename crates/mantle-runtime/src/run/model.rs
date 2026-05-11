@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
-use mantle_artifact::{ArtifactPayload, Error, MessageId, ProcessId, Result, StateId};
+use mantle_artifact::{Error, MessageId, ProcessId, Result, StateId};
 
 use crate::event::RuntimeProcessId;
-use crate::program::LoadedProgram;
+use crate::program::{LoadedProgram, RuntimePayload};
 use crate::report::ProcessStatus;
 
 pub(super) struct ProcessInstance {
@@ -53,11 +53,11 @@ pub(super) struct DequeuedMessage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeMessageEnvelope {
     pub(super) message: MessageId,
-    pub(super) payload: Option<ArtifactPayload>,
+    pub(super) payload: Option<RuntimePayload>,
 }
 
 impl RuntimeMessageEnvelope {
-    pub(super) fn new(message: MessageId, payload: Option<ArtifactPayload>) -> Self {
+    pub(super) fn new(message: MessageId, payload: Option<RuntimePayload>) -> Self {
         Self { message, payload }
     }
 
@@ -96,7 +96,7 @@ impl RuntimeMessageEnvelope {
 
     pub(super) fn display_label(&self, message_label: &str) -> String {
         match &self.payload {
-            Some(payload) => format!("{message_label}({})", payload.value),
+            Some(payload) => format!("{message_label}({})", payload.label()),
             None => message_label.to_string(),
         }
     }
@@ -109,7 +109,7 @@ pub(super) struct ActiveStep {
     pub(super) current_state: StateId,
     pub(super) message: MessageId,
     pub(super) message_label: String,
-    pub(super) payload: Option<ArtifactPayload>,
+    pub(super) payload: Option<RuntimePayload>,
 }
 
 impl ActiveStep {
@@ -155,7 +155,7 @@ impl ActiveStep {
     pub(super) fn current_state_payload<'program>(
         &self,
         program: &'program LoadedProgram,
-    ) -> Result<Option<&'program ArtifactPayload>> {
+    ) -> Result<Option<&'program RuntimePayload>> {
         let state_value = program
             .process(self.process_id)?
             .state_values

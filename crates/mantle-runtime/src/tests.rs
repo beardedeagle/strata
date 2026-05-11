@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
     ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType,
+    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue,
     ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact, MessageId, NextState,
     OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, write_artifact,
 };
@@ -369,11 +369,9 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
 #[test]
 fn in_memory_host_delivers_payload_envelopes_and_template_state() {
     let artifact = payload_artifact();
-    let expected_payload = ArtifactPayload {
-        ty: JOB,
-        value: "Job{phase:Ready}".to_string(),
-        process_ref: None,
-    };
+    let expected_payload =
+        RuntimePayload::from_artifact(&artifact_payload(JOB, "Job{phase:Ready}"))
+            .expect("expected payload should load");
     let mut host = InMemoryRuntimeHost::default();
 
     let report = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
@@ -455,24 +453,25 @@ fn runtime_preflights_template_state_before_process_outputs() {
 }
 
 #[test]
-fn runtime_rejects_template_state_when_label_matches_but_identity_does_not() {
+fn runtime_rejects_state_value_label_mismatch_before_trace() {
     let mut artifact = payload_artifact();
-    artifact.processes[1].state_values[1] = ArtifactStateValue::with_label(
-        WORKER_STATE,
-        "WorkerState{job:Job{phase:Spoofed}}",
-        "WorkerState{job:Job{phase:Ready}}",
-    );
+    artifact.processes[1].state_values[1] = ArtifactStateValue {
+        ty: WORKER_STATE,
+        value: artifact_value("WorkerState{job:Job{phase:Spoofed}}"),
+        label: "WorkerState{job:Job{phase:Ready}}".to_string(),
+        payload: None,
+    };
     let mut host = InMemoryRuntimeHost::default();
 
     let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
-        .expect_err("typed state identity mismatch should fail");
+        .expect_err("state label mismatch should fail before runtime trace");
 
     assert!(err.to_string().contains(
-        "process Worker next_state template produced value WorkerState{job:Job{phase:Ready}} not admitted by state table"
+        "state value label WorkerState{job:Job{phase:Ready}} does not match ordered value label WorkerState{job:Job{phase:Spoofed}}"
     ));
     assert!(
-        host.stdout().is_empty(),
-        "worker output must not be emitted after invalid typed state identity"
+        host.events().is_empty(),
+        "state label mismatch must fail before ArtifactLoaded"
     );
 }
 
@@ -578,18 +577,9 @@ fn loaded_program_rejects_transition_current_state_outside_state_table() {
 #[test]
 fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
     let mut artifact = valid_artifact();
-    let mut working = ArtifactStateValue::with_label(
-        WORKER_STATE,
-        "Working(Job{phase:Ready})",
-        "Working(Job{phase:Ready})",
-    );
-    working.payload = Some(ArtifactPayload {
-        ty: JOB,
-        value: "Job{phase:Ready}".to_string(),
-        process_ref: None,
-    });
-    artifact.processes[1].state_values =
-        vec![ArtifactStateValue::new(WORKER_STATE, "Idle"), working];
+    let mut working = state_value(WORKER_STATE, "Working(Job{phase:Ready})");
+    working.payload = Some(artifact_payload(JOB, "Job{phase:Ready}"));
+    artifact.processes[1].state_values = vec![state_value(WORKER_STATE, "Idle"), working];
     artifact.processes[1].transitions = vec![
         ArtifactTransition {
             current_state: Some(StateId::new(0)),
@@ -800,7 +790,7 @@ fn payload_artifact() -> MantleArtifact {
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
-            value: "Job{phase:Ready}".to_string(),
+            value: artifact_value("Job{phase:Ready}"),
         }),
     };
     artifact.processes[1].state_type = WORKER_STATE;
@@ -1044,10 +1034,20 @@ fn base_types() -> Vec<ArtifactType> {
 }
 
 fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {
-    values
-        .iter()
-        .map(|value| ArtifactStateValue::new(ty, *value))
-        .collect()
+    values.iter().map(|value| state_value(ty, value)).collect()
+}
+
+fn artifact_value(value: &str) -> ArtifactValue {
+    ArtifactValue::parse(value).expect("test artifact value should be valid")
+}
+
+fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {
+    ArtifactStateValue::new(ty, artifact_value(value)).expect("test state value should be valid")
+}
+
+fn artifact_payload(ty: TypeId, value: &str) -> ArtifactPayload {
+    ArtifactPayload::value(ty, artifact_value(value))
+        .expect("test artifact payload should be valid")
 }
 
 fn unique_test_dir(name: &str) -> PathBuf {

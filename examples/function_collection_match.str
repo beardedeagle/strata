@@ -33,9 +33,9 @@ fn from_body(items: List<Phase,1>) -> Phase ! [] ~ [] @det {
     }
 }
 
-fn from_return(items: Map<Phase,Phase,1>) -> Phase ! [] ~ [] @det {
+fn from_return(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
     return match items {
-        Map[Ready => selected] => {
+        Map[Ready => selected, ..] => {
             return selected;
         }
         _ => {
@@ -50,7 +50,7 @@ proc Main mailbox bounded(1) {
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState {
-            selected: from_return(Map<Phase,Phase,1>[Ready => from_body(List<Phase,1>[first(List<Phase,2>[Ready, Done])])]),
+            selected: from_return(Map<Phase,Phase,2>[Ready => from_body(List<Phase,1>[first(List<Phase,2>[Ready, Done])]), Unknown => Unknown]),
         };
     }
 

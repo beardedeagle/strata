@@ -31,7 +31,7 @@ fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
-            value: "Job".to_string(),
+            value: artifact_value("Job"),
         }),
     };
     artifact.processes[1].transitions[0].actions = vec![ArtifactAction::Send {
@@ -42,7 +42,7 @@ fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
-            value: "Job".to_string(),
+            value: artifact_value("Job"),
         }),
     }];
     artifact.processes[1].transitions[0].effects = vec![ArtifactEffect::Send];
@@ -185,7 +185,7 @@ fn validate_rejects_projected_process_ref_payload_template() {
             ty: PROCESS_REF_WORKER,
             record: Box::new(ArtifactValueTemplate::Literal {
                 ty: BOX,
-                value: "Box{reply_to:ProcessRef_Worker}".to_string(),
+                value: artifact_value("Box{reply_to:ProcessRef_Worker}"),
             }),
             field: "reply_to".to_string(),
         }),

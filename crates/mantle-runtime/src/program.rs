@@ -10,22 +10,28 @@ use templates::{
     loaded_template_depends_on_received_payload,
 };
 use transitions::{TransitionLookup, load_transitions, validate_loaded_transition_coverage};
+pub use values::RuntimePayload;
+pub(crate) use values::{
+    LoadedStateValue, LoadedValueTemplate, LoadedValueTemplateField, LoadedValueTemplateMapEntry,
+    RuntimeValue,
+};
 
 mod actions;
 mod admission;
 mod effects;
 mod templates;
 mod transitions;
+mod values;
 
 use mantle_artifact::{
     ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind,
-    ArtifactValueTemplate, Error, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
-    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
-    NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
-    validate_message_label, validate_payload_value_label, validate_state_value_label,
+    ArtifactSendTarget, ArtifactTransition, ArtifactType, ArtifactTypeKind, Error,
+    MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
+    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId, validate_message_label,
+    validate_state_value_identity_label,
 };
 
 #[derive(Debug, Clone)]
@@ -255,7 +261,7 @@ impl LoadedProgram {
 pub(crate) struct LoadedProcess {
     pub(crate) debug_name: String,
     pub(crate) state_type: TypeId,
-    pub(crate) state_values: Vec<ArtifactStateValue>,
+    pub(crate) state_values: Vec<LoadedStateValue>,
     pub(crate) message_variants: Vec<LoadedMessageVariant>,
     pub(crate) process_refs: Vec<LoadedProcessRef>,
     pub(crate) mailbox_bound: usize,
@@ -272,7 +278,11 @@ impl LoadedProcess {
         Ok(Self {
             debug_name: process.debug_name.clone(),
             state_type: process.state_type,
-            state_values: process.state_values.clone(),
+            state_values: process
+                .state_values
+                .iter()
+                .map(LoadedStateValue::from_artifact)
+                .collect::<Result<Vec<_>>>()?,
             message_variants: process
                 .message_variants
                 .iter()
@@ -399,12 +409,17 @@ impl LoadedProcess {
                         self.debug_name
                     ))
                 })?;
-            validate_state_value_label(&state.value).map_err(|err| {
+            state.value.validate("state value").map_err(|err| {
                 Error::new(format!("process {} state value: {err}", self.debug_name))
             })?;
-            validate_state_value_label(&state.label).map_err(|err| {
-                Error::new(format!("process {} state label: {err}", self.debug_name))
-            })?;
+            if state.value.contains_process_ref() {
+                return Err(Error::new(format!(
+                    "process {} state value {} carries a process reference value",
+                    self.debug_name, state.label
+                )));
+            }
+            validate_state_value_identity_label(&state.value, &state.label)
+                .map_err(|err| Error::new(format!("process {} {err}", self.debug_name)))?;
             if state.ty != self.state_type {
                 return Err(Error::new(format!(
                     "process {} loaded state value {} has type id {}, expected {}",
@@ -423,24 +438,27 @@ impl LoadedProcess {
                             self.debug_name
                         ))
                     })?;
-                validate_payload_value_label(&payload.value).map_err(|err| {
-                    Error::new(format!(
-                        "process {} state value payload: {err}",
-                        self.debug_name
-                    ))
-                })?;
-                if payload.process_ref.is_some() {
+                payload
+                    .value
+                    .validate("state value payload")
+                    .map_err(|err| {
+                        Error::new(format!(
+                            "process {} state value payload: {err}",
+                            self.debug_name
+                        ))
+                    })?;
+                if payload.process_ref.is_some() || payload.value.contains_process_ref() {
                     return Err(Error::new(format!(
                         "process {} state value {} carries a process reference payload",
                         self.debug_name, state.label
                     )));
                 }
             }
-            if !states.insert((state.ty, state.value.as_str())) {
+            if !states.insert((state.ty, state.value.clone())) {
                 return Err(Error::new(format!(
                     "process {} loads duplicate state value {} with type id {}",
                     self.debug_name,
-                    state.value,
+                    state.value.label(),
                     state.ty.as_u32()
                 )));
             }
@@ -556,25 +574,25 @@ pub(crate) struct LoadedTransition {
     pub(crate) current_state: Option<StateId>,
     pub(crate) message: MessageId,
     pub(crate) step_result: StepResult,
-    pub(crate) next_state: NextState,
+    pub(crate) next_state: LoadedNextState,
     pub(crate) effect_authority: LoadedEffectAuthority,
     pub(crate) actions: Vec<LoadedAction>,
 }
 
 impl LoadedTransition {
-    fn from_artifact(transition: &ArtifactTransition) -> Self {
-        Self {
+    fn from_artifact(transition: &ArtifactTransition) -> Result<Self> {
+        Ok(Self {
             current_state: transition.current_state,
             message: transition.message,
             step_result: transition.step_result,
-            next_state: transition.next_state.clone(),
+            next_state: LoadedNextState::from_artifact(&transition.next_state)?,
             effect_authority: LoadedEffectAuthority::from_artifact(&transition.effects),
             actions: transition
                 .actions
                 .iter()
                 .map(LoadedAction::from_artifact)
-                .collect(),
-        }
+                .collect::<Result<Vec<_>>>()?,
+        })
     }
 
     fn validate_admission(
@@ -607,8 +625,8 @@ impl LoadedTransition {
     ) -> Result<()> {
         let context = self.transition_context(message);
         match &self.next_state {
-            NextState::Current => Ok(()),
-            NextState::Value(state) => {
+            LoadedNextState::Current => Ok(()),
+            LoadedNextState::Value(state) => {
                 if state.index() >= process.state_values.len() {
                     return Err(Error::new(format!(
                         "process {} {} next_state id {} is not a loaded state value",
@@ -619,7 +637,7 @@ impl LoadedTransition {
                 }
                 Ok(())
             }
-            NextState::Template(template) => {
+            LoadedNextState::Template(template) => {
                 let received_payload_type = process.message_variants[message.index()].payload_type;
                 let current_state_payload_type =
                     transition_current_state_payload_type(process, self)?;
@@ -669,6 +687,25 @@ impl LoadedTransition {
                 current_state.as_u32()
             ),
             None => format!("message id {}", message.as_u32()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LoadedNextState {
+    Current,
+    Value(StateId),
+    Template(LoadedValueTemplate),
+}
+
+impl LoadedNextState {
+    pub(crate) fn from_artifact(next_state: &NextState) -> Result<Self> {
+        match next_state {
+            NextState::Current => Ok(Self::Current),
+            NextState::Value(state) => Ok(Self::Value(*state)),
+            NextState::Template(template) => Ok(Self::Template(
+                LoadedValueTemplate::from_artifact(template)?,
+            )),
         }
     }
 }

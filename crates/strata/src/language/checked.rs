@@ -1,6 +1,6 @@
 use std::fmt;
 
-use mantle_artifact::validate_message_label;
+use mantle_artifact::{ArtifactValue, MapProjectionMode, validate_message_label};
 
 use super::ast::{Effect, Identifier, Module};
 use super::diagnostic::{Error, Result};
@@ -169,14 +169,17 @@ pub(in crate::language) enum CheckedNextState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) struct CheckedPayloadValue {
     ty: CheckedTypeRef,
+    value: Option<ArtifactValue>,
     label: String,
     process_ref: Option<CheckedProcessRefPayload>,
 }
 
 impl CheckedPayloadValue {
-    pub(in crate::language) fn new(ty: CheckedTypeRef, label: String) -> Self {
+    pub(in crate::language) fn new(ty: CheckedTypeRef, value: ArtifactValue) -> Self {
+        let label = value.label();
         Self {
             ty,
+            value: Some(value),
             label,
             process_ref: None,
         }
@@ -190,6 +193,7 @@ impl CheckedPayloadValue {
     ) -> Self {
         Self {
             ty,
+            value: None,
             label,
             process_ref: Some(CheckedProcessRefPayload { target, pid }),
         }
@@ -203,6 +207,10 @@ impl CheckedPayloadValue {
         &self.label
     }
 
+    pub(in crate::language) fn value(&self) -> Option<&ArtifactValue> {
+        self.value.as_ref()
+    }
+
     pub(in crate::language) fn process_ref_payload(&self) -> Option<CheckedProcessRefPayload> {
         self.process_ref
     }
@@ -211,30 +219,32 @@ impl CheckedPayloadValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) struct CheckedStateValue {
     ty: CheckedTypeRef,
-    value: String,
+    value: ArtifactValue,
     label: String,
     payload: Option<CheckedPayloadValue>,
 }
 
 impl CheckedStateValue {
-    pub(in crate::language) fn new(ty: CheckedTypeRef, value: String) -> Self {
+    pub(in crate::language) fn new(ty: CheckedTypeRef, value: ArtifactValue) -> Self {
+        let label = value.label();
         Self {
             ty,
-            label: value.clone(),
             value,
+            label,
             payload: None,
         }
     }
 
     pub(in crate::language) fn enum_variant(
         ty: CheckedTypeRef,
-        value: String,
+        value: ArtifactValue,
         payload: Option<CheckedPayloadValue>,
     ) -> Self {
+        let label = value.label();
         Self {
             ty,
-            label: value.clone(),
             value,
+            label,
             payload,
         }
     }
@@ -243,7 +253,7 @@ impl CheckedStateValue {
         &self.ty
     }
 
-    pub(in crate::language) fn value(&self) -> &str {
+    pub(in crate::language) fn value(&self) -> &ArtifactValue {
         &self.value
     }
 
@@ -259,7 +269,10 @@ impl CheckedStateValue {
         &self,
         payload: &CheckedPayloadValue,
     ) -> bool {
-        self.ty == *payload.ty() && self.value == payload.label()
+        self.ty == *payload.ty()
+            && payload
+                .value()
+                .is_some_and(|payload_value| &self.value == payload_value)
     }
 }
 
@@ -302,8 +315,9 @@ pub(in crate::language) enum CheckedValueTemplate {
     MapValue {
         ty: CheckedTypeRef,
         map: Box<CheckedValueTemplate>,
-        key: String,
-        keys: Vec<String>,
+        key: ArtifactValue,
+        keys: Vec<ArtifactValue>,
+        projection: MapProjectionMode,
     },
     ProcessRef {
         ty: CheckedTypeRef,

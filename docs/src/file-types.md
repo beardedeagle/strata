@@ -29,14 +29,15 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=1
+schema_version=2
 source_language=strata
 ```
 
 The schema version identifies the admitted `.mta` encoding shape. It is not a
 Strata language release, a migration counter, or a stability guarantee. In the
-current greenfield implementation, `1` is the single admitted artifact schema
-baseline.
+current greenfield implementation, `2` is the single admitted artifact schema
+baseline. Older schema versions are rejected; artifact producers must rebuild
+for the admitted schema.
 
 Executable references, type identity, and state transitions inside `.mta` use
 validated table IDs and typed transition forms. Process transition records are
@@ -54,11 +55,14 @@ Artifact type identity is carried by a Mantle type table. Process
 labels are metadata only; Mantle does not parse source type strings such as
 process-reference spellings to decide runtime behavior.
 
-State value tables carry a type ID, typed value identity, display label, and
-optional typed payload metadata for each admitted state. Mantle admission and
-runtime next-state resolution use the type ID and value identity. State-match
-payload templates use the admitted current state's typed payload metadata.
-Labels remain trace and diagnostic metadata.
+State value tables carry a type ID, typed value identity, ordered value label,
+and optional typed payload metadata for each admitted state. The label must match
+the rendering of the typed value, preserving record field and map entry order
+from the admitted value. Mantle admission and runtime next-state resolution use
+the type ID and value identity. State-match payload templates use the admitted
+current state's typed payload metadata. Preserved order is visible in labels and
+traces, but runtime projection is key-based and dispatch uses admitted typed IDs.
+Labels remain trace and diagnostic metadata, not runtime dispatch keys.
 
 Process references are encoded as per-process reference tables. A spawn action
 binds a process-reference ID to a runtime process instance for the transition.

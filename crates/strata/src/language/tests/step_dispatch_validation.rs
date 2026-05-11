@@ -507,6 +507,63 @@ proc Worker mailbox bounded(1) {
 }
 
 #[test]
+fn rejects_exact_map_payload_step_pattern_extra_keys() {
+    let source = r#"
+module exact_map_payload_step_pattern_extra_keys;
+
+enum Phase {
+    Ready,
+    Done,
+}
+record MainState;
+record WorkerState;
+enum MainMsg {
+    Start,
+}
+enum WorkerMsg {
+    Lookup(Map<Phase,Phase,2>),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Lookup(Map<Phase,Phase,2>[Ready => Done, Done => Ready]);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Lookup(Map[Ready => phase])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("exact map payload extra keys should fail");
+
+    assert!(
+        err.to_string().contains(
+            "message payload Map[Ready=>Done,Done=>Ready] does not match pattern binding phase"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_mixed_parameter_pattern_and_match_dispatch() {
     let source = ACTOR_SEQUENCE.replace(
         r#"fn step(state: WorkerState, Second) -> ProcResult<WorkerState> ! [emit] ~ [] @det {

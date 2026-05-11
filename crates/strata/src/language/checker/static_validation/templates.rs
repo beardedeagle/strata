@@ -1,8 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use mantle_artifact::{
-    project_canonical_list_element, project_canonical_map_value, project_canonical_record_field,
-    validate_payload_value_label, validate_state_value_label,
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, MAX_VALUE_TEMPLATE_FIELDS,
 };
 
 use super::process_refs::{
@@ -11,6 +10,7 @@ use super::process_refs::{
 use crate::language::checked::{
     CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess, CheckedProcessRefId,
     CheckedStateId, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
+    CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
 use crate::language::diagnostic::{Error, Result};
 
@@ -181,9 +181,7 @@ pub(super) fn validate_value_template_payload_labels(
     template: &CheckedValueTemplate,
 ) -> Result<()> {
     match template {
-        CheckedValueTemplate::Literal(value) => {
-            validate_payload_value_label(value.label()).map_err(|err| Error::new(err.to_string()))
-        }
+        CheckedValueTemplate::Literal(value) => validate_checked_payload_value(value),
         CheckedValueTemplate::ReceivedPayload { .. }
         | CheckedValueTemplate::CurrentStatePayload { .. } => Ok(()),
         CheckedValueTemplate::RecordField { record, .. } => {
@@ -193,11 +191,7 @@ pub(super) fn validate_value_template_payload_labels(
             validate_value_template_payload_labels(list)
         }
         CheckedValueTemplate::MapValue { map, key, keys, .. } => {
-            validate_payload_value_label(key).map_err(|err| Error::new(err.to_string()))?;
-            for expected_key in keys {
-                validate_payload_value_label(expected_key)
-                    .map_err(|err| Error::new(err.to_string()))?;
-            }
+            validate_map_projection_keys(key, keys)?;
             validate_value_template_payload_labels(map)
         }
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
@@ -205,25 +199,192 @@ pub(super) fn validate_value_template_payload_labels(
             validate_value_template_payload_labels(payload)
         }
         CheckedValueTemplate::Record { fields, .. } => {
+            validate_record_template_shape(fields)?;
             for field in fields {
                 validate_value_template_payload_labels(field.value())?;
             }
             Ok(())
         }
         CheckedValueTemplate::List { items, .. } => {
+            validate_list_template_shape(items)?;
             for item in items {
                 validate_value_template_payload_labels(item)?;
             }
             Ok(())
         }
         CheckedValueTemplate::Map { entries, .. } => {
-            for entry in entries {
-                validate_value_template_payload_labels(entry.key())?;
-                validate_value_template_payload_labels(entry.value())?;
-            }
+            validate_map_template_shape(entries)?;
             Ok(())
         }
     }
+}
+
+fn validate_record_template_shape(fields: &[CheckedValueTemplateField]) -> Result<()> {
+    if fields.is_empty() {
+        return Err(Error::new(
+            "record template field_count must be greater than zero",
+        ));
+    }
+    if fields.len() > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "record template field_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    let mut names = BTreeSet::new();
+    for field in fields {
+        if !names.insert(field.name().as_str()) {
+            return Err(Error::new(format!(
+                "record template duplicates field {}",
+                field.name()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_list_template_shape(items: &[CheckedValueTemplate]) -> Result<()> {
+    if items.len() > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "list template item_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_map_template_shape(entries: &[CheckedValueTemplateMapEntry]) -> Result<()> {
+    if entries.len() > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "map template entry_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    let mut keys = BTreeSet::new();
+    for entry in entries {
+        validate_value_template_payload_labels(entry.key())?;
+        let key = checked_static_template_value(entry.key()).ok_or_else(|| {
+            Error::new("map template keys must be static source values in this source slice")
+        })?;
+        validate_artifact_value("map template key", &key)?;
+        if !keys.insert(key.clone()) {
+            return Err(Error::new(format!(
+                "map template duplicates key {}",
+                key.label()
+            )));
+        }
+        validate_value_template_payload_labels(entry.value())?;
+    }
+    Ok(())
+}
+
+fn validate_checked_payload_value(value: &CheckedPayloadValue) -> Result<()> {
+    let Some(value) = value.value() else {
+        return Err(Error::new(
+            "literal process reference template must be explicit",
+        ));
+    };
+    validate_artifact_value("payload value", value)
+}
+
+fn validate_artifact_value(field: &str, value: &ArtifactValue) -> Result<()> {
+    value
+        .validate(field)
+        .map_err(|err| Error::new(err.to_string()))?;
+    if value.contains_process_ref() {
+        return Err(Error::new(format!(
+            "{field} must not contain a process reference value"
+        )));
+    }
+    Ok(())
+}
+
+fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<ArtifactValue> {
+    match template {
+        CheckedValueTemplate::Literal(value) => value.value().cloned(),
+        CheckedValueTemplate::ReceivedPayload { .. }
+        | CheckedValueTemplate::CurrentStatePayload { .. }
+        | CheckedValueTemplate::RecordField { .. }
+        | CheckedValueTemplate::ListElement { .. }
+        | CheckedValueTemplate::MapValue { .. }
+        | CheckedValueTemplate::ProcessRef { .. } => None,
+        CheckedValueTemplate::EnumVariant {
+            variant, payload, ..
+        } => Some(ArtifactValue::EnumVariant {
+            variant: variant.to_string(),
+            payload: Box::new(checked_static_template_value(payload)?),
+        }),
+        CheckedValueTemplate::Record { ty, fields } => {
+            let mut values = Vec::with_capacity(fields.len());
+            let mut seen = BTreeSet::new();
+            for field in fields {
+                if !seen.insert(field.name()) {
+                    return None;
+                }
+                values.push(ArtifactRecordField {
+                    name: field.name().to_string(),
+                    value: checked_static_template_value(field.value())?,
+                });
+            }
+            Some(ArtifactValue::Record {
+                constructor: ty.label().to_string(),
+                fields: values,
+            })
+        }
+        CheckedValueTemplate::List { items, .. } => {
+            let mut values = Vec::with_capacity(items.len());
+            for item in items {
+                values.push(checked_static_template_value(item)?);
+            }
+            Some(ArtifactValue::List(values))
+        }
+        CheckedValueTemplate::Map { entries, .. } => {
+            let mut values = Vec::with_capacity(entries.len());
+            let mut seen = BTreeSet::new();
+            for entry in entries {
+                let key = checked_static_template_value(entry.key())?;
+                let value = checked_static_template_value(entry.value())?;
+                if !seen.insert(key.clone()) {
+                    return None;
+                }
+                values.push(ArtifactMapEntry { key, value });
+            }
+            Some(ArtifactValue::Map(values))
+        }
+    }
+}
+
+fn validate_map_projection_keys(key: &ArtifactValue, keys: &[ArtifactValue]) -> Result<()> {
+    if keys.is_empty() {
+        return Err(Error::new(
+            "map projection key_count must be greater than zero",
+        ));
+    }
+    if keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "map projection key_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    validate_artifact_value("map projection key", key)?;
+    let mut seen = BTreeSet::new();
+    for expected_key in keys {
+        validate_artifact_value("map projection expected key", expected_key)?;
+        if !seen.insert(expected_key.clone()) {
+            return Err(Error::new(format!(
+                "map projection duplicates expected map key {}",
+                expected_key.label()
+            )));
+        }
+    }
+    if !seen.contains(key) {
+        return Err(Error::new(format!(
+            "map projection key {} is not one of the expected map keys",
+            key.label()
+        )));
+    }
+    if seen.into_iter().collect::<Vec<_>>() != keys {
+        return Err(Error::new(
+            "map projection expected keys must be sorted canonically",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn validate_value_template_process_refs(
@@ -468,10 +629,10 @@ fn evaluate_checked_template(
         CheckedValueTemplate::RecordField { ty, record, field } => {
             let record =
                 evaluate_checked_template(record, received_payload, current_state_payload)?;
-            let label = project_canonical_record_field(record.label(), field.as_str())
+            let value = checked_payload_value(&record)?
+                .project_record_field(field.as_str())
                 .map_err(|err| Error::new(err.to_string()))?;
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(CheckedPayloadValue::new(ty.clone(), label))
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
         }
         CheckedValueTemplate::ListElement {
             ty,
@@ -480,17 +641,23 @@ fn evaluate_checked_template(
             len,
         } => {
             let list = evaluate_checked_template(list, received_payload, current_state_payload)?;
-            let label = project_canonical_list_element(list.label(), *index, *len)
+            let value = checked_payload_value(&list)?
+                .project_list_element(*index, *len)
                 .map_err(|err| Error::new(err.to_string()))?;
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(CheckedPayloadValue::new(ty.clone(), label))
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
         }
-        CheckedValueTemplate::MapValue { ty, map, key, keys } => {
+        CheckedValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
             let map = evaluate_checked_template(map, received_payload, current_state_payload)?;
-            let label = project_canonical_map_value(map.label(), key, keys)
+            let value = checked_payload_value(&map)?
+                .project_map_value(key, keys, *projection)
                 .map_err(|err| Error::new(err.to_string()))?;
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(CheckedPayloadValue::new(ty.clone(), label))
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
         }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires static runtime process reference bindings",
@@ -502,37 +669,57 @@ fn evaluate_checked_template(
         } => {
             let payload =
                 evaluate_checked_template(payload, received_payload, current_state_payload)?;
-            let label = format!("{variant}({})", payload.label());
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(CheckedPayloadValue::new(ty.clone(), label))
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::EnumVariant {
+                    variant: variant.to_string(),
+                    payload: Box::new(checked_payload_value(&payload)?),
+                },
+            ))
         }
         CheckedValueTemplate::Record { ty, fields } => {
-            let mut parts = Vec::with_capacity(fields.len());
+            let mut values = Vec::with_capacity(fields.len());
+            let mut seen = BTreeSet::new();
             for field in fields {
                 let value = evaluate_checked_template(
                     field.value(),
                     received_payload,
                     current_state_payload,
                 )?;
-                parts.push(format!("{}:{}", field.name(), value.label()));
+                if !seen.insert(field.name()) {
+                    return Err(Error::new(format!(
+                        "record template duplicates field {}",
+                        field.name()
+                    )));
+                }
+                values.push(ArtifactRecordField {
+                    name: field.name().to_string(),
+                    value: checked_payload_value(&value)?,
+                });
             }
-            let label = format!("{ty}{{{}}}", parts.join(","));
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(CheckedPayloadValue::new(ty.clone(), label))
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Record {
+                    constructor: ty.label().to_string(),
+                    fields: values,
+                },
+            ))
         }
         CheckedValueTemplate::List { ty, items } => {
-            let mut parts = Vec::with_capacity(items.len());
+            let mut values = Vec::with_capacity(items.len());
             for item in items {
                 let value =
                     evaluate_checked_template(item, received_payload, current_state_payload)?;
-                parts.push(value.label().to_string());
+                values.push(checked_payload_value(&value)?);
             }
-            let label = format!("List[{}]", parts.join(","));
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(CheckedPayloadValue::new(ty.clone(), label))
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::List(values),
+            ))
         }
         CheckedValueTemplate::Map { ty, entries } => {
-            let mut parts = BTreeMap::new();
+            let mut values = Vec::with_capacity(entries.len());
+            let mut seen = BTreeSet::new();
             for entry in entries {
                 let key = evaluate_checked_template(
                     entry.key(),
@@ -544,28 +731,32 @@ fn evaluate_checked_template(
                     received_payload,
                     current_state_payload,
                 )?;
-                if parts
-                    .insert(key.label().to_string(), value.label().to_string())
-                    .is_some()
-                {
+                let key_value = checked_payload_value(&key)?;
+                let item_value = checked_payload_value(&value)?;
+                if !seen.insert(key_value.clone()) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
-                        key.label()
+                        key_value.label()
                     )));
                 }
+                values.push(ArtifactMapEntry {
+                    key: key_value,
+                    value: item_value,
+                });
             }
-            let label = format!(
-                "Map[{}]",
-                parts
-                    .into_iter()
-                    .map(|(key, value)| format!("{key}=>{value}"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(CheckedPayloadValue::new(ty.clone(), label))
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Map(values),
+            ))
         }
     }
+}
+
+fn checked_payload_value(payload: &CheckedPayloadValue) -> Result<ArtifactValue> {
+    payload
+        .value()
+        .cloned()
+        .ok_or_else(|| Error::new("process reference payloads are not valid state values"))
 }
 
 fn resolve_checked_template_state(

@@ -85,11 +85,11 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
             message: MessageId::new(0),
-            payload: Some(ArtifactValueTemplate::ProcessRef {
+            payload: Some(loaded_template(ArtifactValueTemplate::ProcessRef {
                 ty: PROCESS_REF_WORKER,
                 target_process: ProcessId::new(0),
                 process_ref: ProcessRefId::new(0),
-            }),
+            })),
         },
     ];
 
@@ -117,14 +117,14 @@ fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded()
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
             message: MessageId::new(0),
-            payload: Some(ArtifactValueTemplate::RecordField {
+            payload: Some(loaded_template(ArtifactValueTemplate::RecordField {
                 ty: PROCESS_REF_WORKER,
                 record: Box::new(ArtifactValueTemplate::Literal {
                     ty: BOX,
-                    value: "Box{reply_to:ProcessRef_Worker}".to_string(),
+                    value: artifact_value("Box{reply_to:ProcessRef_Worker}"),
                 }),
                 field: "reply_to".to_string(),
-            }),
+            })),
         },
     ];
 
@@ -183,14 +183,14 @@ fn runtime_rejects_unspawned_process_ref_payload() {
             worker_pid,
             RuntimeMessageEnvelope::new(
                 MessageId::new(0),
-                Some(ArtifactPayload {
+                Some(runtime_payload(ArtifactPayload {
                     ty: PROCESS_REF_WORKER,
-                    value: "type8#99".to_string(),
+                    value: ArtifactValue::process_ref(PROCESS_REF_WORKER, 99),
                     process_ref: Some(ArtifactProcessRefPayload {
                         target_process: ProcessId::new(1),
                         pid: 99,
                     }),
-                }),
+                })),
             ),
             Some(main_pid),
         )
@@ -228,14 +228,14 @@ fn runtime_rejects_process_ref_payload_target_type_mismatch() {
             worker_pid,
             RuntimeMessageEnvelope::new(
                 MessageId::new(0),
-                Some(ArtifactPayload {
+                Some(runtime_payload(ArtifactPayload {
                     ty: PROCESS_REF_WORKER,
-                    value: "type8#1".to_string(),
+                    value: ArtifactValue::process_ref(PROCESS_REF_WORKER, main_pid.as_u64()),
                     process_ref: Some(ArtifactProcessRefPayload {
                         target_process: ProcessId::new(0),
                         pid: main_pid.as_u64(),
                     }),
-                }),
+                })),
             ),
             Some(main_pid),
         )
@@ -257,11 +257,14 @@ fn runtime_rejects_oversized_record_payload_template_value() {
             value: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
         }],
     };
-    let received = ArtifactPayload {
-        ty: JOB,
-        value: "a".repeat(MAX_FIELD_VALUE_BYTES),
-        process_ref: None,
-    };
+    let long_atom = RuntimeValue::Atom(format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES - 1)));
+    let short_atom = RuntimeValue::Atom(format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES - 5)));
+    let mut items = vec![long_atom; 126];
+    items.push(short_atom);
+    let received = RuntimePayload::value(JOB, RuntimeValue::List(items))
+        .expect("test payload should fit exactly");
+    let label: &str = received.label();
+    assert_eq!(label.len(), MAX_FIELD_VALUE_BYTES);
     let step = ActiveStep {
         pid: RuntimeProcessId::FIRST,
         process_id: ProcessId::new(0),
@@ -274,7 +277,7 @@ fn runtime_rejects_oversized_record_payload_template_value() {
 
     let err = evaluate_runtime_template(
         &program,
-        &template,
+        &loaded_template(template),
         Some(&received),
         &step,
         &BTreeMap::new(),
@@ -284,5 +287,17 @@ fn runtime_rejects_oversized_record_payload_template_value() {
     assert!(
         err.to_string()
             .contains("payload value exceeds maximum length")
+    );
+}
+
+#[test]
+fn runtime_payload_value_rejects_invalid_structured_value_shape() {
+    let err = RuntimePayload::value(JOB, RuntimeValue::Atom("not-valid".to_string()))
+        .expect_err("invalid runtime payload shape should fail");
+
+    assert!(
+        err.to_string()
+            .contains("artifact field payload value must be an identifier"),
+        "unexpected error: {err}"
     );
 }

@@ -174,16 +174,18 @@ pub(in crate::language::checker) fn payload_value_bindings<'a>(
         (StepPattern::Variant { bindings, .. }, Some(payload)) => bindings
             .iter()
             .map(|param| {
+                let (label, value) = checked_payload_binding(payload, param)?.ok_or_else(|| {
+                    Error::new(format!(
+                        "message payload {} does not match pattern binding {}",
+                        payload.label(),
+                        param.name
+                    ))
+                })?;
                 Ok(DiscoveryValueBinding {
                     name: param.name.clone(),
                     ty: param.ty.clone(),
-                    label: payload_binding_label(payload.label(), param)?.ok_or_else(|| {
-                        Error::new(format!(
-                            "message payload {} does not match pattern binding {}",
-                            payload.label(),
-                            param.name
-                        ))
-                    })?,
+                    label,
+                    value,
                 })
             })
             .collect(),

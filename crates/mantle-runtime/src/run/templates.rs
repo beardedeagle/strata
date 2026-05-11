@@ -1,29 +1,21 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{
-    ArtifactPayload, ArtifactProcessRefPayload, ArtifactValueTemplate, Error, ProcessRefId, Result,
-    project_canonical_list_element, project_canonical_map_value, project_canonical_record_field,
-    validate_payload_value_label,
-};
+use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, Error, ProcessRefId, Result};
 
 use super::model::ActiveStep;
 use crate::event::RuntimeProcessId;
-use crate::program::LoadedProgram;
+use crate::program::{LoadedProgram, LoadedValueTemplate, RuntimePayload, RuntimeValue};
 
 pub(super) fn evaluate_runtime_template(
     program: &LoadedProgram,
-    template: &ArtifactValueTemplate,
-    received_payload: Option<&ArtifactPayload>,
+    template: &LoadedValueTemplate,
+    received_payload: Option<&RuntimePayload>,
     step: &ActiveStep,
     process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
-) -> Result<ArtifactPayload> {
+) -> Result<RuntimePayload> {
     match template {
-        ArtifactValueTemplate::Literal { ty, value } => Ok(ArtifactPayload {
-            ty: *ty,
-            value: value.clone(),
-            process_ref: None,
-        }),
-        ArtifactValueTemplate::ReceivedPayload { ty } => {
+        LoadedValueTemplate::Literal { ty, value } => RuntimePayload::value(*ty, value.clone()),
+        LoadedValueTemplate::ReceivedPayload { ty } => {
             let payload = received_payload.ok_or_else(|| {
                 Error::new("received payload template requires a payload-bearing message")
             })?;
@@ -36,7 +28,7 @@ pub(super) fn evaluate_runtime_template(
             }
             Ok(payload.clone())
         }
-        ArtifactValueTemplate::CurrentStatePayload { ty } => {
+        LoadedValueTemplate::CurrentStatePayload { ty } => {
             let payload = step.current_state_payload(program)?.ok_or_else(|| {
                 Error::new("current state payload template requires a payload-bearing state")
             })?;
@@ -49,18 +41,12 @@ pub(super) fn evaluate_runtime_template(
             }
             Ok(payload.clone())
         }
-        ArtifactValueTemplate::RecordField { ty, record, field } => {
+        LoadedValueTemplate::RecordField { ty, record, field } => {
             let record =
                 evaluate_runtime_template(program, record, received_payload, step, process_refs)?;
-            let value = project_canonical_record_field(&record.value, field)?;
-            validate_payload_value_label(&value)?;
-            Ok(ArtifactPayload {
-                ty: *ty,
-                value,
-                process_ref: None,
-            })
+            RuntimePayload::value(*ty, record.value.project_record_field(field)?)
         }
-        ArtifactValueTemplate::ListElement {
+        LoadedValueTemplate::ListElement {
             ty,
             list,
             index,
@@ -68,26 +54,20 @@ pub(super) fn evaluate_runtime_template(
         } => {
             let list =
                 evaluate_runtime_template(program, list, received_payload, step, process_refs)?;
-            let value = project_canonical_list_element(&list.value, *index, *len)?;
-            validate_payload_value_label(&value)?;
-            Ok(ArtifactPayload {
-                ty: *ty,
-                value,
-                process_ref: None,
-            })
+            RuntimePayload::value(*ty, list.value.project_list_element(*index, *len)?)
         }
-        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+        LoadedValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
             let map =
                 evaluate_runtime_template(program, map, received_payload, step, process_refs)?;
-            let value = project_canonical_map_value(&map.value, key, keys)?;
-            validate_payload_value_label(&value)?;
-            Ok(ArtifactPayload {
-                ty: *ty,
-                value,
-                process_ref: None,
-            })
+            RuntimePayload::value(*ty, map.value.project_map_value(key, keys, *projection)?)
         }
-        ArtifactValueTemplate::ProcessRef {
+        LoadedValueTemplate::ProcessRef {
             ty,
             target_process,
             process_ref,
@@ -99,33 +79,27 @@ pub(super) fn evaluate_runtime_template(
                     process_ref.as_u32()
                 ))
             })?;
-            Ok(ArtifactPayload {
-                ty: *ty,
-                value: format!("type{}#{}", ty.as_u32(), pid.as_u64()),
-                process_ref: Some(ArtifactProcessRefPayload {
-                    target_process: *target_process,
-                    pid: pid.as_u64(),
-                }),
-            })
+            RuntimePayload::from_process_ref(*ty, *target_process, pid)
         }
-        ArtifactValueTemplate::EnumVariant {
+        LoadedValueTemplate::EnumVariant {
             ty,
             variant,
             payload,
         } => {
             let payload =
                 evaluate_runtime_template(program, payload, received_payload, step, process_refs)?;
-            let value = format!("{variant}({})", payload.value);
-            validate_payload_value_label(&value)?;
-            Ok(ArtifactPayload {
-                ty: *ty,
-                value,
-                process_ref: None,
-            })
+            RuntimePayload::value(
+                *ty,
+                RuntimeValue::EnumVariant {
+                    variant: variant.clone(),
+                    payload: Box::new(payload.value),
+                },
+            )
         }
-        ArtifactValueTemplate::Record { ty, fields } => {
+        LoadedValueTemplate::Record { ty, fields } => {
             let type_label = program.type_label(*ty)?;
-            let mut parts = Vec::with_capacity(fields.len());
+            let mut values = Vec::with_capacity(fields.len());
+            let mut seen = BTreeSet::new();
             for field in fields {
                 let value = evaluate_runtime_template(
                     program,
@@ -134,33 +108,37 @@ pub(super) fn evaluate_runtime_template(
                     step,
                     process_refs,
                 )?;
-                parts.push(format!("{}:{}", field.name, value.value));
+                if !seen.insert(field.name.as_str()) {
+                    return Err(Error::new(format!(
+                        "record template duplicates field {}",
+                        field.name
+                    )));
+                }
+                values.push(ArtifactRecordField {
+                    name: field.name.clone(),
+                    value: value.value,
+                });
             }
-            let value = format!("{type_label}{{{}}}", parts.join(","));
-            validate_payload_value_label(&value)?;
-            Ok(ArtifactPayload {
-                ty: *ty,
-                value,
-                process_ref: None,
-            })
+            RuntimePayload::value(
+                *ty,
+                RuntimeValue::Record {
+                    constructor: type_label.to_string(),
+                    fields: values,
+                },
+            )
         }
-        ArtifactValueTemplate::List { ty, items } => {
-            let mut parts = Vec::with_capacity(items.len());
+        LoadedValueTemplate::List { ty, items } => {
+            let mut values = Vec::with_capacity(items.len());
             for item in items {
                 let value =
                     evaluate_runtime_template(program, item, received_payload, step, process_refs)?;
-                parts.push(value.value);
+                values.push(value.value);
             }
-            let value = format!("List[{}]", parts.join(","));
-            validate_payload_value_label(&value)?;
-            Ok(ArtifactPayload {
-                ty: *ty,
-                value,
-                process_ref: None,
-            })
+            RuntimePayload::value(*ty, RuntimeValue::List(values))
         }
-        ArtifactValueTemplate::Map { ty, entries } => {
-            let mut parts = BTreeMap::new();
+        LoadedValueTemplate::Map { ty, entries } => {
+            let mut values = Vec::with_capacity(entries.len());
+            let mut seen = BTreeSet::new();
             for entry in entries {
                 let key = evaluate_runtime_template(
                     program,
@@ -176,27 +154,18 @@ pub(super) fn evaluate_runtime_template(
                     step,
                     process_refs,
                 )?;
-                if parts.insert(key.value.clone(), value.value).is_some() {
+                if !seen.insert(key.value.clone()) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
-                        key.value
+                        key.value.label()
                     )));
                 }
+                values.push(ArtifactMapEntry {
+                    key: key.value,
+                    value: value.value,
+                });
             }
-            let value = format!(
-                "Map[{}]",
-                parts
-                    .into_iter()
-                    .map(|(key, value)| format!("{key}=>{value}"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            validate_payload_value_label(&value)?;
-            Ok(ArtifactPayload {
-                ty: *ty,
-                value,
-                process_ref: None,
-            })
+            RuntimePayload::value(*ty, RuntimeValue::Map(values))
         }
     }
 }

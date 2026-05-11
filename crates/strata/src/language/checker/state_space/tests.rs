@@ -1,4 +1,4 @@
-use mantle_artifact::MAX_STATE_VALUES_PER_PROCESS;
+use mantle_artifact::{ArtifactValue, MAX_STATE_VALUES_PER_PROCESS};
 
 use super::super::super::MAX_VALUE_NESTING;
 use super::super::super::ast::{
@@ -23,7 +23,7 @@ fn state_value_limit_reports_process_context() {
         .map(|index| {
             CheckedStateValue::new(
                 CheckedTypeRef::test_value("MainState"),
-                format!("State{index}"),
+                ArtifactValue::Atom(format!("State{index}")),
             )
         })
         .collect();

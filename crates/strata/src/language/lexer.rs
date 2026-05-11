@@ -7,6 +7,7 @@ pub(super) enum TokenKind {
     Number(String),
     StringLiteral(String),
     Symbol(char),
+    DotDot,
     Arrow,
     FatArrow,
     AtIdent(String),
@@ -57,6 +58,12 @@ impl<'a> Lexer<'a> {
                 self.bump_char();
                 self.bump_char();
                 push_source_token(&mut tokens, TokenKind::FatArrow, offset)?;
+                continue;
+            }
+            if ch == '.' && self.peek_next_char() == Some('.') {
+                self.bump_char();
+                self.bump_char();
+                push_source_token(&mut tokens, TokenKind::DotDot, offset)?;
                 continue;
             }
             if ch == '@' {

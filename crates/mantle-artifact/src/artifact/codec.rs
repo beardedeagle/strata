@@ -276,28 +276,29 @@ fn encode_state_value(encoded: &mut String, prefix: &str, state_value: &Artifact
     encoded.push_str(&format!(
         "{prefix}.type_id={}\n{prefix}.value={}\n{prefix}.label={}\n",
         state_value.ty.as_u32(),
-        state_value.value,
+        state_value.value.label(),
         state_value.label
     ));
     if let Some(payload) = &state_value.payload {
         encoded.push_str(&format!(
             "{prefix}.payload_type_id={}\n{prefix}.payload_value={}\n",
             payload.ty.as_u32(),
-            payload.value
+            payload.value.label()
         ));
     }
 }
 
 fn decode_state_value(fields: &mut ArtifactFields, prefix: &str) -> Result<ArtifactStateValue> {
-    let payload_type = fields.take_optional_type_id(&format!("{prefix}.payload_type_id"))?;
-    let payload_value = fields.take_optional(&format!("{prefix}.payload_value"));
+    let payload_type_key = format!("{prefix}.payload_type_id");
+    let payload_value_key = format!("{prefix}.payload_value");
+    let payload_type = fields.take_optional_type_id(&payload_type_key)?;
+    let payload_value = fields.take_optional(&payload_value_key);
     let payload = match (payload_type, payload_value) {
         (None, None) => None,
-        (Some(ty), Some(value)) => Some(ArtifactPayload {
+        (Some(ty), Some(value)) => Some(ArtifactPayload::value(
             ty,
-            value,
-            process_ref: None,
-        }),
+            ArtifactValue::parse_field(&payload_value_key, &value)?,
+        )?),
         (Some(_), None) => {
             return Err(Error::new(format!(
                 "{prefix}.payload_type_id requires {prefix}.payload_value"
@@ -309,12 +310,13 @@ fn decode_state_value(fields: &mut ArtifactFields, prefix: &str) -> Result<Artif
             )));
         }
     };
-    Ok(ArtifactStateValue {
-        ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
-        value: fields.take_required(&format!("{prefix}.value"))?,
-        label: fields.take_required(&format!("{prefix}.label"))?,
-        payload,
-    })
+    let ty = fields.take_type_id(&format!("{prefix}.type_id"))?;
+    let value_key = format!("{prefix}.value");
+    let value = ArtifactValue::parse_field(&value_key, &fields.take_required(&value_key)?)?;
+    let label = fields.take_required(&format!("{prefix}.label"))?;
+    let mut state_value = ArtifactStateValue::with_label(ty, value, label)?;
+    state_value.payload = payload;
+    Ok(state_value)
 }
 
 fn encode_type(encoded: &mut String, type_index: usize, ty: &ArtifactType) {
@@ -347,6 +349,7 @@ fn decode_type(fields: &mut ArtifactFields, type_index: usize) -> Result<Artifac
 fn encode_value_template(encoded: &mut String, prefix: &str, template: &ArtifactValueTemplate) {
     match template {
         ArtifactValueTemplate::Literal { ty, value } => {
+            let value = value.label();
             encoded.push_str(&format!(
                 "{prefix}.kind=literal\n{prefix}.type_id={}\n{prefix}.value={value}\n",
                 ty.as_u32()
@@ -383,13 +386,22 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
             ));
             encode_value_template(encoded, &format!("{prefix}.list"), list);
         }
-        ArtifactValueTemplate::MapValue { ty, map, key, keys } => {
+        ArtifactValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
+            let key = key.label();
             encoded.push_str(&format!(
-                "{prefix}.kind=map_value\n{prefix}.type_id={}\n{prefix}.key={key}\n{prefix}.key_count={}\n",
+                "{prefix}.kind=map_value\n{prefix}.type_id={}\n{prefix}.key={key}\n{prefix}.projection={}\n{prefix}.key_count={}\n",
                 ty.as_u32(),
+                projection.as_str(),
                 keys.len()
             ));
             for (key_index, expected_key) in keys.iter().enumerate() {
+                let expected_key = expected_key.label();
                 encoded.push_str(&format!(
                     "{prefix}.expected_key.{key_index}={expected_key}\n"
                 ));
@@ -486,10 +498,13 @@ fn decode_value_template(
     }
     let kind_key = format!("{prefix}.kind");
     match fields.take_required(&kind_key)?.as_str() {
-        "literal" => Ok(ArtifactValueTemplate::Literal {
-            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
-            value: fields.take_required(&format!("{prefix}.value"))?,
-        }),
+        "literal" => {
+            let value_key = format!("{prefix}.value");
+            Ok(ArtifactValueTemplate::Literal {
+                ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+                value: ArtifactValue::parse_field(&value_key, &fields.take_required(&value_key)?)?,
+            })
+        }
         "received_payload" => Ok(ArtifactValueTemplate::ReceivedPayload {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
         }),
@@ -525,7 +540,10 @@ fn decode_value_template(
         }),
         "map_value" => {
             let ty = fields.take_type_id(&format!("{prefix}.type_id"))?;
-            let key = fields.take_required(&format!("{prefix}.key"))?;
+            let key_field = format!("{prefix}.key");
+            let key = ArtifactValue::parse_field(&key_field, &fields.take_required(&key_field)?)?;
+            let projection =
+                MapProjectionMode::parse(&fields.take_required(&format!("{prefix}.projection"))?)?;
             let key_count = fields.take_bounded_usize(
                 &format!("{prefix}.key_count"),
                 1,
@@ -533,12 +551,17 @@ fn decode_value_template(
             )?;
             let mut keys = Vec::with_capacity(key_count);
             for key_index in 0..key_count {
-                keys.push(fields.take_required(&format!("{prefix}.expected_key.{key_index}"))?);
+                let expected_key_field = format!("{prefix}.expected_key.{key_index}");
+                keys.push(ArtifactValue::parse_field(
+                    &expected_key_field,
+                    &fields.take_required(&expected_key_field)?,
+                )?);
             }
             Ok(ArtifactValueTemplate::MapValue {
                 ty,
                 key,
                 keys,
+                projection,
                 map: Box::new(decode_value_template(
                     fields,
                     &format!("{prefix}.map"),

@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{MAX_STATE_VALUES_PER_PROCESS, validate_state_value_label};
+use mantle_artifact::{
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, MAX_STATE_VALUES_PER_PROCESS,
+    validate_state_value_label,
+};
 
 use super::super::super::MAX_VALUE_NESTING;
 use super::super::super::ast::{
@@ -14,7 +17,8 @@ use super::super::symbols::{CollectionType, SemanticIndex};
 pub(in crate::language::checker) struct ValueBinding<'a> {
     pub(in crate::language::checker) name: &'a Identifier,
     pub(in crate::language::checker) ty: &'a TypeRef,
-    pub(in crate::language::checker) label: &'a str,
+    pub(in crate::language::checker) label: String,
+    pub(in crate::language::checker) value: Option<ArtifactValue>,
 }
 
 #[derive(Clone, Copy)]
@@ -38,7 +42,7 @@ pub(in crate::language::checker) fn canonical_source_value_with_bindings(
     expected_type: &TypeRef,
     value: &ValueExpr,
     bindings: &[ValueBinding<'_>],
-) -> Result<String> {
+) -> Result<ArtifactValue> {
     canonical_value(
         module,
         semantic_index,
@@ -81,7 +85,7 @@ pub(super) fn canonical_value(
     bindings: &[ValueBinding<'_>],
     context: CanonicalValueContext,
     depth: usize,
-) -> Result<String> {
+) -> Result<ArtifactValue> {
     if depth > MAX_VALUE_NESTING {
         return Err(Error::new(format!(
             "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
@@ -96,7 +100,10 @@ pub(super) fn canonical_value(
     if let ValueExpr::Identifier(name) = value {
         if let Some(binding) = bindings.iter().find(|binding| binding.name == name) {
             if semantic_index.same_type(binding.ty, expected_type) {
-                return Ok(binding.label.to_string());
+                return binding
+                    .value
+                    .clone()
+                    .ok_or_else(|| context.process_ref_error());
             }
             return Err(Error::new(format!(
                 "value binding {} has type {}, expected {}",
@@ -151,7 +158,7 @@ fn canonical_enum_value(
     bindings: &[ValueBinding<'_>],
     context: CanonicalValueContext,
     depth: usize,
-) -> Result<String> {
+) -> Result<ArtifactValue> {
     let enum_decl = semantic_index.enum_decl(module, expected_type)?;
     match value {
         ValueExpr::Identifier(name) => {
@@ -166,7 +173,7 @@ fn canonical_enum_value(
                         variant.name
                     )));
                 }
-                return Ok(name.to_string());
+                return Ok(ArtifactValue::Atom(name.to_string()));
             }
             Err(Error::new(format!(
                 "value {name} is not a variant of enum {}",
@@ -198,8 +205,11 @@ fn canonical_enum_value(
                 context,
                 depth + 1,
             )?;
-            let value = format!("{name}({payload})");
-            validate_state_value_label(&value).map_err(|err| Error::new(err.to_string()))?;
+            let value = ArtifactValue::EnumVariant {
+                variant: name.to_string(),
+                payload: Box::new(payload),
+            };
+            validate_state_value_metadata_label(&value)?;
             Ok(value)
         }
         ValueExpr::Call { .. } | ValueExpr::Record(_) | ValueExpr::List(_) | ValueExpr::Map(_) => {
@@ -219,7 +229,7 @@ fn canonical_collection_value(
     bindings: &[ValueBinding<'_>],
     context: CanonicalValueContext,
     depth: usize,
-) -> Result<String> {
+) -> Result<ArtifactValue> {
     let collection_type = semantic_index
         .collection_type(expected_type)?
         .ok_or_else(|| Error::new(format!("type {expected_type} is not a collection type")))?;
@@ -231,9 +241,9 @@ fn canonical_collection_value(
                 )));
             };
             validate_list_value_type(semantic_index, expected_type, list, element, capacity)?;
-            let mut parts = Vec::with_capacity(list.items.len());
+            let mut items = Vec::with_capacity(list.items.len());
             for item in &list.items {
-                parts.push(canonical_value(
+                items.push(canonical_value(
                     module,
                     semantic_index,
                     element,
@@ -243,9 +253,9 @@ fn canonical_collection_value(
                     depth + 1,
                 )?);
             }
-            let label = format!("List[{}]", parts.join(","));
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(label)
+            let value = ArtifactValue::List(items);
+            validate_state_value_metadata_label(&value)?;
+            Ok(value)
         }
         CollectionType::Map {
             key,
@@ -258,9 +268,10 @@ fn canonical_collection_value(
                 )));
             };
             validate_map_value_type(semantic_index, expected_type, map, key, item, capacity)?;
-            let mut entries = BTreeMap::new();
+            let mut entries = Vec::with_capacity(map.entries.len());
+            let mut seen = BTreeSet::new();
             for entry in &map.entries {
-                let key_label = canonical_value(
+                let key_value = canonical_value(
                     module,
                     semantic_index,
                     key,
@@ -269,7 +280,7 @@ fn canonical_collection_value(
                     context,
                     depth + 1,
                 )?;
-                let value_label = canonical_value(
+                let item_value = canonical_value(
                     module,
                     semantic_index,
                     item,
@@ -278,22 +289,20 @@ fn canonical_collection_value(
                     context,
                     depth + 1,
                 )?;
-                if entries.insert(key_label.clone(), value_label).is_some() {
+                if !seen.insert(key_value.clone()) {
+                    let key_label = key_value.label();
                     return Err(Error::new(format!(
                         "map value {expected_type} duplicates key {key_label}"
                     )));
                 }
+                entries.push(ArtifactMapEntry {
+                    key: key_value,
+                    value: item_value,
+                });
             }
-            let label = format!(
-                "Map[{}]",
-                entries
-                    .into_iter()
-                    .map(|(key, value)| format!("{key}=>{value}"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-            Ok(label)
+            let value = ArtifactValue::Map(entries);
+            validate_state_value_metadata_label(&value)?;
+            Ok(value)
         }
     }
 }
@@ -374,7 +383,7 @@ fn canonical_record_value(
     bindings: &[ValueBinding<'_>],
     context: CanonicalValueContext,
     depth: usize,
-) -> Result<String> {
+) -> Result<ArtifactValue> {
     if let ValueExpr::Record(value) = value {
         if value.fields.is_empty() {
             return Err(Error::new(format!(
@@ -386,7 +395,9 @@ fn canonical_record_value(
 
     if record.fields.is_empty() {
         return match value {
-            ValueExpr::Identifier(name) if name == &record.name => Ok(record.name.to_string()),
+            ValueExpr::Identifier(name) if name == &record.name => {
+                Ok(ArtifactValue::Atom(record.name.to_string()))
+            }
             _ => Err(Error::new(format!(
                 "provided value is not a value of record {}",
                 record.name
@@ -410,46 +421,55 @@ fn canonical_record_value(
     let declared_fields = record
         .fields
         .iter()
-        .map(|field| field.name.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut provided = BTreeMap::new();
+        .map(|field| (field.name.as_str(), &field.ty))
+        .collect::<BTreeMap<_, _>>();
+    let mut provided = BTreeSet::new();
+    let mut fields = Vec::with_capacity(record.fields.len());
     for field in &value.fields {
-        if provided.insert(field.name.as_str(), &field.value).is_some() {
+        if !provided.insert(field.name.as_str()) {
             return Err(Error::new(format!(
                 "record value {} duplicates field {}",
                 record.name, field.name
             )));
         }
-        if !declared_fields.contains(field.name.as_str()) {
+        let Some(field_ty) = declared_fields.get(field.name.as_str()) else {
             return Err(Error::new(format!(
                 "record value {} declares unknown field {}",
-                record.name, field.name
-            )));
-        }
-    }
-
-    let mut parts = Vec::with_capacity(record.fields.len());
-    for field in &record.fields {
-        let Some(value) = provided.get(field.name.as_str()) else {
-            return Err(Error::new(format!(
-                "record value {} is missing field {}",
                 record.name, field.name
             )));
         };
         let field_value = canonical_value(
             module,
             semantic_index,
-            &field.ty,
-            value,
+            field_ty,
+            &field.value,
             bindings,
             context,
             depth + 1,
         )?;
-        parts.push(format!("{}:{field_value}", field.name));
+        fields.push(ArtifactRecordField {
+            name: field.name.to_string(),
+            value: field_value,
+        });
     }
-    let label = format!("{}{{{}}}", record.name, parts.join(","));
-    validate_state_value_label(&label).map_err(|err| Error::new(err.to_string()))?;
-    Ok(label)
+    for field in &record.fields {
+        if !provided.contains(field.name.as_str()) {
+            return Err(Error::new(format!(
+                "record value {} is missing field {}",
+                record.name, field.name
+            )));
+        }
+    }
+    let value = ArtifactValue::Record {
+        constructor: record.name.to_string(),
+        fields,
+    };
+    validate_state_value_metadata_label(&value)?;
+    Ok(value)
+}
+
+fn validate_state_value_metadata_label(value: &ArtifactValue) -> Result<()> {
+    validate_state_value_label(&value.label()).map_err(|err| Error::new(err.to_string()))
 }
 
 pub(super) fn validate_state_value_count(process_name: &Identifier, count: usize) -> Result<()> {
@@ -472,10 +492,9 @@ pub(super) fn reject_reserved_state_values(
     process_name: &Identifier,
     state_values: &[CheckedStateValue],
 ) -> Result<()> {
-    if state_values
-        .iter()
-        .any(|value| value.label() == STEP_STATE_PARAMETER_NAME)
-    {
+    if state_values.iter().any(|value| {
+        matches!(value.value(), ArtifactValue::Atom(name) if name == STEP_STATE_PARAMETER_NAME)
+    }) {
         return Err(Error::new(format!(
             "process {} state value {} conflicts with reserved step state parameter name",
             process_name, STEP_STATE_PARAMETER_NAME
