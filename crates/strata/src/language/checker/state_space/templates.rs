@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use mantle_artifact::ArtifactValue;
+
 use super::super::super::MAX_VALUE_NESTING;
 use super::super::super::ast::{
     Identifier, ListValue, MapValue, Module, Record, TypeRef, ValueExpr,
@@ -85,7 +87,7 @@ fn checked_value_template(
         .iter()
         .any(|binding| source_value_uses_binding(value, binding.name))
     {
-        let label = canonical_value(
+        let value = canonical_value(
             module,
             semantic_index,
             expected_type,
@@ -96,7 +98,7 @@ fn checked_value_template(
         )?;
         return Ok(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
             types.intern(expected_type)?,
-            label,
+            value,
         )));
     }
 
@@ -363,7 +365,8 @@ fn checked_collection_template(
                             validate_static_map_key_template(expected_type, &key_template)?;
                         if !seen_keys.insert(key_label.clone()) {
                             return Err(Error::new(format!(
-                                "map value type {expected_type} duplicates key {key_label}"
+                                "map value type {expected_type} duplicates key {}",
+                                key_label.label()
                             )));
                         }
                         Ok(CheckedValueTemplateMapEntry::new(
@@ -456,17 +459,17 @@ fn validate_map_value_type(
 fn validate_static_map_key_template(
     expected_type: &TypeRef,
     template: &CheckedValueTemplate,
-) -> Result<String> {
-    checked_static_source_value_label(template).ok_or_else(|| {
+) -> Result<ArtifactValue> {
+    checked_static_source_value(template).ok_or_else(|| {
         Error::new(format!(
             "map value type {expected_type} keys must be static source values in this source slice"
         ))
     })
 }
 
-fn checked_static_source_value_label(template: &CheckedValueTemplate) -> Option<String> {
+fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<ArtifactValue> {
     match template {
-        CheckedValueTemplate::Literal(value) => Some(value.label().to_string()),
+        CheckedValueTemplate::Literal(value) => value.value().cloned(),
         CheckedValueTemplate::ReceivedPayload { .. }
         | CheckedValueTemplate::CurrentStatePayload { .. }
         | CheckedValueTemplate::RecordField { .. }
@@ -475,45 +478,40 @@ fn checked_static_source_value_label(template: &CheckedValueTemplate) -> Option<
         | CheckedValueTemplate::ProcessRef { .. } => None,
         CheckedValueTemplate::EnumVariant {
             variant, payload, ..
-        } => Some(format!(
-            "{variant}({})",
-            checked_static_source_value_label(payload)?
-        )),
+        } => Some(ArtifactValue::EnumVariant {
+            variant: variant.to_string(),
+            payload: Box::new(checked_static_source_value(payload)?),
+        }),
         CheckedValueTemplate::Record { ty, fields } => {
-            let mut parts = Vec::with_capacity(fields.len());
+            let mut values = BTreeMap::new();
             for field in fields {
-                parts.push(format!(
-                    "{}:{}",
-                    field.name(),
-                    checked_static_source_value_label(field.value())?
-                ));
+                values.insert(
+                    field.name().to_string(),
+                    checked_static_source_value(field.value())?,
+                );
             }
-            Some(format!("{ty}{{{}}}", parts.join(",")))
+            Some(ArtifactValue::Record {
+                constructor: ty.label().to_string(),
+                fields: values,
+            })
         }
         CheckedValueTemplate::List { items, .. } => {
-            let mut parts = Vec::with_capacity(items.len());
+            let mut values = Vec::with_capacity(items.len());
             for item in items {
-                parts.push(checked_static_source_value_label(item)?);
+                values.push(checked_static_source_value(item)?);
             }
-            Some(format!("List[{}]", parts.join(",")))
+            Some(ArtifactValue::List(values))
         }
         CheckedValueTemplate::Map { entries, .. } => {
-            let mut parts = BTreeMap::new();
+            let mut values = BTreeMap::new();
             for entry in entries {
-                let key = checked_static_source_value_label(entry.key())?;
-                let value = checked_static_source_value_label(entry.value())?;
-                if parts.insert(key, value).is_some() {
+                let key = checked_static_source_value(entry.key())?;
+                let value = checked_static_source_value(entry.value())?;
+                if values.insert(key, value).is_some() {
                     return None;
                 }
             }
-            Some(format!(
-                "Map[{}]",
-                parts
-                    .into_iter()
-                    .map(|(key, value)| format!("{key}=>{value}"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ))
+            Some(ArtifactValue::Map(values))
         }
     }
 }

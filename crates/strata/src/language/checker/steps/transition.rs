@@ -361,18 +361,18 @@ fn populate_template_state_values(
             .message_cases
             .payload_values(context.process_id, variant)?
         {
-            let payload_labels = payload_bindings
+            let payload_values = payload_bindings
                 .iter()
                 .map(|binding| {
-                    let projected = payload_binding_label(
-                        payload.label(),
+                    checked_payload_binding(
+                        payload,
                         &PatternPayloadParam {
                             name: binding.name.clone(),
                             ty: binding.ty.clone(),
                             path: binding.path.clone(),
                         },
-                    )?;
-                    projected.ok_or_else(|| {
+                    )?
+                    .ok_or_else(|| {
                         Error::new(format!(
                             "process {} message payload {} does not match step pattern binding {}",
                             context.process.name,
@@ -383,18 +383,20 @@ fn populate_template_state_values(
                 })
                 .collect::<Result<Vec<_>>>()?;
             let mut bindings = Vec::new();
-            for (binding, label) in payload_bindings.iter().zip(&payload_labels) {
+            for (binding, (label, value)) in payload_bindings.iter().zip(&payload_values) {
                 bindings.push(ValueBinding {
                     name: &binding.name,
                     ty: &binding.ty,
-                    label,
+                    label: label.clone(),
+                    value: value.clone(),
                 });
             }
             for state_binding in state_payload_bindings {
                 bindings.push(ValueBinding {
                     name: &state_binding.name,
                     ty: &state_binding.ty,
-                    label: &state_binding.label,
+                    label: state_binding.label.clone(),
+                    value: Some(state_binding.value.clone()),
                 });
             }
             state_space.resolve_state_value_with_bindings(
@@ -412,7 +414,8 @@ fn populate_template_state_values(
             .map(|binding| ValueBinding {
                 name: &binding.name,
                 ty: &binding.ty,
-                label: &binding.label,
+                label: binding.label.clone(),
+                value: Some(binding.value.clone()),
             })
             .collect::<Vec<_>>();
         state_space.resolve_state_value_with_bindings(

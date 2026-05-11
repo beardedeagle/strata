@@ -102,10 +102,25 @@ pub(super) fn valid_artifact() -> MantleArtifact {
 }
 
 pub(super) fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {
-    values
-        .iter()
-        .map(|value| ArtifactStateValue::new(ty, *value))
-        .collect()
+    values.iter().map(|value| state_value(ty, value)).collect()
+}
+
+pub(super) fn artifact_value(value: &str) -> ArtifactValue {
+    ArtifactValue::parse(value).expect("test artifact value should be valid")
+}
+
+pub(super) fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {
+    ArtifactStateValue::new(ty, artifact_value(value)).expect("test state value should be valid")
+}
+
+pub(super) fn state_value_with_label(ty: TypeId, value: &str, label: &str) -> ArtifactStateValue {
+    ArtifactStateValue::with_label(ty, artifact_value(value), label)
+        .expect("test labeled state value should be valid")
+}
+
+pub(super) fn artifact_payload(ty: TypeId, value: &str) -> ArtifactPayload {
+    ArtifactPayload::value(ty, artifact_value(value))
+        .expect("test artifact payload should be valid")
 }
 
 pub(super) fn emit_actions(count: usize) -> Vec<ArtifactAction> {

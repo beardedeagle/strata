@@ -8,8 +8,8 @@ pub(super) use super::super::lexer::{Lexer, TokenKind};
 pub(super) use super::super::*;
 pub(super) use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget, ArtifactTypeKind,
-    ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
-    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
+    ArtifactValue, ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_FIELD_VALUE_BYTES,
+    MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT,
     MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact,
     ProcessId, ProcessRefId, StepResult, TypeId,
 };
@@ -304,6 +304,10 @@ pub(super) fn artifact_type_id(artifact: &MantleArtifact, label: &str) -> TypeId
         .position(|ty| ty.label == label)
         .unwrap_or_else(|| panic!("artifact type {label} should exist"));
     TypeId::from_index(index).expect("artifact type index should fit")
+}
+
+pub(super) fn artifact_value(value: &str) -> ArtifactValue {
+    ArtifactValue::parse(value).expect("test artifact value should be valid")
 }
 
 pub(super) fn artifact_process_ref_type_id(artifact: &MantleArtifact, target: ProcessId) -> TypeId {

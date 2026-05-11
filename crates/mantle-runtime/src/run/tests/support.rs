@@ -11,10 +11,10 @@ pub(super) use crate::program::{
 pub(super) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactMessageVariant,
     ArtifactPayload, ArtifactProcess, ArtifactProcessRef, ArtifactProcessRefPayload,
-    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValueTemplate,
-    ArtifactValueTemplateField, MAX_FIELD_VALUE_BYTES, MAX_PROCESS_REFS_PER_PROCESS,
-    MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, StateId, StepResult, TypeId,
+    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue, ArtifactValueTemplate,
+    ArtifactValueTemplateField, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
@@ -137,16 +137,21 @@ pub(super) fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact 
 }
 
 pub(super) fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {
-    values
-        .iter()
-        .map(|value| ArtifactStateValue::new(ty, *value))
-        .collect()
+    values.iter().map(|value| state_value(ty, value)).collect()
+}
+
+pub(super) fn artifact_value(value: &str) -> ArtifactValue {
+    ArtifactValue::parse(value).expect("test artifact value should be valid")
+}
+
+pub(super) fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {
+    ArtifactStateValue::new(ty, artifact_value(value)).expect("test state value should be valid")
 }
 
 pub(super) fn record_template_with_depth(depth: usize) -> ArtifactValueTemplate {
     let mut template = ArtifactValueTemplate::Literal {
         ty: LEAF,
-        value: "Leaf".to_string(),
+        value: artifact_value("Leaf"),
     };
     for _ in 0..depth {
         template = ArtifactValueTemplate::Record {

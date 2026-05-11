@@ -1,6 +1,7 @@
 pub(super) use std::collections::{BTreeMap, VecDeque};
 
 pub(super) use super::super::runtime_order::*;
+pub(super) use super::super::templates::validate_value_template_payload_labels;
 pub(super) use super::super::validate_action_references;
 pub(super) use crate::language::STATIC_RUNTIME_PROCESS_LIMIT;
 pub(super) use crate::language::ast::{Effect, Identifier};
@@ -9,8 +10,9 @@ pub(super) use crate::language::checked::{
     CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts,
     CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStateValue,
     CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeRef,
-    CheckedValueTemplate, CheckedValueTemplateField,
+    CheckedValueTemplate, CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
+pub(super) use mantle_artifact::ArtifactValue;
 
 pub(super) fn checked_process_with_declared_refs(process_ref_count: usize) -> CheckedProcess {
     CheckedProcess::new(CheckedProcessParts {
@@ -59,8 +61,12 @@ pub(super) fn process_ref_type(target: &str) -> CheckedTypeRef {
 pub(super) fn checked_state_values(ty: &str, values: &[&str]) -> Vec<CheckedStateValue> {
     values
         .iter()
-        .map(|value| CheckedStateValue::new(value_type(ty), (*value).to_string()))
+        .map(|value| CheckedStateValue::new(value_type(ty), artifact_value(value)))
         .collect()
+}
+
+pub(super) fn artifact_value(value: &str) -> ArtifactValue {
+    ArtifactValue::parse(value).expect("test artifact value should be valid")
 }
 
 pub(super) fn checked_process_id(index: usize) -> CheckedProcessId {

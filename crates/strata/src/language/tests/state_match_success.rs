@@ -71,7 +71,7 @@ fn parses_checks_and_lowers_state_payload_match() {
         worker_artifact.state_values[1].payload.as_ref(),
         Some(&mantle_artifact::ArtifactPayload {
             ty: job_ty,
-            value: "Job{phase:Ready}".to_string(),
+            value: artifact_value("Job{phase:Ready}"),
             process_ref: None,
         })
     );
@@ -79,7 +79,7 @@ fn parses_checks_and_lowers_state_payload_match() {
         worker_artifact.state_values[2].payload.as_ref(),
         Some(&mantle_artifact::ArtifactPayload {
             ty: job_ty,
-            value: "Job{phase:Ready}".to_string(),
+            value: artifact_value("Job{phase:Ready}"),
             process_ref: None,
         })
     );
@@ -218,8 +218,8 @@ proc Worker mailbox bounded(2) {
     else {
         panic!("Done payload should project from current map state payload");
     };
-    assert_eq!(key, "Ready");
-    assert_eq!(keys.as_slice(), ["Ready"]);
+    assert_eq!(key, &artifact_value("Ready"));
+    assert_eq!(keys.as_slice(), [artifact_value("Ready")]);
     assert_eq!(*projection, mantle_artifact::MapProjectionMode::Subset);
 }
 

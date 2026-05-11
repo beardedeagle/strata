@@ -213,8 +213,7 @@ impl LoadedTemplateAdmission<'_> {
             LoadedValueTemplate::Literal { ty, value } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
-                validate_payload_value_label(&value.label())
-                    .map_err(|err| Error::new(format!("{field}: {err}")))
+                validate_non_process_ref_value(field, value)
             }
             LoadedValueTemplate::ReceivedPayload { ty } => {
                 self.validate_received_payload(field, *ty)
@@ -533,12 +532,10 @@ fn validate_map_projection_keys(
             "{field}.key_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
         )));
     }
-    validate_payload_value_label(&key.label())
-        .map_err(|err| Error::new(format!("{field}.key: {err}")))?;
+    validate_non_process_ref_value(&format!("{field}.key"), key)?;
     let mut seen = BTreeSet::new();
     for expected_key in keys {
-        validate_payload_value_label(&expected_key.label())
-            .map_err(|err| Error::new(format!("{field}.expected_key: {err}")))?;
+        validate_non_process_ref_value(&format!("{field}.expected_key"), expected_key)?;
         if !seen.insert(expected_key.clone()) {
             return Err(Error::new(format!(
                 "{field} duplicates expected map key {}",
@@ -550,6 +547,21 @@ fn validate_map_projection_keys(
         return Err(Error::new(format!(
             "{field} projection key {} is not one of the expected map keys",
             key.label()
+        )));
+    }
+    if seen.into_iter().collect::<Vec<_>>() != keys {
+        return Err(Error::new(format!(
+            "{field} expected map keys must be sorted"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_non_process_ref_value(field: &str, value: &RuntimeValue) -> Result<()> {
+    value.validate(field)?;
+    if value.contains_process_ref() {
+        return Err(Error::new(format!(
+            "{field} must not contain a process reference value"
         )));
     }
     Ok(())

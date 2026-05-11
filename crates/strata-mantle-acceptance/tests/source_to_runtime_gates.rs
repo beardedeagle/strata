@@ -6,8 +6,9 @@ use std::process::{Command, Output};
 use std::sync::Once;
 
 use mantle_artifact::{
-    ArtifactEffect, ArtifactTypeKind, ArtifactValueTemplate, ArtifactValueTemplateField,
-    ArtifactValueTemplateMapEntry, MantleArtifact, ProcessId, TypeId, read_artifact,
+    ArtifactEffect, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, ProcessId, TypeId,
+    read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -16,6 +17,10 @@ struct GateHarness {
     root: PathBuf,
     strata: PathBuf,
     mantle: PathBuf,
+}
+
+fn artifact_value(value: &str) -> ArtifactValue {
+    ArtifactValue::parse(value).expect("test artifact value should be valid")
 }
 
 impl GateHarness {
@@ -604,7 +609,7 @@ fn function_match_checks_builds_and_runs_on_mantle() {
     assert_eq!(main.init_state, mantle_artifact::StateId::new(0));
     assert_eq!(
         main.state_values[0].label,
-        "MainState{signature:WarmReady,body:WarmReady}"
+        "MainState{body:WarmReady,signature:WarmReady}"
     );
 
     let worker = &artifact.processes[1];
@@ -632,7 +637,7 @@ fn function_match_checks_builds_and_runs_on_mantle() {
 
     let trace = gate.read_trace("function_match");
     assert!(trace.contains(
-        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{signature:WarmReady,body:WarmReady}""#
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{body:WarmReady,signature:WarmReady}""#
     ));
     assert!(trace.contains(
         r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source functions selected WarmReady""#
@@ -660,7 +665,7 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
     let main = &artifact.processes[0];
     assert_eq!(
         main.state_values[0].label,
-        "MainState{signature:Active(Job{phase:Ready}),body:Active(Job{phase:Done})}"
+        "MainState{body:Active(Job{phase:Done}),signature:Active(Job{phase:Ready})}"
     );
 
     let worker = &artifact.processes[1];
@@ -690,7 +695,7 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
     let payload_type = format!(r#""payload_type_id":{}"#, job_type.as_u32());
     let trace = gate.read_trace("function_payload_match");
     assert!(trace.contains(
-        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{signature:Active(Job{phase:Ready}),body:Active(Job{phase:Done})}""#
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{body:Active(Job{phase:Done}),signature:Active(Job{phase:Ready})}""#
     ));
     assert!(trace.contains(&format!(
         r#""event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}""#
@@ -914,24 +919,24 @@ fn collection_state_checks_builds_and_runs_on_mantle() {
                 ArtifactValueTemplateMapEntry {
                     key: ArtifactValueTemplate::Literal {
                         ty: phase_type,
-                        value: "Ready".to_string(),
+                        value: artifact_value("Ready"),
                     },
                     value: ArtifactValueTemplate::MapValue {
                         ty: phase_type,
                         map: Box::new(ArtifactValueTemplate::ReceivedPayload { ty: map_type }),
-                        key: "Ready".to_string(),
-                        keys: vec!["Ready".to_string()],
+                        key: artifact_value("Ready"),
+                        keys: vec![artifact_value("Ready")],
                         projection: mantle_artifact::MapProjectionMode::Subset,
                     },
                 },
                 ArtifactValueTemplateMapEntry {
                     key: ArtifactValueTemplate::Literal {
                         ty: phase_type,
-                        value: "Done".to_string(),
+                        value: artifact_value("Done"),
                     },
                     value: ArtifactValueTemplate::Literal {
                         ty: phase_type,
-                        value: "Ready".to_string(),
+                        value: artifact_value("Ready"),
                     },
                 },
             ],
@@ -977,7 +982,7 @@ fn state_payload_match_checks_builds_and_runs_on_mantle() {
         worker.state_values[1].payload.as_ref(),
         Some(&mantle_artifact::ArtifactPayload {
             ty: job_type,
-            value: "Job{phase:Ready}".to_string(),
+            value: artifact_value("Job{phase:Ready}"),
             process_ref: None,
         })
     );
@@ -985,7 +990,7 @@ fn state_payload_match_checks_builds_and_runs_on_mantle() {
         worker.state_values[2].payload.as_ref(),
         Some(&mantle_artifact::ArtifactPayload {
             ty: job_type,
-            value: "Job{phase:Ready}".to_string(),
+            value: artifact_value("Job{phase:Ready}"),
             process_ref: None,
         })
     );

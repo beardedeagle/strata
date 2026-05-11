@@ -7,7 +7,7 @@ pub(in crate::language::checker::source_functions) enum CollectionPatternShape {
         len: usize,
     },
     Map {
-        keys: Vec<String>,
+        keys: Vec<ArtifactValue>,
         completeness: MapPatternCompleteness,
     },
 }
@@ -549,7 +549,7 @@ fn canonical_map_pattern_keys(
     semantic_index: &SemanticIndex,
     key_type: &TypeRef,
     pattern: &MapPattern,
-) -> Result<Vec<String>> {
+) -> Result<Vec<ArtifactValue>> {
     let mut keys = BTreeSet::new();
     for entry in &pattern.entries {
         let key = canonical_source_value_with_bindings(
@@ -560,7 +560,10 @@ fn canonical_map_pattern_keys(
             &[],
         )?;
         if !keys.insert(key.clone()) {
-            return Err(Error::new(format!("map pattern duplicates key {key}")));
+            return Err(Error::new(format!(
+                "map pattern duplicates key {}",
+                key.label()
+            )));
         }
     }
     Ok(keys.into_iter().collect())
@@ -598,7 +601,10 @@ fn map_pattern_substitutions<'a>(
             &[],
         )?;
         if value_entries.insert(key.clone(), &entry.value).is_some() {
-            return Err(Error::new(format!("map value duplicates key {key}")));
+            return Err(Error::new(format!(
+                "map value duplicates key {}",
+                key.label()
+            )));
         }
     }
 
@@ -613,7 +619,10 @@ fn map_pattern_substitutions<'a>(
             &[],
         )?;
         if !pattern_keys.insert(key.clone()) {
-            return Err(Error::new(format!("map pattern duplicates key {key}")));
+            return Err(Error::new(format!(
+                "map pattern duplicates key {}",
+                key.label()
+            )));
         }
         let Some(value) = value_entries.get(&key).copied() else {
             return Ok(None);
@@ -640,7 +649,12 @@ pub(in crate::language::checker::source_functions) fn collection_shape_label(
                 MapPatternCompleteness::Exact => "exact",
                 MapPatternCompleteness::Subset => "subset",
             };
-            format!("Map {marker} keys [{}]", keys.join(","))
+            let key_labels = keys
+                .iter()
+                .map(ArtifactValue::label)
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("Map {marker} keys [{key_labels}]")
         }
     }
 }
@@ -700,9 +714,9 @@ fn collection_pattern_shapes_overlap(
 }
 
 fn map_pattern_shapes_overlap(
-    left: &[String],
+    left: &[ArtifactValue],
     left_completeness: MapPatternCompleteness,
-    right: &[String],
+    right: &[ArtifactValue],
     right_completeness: MapPatternCompleteness,
     capacity: usize,
 ) -> bool {
@@ -720,13 +734,13 @@ fn map_pattern_shapes_overlap(
     }
 }
 
-fn key_set_contains_all(keys: &[String], required: &[String]) -> bool {
+fn key_set_contains_all(keys: &[ArtifactValue], required: &[ArtifactValue]) -> bool {
     required
         .iter()
         .all(|required_key| keys.binary_search(required_key).is_ok())
 }
 
-fn sorted_key_union_len(left: &[String], right: &[String]) -> usize {
+fn sorted_key_union_len(left: &[ArtifactValue], right: &[ArtifactValue]) -> usize {
     let mut index_left = 0usize;
     let mut index_right = 0usize;
     let mut count = 0usize;

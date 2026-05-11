@@ -105,7 +105,7 @@ proc Main mailbox bounded(1) {
 
     assert_eq!(
         artifact_state_labels(&artifact.processes[0]),
-        ["MainState{first:Ready,body:Done,map_body:Done,ret:Done,mapped:Done}"]
+        ["MainState{body:Done,first:Ready,map_body:Done,mapped:Done,ret:Done}"]
     );
 }
 
@@ -177,7 +177,7 @@ proc Main mailbox bounded(1) {
 
     assert_eq!(
         artifact_state_labels(&artifact.processes[0]),
-        ["MainState{signature:Done,body:Done,ret:Done}"]
+        ["MainState{body:Done,ret:Done,signature:Done}"]
     );
 }
 

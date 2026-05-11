@@ -37,15 +37,20 @@ impl ArtifactProcess {
                 return Err(Error::new(format!(
                     "process {} state value {} (label {}) has type id {}, expected {}",
                     self.debug_name,
-                    state_value.value,
+                    state_value.value.label(),
                     state_value.label,
                     state_value.ty.as_u32(),
                     self.state_type.as_u32()
                 )));
             }
+            state_value
+                .value
+                .validate_without_process_ref("state value")?;
             if let Some(payload) = &state_value.payload {
                 artifact.validate_value_type("state value payload type", payload.ty)?;
-                validate_value_label("state value payload", &payload.value)?;
+                payload
+                    .value
+                    .validate_without_process_ref("state value payload")?;
                 if payload.process_ref.is_some() {
                     return Err(Error::new(format!(
                         "process {} state value {} carries a process reference payload",

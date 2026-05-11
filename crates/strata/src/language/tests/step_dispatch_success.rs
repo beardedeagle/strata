@@ -233,8 +233,8 @@ proc BodyWorker mailbox bounded(1) {
         else {
             panic!("{process_name} should project phase from a map payload");
         };
-        assert_eq!(key, "Ready");
-        assert_eq!(keys.as_slice(), ["Ready"]);
+        assert_eq!(key, &artifact_value("Ready"));
+        assert_eq!(keys.as_slice(), [artifact_value("Ready")]);
         assert_eq!(*projection, mantle_artifact::MapProjectionMode::Subset);
     }
 }

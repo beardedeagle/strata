@@ -303,7 +303,7 @@ pub(in crate::language::checker) fn collect_concrete_state_payload_domains(
     process: &Process,
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
-) -> Result<BTreeMap<String, BTreeSet<String>>> {
+) -> Result<Vec<ConcreteStatePayloadDomain>> {
     let mut local_types = CheckedTypeInterner::new(semantic_index);
     let mut state_space = StateSpace::new(module, semantic_index, process, &mut local_types)?;
     check_init(
@@ -322,16 +322,44 @@ pub(in crate::language::checker) fn collect_concrete_state_payload_domains(
         &mut local_types,
     )?;
 
-    let mut domains: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut domains = Vec::new();
     for state in state_space.values() {
         if let Some(payload) = state.payload() {
-            domains
-                .entry(payload.ty().label().to_string())
-                .or_default()
-                .insert(payload.label().to_string());
+            let value = payload.value().cloned().ok_or_else(|| {
+                Error::new(format!(
+                    "process {} state payload {} cannot be a process reference",
+                    process.name,
+                    payload.label()
+                ))
+            })?;
+            insert_concrete_state_payload_domain(
+                semantic_index,
+                &mut domains,
+                local_types.source_type(payload.ty())?.clone(),
+                value,
+            );
         }
     }
     Ok(domains)
+}
+
+fn insert_concrete_state_payload_domain(
+    semantic_index: &SemanticIndex,
+    domains: &mut Vec<ConcreteStatePayloadDomain>,
+    ty: TypeRef,
+    value: ArtifactValue,
+) {
+    if let Some(domain) = domains
+        .iter_mut()
+        .find(|domain| semantic_index.same_type(&domain.ty, &ty))
+    {
+        domain.values.insert(value);
+        return;
+    }
+    domains.push(ConcreteStatePayloadDomain {
+        ty,
+        values: BTreeSet::from([value]),
+    });
 }
 
 fn step_pattern_binding_names(pattern: &StepPattern) -> Vec<&Identifier> {
@@ -561,8 +589,8 @@ fn preadmit_state_match_case_return(
         for payload in message_cases.payload_values(process_id, variant)? {
             let mut owned_bindings = Vec::new();
             for binding in payload_bindings {
-                let label = payload_binding_label(
-                    payload.label(),
+                let (label, value) = checked_payload_binding(
+                    payload,
                     &PatternPayloadParam {
                         name: binding.name.clone(),
                         ty: binding.ty.clone(),
@@ -581,6 +609,7 @@ fn preadmit_state_match_case_return(
                     name: binding.name.clone(),
                     ty: binding.ty.clone(),
                     label,
+                    value,
                 });
             }
             for binding in state_payload_bindings {
@@ -588,6 +617,7 @@ fn preadmit_state_match_case_return(
                     name: binding.name.clone(),
                     ty: binding.ty.clone(),
                     label: binding.label.clone(),
+                    value: Some(binding.value.clone()),
                 });
             }
             let value_bindings = owned_bindings
@@ -595,7 +625,8 @@ fn preadmit_state_match_case_return(
                 .map(|binding| ValueBinding {
                     name: &binding.name,
                     ty: &binding.ty,
-                    label: &binding.label,
+                    label: binding.label.clone(),
+                    value: binding.value.clone(),
                 })
                 .collect::<Vec<_>>();
             state_space.resolve_state_value_with_bindings(
@@ -614,6 +645,7 @@ fn preadmit_state_match_case_return(
             name: binding.name.clone(),
             ty: binding.ty.clone(),
             label: binding.label.clone(),
+            value: Some(binding.value.clone()),
         })
         .collect::<Vec<_>>();
     let value_bindings = owned_bindings
@@ -621,7 +653,8 @@ fn preadmit_state_match_case_return(
         .map(|binding| ValueBinding {
             name: &binding.name,
             ty: &binding.ty,
-            label: &binding.label,
+            label: binding.label.clone(),
+            value: binding.value.clone(),
         })
         .collect::<Vec<_>>();
     state_space.resolve_state_value_with_bindings(
@@ -704,6 +737,13 @@ fn state_match_arm_cases(
                                 name: variant_decl.name.clone(),
                                 payload: Box::new(ValueExpr::Identifier(payload_name.clone())),
                             };
+                            let payload_value = payload.value().cloned().ok_or_else(|| {
+                                Error::new(format!(
+                                    "process {} state payload {} cannot be a process reference",
+                                    process.name,
+                                    payload.label()
+                                ))
+                            })?;
                             let state = state_space.resolve_state_value_with_bindings(
                                 semantic_index,
                                 types,
@@ -711,35 +751,45 @@ fn state_match_arm_cases(
                                 &[ValueBinding {
                                     name: &payload_name,
                                     ty: payload_type,
-                                    label: payload.label(),
+                                    label: payload_value.label(),
+                                    value: Some(payload_value),
                                 }],
                             )?;
                             let state_payload_bindings = bindings
                                 .iter()
                                 .map(|binding| {
+                                    let (label, value) = checked_payload_binding(
+                                        &payload, binding,
+                                    )?
+                                    .ok_or_else(|| {
+                                        Error::new(format!(
+                                            "process {} state payload {} does not match binding {}",
+                                            process.name,
+                                            payload.label(),
+                                            binding.name
+                                        ))
+                                    })?;
+                                    let value = value.ok_or_else(|| {
+                                        Error::new(format!(
+                                            "process {} state payload {} does not match binding {}",
+                                            process.name,
+                                            payload.label(),
+                                            binding.name
+                                        ))
+                                    })?;
                                     Ok(StepStatePayloadBinding {
                                         name: binding.name.clone(),
                                         payload_ty: payload_type.clone(),
                                         ty: binding.ty.clone(),
                                         checked_payload_ty: checked_ty.clone(),
                                         checked_ty: types.intern(&binding.ty)?,
-                                        label: payload_binding_label(payload.label(), binding)?
-                                            .ok_or_else(|| {
-                                                Error::new(format!(
-                                                    "process {} state payload {} does not match binding {}",
-                                                    process.name,
-                                                    payload.label(),
-                                                    binding.name
-                                                ))
-                                            })?,
+                                        label,
+                                        value,
                                         path: binding.path.clone(),
                                     })
                                 })
                                 .collect::<Result<Vec<_>>>()?;
-                            Ok((
-                                state,
-                                state_payload_bindings,
-                            ))
+                            Ok((state, state_payload_bindings))
                         })
                         .collect()
                 }
@@ -775,6 +825,13 @@ fn state_match_arm_cases(
                             payload_type,
                             &checked_ty,
                         )? {
+                            let payload_value = payload.value().cloned().ok_or_else(|| {
+                                Error::new(format!(
+                                    "process {} state payload {} cannot be a process reference",
+                                    process.name,
+                                    payload.label()
+                                ))
+                            })?;
                             let state = state_space.resolve_state_value_with_bindings(
                                 semantic_index,
                                 types,
@@ -782,7 +839,8 @@ fn state_match_arm_cases(
                                 &[ValueBinding {
                                     name: &payload_name,
                                     ty: payload_type,
-                                    label: payload.label(),
+                                    label: payload_value.label(),
+                                    value: Some(payload_value),
                                 }],
                             )?;
                             cases.push((state, Vec::new()));
@@ -810,7 +868,7 @@ fn state_match_payload_domain(
     for state in state_space.values() {
         if let Some(payload) = state.payload() {
             if payload.ty() == checked_payload_type {
-                payloads.insert(payload.label().to_string(), payload.clone());
+                payloads.insert(PayloadDomainKey::from_payload(payload), payload.clone());
             }
         }
     }
@@ -824,7 +882,7 @@ fn state_match_payload_domain(
         }
         let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
         for payload in message_cases.payload_values(process_id, variant_id)? {
-            payloads.insert(payload.label().to_string(), payload.clone());
+            payloads.insert(PayloadDomainKey::from_payload(payload), payload.clone());
         }
     }
     Ok(payloads.into_values().collect())

@@ -11,10 +11,9 @@ mod validation;
 pub use artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
     ArtifactProcessRef, ArtifactProcessRefPayload, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
+    ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
     ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode,
-    NextState, StepResult, project_canonical_list_element, project_canonical_map_value,
-    project_canonical_record_field,
+    NextState, StepResult,
 };
 pub use constants::*;
 pub use error::{Error, Result};

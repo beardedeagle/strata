@@ -63,7 +63,10 @@ fn static_validation_rejects_static_next_state_template_outside_state_table() {
             message: checked_message_id(0),
             step_result: CheckedStepResult::Stop,
             next_state: CheckedNextState::Template(CheckedValueTemplate::Literal(
-                CheckedPayloadValue::new(value_type("MainState"), "UnadmittedState".to_string()),
+                CheckedPayloadValue::new(
+                    value_type("MainState"),
+                    artifact_value("UnadmittedState"),
+                ),
             )),
             effects: Vec::new(),
             actions: Vec::new(),
@@ -267,7 +270,7 @@ fn static_validation_rejects_payload_template_next_state_outside_state_table() {
                     message: checked_message_id(0),
                     payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
                         value_type("Job"),
-                        "Job{phase:Ready}".to_string(),
+                        artifact_value("Job{phase:Ready}"),
                     ))),
                 },
             ],
@@ -356,7 +359,7 @@ fn static_validation_rejects_payload_enum_template_next_state_outside_state_tabl
                     message: checked_message_id(0),
                     payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
                         value_type("Job"),
-                        "Job{phase:Ready}".to_string(),
+                        artifact_value("Job{phase:Ready}"),
                     ))),
                 },
             ],

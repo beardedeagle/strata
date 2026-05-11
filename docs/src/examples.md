@@ -329,11 +329,11 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/collection_state.m
 
 Key source ideas:
 
-- `type State = List<Phase,1>;` and `type State = Map<Phase,Phase,1>;` make
+- `type State = List<Phase,1>;` and `type State = Map<Phase,Phase,2>;` make
   worker states collection values rather than records or enums.
 - `return Stop(List<Phase,1>[next]);` and
-  `return Stop(Map<Phase,Phase,1>[Ready => next]);` create new immutable whole
-  collection states from the received payload binding.
+  `return Stop(Map<Phase,Phase,2>[Ready => next, Done => Ready]);` create new
+  immutable whole collection states from received payload bindings.
 - Mantle receives list and map value templates and evaluates them during
   runtime execution.
 

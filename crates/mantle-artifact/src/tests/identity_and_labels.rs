@@ -114,7 +114,7 @@ fn validate_payload_value_label_defines_artifact_metadata_boundary() {
 
 #[test]
 fn projection_helpers_reject_duplicate_record_fields() {
-    let err = project_canonical_record_field("Job{phase:Ready,phase:Done}", "phase")
+    let err = ArtifactValue::parse("Job{phase:Ready,phase:Done}")
         .expect_err("duplicate record fields must fail closed");
 
     assert!(
@@ -125,17 +125,89 @@ fn projection_helpers_reject_duplicate_record_fields() {
 
 #[test]
 fn projection_helpers_reject_duplicate_map_keys() {
-    let keys = vec!["Ready".to_string()];
-    let err = project_canonical_map_value(
-        "Map[Ready=>Ready,Ready=>Done]",
-        "Ready",
-        &keys,
-        MapProjectionMode::Exact,
-    )
-    .expect_err("duplicate map keys must fail closed");
+    let err = ArtifactValue::parse("Map[Ready=>Ready,Ready=>Done]")
+        .expect_err("duplicate map keys must fail closed");
 
     assert!(
         err.to_string().contains("duplicates key Ready"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn map_projection_rejects_duplicate_expected_keys() {
+    let map =
+        ArtifactValue::parse("Map[Done=>Ready,Ready=>Done]").expect("test map value should parse");
+    let key = ArtifactValue::parse("Ready").expect("test key should parse");
+    let keys = vec![key.clone(), key.clone()];
+
+    let err = map
+        .project_map_value(&key, &keys, MapProjectionMode::Exact)
+        .expect_err("duplicate projection keys must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("map projection duplicates expected map key Ready"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn artifact_value_validate_rejects_invalid_shape_before_materializing_label() {
+    let value = ArtifactValue::List(vec![
+        ArtifactValue::Atom("A".repeat(MAX_IDENTIFIER_BYTES));
+        MAX_VALUE_TEMPLATE_FIELDS + 1
+    ]);
+
+    let err = value
+        .validate("oversized list")
+        .expect_err("oversized list shape should fail before label validation");
+
+    assert!(
+        err.to_string()
+            .contains("oversized list.item_count must be no greater than"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn validate_rejects_programmatic_invalid_state_value_shape() {
+    let mut artifact = valid_artifact();
+    let invalid = ArtifactValue::Atom("not-valid".to_string());
+    artifact.processes[0].state_values[0] = ArtifactStateValue {
+        ty: MAIN_STATE,
+        value: invalid,
+        label: "not-valid".to_string(),
+        payload: None,
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("programmatic invalid state value should fail validation");
+
+    assert!(
+        err.to_string()
+            .contains("artifact field state value must be an identifier"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn validate_rejects_programmatic_invalid_literal_template_shape() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Literal {
+            ty: MAIN_STATE,
+            value: ArtifactValue::Atom("not-valid".to_string()),
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("programmatic invalid literal template should fail validation");
+
+    assert!(
+        err.to_string()
+            .contains("next_state_template must be an identifier"),
         "unexpected error: {err}"
     );
 }

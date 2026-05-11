@@ -10,10 +10,9 @@ mod symbols;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
-    MAX_ACTIONS_PER_PROCESS, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
+    ArtifactValue, MAX_ACTIONS_PER_PROCESS, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_TYPE_COUNT, MapProjectionMode, project_canonical_list_element, project_canonical_map_value,
-    project_canonical_record_field,
+    MAX_TYPE_COUNT, MapProjectionMode,
 };
 
 use super::ast::{
@@ -99,6 +98,19 @@ impl<'a> CheckedTypeInterner<'a> {
         let checked = CheckedTypeRef::new(id, checked_type_label(ty, process_ref_target)?, kind);
         self.entries.push((ty.clone(), checked.clone()));
         Ok(checked)
+    }
+
+    fn source_type(&self, checked_ty: &CheckedTypeRef) -> Result<&TypeRef> {
+        self.entries
+            .get(checked_ty.id().index())
+            .filter(|(_, checked)| checked == checked_ty)
+            .map(|(ty, _)| ty)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "checked type id {} is not interned",
+                    checked_ty.id().as_u32()
+                ))
+            })
     }
 
     fn into_types(self) -> Vec<CheckedTypeRef> {
@@ -292,8 +304,8 @@ enum PayloadBindingPath {
         len: usize,
     },
     MapValue {
-        key: String,
-        keys: Vec<String>,
+        key: ArtifactValue,
+        keys: Vec<ArtifactValue>,
         projection: MapProjectionMode,
     },
 }
@@ -311,11 +323,45 @@ struct DiscoveryValueBinding {
     name: Identifier,
     ty: TypeRef,
     label: String,
+    value: Option<ArtifactValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConcreteStatePayloadDomain {
+    ty: TypeRef,
+    values: BTreeSet<ArtifactValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PayloadDomainKey {
+    value: Option<ArtifactValue>,
+    process_ref_target: Option<CheckedProcessId>,
+    process_ref_label: Option<String>,
+}
+
+impl PayloadDomainKey {
+    fn from_payload(payload: &CheckedPayloadValue) -> Self {
+        if let Some(value) = payload.value() {
+            return Self {
+                value: Some(value.clone()),
+                process_ref_target: None,
+                process_ref_label: None,
+            };
+        }
+        let process_ref = payload
+            .process_ref_payload()
+            .expect("non-value payloads must carry process reference metadata");
+        Self {
+            value: None,
+            process_ref_target: Some(process_ref.target()),
+            process_ref_label: Some(payload.label().to_string()),
+        }
+    }
 }
 
 struct SendPayloadDiscoveryContext<'a, 'types, 'semantic> {
     sender_cases: &'a [DiscoveredMessageCase],
-    concrete_state_payloads: &'a BTreeMap<String, BTreeSet<String>>,
+    concrete_state_payloads: &'a [ConcreteStatePayloadDomain],
     process_refs: &'a BTreeMap<Identifier, CheckedProcessId>,
     types: &'types mut CheckedTypeInterner<'semantic>,
 }
@@ -338,6 +384,7 @@ struct StepStatePayloadBinding {
     checked_payload_ty: CheckedTypeRef,
     checked_ty: CheckedTypeRef,
     label: String,
+    value: ArtifactValue,
     path: PayloadBindingPath,
 }
 
@@ -982,7 +1029,10 @@ fn check_map_payload_pattern_bindings(
             &[],
         )?;
         if !seen_keys.insert(key.clone()) {
-            return Err(Error::new(format!("map pattern duplicates key {key}")));
+            return Err(Error::new(format!(
+                "map pattern duplicates key {}",
+                key.label()
+            )));
         }
         entry_keys.push(key);
     }
@@ -1054,24 +1104,35 @@ fn map_pattern_projection(pattern: &MapPattern) -> MapProjectionMode {
     }
 }
 
-fn payload_binding_label(
-    payload_label: &str,
+fn payload_binding_value(
+    payload_value: &ArtifactValue,
     binding: &PatternPayloadParam,
-) -> Result<Option<String>> {
+) -> Result<Option<ArtifactValue>> {
     match &binding.path {
-        PayloadBindingPath::Whole => Ok(Some(payload_label.to_string())),
+        PayloadBindingPath::Whole => Ok(Some(payload_value.clone())),
         PayloadBindingPath::RecordField { field } => {
-            Ok(project_canonical_record_field(payload_label, field.as_str()).ok())
+            Ok(payload_value.project_record_field(field.as_str()).ok())
         }
         PayloadBindingPath::ListIndex { index, len } => {
-            Ok(project_canonical_list_element(payload_label, *index, *len).ok())
+            Ok(payload_value.project_list_element(*index, *len).ok())
         }
         PayloadBindingPath::MapValue {
             key,
             keys,
             projection,
-        } => Ok(project_canonical_map_value(payload_label, key, keys, *projection).ok()),
+        } => Ok(payload_value.project_map_value(key, keys, *projection).ok()),
     }
+}
+
+fn checked_payload_binding(
+    payload: &CheckedPayloadValue,
+    binding: &PatternPayloadParam,
+) -> Result<Option<(String, Option<ArtifactValue>)>> {
+    let Some(payload_value) = payload.value() else {
+        return Ok(matches!(binding.path, PayloadBindingPath::Whole)
+            .then(|| (payload.label().to_string(), None)));
+    };
+    Ok(payload_binding_value(payload_value, binding)?.map(|value| (value.label(), Some(value))))
 }
 
 fn reject_payload_entry_message(

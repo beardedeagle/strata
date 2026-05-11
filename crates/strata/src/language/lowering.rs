@@ -222,15 +222,17 @@ fn lower_state_value(
 ) -> mantle_artifact::Result<ArtifactStateValue> {
     let mut state = ArtifactStateValue::with_label(
         types.artifact_id(value.ty())?,
-        value.value().to_string(),
-        value.label().to_string(),
-    );
+        value.value().clone(),
+        value.label(),
+    )?;
     if let Some(payload) = value.payload() {
-        state.payload = Some(mantle_artifact::ArtifactPayload {
-            ty: types.artifact_id(payload.ty())?,
-            value: payload.label().to_string(),
-            process_ref: None,
-        });
+        let payload_value = payload.value().cloned().ok_or_else(|| {
+            mantle_artifact::Error::new("checked state payload cannot be a process reference")
+        })?;
+        state.payload = Some(mantle_artifact::ArtifactPayload::value(
+            types.artifact_id(payload.ty())?,
+            payload_value,
+        )?);
     }
     Ok(state)
 }
@@ -242,7 +244,9 @@ fn lower_value_template(
     match template {
         CheckedValueTemplate::Literal(value) => Ok(ArtifactValueTemplate::Literal {
             ty: types.artifact_id(value.ty())?,
-            value: value.label().to_string(),
+            value: value.value().cloned().ok_or_else(|| {
+                mantle_artifact::Error::new("literal process reference template must be explicit")
+            })?,
         }),
         CheckedValueTemplate::ReceivedPayload { ty } => {
             Ok(ArtifactValueTemplate::ReceivedPayload {

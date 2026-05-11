@@ -9,7 +9,7 @@ fn validate_accepts_payload_message_metadata() {
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
-            value: "Job{phase:Ready}".to_string(),
+            value: artifact_value("Job{phase:Ready}"),
         }),
     };
 
@@ -64,7 +64,7 @@ fn validate_rejects_payload_for_unit_message_variant() {
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
-            value: "Job{phase:Ready}".to_string(),
+            value: artifact_value("Job{phase:Ready}"),
         }),
     };
 
@@ -86,7 +86,7 @@ fn validate_rejects_send_payload_type_mismatch() {
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: OTHER_JOB,
-            value: "OtherJob{phase:Ready}".to_string(),
+            value: artifact_value("OtherJob{phase:Ready}"),
         }),
     };
 

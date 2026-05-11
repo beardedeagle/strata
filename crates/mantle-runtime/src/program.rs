@@ -31,7 +31,7 @@ use mantle_artifact::{
     MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
     MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
     OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId, validate_message_label,
-    validate_payload_value_label, validate_state_value_label,
+    validate_state_value_label,
 };
 
 #[derive(Debug, Clone)]
@@ -409,9 +409,15 @@ impl LoadedProcess {
                         self.debug_name
                     ))
                 })?;
-            validate_state_value_label(&state.value.label()).map_err(|err| {
+            state.value.validate("state value").map_err(|err| {
                 Error::new(format!("process {} state value: {err}", self.debug_name))
             })?;
+            if state.value.contains_process_ref() {
+                return Err(Error::new(format!(
+                    "process {} state value {} carries a process reference value",
+                    self.debug_name, state.label
+                )));
+            }
             validate_state_value_label(&state.label).map_err(|err| {
                 Error::new(format!("process {} state label: {err}", self.debug_name))
             })?;
@@ -433,13 +439,16 @@ impl LoadedProcess {
                             self.debug_name
                         ))
                     })?;
-                validate_payload_value_label(&payload.label()).map_err(|err| {
-                    Error::new(format!(
-                        "process {} state value payload: {err}",
-                        self.debug_name
-                    ))
-                })?;
-                if payload.process_ref.is_some() {
+                payload
+                    .value
+                    .validate("state value payload")
+                    .map_err(|err| {
+                        Error::new(format!(
+                            "process {} state value payload: {err}",
+                            self.debug_name
+                        ))
+                    })?;
+                if payload.process_ref.is_some() || payload.value.contains_process_ref() {
                     return Err(Error::new(format!(
                         "process {} state value {} carries a process reference payload",
                         self.debug_name, state.label
