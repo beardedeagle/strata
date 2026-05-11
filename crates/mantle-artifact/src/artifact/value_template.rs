@@ -46,9 +46,13 @@ pub enum ArtifactValue {
 
 impl ArtifactValue {
     pub fn parse(label: &str) -> Result<Self> {
-        validate_payload_value_label(label)?;
+        Self::parse_field("artifact value", label)
+    }
+
+    pub(crate) fn parse_field(field: &str, label: &str) -> Result<Self> {
+        validate_value_label(field, label)?;
         let value = parse_value(label, 0)?;
-        value.validate("artifact value")?;
+        value.validate(field)?;
         Ok(value)
     }
 

@@ -98,6 +98,28 @@ fn decode_reports_unknown_fields() {
 }
 
 #[test]
+fn decode_reports_artifact_value_field_context() {
+    let encoded = valid_artifact().encode().replace(
+        "process.0.state_value.0.value=MainState",
+        "process.0.state_value.0.value=Main\u{7}State",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("invalid state value should fail");
+    let message = err.to_string();
+
+    assert!(
+        message.contains(
+            "process.0.state_value.0.value must be non-empty and contain no control characters"
+        ),
+        "unexpected error: {err}"
+    );
+    assert!(
+        !message.contains("payload value"),
+        "state value decode should not report payload context: {err}"
+    );
+}
+
+#[test]
 fn decode_rejects_unbounded_process_count_before_allocation() {
     let encoded = format!(
         "MTA0\nformat={ARTIFACT_FORMAT}\nschema_version={ARTIFACT_SCHEMA_VERSION}\nprocess_count={}\n",

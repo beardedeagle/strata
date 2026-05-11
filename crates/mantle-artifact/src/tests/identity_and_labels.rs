@@ -114,6 +114,18 @@ fn validate_payload_value_label_defines_artifact_metadata_boundary() {
 }
 
 #[test]
+fn artifact_value_parse_uses_generic_artifact_value_context() {
+    let oversized = "a".repeat(MAX_FIELD_VALUE_BYTES + 1);
+    let err = ArtifactValue::parse(&oversized).expect_err("oversized artifact value should fail");
+
+    assert!(
+        err.to_string()
+            .contains("artifact value exceeds maximum length"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn projection_helpers_reject_duplicate_record_fields() {
     let err = ArtifactValue::parse("Job{phase:Ready,phase:Done}")
         .expect_err("duplicate record fields must fail closed");
