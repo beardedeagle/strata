@@ -477,7 +477,7 @@ impl Parser {
             return Ok((entries, completeness));
         }
         if self.consume_dotdot() {
-            self.expect_symbol(']')?;
+            self.expect_map_subset_pattern_end()?;
             return Ok((entries, MapPatternCompleteness::Subset));
         }
         loop {
@@ -488,7 +488,7 @@ impl Parser {
             if self.consume_symbol(',') {
                 if self.consume_dotdot() {
                     completeness = MapPatternCompleteness::Subset;
-                    self.expect_symbol(']')?;
+                    self.expect_map_subset_pattern_end()?;
                     break;
                 }
                 if self.consume_symbol(']') {
@@ -500,6 +500,11 @@ impl Parser {
             break;
         }
         Ok((entries, completeness))
+    }
+
+    fn expect_map_subset_pattern_end(&mut self) -> Result<()> {
+        self.consume_symbol(',');
+        self.expect_symbol(']')
     }
 
     fn parse_collection_pattern_binding(&mut self) -> Result<CollectionPatternBinding> {

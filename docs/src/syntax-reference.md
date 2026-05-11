@@ -141,10 +141,10 @@ list_pattern_items =
     collection_pattern_binding ("," collection_pattern_binding)* ","?
 
 map_pattern_entries =
-    ".."
+    ".." ","?
   | value_expr "=>" collection_pattern_binding
     ("," value_expr "=>" collection_pattern_binding)*
-    ("," ".." | ","?)
+    ("," ".." ","? | ","?)
 
 collection_pattern_binding =
     ident

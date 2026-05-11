@@ -128,13 +128,13 @@ enum MainMsg {
     Start,
 }
 
-fn ready_signature(Map<Phase,Phase,2>[Ready => selected, ..]) -> Phase ! [] ~ [] @det {
+fn ready_signature(Map<Phase,Phase,2>[Ready => selected, ..,]) -> Phase ! [] ~ [] @det {
     return selected;
 }
 
 fn ready_body(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
     match items {
-        Map[Ready => selected, ..] => {
+        Map[Ready => selected, ..,] => {
             return selected;
         }
         _ => {
@@ -145,7 +145,7 @@ fn ready_body(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
 
 fn ready_return(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
     return match items {
-        Map[Ready => selected, ..] => {
+        Map[Ready => selected, ..,] => {
             return selected;
         }
         _ => {
@@ -340,7 +340,7 @@ enum MainMsg {
     Start,
 }
 
-fn pick(Map<Phase,Phase,2>[..]) -> Phase ! [] ~ [] @det {
+fn pick(Map<Phase,Phase,2>[..,]) -> Phase ! [] ~ [] @det {
     return Ready;
 }
 
