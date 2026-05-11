@@ -1308,3 +1308,77 @@ proc Main mailbox bounded(1) {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn rejects_runtime_dependent_map_key_send_payload_template() {
+    let source = r#"
+module runtime_dependent_map_key_send_payload_template;
+
+record Unit;
+enum Phase {
+    Ready,
+    Done,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerMsg {
+    Replace(Phase),
+}
+enum MapWorkerMsg {
+    ReplaceMap(Map<Phase,Phase,1>),
+}
+
+proc Main mailbox bounded(1) {
+    type State = Unit;
+    type Msg = MainMsg;
+
+    fn init() -> Unit ! [] ~ [] @det {
+        return Unit;
+    }
+
+    fn step(state: Unit, Start) -> ProcResult<Unit> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Replace(Done);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = Unit;
+    type Msg = WorkerMsg;
+
+    fn init() -> Unit ! [] ~ [] @det {
+        return Unit;
+    }
+
+    fn step(state: Unit, Replace(next: Phase)) -> ProcResult<Unit> ! [spawn, send] ~ [] @det {
+        let map_worker: ProcessRef<MapWorker> = spawn MapWorker;
+        send map_worker ReplaceMap(Map<Phase,Phase,1>[next => Ready]);
+        return Stop(state);
+    }
+}
+
+proc MapWorker mailbox bounded(1) {
+    type State = Map<Phase,Phase,1>;
+    type Msg = MapWorkerMsg;
+
+    fn init() -> Map<Phase,Phase,1> ! [] ~ [] @det {
+        return Map<Phase,Phase,1>[Ready => Ready];
+    }
+
+    fn step(state: Map<Phase,Phase,1>, ReplaceMap(next: Map<Phase,Phase,1>)) -> ProcResult<Map<Phase,Phase,1>> ! [] ~ [] @det {
+        return Stop(next);
+    }
+}
+"#;
+
+    let err =
+        check_source(source).expect_err("runtime-dependent send payload map keys should fail");
+
+    assert!(
+        err.to_string()
+            .contains("map value type Map<Phase,Phase,1> keys must be static source values"),
+        "unexpected error: {err}"
+    );
+}
