@@ -44,13 +44,18 @@ just ci-local
 
 ## Performance Smoke
 
-`just performance-smoke` runs a stable in-memory source-to-runtime timing smoke
-test over `examples/collection_state.str`. It measures repeated Strata checking
-and lowering, then repeated Mantle in-memory execution of the lowered artifact.
+`just performance-smoke` runs a stable in-memory source-to-runtime resource
+smoke test over `examples/collection_state.str`. It measures repeated Strata
+checking and lowering, then repeated Mantle in-memory execution of the lowered
+artifact.
+
+The smoke output reports wall time, process CPU time when the platform exposes
+it, and resident memory. Linux CI reports current and peak RSS through `/proc`;
+macOS and BSD local runs report current RSS through `ps`.
 
 The gate uses intentionally broad budgets. It is meant to catch severe
-regressions in compilation or runtime paths without making PR CI depend on
-microbenchmark noise from shared runners.
+regressions in compilation, runtime, CPU, or memory paths without making PR CI
+depend on microbenchmark noise from shared runners.
 
 Useful local command:
 
