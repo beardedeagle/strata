@@ -292,7 +292,7 @@ impl ArtifactValue {
         for excluded_key in excluded_keys {
             if !entries.iter().any(|entry| entry.key == *excluded_key) {
                 return Err(Error::new(format!(
-                    "map rest projection expected key {}, found [{}]",
+                    "map rest projection expected excluded map key {}, found [{}]",
                     excluded_key.label(),
                     labels(&entry_keys)
                 )));

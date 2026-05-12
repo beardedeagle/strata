@@ -306,6 +306,22 @@ fn map_rest_projection_rejects_duplicate_excluded_keys() {
 }
 
 #[test]
+fn map_rest_projection_reports_missing_excluded_key_precisely() {
+    let map = ArtifactValue::parse("Map[Done=>Ready]").expect("test map value should parse");
+    let keys = vec![ArtifactValue::parse("Ready").expect("test key should parse")];
+
+    let err = map
+        .project_map_rest(&keys)
+        .expect_err("missing excluded rest key must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("map rest projection expected excluded map key Ready, found [Done]"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn artifact_value_validate_rejects_invalid_shape_before_materializing_label() {
     let value = ArtifactValue::List(vec![
         ArtifactValue::Atom("A".repeat(MAX_IDENTIFIER_BYTES));
