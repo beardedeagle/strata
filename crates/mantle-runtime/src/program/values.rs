@@ -11,6 +11,35 @@ use crate::event::RuntimeProcessId;
 
 pub(crate) type RuntimeValue = ArtifactValue;
 
+#[derive(Debug, Clone, Copy)]
+enum MapKeySetKind {
+    Expected,
+    Excluded,
+}
+
+impl MapKeySetKind {
+    const fn field_name(self) -> &'static str {
+        match self {
+            Self::Expected => "expected_key",
+            Self::Excluded => "excluded_key",
+        }
+    }
+
+    const fn singular(self) -> &'static str {
+        match self {
+            Self::Expected => "expected map key",
+            Self::Excluded => "excluded map key",
+        }
+    }
+
+    const fn plural(self) -> &'static str {
+        match self {
+            Self::Expected => "expected map keys",
+            Self::Excluded => "excluded map keys",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimePayload {
     pub(crate) ty: TypeId,
@@ -169,6 +198,11 @@ pub(crate) enum LoadedValueTemplate {
         keys: Vec<RuntimeValue>,
         projection: MapProjectionMode,
     },
+    MapRest {
+        ty: TypeId,
+        map: Box<LoadedValueTemplate>,
+        excluded_keys: Vec<RuntimeValue>,
+    },
     ProcessRef {
         ty: TypeId,
         target_process: ProcessId,
@@ -244,6 +278,18 @@ impl LoadedValueTemplate {
                     projection: *projection,
                 })
             }
+            ArtifactValueTemplate::MapRest {
+                ty,
+                map,
+                excluded_keys,
+            } => {
+                validate_map_rest_keys("map rest projection", excluded_keys)?;
+                Ok(Self::MapRest {
+                    ty: *ty,
+                    map: Box::new(Self::from_artifact(map)?),
+                    excluded_keys: excluded_keys.clone(),
+                })
+            }
             ArtifactValueTemplate::ProcessRef {
                 ty,
                 target_process,
@@ -294,6 +340,7 @@ impl LoadedValueTemplate {
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
             | Self::MapValue { ty, .. }
+            | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
@@ -308,31 +355,42 @@ pub(super) fn validate_map_projection_keys(
     key: &RuntimeValue,
     keys: &[RuntimeValue],
 ) -> Result<()> {
-    if keys.is_empty() || keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
-        return Err(Error::new(format!(
-            "{field}.key_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
-        )));
-    }
+    validate_map_key_set(field, keys, MapKeySetKind::Expected)?;
     validate_non_process_ref_value(&format!("{field}.key"), key)?;
-    let mut seen = BTreeSet::new();
-    for expected_key in keys {
-        validate_non_process_ref_value(&format!("{field}.expected_key"), expected_key)?;
-        if !seen.insert(expected_key.clone()) {
-            return Err(Error::new(format!(
-                "{field} duplicates expected map key {}",
-                expected_key.label()
-            )));
-        }
-    }
-    if !seen.contains(key) {
+    if keys.binary_search(key).is_err() {
         return Err(Error::new(format!(
             "{field} projection key {} is not one of the expected map keys",
             key.label()
         )));
     }
+    Ok(())
+}
+
+pub(super) fn validate_map_rest_keys(field: &str, keys: &[RuntimeValue]) -> Result<()> {
+    validate_map_key_set(field, keys, MapKeySetKind::Excluded)
+}
+
+fn validate_map_key_set(field: &str, keys: &[RuntimeValue], kind: MapKeySetKind) -> Result<()> {
+    if keys.is_empty() || keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "{field}.key_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    let mut seen = BTreeSet::new();
+    for map_key in keys {
+        validate_non_process_ref_value(&format!("{field}.{}", kind.field_name()), map_key)?;
+        if !seen.insert(map_key.clone()) {
+            return Err(Error::new(format!(
+                "{field} duplicates {} {}",
+                kind.singular(),
+                map_key.label()
+            )));
+        }
+    }
     if seen.into_iter().collect::<Vec<_>>() != keys {
         return Err(Error::new(format!(
-            "{field} expected map keys must be sorted canonically"
+            "{field} {} must be sorted canonically",
+            kind.plural()
         )));
     }
     Ok(())

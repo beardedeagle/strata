@@ -225,6 +225,27 @@ fn runtime_rejects_loaded_duplicate_map_projection_keys_before_artifact_loaded()
 }
 
 #[test]
+fn runtime_rejects_loaded_duplicate_map_rest_projection_keys_before_artifact_loaded() {
+    let template = ArtifactValueTemplate::MapRest {
+        ty: JOB,
+        map: Box::new(ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("Map[Ready=>Done]"),
+        }),
+        excluded_keys: vec![artifact_value("Ready"), artifact_value("Ready")],
+    };
+
+    let err = LoadedValueTemplate::from_artifact(&template)
+        .expect_err("duplicate map rest keys should fail loaded admission");
+
+    assert!(
+        err.to_string()
+            .contains("map rest projection duplicates excluded map key Ready"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_unsorted_map_projection_keys_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

@@ -35,7 +35,7 @@ fn from_body(items: List<Phase,1>) -> Phase ! [] ~ [] @det {
 
 fn from_return(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
     return match items {
-        Map[Ready => selected, ..] => {
+        Map[Ready => selected, ..rest] => {
             return selected;
         }
         _ => {

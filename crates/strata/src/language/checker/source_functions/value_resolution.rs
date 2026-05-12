@@ -11,8 +11,7 @@ mod return_matches;
 use body_matches::resolve_source_function_body_match_value;
 use return_matches::resolve_source_function_return_match_value;
 
-type SourceSubstitution<'a> = (&'a Identifier, &'a ValueExpr);
-type RecordPatternValueResolution<'a> = (Vec<SourceSubstitution<'a>>, Vec<PatternPayloadParam>);
+type RecordPatternValueResolution = (Vec<SourceSubstitution>, Vec<PatternPayloadParam>);
 
 pub(super) fn resolve_binding_source_function_call(
     scope: &SourceFunctionScope<'_>,
@@ -37,7 +36,10 @@ pub(super) fn resolve_binding_source_function_call(
     let returned = resolve_source_function_body_value(
         scope,
         function,
-        &[(&param.name, &resolved_arg)],
+        &[SourceSubstitution::new(
+            param.name.clone(),
+            resolved_arg.clone(),
+        )],
         &local_bindings,
         bindings,
         depth + 1,
@@ -157,14 +159,14 @@ pub(super) fn resolve_pattern_source_function_call(
     )))
 }
 
-fn resolve_constructor_payload_pattern_bindings<'a>(
+fn resolve_constructor_payload_pattern_bindings(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
     variant_name: &Identifier,
     variant: &EnumVariant,
-    payload_pattern: Option<&'a ConstructorPayloadPattern>,
-    selected_payload: Option<&'a ValueExpr>,
-) -> Result<(Vec<SourceSubstitution<'a>>, Vec<PatternPayloadParam>)> {
+    payload_pattern: Option<&ConstructorPayloadPattern>,
+    selected_payload: Option<&ValueExpr>,
+) -> Result<(Vec<SourceSubstitution>, Vec<PatternPayloadParam>)> {
     let Some(payload_pattern) = payload_pattern else {
         return Ok((Vec::new(), Vec::new()));
     };
@@ -182,7 +184,10 @@ fn resolve_constructor_payload_pattern_bindings<'a>(
     };
     match payload_pattern {
         ConstructorPayloadPattern::Binding(binding) => Ok((
-            vec![(&binding.name, payload)],
+            vec![SourceSubstitution::new(
+                binding.name.clone(),
+                payload.clone(),
+            )],
             vec![PatternPayloadParam {
                 name: binding.name.clone(),
                 ty: binding.ty.clone(),
@@ -195,13 +200,13 @@ fn resolve_constructor_payload_pattern_bindings<'a>(
     }
 }
 
-fn resolve_destructured_payload_pattern<'a>(
+fn resolve_destructured_payload_pattern(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
     payload_type: &TypeRef,
-    pattern: &'a Pattern,
-    payload: &'a ValueExpr,
-) -> Result<(Vec<SourceSubstitution<'a>>, Vec<PatternPayloadParam>)> {
+    pattern: &Pattern,
+    payload: &ValueExpr,
+) -> Result<(Vec<SourceSubstitution>, Vec<PatternPayloadParam>)> {
     match pattern {
         Pattern::Record { name, fields } => {
             let record = scope
@@ -240,13 +245,13 @@ fn resolve_destructured_payload_pattern<'a>(
     }
 }
 
-fn resolve_collection_payload_pattern<'a>(
+fn resolve_collection_payload_pattern(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
     payload_type: &TypeRef,
-    pattern: &'a Pattern,
-    payload: &'a ValueExpr,
-) -> Result<(Vec<SourceSubstitution<'a>>, Vec<PatternPayloadParam>)> {
+    pattern: &Pattern,
+    payload: &ValueExpr,
+) -> Result<(Vec<SourceSubstitution>, Vec<PatternPayloadParam>)> {
     let Some(resolution) = resolve_collection_pattern_value_bindings(
         scope.module,
         scope.semantic_index,
@@ -389,13 +394,13 @@ pub(super) fn resolve_collection_pattern_source_function_call(
     )))
 }
 
-fn resolve_record_pattern_value_bindings<'a>(
+fn resolve_record_pattern_value_bindings(
     semantic_index: &SemanticIndex,
     subject: &str,
     record_decl: &Record,
-    fields: &'a [RecordPatternField],
-    record_value: &'a RecordValue,
-) -> Result<RecordPatternValueResolution<'a>> {
+    fields: &[RecordPatternField],
+    record_value: &RecordValue,
+) -> Result<RecordPatternValueResolution> {
     let pattern_bindings =
         check_record_pattern_bindings(semantic_index, subject, record_decl, fields)?;
     let mut substitutions = Vec::with_capacity(fields.len());
@@ -410,7 +415,10 @@ fn resolve_record_pattern_value_bindings<'a>(
                 record_decl.name, field.field
             )));
         };
-        substitutions.push((&field.binding, &value_field.value));
+        substitutions.push(SourceSubstitution::new(
+            field.binding.clone(),
+            value_field.value.clone(),
+        ));
     }
     Ok((substitutions, pattern_bindings))
 }
@@ -418,7 +426,7 @@ fn resolve_record_pattern_value_bindings<'a>(
 fn resolve_source_function_body_value(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
-    substitutions: &[(&Identifier, &ValueExpr)],
+    substitutions: &[SourceSubstitution],
     local_bindings: &[SourceValueBinding<'_>],
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
@@ -454,7 +462,7 @@ fn resolve_source_function_block_return_value(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
     body: &FunctionBlock,
-    substitutions: &[(&Identifier, &ValueExpr)],
+    substitutions: &[SourceSubstitution],
     local_bindings: &[SourceValueBinding<'_>],
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
@@ -479,7 +487,7 @@ fn resolve_source_function_return_value(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
     returns: &ReturnExpr,
-    substitutions: &[(&Identifier, &ValueExpr)],
+    substitutions: &[SourceSubstitution],
     local_bindings: &[SourceValueBinding<'_>],
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
@@ -545,14 +553,12 @@ fn concrete_source_record_value<'a>(
 
 fn substitute_source_value_bindings(
     value: ValueExpr,
-    bindings: &[(&Identifier, &ValueExpr)],
+    bindings: &[SourceSubstitution],
 ) -> ValueExpr {
     match value {
         ValueExpr::Identifier(name) => bindings
             .iter()
-            .find_map(|(binding_name, replacement)| {
-                (name == **binding_name).then(|| (*replacement).clone())
-            })
+            .find_map(|binding| (name == binding.name).then(|| binding.value.clone()))
             .unwrap_or(ValueExpr::Identifier(name)),
         ValueExpr::Call { name, arg } => ValueExpr::Call {
             name,

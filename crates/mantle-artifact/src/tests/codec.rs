@@ -41,6 +41,30 @@ fn artifact_round_trips_panic_step_result() {
 }
 
 #[test]
+fn artifact_round_trips_map_rest_template_with_excluded_keys() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].state_type = JOB;
+    artifact.processes[0].state_values = vec![state_value(JOB, "Map[Done=>Ready]")];
+    artifact.processes[0].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::MapRest {
+            ty: JOB,
+            map: Box::new(ArtifactValueTemplate::Literal {
+                ty: JOB,
+                value: artifact_value("Map[Done=>Ready,Ready=>Done]"),
+            }),
+            excluded_keys: vec![artifact_value("Ready")],
+        });
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("map rest artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains("process.0.transition.0.next_state_template.kind=map_rest"));
+    assert!(encoded.contains("process.0.transition.0.next_state_template.excluded_key.0=Ready"));
+    assert!(!encoded.contains("process.0.transition.0.next_state_template.expected_key.0"));
+}
+
+#[test]
 fn decode_rejects_unknown_step_result() {
     let encoded = valid_artifact().encode().replace(
         "process.1.transition.0.step_result=Stop",

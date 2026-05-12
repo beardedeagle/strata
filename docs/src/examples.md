@@ -211,8 +211,8 @@ Key source ideas:
 - `fn first(List<Phase,2>[phase, _])` dispatches on exact list length and binds
   one immutable element.
 - Helper body and return matches can use list patterns, exact map patterns, and
-  subset map patterns such as `Map[Ready => selected, ..]` with `_` fallback
-  arms.
+  subset map patterns such as `Map[Ready => selected, ..rest]` with `_`
+  fallback arms.
 - The helper expansion leaves Mantle with a resolved `MainState` value, not
   source helper dispatch names.
 

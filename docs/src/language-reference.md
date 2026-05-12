@@ -163,13 +163,21 @@ pattern over the listed static keys:
 ```strata
 Map[Ready => selected]     // exact key set
 Map[Ready => selected, ..] // Ready must exist; extra keys are allowed
+Map[Ready => selected, ..rest] // rest binds a map without Ready
 ```
+
+`..rest` binds an immutable whole map containing entries except the listed
+static keys. If the matched value has type `Map<K,V,N>` and the pattern lists
+`M` distinct static keys, the rest binding has type `Map<K,V,N-M>`. The actual
+rest value may contain fewer entries because subset patterns still match maps
+that omit unlisted keys.
 
 Overlapping exact and subset map patterns are rejected instead of relying on
 source order or specificity. Subset overlap is capacity-aware: two subset
 patterns overlap when one bounded map can contain both required key sets.
 Runtime-bound map value keys must be static source values in this slice;
-dynamic-key dictionaries remain deferred.
+dynamic-key dictionaries remain deferred. Rest binding does not expose map
+iteration, order-dependent dispatch, mutation, or dynamic keys.
 
 Record field order and map entry order are preserved in source-authored values,
 emitted artifact values, labels, and traces. Projection still addresses map
@@ -376,7 +384,7 @@ Collection return matches use the same collection patterns:
 ```strata
 fn ready_value(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
     return match items {
-        Map[Ready => selected, ..] => {
+        Map[Ready => selected, ..rest] => {
             return selected;
         }
         _ => {
@@ -590,16 +598,17 @@ fn step(state: WorkerState, Items(List[phase, _])) -> ProcResult<WorkerState> ! 
     return Continue(WorkerState { seen: phase });
 }
 
-fn step(state: WorkerState, Lookup(Map[Ready => phase, ..])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+fn step(state: WorkerState, Lookup(Map[Ready => phase, ..rest])) -> ProcResult<WorkerState> ! [] ~ [] @det {
     return Continue(WorkerState { seen: phase });
 }
 ```
 
 These bindings are immutable projections of the concrete payload value. A
-record field, list element, or map value can be used in whole-value state
-returns and downstream payloads, but process references still remain valid only
-as direct message payload bindings. Shape-only collection payload patterns such
-as `Items(List[_])`, `Lookup(Map[Ready => _])`, or `Lookup(Map[..])` are not admitted in this slice;
+record field, list element, map value, or map rest can be used in whole-value
+state returns and downstream payloads, but process references still remain
+valid only as direct message payload bindings. Shape-only collection payload
+patterns such as `Items(List[_])`, `Lookup(Map[Ready => _])`, or
+`Lookup(Map[..])` are not admitted in this slice;
 use the constructor pattern without destructuring when the payload is ignored.
 
 If a process accepts more than one message, it can declare explicit clauses for

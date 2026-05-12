@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use super::super::{ArtifactStateValue, ArtifactTypeKind, MantleArtifact};
 use super::model::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue, ArtifactValueTemplate};
 use super::payload::ArtifactPayload;
-use super::projection::validate_projection_keys;
+use super::projection::{
+    ProjectionKeySetKind, validate_projection_key_set, validate_projection_keys,
+};
 use crate::validation::{validate_count, validate_ident_field, validate_value_label};
 use crate::{Error, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result, TypeId};
 
@@ -16,6 +18,7 @@ impl ArtifactValueTemplate {
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
             | Self::MapValue { ty, .. }
+            | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
@@ -101,6 +104,17 @@ impl ArtifactValueTemplate {
                     map.evaluate_state_value(received_payload, current_state_payload, type_label)?;
                 let value = map.value.project_map_value(key, keys, *projection)?;
                 validate_value_label("map value projection value", &value.label())?;
+                ArtifactStateValue::from_value(*ty, value)
+            }
+            Self::MapRest {
+                ty,
+                map,
+                excluded_keys,
+            } => {
+                let map =
+                    map.evaluate_state_value(received_payload, current_state_payload, type_label)?;
+                let value = map.value.project_map_rest(excluded_keys)?;
+                validate_value_label("map rest projection value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::ProcessRef { .. } => Err(Error::new(
@@ -205,6 +219,7 @@ impl ArtifactValueTemplate {
             Self::RecordField { record, .. } => record.depends_on_received_payload(),
             Self::ListElement { list, .. } => list.depends_on_received_payload(),
             Self::MapValue { map, .. } => map.depends_on_received_payload(),
+            Self::MapRest { map, .. } => map.depends_on_received_payload(),
             Self::ProcessRef { .. } => false,
             Self::EnumVariant { payload, .. } => payload.depends_on_received_payload(),
             Self::Record { fields, .. } => fields
@@ -336,6 +351,23 @@ impl ArtifactValueTemplate {
                 reject_projected_process_ref_type(artifact, field, *ty)?;
                 artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
                 validate_projection_keys(field, key, keys)?;
+                map.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.map"),
+                    None,
+                    received_payload_type,
+                    current_state_payload_type,
+                    depth + 1,
+                )
+            }
+            Self::MapRest {
+                ty,
+                map,
+                excluded_keys,
+            } => {
+                reject_projected_process_ref_type(artifact, field, *ty)?;
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+                validate_projection_key_set(field, excluded_keys, ProjectionKeySetKind::Excluded)?;
                 map.validate_for_received_payload(
                     artifact,
                     &format!("{field}.map"),
@@ -501,6 +533,7 @@ fn is_static_map_key_template(template: &ArtifactValueTemplate) -> bool {
         | ArtifactValueTemplate::RecordField { .. }
         | ArtifactValueTemplate::ListElement { .. }
         | ArtifactValueTemplate::MapValue { .. }
+        | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. } => false,
         ArtifactValueTemplate::EnumVariant { payload, .. } => is_static_map_key_template(payload),
         ArtifactValueTemplate::Record { fields, .. } => fields

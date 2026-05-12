@@ -1,4 +1,6 @@
-use super::values::{validate_map_projection_keys, validate_non_process_ref_value};
+use super::values::{
+    validate_map_projection_keys, validate_map_rest_keys, validate_non_process_ref_value,
+};
 use super::*;
 use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField};
 use std::collections::BTreeSet;
@@ -85,6 +87,19 @@ fn evaluate_loaded_payload_value(
                 current_state_payload,
             )?;
             RuntimePayload::value(*ty, map.value.project_map_value(key, keys, *projection)?)
+        }
+        LoadedValueTemplate::MapRest {
+            ty,
+            map,
+            excluded_keys,
+        } => {
+            let map = evaluate_loaded_payload_value(
+                program,
+                map,
+                received_payload,
+                current_state_payload,
+            )?;
+            RuntimePayload::value(*ty, map.value.project_map_rest(excluded_keys)?)
         }
         LoadedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires runtime process reference bindings",
@@ -287,6 +302,22 @@ impl LoadedTemplateAdmission<'_> {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 validate_map_projection_keys(field, key, keys)?;
+                let nested = Self {
+                    expected_type: None,
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.map"), map, depth + 1)
+            }
+            LoadedValueTemplate::MapRest {
+                ty,
+                map,
+                excluded_keys,
+            } => {
+                self.reject_projected_process_ref_type(field, *ty)?;
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                validate_map_rest_keys(field, excluded_keys)?;
                 let nested = Self {
                     expected_type: None,
                     allow_direct_process_ref: false,
@@ -550,6 +581,7 @@ fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) -> bool {
         | LoadedValueTemplate::RecordField { .. }
         | LoadedValueTemplate::ListElement { .. }
         | LoadedValueTemplate::MapValue { .. }
+        | LoadedValueTemplate::MapRest { .. }
         | LoadedValueTemplate::ProcessRef { .. } => false,
         LoadedValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_is_static_map_key(payload)
@@ -579,6 +611,9 @@ pub(super) fn loaded_template_depends_on_received_payload(template: &LoadedValue
             loaded_template_depends_on_received_payload(list)
         }
         LoadedValueTemplate::MapValue { map, .. } => {
+            loaded_template_depends_on_received_payload(map)
+        }
+        LoadedValueTemplate::MapRest { map, .. } => {
             loaded_template_depends_on_received_payload(map)
         }
         LoadedValueTemplate::EnumVariant { payload, .. } => {

@@ -97,6 +97,23 @@ fn evaluate_checked_runtime_template(
                 .map_err(|err| Error::new(err.to_string()))?;
             Ok(CheckedPayloadValue::new(ty.clone(), value))
         }
+        CheckedValueTemplate::MapRest {
+            ty,
+            map,
+            excluded_keys,
+        } => {
+            let map = evaluate_checked_runtime_template(
+                map,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+            )?;
+            let value = checked_payload_value(&map)?
+                .project_map_rest(excluded_keys)
+                .map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
+        }
         CheckedValueTemplate::ProcessRef {
             ty,
             target,

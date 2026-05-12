@@ -133,6 +133,11 @@ pub(super) fn validate_value_template_binding_types(
             received_payload_type,
             current_state_payload_type,
         ),
+        CheckedValueTemplate::MapRest { map, .. } => validate_value_template_binding_types(
+            map,
+            received_payload_type,
+            current_state_payload_type,
+        ),
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
         CheckedValueTemplate::EnumVariant { payload, .. } => validate_value_template_binding_types(
             payload,
@@ -192,6 +197,12 @@ pub(super) fn validate_value_template_payload_labels(
         }
         CheckedValueTemplate::MapValue { map, key, keys, .. } => {
             validate_map_projection_keys(key, keys)?;
+            validate_value_template_payload_labels(map)
+        }
+        CheckedValueTemplate::MapRest {
+            map, excluded_keys, ..
+        } => {
+            validate_map_rest_projection_keys(excluded_keys)?;
             validate_value_template_payload_labels(map)
         }
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
@@ -304,6 +315,7 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         | CheckedValueTemplate::RecordField { .. }
         | CheckedValueTemplate::ListElement { .. }
         | CheckedValueTemplate::MapValue { .. }
+        | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. } => None,
         CheckedValueTemplate::EnumVariant {
             variant, payload, ..
@@ -352,37 +364,77 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
 }
 
 fn validate_map_projection_keys(key: &ArtifactValue, keys: &[ArtifactValue]) -> Result<()> {
-    if keys.is_empty() {
-        return Err(Error::new(
-            "map projection key_count must be greater than zero",
-        ));
-    }
-    if keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
-        return Err(Error::new(format!(
-            "map projection key_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
-        )));
-    }
+    validate_map_key_set("map projection", keys, MapKeySetKind::Expected)?;
     validate_artifact_value("map projection key", key)?;
-    let mut seen = BTreeSet::new();
-    for expected_key in keys {
-        validate_artifact_value("map projection expected key", expected_key)?;
-        if !seen.insert(expected_key.clone()) {
-            return Err(Error::new(format!(
-                "map projection duplicates expected map key {}",
-                expected_key.label()
-            )));
-        }
-    }
-    if !seen.contains(key) {
+    if keys.binary_search(key).is_err() {
         return Err(Error::new(format!(
             "map projection key {} is not one of the expected map keys",
             key.label()
         )));
     }
+    Ok(())
+}
+
+fn validate_map_rest_projection_keys(keys: &[ArtifactValue]) -> Result<()> {
+    validate_map_key_set("map rest projection", keys, MapKeySetKind::Excluded)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MapKeySetKind {
+    Expected,
+    Excluded,
+}
+
+impl MapKeySetKind {
+    fn field_label(self) -> &'static str {
+        match self {
+            Self::Expected => "expected key",
+            Self::Excluded => "excluded key",
+        }
+    }
+
+    fn singular(self) -> &'static str {
+        match self {
+            Self::Expected => "expected map key",
+            Self::Excluded => "excluded map key",
+        }
+    }
+
+    fn plural(self) -> &'static str {
+        match self {
+            Self::Expected => "expected keys",
+            Self::Excluded => "excluded keys",
+        }
+    }
+}
+
+fn validate_map_key_set(field: &str, keys: &[ArtifactValue], kind: MapKeySetKind) -> Result<()> {
+    if keys.is_empty() {
+        return Err(Error::new(format!(
+            "{field} key_count must be greater than zero"
+        )));
+    }
+    if keys.len() > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "{field} key_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    let mut seen = BTreeSet::new();
+    for map_key in keys {
+        validate_artifact_value(&format!("{field} {}", kind.field_label()), map_key)?;
+        if !seen.insert(map_key.clone()) {
+            return Err(Error::new(format!(
+                "{field} duplicates {} {}",
+                kind.singular(),
+                map_key.label()
+            )));
+        }
+    }
     if seen.into_iter().collect::<Vec<_>>() != keys {
-        return Err(Error::new(
-            "map projection expected keys must be sorted canonically",
-        ));
+        return Err(Error::new(format!(
+            "{field} {} must be sorted canonically",
+            kind.plural()
+        )));
     }
     Ok(())
 }
@@ -405,6 +457,9 @@ pub(super) fn validate_value_template_process_refs(
             validate_value_template_process_refs(processes, process, list, spawned_refs, false)
         }
         CheckedValueTemplate::MapValue { map, .. } => {
+            validate_value_template_process_refs(processes, process, map, spawned_refs, false)
+        }
+        CheckedValueTemplate::MapRest { map, .. } => {
             validate_value_template_process_refs(processes, process, map, spawned_refs, false)
         }
         CheckedValueTemplate::ProcessRef {
@@ -525,6 +580,12 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
             }
             reject_process_ref_template_in_next_state(map)
         }
+        CheckedValueTemplate::MapRest { ty, map, .. } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            reject_process_ref_template_in_next_state(map)
+        }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference templates are not valid next-state values",
         )),
@@ -569,6 +630,9 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
             checked_template_depends_on_received_payload(list)
         }
         CheckedValueTemplate::MapValue { map, .. } => {
+            checked_template_depends_on_received_payload(map)
+        }
+        CheckedValueTemplate::MapRest { map, .. } => {
             checked_template_depends_on_received_payload(map)
         }
         CheckedValueTemplate::ProcessRef { .. } => false,
@@ -656,6 +720,17 @@ fn evaluate_checked_template(
             let map = evaluate_checked_template(map, received_payload, current_state_payload)?;
             let value = checked_payload_value(&map)?
                 .project_map_value(key, keys, *projection)
+                .map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
+        }
+        CheckedValueTemplate::MapRest {
+            ty,
+            map,
+            excluded_keys,
+        } => {
+            let map = evaluate_checked_template(map, received_payload, current_state_payload)?;
+            let value = checked_payload_value(&map)?
+                .project_map_rest(excluded_keys)
                 .map_err(|err| Error::new(err.to_string()))?;
             Ok(CheckedPayloadValue::new(ty.clone(), value))
         }

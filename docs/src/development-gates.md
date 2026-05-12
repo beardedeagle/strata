@@ -49,11 +49,19 @@ smoke test over `examples/collection_state.str`. It measures repeated Strata
 checking and lowering, then repeated Mantle in-memory execution of the lowered
 artifact.
 
-The smoke output reports wall time, process CPU time when the platform exposes
-it, and resident memory. Linux CI reports process CPU from `/proc/self/stat` and
-current/peak RSS through `/proc`; macOS and BSD local runs report current RSS
-through `ps`. RSS budgets are enforced against current RSS for each measured
-profile; process-lifetime peak RSS is reported as context when available.
+The smoke output reports wall time, allocation/deallocation counts, allocated
+and deallocated bytes, interval-relative live-byte metrics, process CPU time
+when the platform exposes it, and resident memory. Allocation metrics come from
+a test-only global allocator wrapper around `std::alloc::System`; the wrapper
+does not change allocation policy and only records atomic counters. The live
+metrics are relative to the start of each measured profile: net live-byte delta
+is the signed end-of-interval live byte change, and peak live over interval start
+is the highest live byte count above that start baseline. The net live-byte
+delta budget is an upper bound; negative deltas remain valid. Linux CI reports
+process CPU from `/proc/self/stat` and current/peak RSS through `/proc`; macOS
+and BSD local runs report current RSS through `ps`. RSS budgets are enforced
+against current RSS for each measured profile; process-lifetime peak RSS is
+reported as context when available.
 
 The gate uses intentionally broad budgets. It is meant to catch severe
 regressions in compilation, runtime, CPU, or memory paths without making PR CI
@@ -63,7 +71,7 @@ Reviewed reference values and enforced budget ceilings live in
 `benchmarks/performance-smoke.baseline`. Local and CI runs print current
 measurements to their logs; git tracks reviewed baseline changes, not every
 noisy raw run. The baseline file uses strict `key=value` entries with
-nanosecond and KiB units.
+nanosecond, KiB, byte, and count units.
 
 Useful local command:
 
