@@ -522,6 +522,27 @@ fn add_value_template_bytes(
             }
             add_value_template_bytes(total, &format!("{prefix}.map"), map)?;
         }
+        ArtifactValueTemplate::MapRest {
+            ty,
+            map,
+            excluded_keys,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "map_rest")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.key_count"),
+                &excluded_keys.len().to_string(),
+            )?;
+            for (key_index, excluded_key) in excluded_keys.iter().enumerate() {
+                add_field_bytes(
+                    total,
+                    &format!("{prefix}.excluded_key.{key_index}"),
+                    &excluded_key.label(),
+                )?;
+            }
+            add_value_template_bytes(total, &format!("{prefix}.map"), map)?;
+        }
         ArtifactValueTemplate::ProcessRef {
             ty,
             target_process,

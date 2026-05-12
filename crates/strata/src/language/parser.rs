@@ -352,12 +352,13 @@ impl Parser {
                     }
                     None => (None, None, None),
                 };
-                let (entries, completeness) = self.parse_map_pattern_entries()?;
+                let (entries, completeness, rest) = self.parse_map_pattern_entries()?;
                 return Ok(Pattern::Map(MapPattern {
                     key_type,
                     value_type,
                     capacity,
                     completeness,
+                    rest,
                     entries,
                 }));
             }
@@ -470,16 +471,22 @@ impl Parser {
 
     fn parse_map_pattern_entries(
         &mut self,
-    ) -> Result<(Vec<MapPatternEntry>, MapPatternCompleteness)> {
+    ) -> Result<(
+        Vec<MapPatternEntry>,
+        MapPatternCompleteness,
+        Option<Identifier>,
+    )> {
         let mut entries = Vec::new();
         let mut completeness = MapPatternCompleteness::Exact;
         if self.consume_symbol(']') {
-            return Ok((entries, completeness));
+            return Ok((entries, completeness, None));
         }
         if self.consume_dotdot() {
+            let rest = self.parse_map_pattern_rest_binding()?;
             self.expect_map_subset_pattern_end()?;
-            return Ok((entries, MapPatternCompleteness::Subset));
+            return Ok((entries, MapPatternCompleteness::Subset, rest));
         }
+        let mut rest = None;
         loop {
             let key = self.parse_value_expr()?;
             self.expect_fat_arrow()?;
@@ -488,6 +495,7 @@ impl Parser {
             if self.consume_symbol(',') {
                 if self.consume_dotdot() {
                     completeness = MapPatternCompleteness::Subset;
+                    rest = self.parse_map_pattern_rest_binding()?;
                     self.expect_map_subset_pattern_end()?;
                     break;
                 }
@@ -499,7 +507,20 @@ impl Parser {
             self.expect_symbol(']')?;
             break;
         }
-        Ok((entries, completeness))
+        Ok((entries, completeness, rest))
+    }
+
+    fn parse_map_pattern_rest_binding(&mut self) -> Result<Option<Identifier>> {
+        if matches!(self.peek_kind(), TokenKind::Ident(_)) {
+            let binding = self.expect_ident()?;
+            if binding == "_" {
+                return Err(self.error_previous(
+                    "map rest binding cannot be a wildcard; use `..` to ignore the remainder",
+                ));
+            }
+            return Ok(Some(Identifier::new(binding)?));
+        }
+        Ok(None)
     }
 
     fn expect_map_subset_pattern_end(&mut self) -> Result<()> {

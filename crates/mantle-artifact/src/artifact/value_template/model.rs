@@ -67,6 +67,11 @@ pub enum ArtifactValueTemplate {
         keys: Vec<ArtifactValue>,
         projection: MapProjectionMode,
     },
+    MapRest {
+        ty: TypeId,
+        map: Box<ArtifactValueTemplate>,
+        excluded_keys: Vec<ArtifactValue>,
+    },
     ProcessRef {
         ty: TypeId,
         target_process: ProcessId,

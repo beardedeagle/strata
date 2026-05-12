@@ -67,6 +67,15 @@ pub(super) fn evaluate_runtime_template(
                 evaluate_runtime_template(program, map, received_payload, step, process_refs)?;
             RuntimePayload::value(*ty, map.value.project_map_value(key, keys, *projection)?)
         }
+        LoadedValueTemplate::MapRest {
+            ty,
+            map,
+            excluded_keys,
+        } => {
+            let map =
+                evaluate_runtime_template(program, map, received_payload, step, process_refs)?;
+            RuntimePayload::value(*ty, map.value.project_map_rest(excluded_keys)?)
+        }
         LoadedValueTemplate::ProcessRef {
             ty,
             target_process,

@@ -289,6 +289,15 @@ fn lower_value_template(
             keys: keys.clone(),
             projection: *projection,
         }),
+        CheckedValueTemplate::MapRest {
+            ty,
+            map,
+            excluded_keys,
+        } => Ok(ArtifactValueTemplate::MapRest {
+            ty: types.artifact_id(ty)?,
+            map: Box::new(lower_value_template(map, types)?),
+            excluded_keys: excluded_keys.clone(),
+        }),
         CheckedValueTemplate::ProcessRef {
             ty,
             target,

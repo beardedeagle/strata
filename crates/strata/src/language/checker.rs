@@ -30,7 +30,7 @@ use super::checked::{
     CheckedTypeRef, CheckedValueTemplate,
 };
 use super::diagnostic::{Error, Result};
-use super::{MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
+use super::{MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
 use init::check_init;
 use message_cases::{DiscoveredMessageCase, MessageCaseTable};
 use outputs::OutputPool;
@@ -308,6 +308,34 @@ enum PayloadBindingPath {
         keys: Vec<ArtifactValue>,
         projection: MapProjectionMode,
     },
+    MapRest {
+        excluded_keys: Vec<ArtifactValue>,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct MapPatternType<'a> {
+    key: &'a TypeRef,
+    value: &'a TypeRef,
+    capacity: usize,
+}
+
+fn map_rest_type(
+    key_type: &TypeRef,
+    value_type: &TypeRef,
+    capacity: usize,
+    excluded_key_count: usize,
+) -> Result<TypeRef> {
+    let rest_capacity = capacity.checked_sub(excluded_key_count).ok_or_else(|| {
+        Error::new(format!(
+            "map rest binding excludes {excluded_key_count} keys from capacity {capacity}"
+        ))
+    })?;
+    Ok(TypeRef::Applied {
+        constructor: Identifier::new(MAP_TYPE)?,
+        args: vec![key_type.clone(), value_type.clone()],
+        const_args: vec![rest_capacity],
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -882,8 +910,11 @@ fn check_destructured_payload_bindings(
                 semantic_index,
                 binding_context,
                 context,
-                key,
-                value,
+                MapPatternType {
+                    key,
+                    value,
+                    capacity,
+                },
                 pattern,
             )
         }
@@ -1014,8 +1045,7 @@ fn check_map_payload_pattern_bindings(
     semantic_index: &SemanticIndex,
     binding_context: PatternBindingContext<'_>,
     context: &str,
-    key_type: &TypeRef,
-    value_type: &TypeRef,
+    map_type: MapPatternType<'_>,
     pattern: &MapPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
     let mut seen_keys = BTreeSet::new();
@@ -1024,7 +1054,7 @@ fn check_map_payload_pattern_bindings(
         let key = canonical_source_value_with_bindings(
             module,
             semantic_index,
-            key_type,
+            map_type.key,
             &entry.key,
             &[],
         )?;
@@ -1052,11 +1082,27 @@ fn check_map_payload_pattern_bindings(
         validate_pattern_binding_name(binding_context, semantic_index, name)?;
         bindings.push(PatternPayloadParam {
             name: name.clone(),
-            ty: value_type.clone(),
+            ty: map_type.value.clone(),
             path: PayloadBindingPath::MapValue {
                 key,
                 keys: keys.clone(),
                 projection: map_pattern_projection(pattern),
+            },
+        });
+    }
+    if let Some(rest) = &pattern.rest {
+        let subject = pattern_binding_subject(binding_context);
+        if !seen_bindings.insert(rest.as_str()) {
+            return Err(Error::new(format!(
+                "{subject} {context} map payload pattern binding {rest} is declared more than once"
+            )));
+        }
+        validate_pattern_binding_name(binding_context, semantic_index, rest)?;
+        bindings.push(PatternPayloadParam {
+            name: rest.clone(),
+            ty: map_rest_type(map_type.key, map_type.value, map_type.capacity, keys.len())?,
+            path: PayloadBindingPath::MapRest {
+                excluded_keys: keys,
             },
         });
     }
@@ -1087,6 +1133,16 @@ fn validate_map_payload_pattern_capacity(
         return Err(Error::new(format!(
             "{subject} {context} map payload pattern entry count {} exceeds capacity {capacity} for {payload_type}",
             pattern.entries.len()
+        )));
+    }
+    if pattern.rest.is_some() && pattern.completeness != MapPatternCompleteness::Subset {
+        return Err(Error::new(format!(
+            "{subject} {context} map rest binding requires a subset map payload pattern"
+        )));
+    }
+    if pattern.rest.is_some() && pattern.entries.is_empty() {
+        return Err(Error::new(format!(
+            "{subject} {context} map rest payload pattern must declare at least one key"
         )));
     }
     if pattern.completeness == MapPatternCompleteness::Subset && pattern.entries.is_empty() {
@@ -1121,6 +1177,9 @@ fn payload_binding_value(
             keys,
             projection,
         } => Ok(payload_value.project_map_value(key, keys, *projection).ok()),
+        PayloadBindingPath::MapRest { excluded_keys } => {
+            Ok(payload_value.project_map_rest(excluded_keys).ok())
+        }
     }
 }
 

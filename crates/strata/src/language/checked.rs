@@ -319,6 +319,11 @@ pub(in crate::language) enum CheckedValueTemplate {
         keys: Vec<ArtifactValue>,
         projection: MapProjectionMode,
     },
+    MapRest {
+        ty: CheckedTypeRef,
+        map: Box<CheckedValueTemplate>,
+        excluded_keys: Vec<ArtifactValue>,
+    },
     ProcessRef {
         ty: CheckedTypeRef,
         target: CheckedProcessId,
@@ -352,6 +357,7 @@ impl CheckedValueTemplate {
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
             | Self::MapValue { ty, .. }
+            | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }

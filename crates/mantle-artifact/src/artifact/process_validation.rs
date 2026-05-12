@@ -478,6 +478,9 @@ impl ArtifactProcess {
             ArtifactValueTemplate::MapValue { map, .. } => {
                 self.validate_template_process_refs(artifact, map, spawned_refs)
             }
+            ArtifactValueTemplate::MapRest { map, .. } => {
+                self.validate_template_process_refs(artifact, map, spawned_refs)
+            }
             ArtifactValueTemplate::ProcessRef {
                 ty,
                 target_process,

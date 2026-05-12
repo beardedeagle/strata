@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 
 use super::model::{ArtifactValue, MapProjectionMode};
 use super::parsing::parse_value;
-use super::projection::{labels, validate_projection_keys};
+use super::projection::{
+    ProjectionKeySetKind, labels, validate_projection_key_set, validate_projection_keys,
+};
 use crate::validation::{validate_count, validate_ident_field, validate_value_label};
 use crate::{Error, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result, TypeId};
 
@@ -269,5 +271,39 @@ impl ArtifactValue {
                     self.label()
                 ))
             })
+    }
+
+    pub fn project_map_rest(&self, excluded_keys: &[ArtifactValue]) -> Result<Self> {
+        validate_projection_key_set(
+            "map rest projection",
+            excluded_keys,
+            ProjectionKeySetKind::Excluded,
+        )?;
+        let Self::Map(entries) = self else {
+            return Err(Error::new(format!(
+                "map rest projection requires a map value, got {}",
+                self.label()
+            )));
+        };
+        let entry_keys = entries
+            .iter()
+            .map(|entry| entry.key.clone())
+            .collect::<Vec<_>>();
+        for excluded_key in excluded_keys {
+            if !entries.iter().any(|entry| entry.key == *excluded_key) {
+                return Err(Error::new(format!(
+                    "map rest projection expected key {}, found [{}]",
+                    excluded_key.label(),
+                    labels(&entry_keys)
+                )));
+            }
+        }
+        Ok(Self::Map(
+            entries
+                .iter()
+                .filter(|entry| excluded_keys.binary_search(&entry.key).is_err())
+                .cloned()
+                .collect(),
+        ))
     }
 }

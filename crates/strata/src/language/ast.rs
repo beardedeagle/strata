@@ -229,6 +229,7 @@ pub struct MapPattern {
     pub value_type: Option<TypeRef>,
     pub capacity: Option<usize>,
     pub completeness: MapPatternCompleteness,
+    pub rest: Option<Identifier>,
     pub entries: Vec<MapPatternEntry>,
 }
 

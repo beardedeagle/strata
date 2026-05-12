@@ -170,6 +170,11 @@ fn checked_binding_value_template(binding: &ValueTemplateBinding<'_>) -> Checked
             keys: keys.clone(),
             projection: *projection,
         },
+        PayloadBindingPath::MapRest { excluded_keys } => CheckedValueTemplate::MapRest {
+            ty: binding.checked_ty.clone(),
+            map: Box::new(root),
+            excluded_keys: excluded_keys.clone(),
+        },
     }
 }
 
@@ -474,6 +479,7 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         | CheckedValueTemplate::RecordField { .. }
         | CheckedValueTemplate::ListElement { .. }
         | CheckedValueTemplate::MapValue { .. }
+        | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. } => None,
         CheckedValueTemplate::EnumVariant {
             variant, payload, ..

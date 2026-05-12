@@ -408,6 +408,24 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
             }
             encode_value_template(encoded, &format!("{prefix}.map"), map);
         }
+        ArtifactValueTemplate::MapRest {
+            ty,
+            map,
+            excluded_keys,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=map_rest\n{prefix}.type_id={}\n{prefix}.key_count={}\n",
+                ty.as_u32(),
+                excluded_keys.len()
+            ));
+            for (key_index, excluded_key) in excluded_keys.iter().enumerate() {
+                let excluded_key = excluded_key.label();
+                encoded.push_str(&format!(
+                    "{prefix}.excluded_key.{key_index}={excluded_key}\n"
+                ));
+            }
+            encode_value_template(encoded, &format!("{prefix}.map"), map);
+        }
         ArtifactValueTemplate::ProcessRef {
             ty,
             target_process,
@@ -562,6 +580,31 @@ fn decode_value_template(
                 key,
                 keys,
                 projection,
+                map: Box::new(decode_value_template(
+                    fields,
+                    &format!("{prefix}.map"),
+                    depth + 1,
+                )?),
+            })
+        }
+        "map_rest" => {
+            let ty = fields.take_type_id(&format!("{prefix}.type_id"))?;
+            let key_count = fields.take_bounded_usize(
+                &format!("{prefix}.key_count"),
+                1,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?;
+            let mut excluded_keys = Vec::with_capacity(key_count);
+            for key_index in 0..key_count {
+                let excluded_key_field = format!("{prefix}.excluded_key.{key_index}");
+                excluded_keys.push(ArtifactValue::parse_field(
+                    &excluded_key_field,
+                    &fields.take_required(&excluded_key_field)?,
+                )?);
+            }
+            Ok(ArtifactValueTemplate::MapRest {
+                ty,
+                excluded_keys,
                 map: Box::new(decode_value_template(
                     fields,
                     &format!("{prefix}.map"),

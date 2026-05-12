@@ -12,9 +12,8 @@ pub(in crate::language::checker::source_functions) enum CollectionPatternShape {
     },
 }
 
-pub(in crate::language::checker::source_functions) struct CollectionPatternResolution<'a> {
-    pub(in crate::language::checker::source_functions) substitutions:
-        Vec<(&'a Identifier, &'a ValueExpr)>,
+pub(in crate::language::checker::source_functions) struct CollectionPatternResolution {
+    pub(in crate::language::checker::source_functions) substitutions: Vec<SourceSubstitution>,
     pub(in crate::language::checker::source_functions) bindings: Vec<PatternPayloadParam>,
 }
 
@@ -130,7 +129,15 @@ pub(in crate::language::checker::source_functions) fn check_collection_pattern_b
                 value,
                 capacity,
             )?;
-            check_map_pattern_bindings(module, semantic_index, subject, key, value, pattern)
+            check_map_pattern_bindings(
+                module,
+                semantic_index,
+                subject,
+                key,
+                value,
+                capacity,
+                pattern,
+            )
         }
         None => Err(Error::new(format!(
             "{subject} collection pattern expected List<T,N> or Map<K,V,N>, found {expected_type}"
@@ -177,17 +184,15 @@ pub(in crate::language::checker::source_functions) fn collection_pattern_shape(
     }
 }
 
-pub(in crate::language::checker::source_functions) fn resolve_collection_pattern_value_bindings<
-    'a,
->(
+pub(in crate::language::checker::source_functions) fn resolve_collection_pattern_value_bindings(
     module: &Module,
     semantic_index: &SemanticIndex,
     function_name: &str,
     usage: &str,
     expected_type: &TypeRef,
-    pattern: &'a Pattern,
-    value: &'a ValueExpr,
-) -> Result<Option<CollectionPatternResolution<'a>>> {
+    pattern: &Pattern,
+    value: &ValueExpr,
+) -> Result<Option<CollectionPatternResolution>> {
     match semantic_index.collection_type(expected_type)? {
         Some(CollectionType::List { element, capacity }) => {
             let ValueExpr::List(list) = value else {
@@ -253,8 +258,15 @@ pub(in crate::language::checker::source_functions) fn resolve_collection_pattern
                         item,
                         capacity,
                     )?;
-                    let Some(substitutions) =
-                        map_pattern_substitutions(module, semantic_index, key, pattern, map)?
+                    let Some(substitutions) = map_pattern_substitutions(
+                        module,
+                        semantic_index,
+                        key,
+                        item,
+                        capacity,
+                        pattern,
+                        map,
+                    )?
                     else {
                         return Ok(None);
                     };
@@ -264,6 +276,7 @@ pub(in crate::language::checker::source_functions) fn resolve_collection_pattern
                         &subject,
                         key,
                         item,
+                        capacity,
                         pattern,
                     )?;
                     Ok(Some(CollectionPatternResolution {
@@ -465,6 +478,16 @@ fn validate_map_pattern_type(
             pattern.entries.len()
         )));
     }
+    if pattern.rest.is_some() && pattern.completeness != MapPatternCompleteness::Subset {
+        return Err(Error::new(format!(
+            "{subject} map rest binding requires a subset map pattern"
+        )));
+    }
+    if pattern.rest.is_some() && pattern.entries.is_empty() {
+        return Err(Error::new(format!(
+            "{subject} map rest pattern must declare at least one key"
+        )));
+    }
     if pattern.completeness == MapPatternCompleteness::Subset && pattern.entries.is_empty() {
         return Err(Error::new(format!(
             "{subject} subset map pattern must declare at least one key"
@@ -509,6 +532,7 @@ fn check_map_pattern_bindings(
     subject: &str,
     key_type: &TypeRef,
     value_type: &TypeRef,
+    capacity: usize,
     pattern: &MapPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
     let keys = canonical_map_pattern_keys(module, semantic_index, key_type, pattern)?;
@@ -541,6 +565,21 @@ fn check_map_pattern_bindings(
             },
         });
     }
+    if let Some(rest) = &pattern.rest {
+        if !seen_bindings.insert(rest.as_str()) {
+            return Err(Error::new(format!(
+                "{subject} map pattern binding {rest} is declared more than once"
+            )));
+        }
+        validate_source_pattern_binding_name(subject, semantic_index, rest)?;
+        bindings.push(PatternPayloadParam {
+            name: rest.clone(),
+            ty: map_rest_type(key_type, value_type, capacity, keys.len())?,
+            path: PayloadBindingPath::MapRest {
+                excluded_keys: keys,
+            },
+        });
+    }
     Ok(bindings)
 }
 
@@ -569,28 +608,29 @@ fn canonical_map_pattern_keys(
     Ok(keys.into_iter().collect())
 }
 
-fn list_pattern_substitutions<'a>(
-    pattern: &'a ListPattern,
-    value: &'a ListValue,
-) -> Vec<(&'a Identifier, &'a ValueExpr)> {
+fn list_pattern_substitutions(pattern: &ListPattern, value: &ListValue) -> Vec<SourceSubstitution> {
     pattern
         .elements
         .iter()
         .zip(&value.items)
         .filter_map(|(binding, value)| match binding {
-            CollectionPatternBinding::Binding(name) => Some((name, value)),
+            CollectionPatternBinding::Binding(name) => {
+                Some(SourceSubstitution::new(name.clone(), value.clone()))
+            }
             CollectionPatternBinding::Wildcard => None,
         })
         .collect()
 }
 
-fn map_pattern_substitutions<'a>(
+fn map_pattern_substitutions(
     module: &Module,
     semantic_index: &SemanticIndex,
     key_type: &TypeRef,
-    pattern: &'a MapPattern,
-    value: &'a MapValue,
-) -> Result<Option<Vec<(&'a Identifier, &'a ValueExpr)>>> {
+    value_type: &TypeRef,
+    capacity: usize,
+    pattern: &MapPattern,
+    value: &MapValue,
+) -> Result<Option<Vec<SourceSubstitution>>> {
     let mut value_entries = BTreeMap::new();
     for entry in &value.entries {
         let key = canonical_source_value_with_bindings(
@@ -628,13 +668,43 @@ fn map_pattern_substitutions<'a>(
             return Ok(None);
         };
         if let CollectionPatternBinding::Binding(binding) = &entry.binding {
-            substitutions.push((binding, value));
+            substitutions.push(SourceSubstitution::new(binding.clone(), value.clone()));
         }
     }
     if pattern.completeness == MapPatternCompleteness::Exact
         && pattern_keys.len() != value_entries.len()
     {
         return Ok(None);
+    }
+    if let Some(rest) = &pattern.rest {
+        let rest_entries = value
+            .entries
+            .iter()
+            .map(|entry| {
+                let key = canonical_source_value_with_bindings(
+                    module,
+                    semantic_index,
+                    key_type,
+                    &entry.key,
+                    &[],
+                )?;
+                Ok((key, entry))
+            })
+            .filter_map(|result| match result {
+                Ok((key, entry)) if !pattern_keys.contains(&key) => Some(Ok(entry.clone())),
+                Ok(_) => None,
+                Err(err) => Some(Err(err)),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        substitutions.push(SourceSubstitution::new(
+            rest.clone(),
+            ValueExpr::Map(MapValue {
+                key_type: Some(key_type.clone()),
+                value_type: Some(value_type.clone()),
+                capacity: Some(capacity - pattern_keys.len()),
+                entries: rest_entries,
+            }),
+        ));
     }
     Ok(Some(substitutions))
 }

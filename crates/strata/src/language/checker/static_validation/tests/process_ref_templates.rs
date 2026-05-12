@@ -100,6 +100,26 @@ fn static_validation_rejects_duplicate_map_projection_keys() {
 }
 
 #[test]
+fn static_validation_rejects_duplicate_map_rest_projection_keys() {
+    let template = CheckedValueTemplate::MapRest {
+        ty: value_type("PhaseMap"),
+        map: Box::new(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+            value_type("PhaseMap"),
+            artifact_value("Map[Done=>Ready,Ready=>Done]"),
+        ))),
+        excluded_keys: vec![artifact_value("Ready"), artifact_value("Ready")],
+    };
+    let err = validate_value_template_payload_labels(&template)
+        .expect_err("duplicate map rest keys should fail static validation");
+
+    assert!(
+        err.to_string()
+            .contains("map rest projection duplicates excluded map key Ready"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn static_validation_rejects_duplicate_record_template_fields() {
     let template = CheckedValueTemplate::Record {
         ty: value_type("Job"),

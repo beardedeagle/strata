@@ -4,6 +4,8 @@
 # Units:
 # - *_nanos values are nanoseconds.
 # - *_rss_kib values are KiB.
+# - *_bytes values are bytes.
+# - allocation/deallocation counts are operation counts.
 #
 # Reference values record the reviewed CI signal when the baseline was written.
 # Budget values are intentionally broader and are the values enforced by tests.
@@ -14,14 +16,38 @@ collection_state.check_lower.iterations=64
 collection_state.check_lower.reference_wall_nanos=74990470
 collection_state.check_lower.reference_cpu_nanos=70000000
 collection_state.check_lower.reference_rss_kib=6444
+collection_state.check_lower.reference_allocation_count=176602
+collection_state.check_lower.reference_deallocation_count=176602
+collection_state.check_lower.reference_allocated_bytes=13628707
+collection_state.check_lower.reference_deallocated_bytes=13628707
+collection_state.check_lower.reference_current_live_bytes=0
+collection_state.check_lower.reference_peak_live_bytes=48891
 collection_state.check_lower.wall_budget_nanos=5000000000
 collection_state.check_lower.cpu_budget_nanos=5000000000
 collection_state.check_lower.rss_budget_kib=524288
+collection_state.check_lower.allocation_count_budget=10000000
+collection_state.check_lower.deallocation_count_budget=10000000
+collection_state.check_lower.allocated_bytes_budget=8589934592
+collection_state.check_lower.deallocated_bytes_budget=8589934592
+collection_state.check_lower.current_live_bytes_budget=1073741824
+collection_state.check_lower.peak_live_bytes_budget=1073741824
 
 collection_state.in_memory_runtime.iterations=64
 collection_state.in_memory_runtime.reference_wall_nanos=20049148
 collection_state.in_memory_runtime.reference_cpu_nanos=20000000
 collection_state.in_memory_runtime.reference_rss_kib=6444
+collection_state.in_memory_runtime.reference_allocation_count=108314
+collection_state.in_memory_runtime.reference_deallocation_count=108314
+collection_state.in_memory_runtime.reference_allocated_bytes=5477347
+collection_state.in_memory_runtime.reference_deallocated_bytes=5477347
+collection_state.in_memory_runtime.reference_current_live_bytes=0
+collection_state.in_memory_runtime.reference_peak_live_bytes=20655
 collection_state.in_memory_runtime.wall_budget_nanos=5000000000
 collection_state.in_memory_runtime.cpu_budget_nanos=5000000000
 collection_state.in_memory_runtime.rss_budget_kib=524288
+collection_state.in_memory_runtime.allocation_count_budget=10000000
+collection_state.in_memory_runtime.deallocation_count_budget=10000000
+collection_state.in_memory_runtime.allocated_bytes_budget=8589934592
+collection_state.in_memory_runtime.deallocated_bytes_budget=8589934592
+collection_state.in_memory_runtime.current_live_bytes_budget=1073741824
+collection_state.in_memory_runtime.peak_live_bytes_budget=1073741824

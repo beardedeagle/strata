@@ -1,11 +1,11 @@
 use super::*;
 use crate::language::checker::source_functions::collection_patterns::resolve_collection_pattern_value_bindings;
 
-struct ReturnMatchResolutionContext<'ctx, 'module, 'value, 'local, 'outer> {
+struct ReturnMatchResolutionContext<'ctx, 'module, 'local, 'outer> {
     scope: &'ctx SourceFunctionScope<'module>,
     function: &'ctx Function,
     match_body: &'ctx Match,
-    substitutions: &'ctx [SourceSubstitution<'value>],
+    substitutions: &'ctx [SourceSubstitution],
     local_bindings: &'ctx [SourceValueBinding<'local>],
     bindings: &'ctx [SourceValueBinding<'outer>],
     depth: usize,
@@ -15,7 +15,7 @@ pub(super) fn resolve_source_function_return_match_value(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
     match_body: &Match,
-    substitutions: &[SourceSubstitution<'_>],
+    substitutions: &[SourceSubstitution],
     local_bindings: &[SourceValueBinding<'_>],
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
@@ -72,7 +72,7 @@ pub(super) fn resolve_source_function_return_match_value(
 }
 
 fn resolve_source_function_return_enum_match_value(
-    context: &ReturnMatchResolutionContext<'_, '_, '_, '_, '_>,
+    context: &ReturnMatchResolutionContext<'_, '_, '_, '_>,
     enum_type: &TypeRef,
     enum_decl: &Enum,
     selected: &ValueExpr,
@@ -167,7 +167,7 @@ fn resolve_source_function_return_enum_match_value(
 }
 
 fn resolve_source_function_return_record_match_value(
-    context: &ReturnMatchResolutionContext<'_, '_, '_, '_, '_>,
+    context: &ReturnMatchResolutionContext<'_, '_, '_, '_>,
     record_decl: &Record,
     selected: &ValueExpr,
 ) -> Result<ValueExpr> {
@@ -269,7 +269,7 @@ fn record_return_match_pattern_error(
 }
 
 fn resolve_source_function_return_collection_match_value(
-    context: &ReturnMatchResolutionContext<'_, '_, '_, '_, '_>,
+    context: &ReturnMatchResolutionContext<'_, '_, '_, '_>,
     collection_type: &TypeRef,
     selected: &ValueExpr,
 ) -> Result<ValueExpr> {

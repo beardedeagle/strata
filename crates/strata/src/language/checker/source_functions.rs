@@ -14,6 +14,21 @@ use record_patterns::validate_record_pattern_source_function_group;
 use values::validate_source_function_body_values;
 pub(super) use values::{check_source_value_type, resolve_source_value_expr};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language::checker::source_functions) struct SourceSubstitution {
+    pub(in crate::language::checker::source_functions) name: Identifier,
+    pub(in crate::language::checker::source_functions) value: ValueExpr,
+}
+
+impl SourceSubstitution {
+    pub(in crate::language::checker::source_functions) fn new(
+        name: Identifier,
+        value: ValueExpr,
+    ) -> Self {
+        Self { name, value }
+    }
+}
+
 pub(super) fn validate_source_function_declarations(
     module: &Module,
     semantic_index: &SemanticIndex,
