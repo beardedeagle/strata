@@ -241,7 +241,7 @@ struct ReferenceMetrics {
     deallocation_count: u64,
     allocated_bytes: u64,
     deallocated_bytes: u64,
-    net_live_bytes_delta: u64,
+    net_live_bytes_delta: i64,
     peak_live_bytes_over_start: u64,
 }
 
@@ -276,7 +276,7 @@ impl PerformanceBudget {
                     "{}.reference_deallocated_bytes",
                     profile.key
                 )),
-                net_live_bytes_delta: baseline_u64(&format!(
+                net_live_bytes_delta: baseline_i64(&format!(
                     "{}.reference_net_live_bytes_delta",
                     profile.key
                 )),
@@ -406,7 +406,7 @@ struct AllocationMetrics {
     deallocation_count: u64,
     allocated_bytes: u64,
     deallocated_bytes: u64,
-    net_live_bytes_delta: u64,
+    net_live_bytes_delta: i64,
     peak_live_bytes_over_start: u64,
 }
 
@@ -418,12 +418,42 @@ impl AllocationSnapshot {
             deallocation_count: end.deallocations.saturating_sub(self.deallocations),
             allocated_bytes: end.allocated_bytes.saturating_sub(self.allocated_bytes),
             deallocated_bytes: end.deallocated_bytes.saturating_sub(self.deallocated_bytes),
-            net_live_bytes_delta: end.live_bytes.saturating_sub(interval_start_live_bytes),
+            net_live_bytes_delta: live_byte_delta(end.live_bytes, interval_start_live_bytes),
             peak_live_bytes_over_start: end
                 .peak_live_bytes
                 .saturating_sub(interval_start_live_bytes),
         }
     }
+}
+
+fn live_byte_delta(end: u64, start: u64) -> i64 {
+    let delta = i128::from(end) - i128::from(start);
+    i64::try_from(delta).expect("live-byte delta should fit i64")
+}
+
+#[test]
+fn allocation_snapshot_reports_signed_net_live_byte_delta() {
+    let start = AllocationSnapshot {
+        allocations: 10,
+        deallocations: 4,
+        allocated_bytes: 160,
+        deallocated_bytes: 32,
+        live_bytes: 128,
+        peak_live_bytes: 128,
+    };
+    let end = AllocationSnapshot {
+        allocations: 11,
+        deallocations: 5,
+        allocated_bytes: 192,
+        deallocated_bytes: 96,
+        live_bytes: 96,
+        peak_live_bytes: 160,
+    };
+
+    let metrics = start.measure_until(end);
+
+    assert_eq!(metrics.net_live_bytes_delta, -32);
+    assert_eq!(metrics.peak_live_bytes_over_start, 32);
 }
 
 fn run_collection_state_artifact(
@@ -496,7 +526,7 @@ fn assert_within_budget(budget: PerformanceBudget, metrics: ResourceMetrics) {
         metrics.allocations.deallocated_bytes,
         budget.deallocated_bytes_budget,
     );
-    assert_allocation_budget(
+    assert_signed_allocation_budget(
         budget.profile.label,
         "net live-byte delta",
         metrics.allocations.net_live_bytes_delta,
@@ -532,6 +562,13 @@ fn assert_allocation_budget(profile: &str, metric: &str, value: u64, budget: u64
     );
 }
 
+fn assert_signed_allocation_budget(profile: &str, metric: &str, value: i64, budget: u64) {
+    assert!(
+        i128::from(value) <= i128::from(budget),
+        "{profile} exceeded {metric} performance smoke budget: {value}, budget {budget}"
+    );
+}
+
 fn baseline_duration(key: &str) -> Duration {
     Duration::from_nanos(baseline_u64(key))
 }
@@ -548,6 +585,13 @@ fn baseline_u64(key: &str) -> u64 {
     value
         .parse::<u64>()
         .unwrap_or_else(|_| panic!("{key} must be an unsigned base-10 integer, got {value:?}"))
+}
+
+fn baseline_i64(key: &str) -> i64 {
+    let value = baseline_value(key);
+    value
+        .parse::<i64>()
+        .unwrap_or_else(|_| panic!("{key} must be a signed base-10 integer, got {value:?}"))
 }
 
 fn baseline_value(key: &str) -> &str {

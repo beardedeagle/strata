@@ -55,12 +55,13 @@ when the platform exposes it, and resident memory. Allocation metrics come from
 a test-only global allocator wrapper around `std::alloc::System`; the wrapper
 does not change allocation policy and only records atomic counters. The live
 metrics are relative to the start of each measured profile: net live-byte delta
-is the end-of-interval live byte change, and peak live over interval start is
-the highest live byte count above that start baseline. Linux CI reports process
-CPU from `/proc/self/stat` and current/peak RSS through `/proc`; macOS and BSD
-local runs report current RSS through `ps`. RSS budgets are enforced against
-current RSS for each measured profile; process-lifetime peak RSS is reported as
-context when available.
+is the signed end-of-interval live byte change, and peak live over interval start
+is the highest live byte count above that start baseline. The net live-byte
+delta budget is an upper bound; negative deltas remain valid. Linux CI reports
+process CPU from `/proc/self/stat` and current/peak RSS through `/proc`; macOS
+and BSD local runs report current RSS through `ps`. RSS budgets are enforced
+against current RSS for each measured profile; process-lifetime peak RSS is
+reported as context when available.
 
 The gate uses intentionally broad budgets. It is meant to catch severe
 regressions in compilation, runtime, CPU, or memory paths without making PR CI

@@ -1,10 +1,12 @@
 # Performance smoke baseline and reviewed budget ceilings.
 #
-# Format: strict key=value, unsigned base-10 integers only.
+# Format: strict key=value.
 # Units:
+# - All values are unsigned base-10 integers unless explicitly listed as signed.
 # - *_nanos values are nanoseconds.
 # - *_rss_kib values are KiB.
 # - *_bytes values are bytes.
+# - reference_net_live_bytes_delta values are signed base-10 byte counts.
 # - allocation/deallocation counts are operation counts.
 #
 # Reference values record the reviewed CI signal when the baseline was written.
