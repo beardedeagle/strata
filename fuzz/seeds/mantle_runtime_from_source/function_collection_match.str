@@ -1,0 +1,61 @@
+module function_collection_match;
+
+enum Phase {
+    Ready,
+    Done,
+    Unknown,
+}
+
+record MainState {
+    selected: Phase,
+}
+
+enum MainMsg {
+    Start,
+}
+
+fn first(List<Phase,2>[phase, _]) -> Phase ! [] ~ [] @det {
+    return phase;
+}
+
+fn first(List<Phase,2>[]) -> Phase ! [] ~ [] @det {
+    return Unknown;
+}
+
+fn from_body(items: List<Phase,1>) -> Phase ! [] ~ [] @det {
+    match items {
+        List[item] => {
+            return item;
+        }
+        _ => {
+            return Unknown;
+        }
+    }
+}
+
+fn from_return(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
+    return match items {
+        Map[Ready => selected, ..] => {
+            return selected;
+        }
+        _ => {
+            return Unknown;
+        }
+    };
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            selected: from_return(Map<Phase,Phase,2>[Ready => from_body(List<Phase,1>[first(List<Phase,2>[Ready, Done])]), Unknown => Unknown]),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "source helper collection match selected values";
+        return Stop(state);
+    }
+}

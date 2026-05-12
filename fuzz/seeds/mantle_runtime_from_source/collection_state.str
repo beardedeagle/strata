@@ -1,0 +1,65 @@
+module collection_state;
+
+record MainState;
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum WorkerMsg {
+    Replace(Phase),
+}
+
+enum MapWorkerMsg {
+    ReplaceMap(Map<Phase,Phase,2>),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let map_worker: ProcessRef<MapWorker> = spawn MapWorker;
+        send worker Replace(Done);
+        send map_worker ReplaceMap(Map<Phase,Phase,2>[Ready => Done, Done => Ready]);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = List<Phase,1>;
+    type Msg = WorkerMsg;
+
+    fn init() -> List<Phase,1> ! [] ~ [] @det {
+        return List<Phase,1>[Ready];
+    }
+
+    fn step(state: List<Phase,1>, Replace(next: Phase)) -> ProcResult<List<Phase,1>> ! [emit] ~ [] @det {
+        emit "collection state replaced";
+        return Stop(List<Phase,1>[next]);
+    }
+}
+
+proc MapWorker mailbox bounded(1) {
+    type State = Map<Phase,Phase,2>;
+    type Msg = MapWorkerMsg;
+
+    fn init() -> Map<Phase,Phase,2> ! [] ~ [] @det {
+        return Map<Phase,Phase,2>[Ready => Ready, Done => Ready];
+    }
+
+    fn step(state: Map<Phase,Phase,2>, ReplaceMap(Map[Ready => next, ..])) -> ProcResult<Map<Phase,Phase,2>> ! [emit] ~ [] @det {
+        emit "collection map state replaced";
+        return Stop(Map<Phase,Phase,2>[Ready => next, Done => Ready]);
+    }
+}

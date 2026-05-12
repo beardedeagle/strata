@@ -1,0 +1,27 @@
+# Performance smoke baseline and reviewed budget ceilings.
+#
+# Format: strict key=value, unsigned base-10 integers only.
+# Units:
+# - *_nanos values are nanoseconds.
+# - *_rss_kib values are KiB.
+#
+# Reference values record the reviewed CI signal when the baseline was written.
+# Budget values are intentionally broader and are the values enforced by tests.
+
+version=1
+
+collection_state.check_lower.iterations=64
+collection_state.check_lower.reference_wall_nanos=74990470
+collection_state.check_lower.reference_cpu_nanos=70000000
+collection_state.check_lower.reference_rss_kib=6444
+collection_state.check_lower.wall_budget_nanos=5000000000
+collection_state.check_lower.cpu_budget_nanos=5000000000
+collection_state.check_lower.rss_budget_kib=524288
+
+collection_state.in_memory_runtime.iterations=64
+collection_state.in_memory_runtime.reference_wall_nanos=20049148
+collection_state.in_memory_runtime.reference_cpu_nanos=20000000
+collection_state.in_memory_runtime.reference_rss_kib=6444
+collection_state.in_memory_runtime.wall_budget_nanos=5000000000
+collection_state.in_memory_runtime.cpu_budget_nanos=5000000000
+collection_state.in_memory_runtime.rss_budget_kib=524288

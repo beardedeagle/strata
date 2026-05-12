@@ -161,6 +161,22 @@ fn artifact_value_parse_rejects_empty_record_values() {
 }
 
 #[test]
+fn artifact_value_parse_rejects_unbalanced_top_level_delimiters() {
+    for (label, expected) in [
+        ("Unexpected)Record{phase:Ready}", "unbalanced parentheses"),
+        ("Unexpected]Record{phase:Ready}", "unbalanced brackets"),
+        ("Unexpected}Record{phase:Ready}", "unbalanced braces"),
+    ] {
+        let err = ArtifactValue::parse(label).expect_err("unbalanced value labels must fail");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+}
+
+#[test]
 fn artifact_value_labels_preserve_record_and_map_entry_order() {
     let record = ArtifactValue::parse("MainState{signature:WarmReady,body:WarmReady}")
         .expect("ordered record value should parse");

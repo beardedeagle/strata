@@ -7,6 +7,8 @@ license = "MIT"
 
 [dev-dependencies]
 mantle-artifact = { path = "../mantle-artifact" }
+mantle-runtime = { path = "../mantle-runtime" }
+strata = { path = "../strata" }
 
 [lib]
 name = "strata_mantle_acceptance"
