@@ -273,14 +273,21 @@ fuzz-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    mkdir -p \
-        fuzz/corpus/strata_parse_check_lower \
-        fuzz/corpus/mantle_artifact_decode \
-        fuzz/corpus/mantle_runtime_from_source
+    copy_seed_inputs() {
+        local corpus_dir="$1"
+        local seed_dir="$2"
 
-    cargo +{{nightly_toolchain}} fuzz run strata_parse_check_lower fuzz/corpus/strata_parse_check_lower fuzz/seeds/strata_parse_check_lower -- -runs=256
-    cargo +{{nightly_toolchain}} fuzz run mantle_artifact_decode fuzz/corpus/mantle_artifact_decode fuzz/seeds/mantle_artifact_decode -- -runs=256
-    cargo +{{nightly_toolchain}} fuzz run mantle_runtime_from_source fuzz/corpus/mantle_runtime_from_source fuzz/seeds/mantle_runtime_from_source -- -runs=128
+        mkdir -p "$corpus_dir"
+        find "$seed_dir" -maxdepth 1 -type f -exec cp -f {} "$corpus_dir"/ \;
+    }
+
+    copy_seed_inputs fuzz/corpus/strata_parse_check_lower fuzz/seeds/strata_parse_check_lower
+    copy_seed_inputs fuzz/corpus/mantle_artifact_decode fuzz/seeds/mantle_artifact_decode
+    copy_seed_inputs fuzz/corpus/mantle_runtime_from_source fuzz/seeds/mantle_runtime_from_source
+
+    cargo +{{nightly_toolchain}} fuzz run strata_parse_check_lower fuzz/corpus/strata_parse_check_lower -- -runs=256
+    cargo +{{nightly_toolchain}} fuzz run mantle_artifact_decode fuzz/corpus/mantle_artifact_decode -- -runs=256
+    cargo +{{nightly_toolchain}} fuzz run mantle_runtime_from_source fuzz/corpus/mantle_runtime_from_source -- -runs=128
 
 fuzz-ci: fuzz-build fuzz-lint fuzz-smoke
 

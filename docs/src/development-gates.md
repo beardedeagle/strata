@@ -50,8 +50,9 @@ checking and lowering, then repeated Mantle in-memory execution of the lowered
 artifact.
 
 The smoke output reports wall time, process CPU time when the platform exposes
-it, and resident memory. Linux CI reports current and peak RSS through `/proc`;
-macOS and BSD local runs report current RSS through `ps`.
+it, and resident memory. Linux CI reports process CPU from `/proc/self/stat` and
+current/peak RSS through `/proc`; macOS and BSD local runs report current RSS
+through `ps`.
 
 The gate uses intentionally broad budgets. It is meant to catch severe
 regressions in compilation, runtime, CPU, or memory paths without making PR CI
@@ -74,7 +75,9 @@ They cover three initial boundaries:
 
 Committed seed corpora under `fuzz/seeds/` keep the smoke runs exercising valid
 collection, template, and source-to-runtime examples even before mutation finds
-those forms from random input.
+those forms from random input. The smoke recipe copies those seeds into ignored
+`fuzz/corpus/` directories before running `cargo-fuzz`, so mutation output does
+not touch tracked seed fixtures.
 
 Useful local commands:
 

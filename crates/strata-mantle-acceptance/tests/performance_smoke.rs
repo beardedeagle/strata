@@ -208,7 +208,7 @@ fn format_memory(metrics: ResourceMetrics) -> String {
 
 #[cfg(target_os = "linux")]
 fn capture_cpu_time() -> Option<Duration> {
-    capture_linux_schedstat_cpu_time().or_else(capture_linux_stat_cpu_time)
+    capture_linux_stat_cpu_time().or_else(capture_linux_schedstat_cpu_time)
 }
 
 #[cfg(target_os = "linux")]
