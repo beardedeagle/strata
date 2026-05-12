@@ -52,7 +52,8 @@ artifact.
 The smoke output reports wall time, process CPU time when the platform exposes
 it, and resident memory. Linux CI reports process CPU from `/proc/self/stat` and
 current/peak RSS through `/proc`; macOS and BSD local runs report current RSS
-through `ps`.
+through `ps`. RSS budgets are enforced against current RSS for each measured
+profile; process-lifetime peak RSS is reported as context when available.
 
 The gate uses intentionally broad budgets. It is meant to catch severe
 regressions in compilation, runtime, CPU, or memory paths without making PR CI

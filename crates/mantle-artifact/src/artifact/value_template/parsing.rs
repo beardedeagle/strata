@@ -22,7 +22,7 @@ pub(super) fn parse_value(label: &str, depth: usize) -> Result<ArtifactValue> {
         };
         return parse_map(label, body, depth + 1);
     }
-    if let Some(open) = top_level_char(label, '{') {
+    if let Some(open) = top_level_char(label, '{')? {
         let Some(body) = label.strip_suffix('}') else {
             return Err(Error::new(format!("{label} is not a record value")));
         };
@@ -30,7 +30,7 @@ pub(super) fn parse_value(label: &str, depth: usize) -> Result<ArtifactValue> {
         validate_ident_field("artifact record value type", constructor)?;
         return parse_record(constructor, &body[open + 1..], depth + 1);
     }
-    if let Some(open) = top_level_char(label, '(') {
+    if let Some(open) = top_level_char(label, '(')? {
         let Some(body) = label.strip_suffix(')') else {
             return Err(Error::new(format!("{label} is not an enum payload value")));
         };
@@ -60,7 +60,7 @@ fn parse_record(constructor: &str, body: &str, depth: usize) -> Result<ArtifactV
     let mut fields = Vec::with_capacity(parts.len());
     let mut seen = BTreeSet::new();
     for part in parts {
-        let index = top_level_char(part, ':').ok_or_else(|| {
+        let index = top_level_char(part, ':')?.ok_or_else(|| {
             Error::new(format!(
                 "record value {constructor}{{{body}}} contains malformed field"
             ))
@@ -171,25 +171,40 @@ fn split_top_level(value: &str, separator: char) -> Result<Vec<&str>> {
     Ok(parts)
 }
 
-fn top_level_char(value: &str, target: char) -> Option<usize> {
+fn top_level_char(value: &str, target: char) -> Result<Option<usize>> {
     let mut paren_depth = 0usize;
     let mut bracket_depth = 0usize;
     let mut brace_depth = 0usize;
     for (index, ch) in value.char_indices() {
         if ch == target && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            return Some(index);
+            return Ok(Some(index));
         }
         match ch {
             '(' => paren_depth = paren_depth.saturating_add(1),
-            ')' => paren_depth = paren_depth.saturating_sub(1),
+            ')' => {
+                paren_depth = paren_depth.checked_sub(1).ok_or_else(|| {
+                    Error::new(format!("value label {value} has unbalanced parentheses"))
+                })?
+            }
             '[' => bracket_depth = bracket_depth.saturating_add(1),
-            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ']' => {
+                bracket_depth = bracket_depth.checked_sub(1).ok_or_else(|| {
+                    Error::new(format!("value label {value} has unbalanced brackets"))
+                })?
+            }
             '{' => brace_depth = brace_depth.saturating_add(1),
-            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '}' => {
+                brace_depth = brace_depth.checked_sub(1).ok_or_else(|| {
+                    Error::new(format!("value label {value} has unbalanced braces"))
+                })?
+            }
             _ => {}
         }
     }
-    None
+    if paren_depth != 0 || bracket_depth != 0 || brace_depth != 0 {
+        return Err(Error::new(format!("value label {value} is unbalanced")));
+    }
+    Ok(None)
 }
 
 fn top_level_fat_arrow(value: &str) -> Option<usize> {

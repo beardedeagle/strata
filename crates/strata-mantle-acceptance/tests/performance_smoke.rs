@@ -212,15 +212,7 @@ fn assert_within_budget(budget: PerformanceBudget, metrics: ResourceMetrics) {
         );
     }
 
-    if let Some(peak_rss_kib) = metrics.peak_rss_kib {
-        assert!(
-            peak_rss_kib <= budget.rss_budget_kib,
-            "{} exceeded peak RSS performance smoke budget: {} KiB, budget {} KiB",
-            budget.profile.label,
-            peak_rss_kib,
-            budget.rss_budget_kib,
-        );
-    } else if let Some(current_rss_kib) = metrics.current_rss_kib {
+    if let Some(current_rss_kib) = metrics.current_rss_kib {
         assert!(
             current_rss_kib <= budget.rss_budget_kib,
             "{} exceeded RSS performance smoke budget: {} KiB, budget {} KiB",
