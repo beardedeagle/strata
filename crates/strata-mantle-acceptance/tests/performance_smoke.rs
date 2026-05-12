@@ -12,14 +12,16 @@ use std::time::{Duration, Instant};
 
 use mantle_runtime::{InMemoryRuntimeHost, RunLimits, run_artifact_with_host};
 
+const PERFORMANCE_BASELINE: &str = include_str!("../../../benchmarks/performance-smoke.baseline");
 const COLLECTION_STATE_SOURCE: &str = include_str!("../../../examples/collection_state.str");
-const COMPILATION_ITERATIONS: usize = 64;
-const RUNTIME_ITERATIONS: usize = 64;
-const COMPILATION_BUDGET: Duration = Duration::from_secs(5);
-const RUNTIME_BUDGET: Duration = Duration::from_secs(5);
-const COMPILATION_CPU_BUDGET: Duration = Duration::from_secs(5);
-const RUNTIME_CPU_BUDGET: Duration = Duration::from_secs(5);
-const RSS_BUDGET_KIB: u64 = 512 * 1024;
+const CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "collection_state.check_lower",
+    label: "collection_state check+lower",
+};
+const IN_MEMORY_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "collection_state.in_memory_runtime",
+    label: "collection_state in-memory runtime",
+};
 #[cfg(any(
     target_os = "linux",
     target_os = "macos",
@@ -44,13 +46,16 @@ const PERF_RUN_LIMITS: RunLimits = RunLimits {
 #[test]
 #[ignore = "run through `just performance-smoke` so timing checks stay explicit"]
 fn collection_state_compilation_and_runtime_performance_smoke() {
+    let check_lower_budget = PerformanceBudget::load(CHECK_LOWER_PROFILE);
+    let in_memory_runtime_budget = PerformanceBudget::load(IN_MEMORY_RUNTIME_PROFILE);
+
     let checked = strata::language::check_source(COLLECTION_STATE_SOURCE)
         .expect("performance smoke source should check");
     let artifact = strata::language::lower_to_artifact(&checked, COLLECTION_STATE_SOURCE)
         .expect("performance smoke source should lower");
     run_collection_state_artifact(&artifact);
 
-    let compilation_metrics = measure_for(COMPILATION_ITERATIONS, || {
+    let compilation_metrics = measure_for(check_lower_budget.iterations, || {
         let checked = strata::language::check_source(COLLECTION_STATE_SOURCE)
             .expect("performance smoke source should check");
         let artifact = strata::language::lower_to_artifact(&checked, COLLECTION_STATE_SOURCE)
@@ -58,25 +63,59 @@ fn collection_state_compilation_and_runtime_performance_smoke() {
         black_box(artifact);
     });
 
-    let runtime_metrics = measure_for(RUNTIME_ITERATIONS, || {
+    let runtime_metrics = measure_for(in_memory_runtime_budget.iterations, || {
         let report = run_collection_state_artifact(&artifact);
         black_box(report);
     });
 
-    assert_within_budget(
-        "collection_state check+lower",
-        compilation_metrics,
-        COMPILATION_ITERATIONS,
-        COMPILATION_BUDGET,
-        COMPILATION_CPU_BUDGET,
-    );
-    assert_within_budget(
-        "collection_state in-memory runtime",
-        runtime_metrics,
-        RUNTIME_ITERATIONS,
-        RUNTIME_BUDGET,
-        RUNTIME_CPU_BUDGET,
-    );
+    assert_within_budget(check_lower_budget, compilation_metrics);
+    assert_within_budget(in_memory_runtime_budget, runtime_metrics);
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BenchmarkProfile {
+    key: &'static str,
+    label: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PerformanceBudget {
+    profile: BenchmarkProfile,
+    iterations: usize,
+    reference: ReferenceMetrics,
+    wall_budget: Duration,
+    cpu_budget: Duration,
+    rss_budget_kib: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ReferenceMetrics {
+    wall: Duration,
+    cpu: Duration,
+    rss_kib: u64,
+}
+
+impl PerformanceBudget {
+    fn load(profile: BenchmarkProfile) -> Self {
+        assert_eq!(
+            baseline_u64("version"),
+            1,
+            "unsupported performance baseline version"
+        );
+
+        Self {
+            profile,
+            iterations: baseline_usize(&format!("{}.iterations", profile.key)),
+            reference: ReferenceMetrics {
+                wall: baseline_duration(&format!("{}.reference_wall_nanos", profile.key)),
+                cpu: baseline_duration(&format!("{}.reference_cpu_nanos", profile.key)),
+                rss_kib: baseline_u64(&format!("{}.reference_rss_kib", profile.key)),
+            },
+            wall_budget: baseline_duration(&format!("{}.wall_budget_nanos", profile.key)),
+            cpu_budget: baseline_duration(&format!("{}.cpu_budget_nanos", profile.key)),
+            rss_budget_kib: baseline_u64(&format!("{}.rss_budget_kib", profile.key)),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -149,45 +188,113 @@ fn run_collection_state_artifact(
     report
 }
 
-fn assert_within_budget(
-    label: &str,
-    metrics: ResourceMetrics,
-    iterations: usize,
-    wall_budget: Duration,
-    cpu_budget: Duration,
-) {
+fn assert_within_budget(budget: PerformanceBudget, metrics: ResourceMetrics) {
+    let iterations =
+        u32::try_from(budget.iterations).expect("performance smoke iteration count should fit u32");
+
     assert!(
-        metrics.wall <= wall_budget,
-        "{label} exceeded wall-time performance smoke budget: {:?} for {iterations} iterations, budget {wall_budget:?}",
+        metrics.wall <= budget.wall_budget,
+        "{} exceeded wall-time performance smoke budget: {:?} for {} iterations, budget {:?}",
+        budget.profile.label,
         metrics.wall,
+        budget.iterations,
+        budget.wall_budget,
     );
 
     if let Some(cpu) = metrics.cpu {
         assert!(
-            cpu <= cpu_budget,
-            "{label} exceeded CPU performance smoke budget: {cpu:?} for {iterations} iterations, budget {cpu_budget:?}"
+            cpu <= budget.cpu_budget,
+            "{} exceeded CPU performance smoke budget: {:?} for {} iterations, budget {:?}",
+            budget.profile.label,
+            cpu,
+            budget.iterations,
+            budget.cpu_budget,
         );
     }
 
     if let Some(peak_rss_kib) = metrics.peak_rss_kib {
         assert!(
-            peak_rss_kib <= RSS_BUDGET_KIB,
-            "{label} exceeded peak RSS performance smoke budget: {peak_rss_kib} KiB, budget {RSS_BUDGET_KIB} KiB"
+            peak_rss_kib <= budget.rss_budget_kib,
+            "{} exceeded peak RSS performance smoke budget: {} KiB, budget {} KiB",
+            budget.profile.label,
+            peak_rss_kib,
+            budget.rss_budget_kib,
         );
     } else if let Some(current_rss_kib) = metrics.current_rss_kib {
         assert!(
-            current_rss_kib <= RSS_BUDGET_KIB,
-            "{label} exceeded RSS performance smoke budget: {current_rss_kib} KiB, budget {RSS_BUDGET_KIB} KiB"
+            current_rss_kib <= budget.rss_budget_kib,
+            "{} exceeded RSS performance smoke budget: {} KiB, budget {} KiB",
+            budget.profile.label,
+            current_rss_kib,
+            budget.rss_budget_kib,
         );
     }
 
     println!(
-        "{label}: wall {:?} total for {iterations} iterations ({:?} per iteration), cpu {}, rss {}",
+        "{}: wall {:?} total for {} iterations ({:?} per iteration), cpu {}, rss {}; reviewed baseline wall {:?}, cpu {:?}, rss {} KiB",
+        budget.profile.label,
         metrics.wall,
-        metrics.wall / iterations as u32,
+        budget.iterations,
+        metrics.wall / iterations,
         format_optional_duration(metrics.cpu),
         format_memory(metrics),
+        budget.reference.wall,
+        budget.reference.cpu,
+        budget.reference.rss_kib,
     );
+}
+
+fn baseline_duration(key: &str) -> Duration {
+    Duration::from_nanos(baseline_u64(key))
+}
+
+fn baseline_usize(key: &str) -> usize {
+    let value = baseline_u64(key);
+    let value = usize::try_from(value).expect("performance baseline value should fit usize");
+    assert!(value > 0, "{key} must be greater than zero");
+    value
+}
+
+fn baseline_u64(key: &str) -> u64 {
+    let value = baseline_value(key);
+    value
+        .parse::<u64>()
+        .unwrap_or_else(|_| panic!("{key} must be an unsigned base-10 integer, got {value:?}"))
+}
+
+fn baseline_value(key: &str) -> &str {
+    let mut found = None;
+    for (line_index, raw_line) in PERFORMANCE_BASELINE.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (candidate_key, value) = line.split_once('=').unwrap_or_else(|| {
+            panic!(
+                "performance baseline line {} must use key=value syntax",
+                line_index + 1
+            )
+        });
+        let candidate_key = candidate_key.trim();
+        let value = value.trim();
+        assert!(
+            !candidate_key.is_empty(),
+            "performance baseline line {} has empty key",
+            line_index + 1
+        );
+        assert!(
+            !value.is_empty(),
+            "performance baseline line {} has empty value",
+            line_index + 1
+        );
+        if candidate_key == key {
+            assert!(
+                found.replace(value).is_none(),
+                "performance baseline key {key} is duplicated"
+            );
+        }
+    }
+    found.unwrap_or_else(|| panic!("performance baseline key {key} is missing"))
 }
 
 fn format_optional_duration(duration: Option<Duration>) -> String {

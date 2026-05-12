@@ -58,6 +58,12 @@ The gate uses intentionally broad budgets. It is meant to catch severe
 regressions in compilation, runtime, CPU, or memory paths without making PR CI
 depend on microbenchmark noise from shared runners.
 
+Reviewed reference values and enforced budget ceilings live in
+`benchmarks/performance-smoke.baseline`. Local and CI runs print current
+measurements to their logs; git tracks reviewed baseline changes, not every
+noisy raw run. The baseline file uses strict `key=value` entries with
+nanosecond and KiB units.
+
 Useful local command:
 
 ```sh
