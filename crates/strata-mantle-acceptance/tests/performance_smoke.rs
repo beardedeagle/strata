@@ -228,8 +228,8 @@ struct PerformanceBudget {
     deallocation_count_budget: u64,
     allocated_bytes_budget: u64,
     deallocated_bytes_budget: u64,
-    current_live_bytes_budget: u64,
-    peak_live_bytes_budget: u64,
+    net_live_bytes_delta_budget: u64,
+    peak_live_bytes_over_start_budget: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -241,8 +241,8 @@ struct ReferenceMetrics {
     deallocation_count: u64,
     allocated_bytes: u64,
     deallocated_bytes: u64,
-    current_live_bytes: u64,
-    peak_live_bytes: u64,
+    net_live_bytes_delta: u64,
+    peak_live_bytes_over_start: u64,
 }
 
 impl PerformanceBudget {
@@ -276,12 +276,12 @@ impl PerformanceBudget {
                     "{}.reference_deallocated_bytes",
                     profile.key
                 )),
-                current_live_bytes: baseline_u64(&format!(
-                    "{}.reference_current_live_bytes",
+                net_live_bytes_delta: baseline_u64(&format!(
+                    "{}.reference_net_live_bytes_delta",
                     profile.key
                 )),
-                peak_live_bytes: baseline_u64(&format!(
-                    "{}.reference_peak_live_bytes",
+                peak_live_bytes_over_start: baseline_u64(&format!(
+                    "{}.reference_peak_live_bytes_over_start",
                     profile.key
                 )),
             },
@@ -304,12 +304,12 @@ impl PerformanceBudget {
                 "{}.deallocated_bytes_budget",
                 profile.key
             )),
-            current_live_bytes_budget: baseline_u64(&format!(
-                "{}.current_live_bytes_budget",
+            net_live_bytes_delta_budget: baseline_u64(&format!(
+                "{}.net_live_bytes_delta_budget",
                 profile.key
             )),
-            peak_live_bytes_budget: baseline_u64(&format!(
-                "{}.peak_live_bytes_budget",
+            peak_live_bytes_over_start_budget: baseline_u64(&format!(
+                "{}.peak_live_bytes_over_start_budget",
                 profile.key
             )),
         }
@@ -406,19 +406,22 @@ struct AllocationMetrics {
     deallocation_count: u64,
     allocated_bytes: u64,
     deallocated_bytes: u64,
-    current_live_bytes: u64,
-    peak_live_bytes: u64,
+    net_live_bytes_delta: u64,
+    peak_live_bytes_over_start: u64,
 }
 
 impl AllocationSnapshot {
     fn measure_until(self, end: Self) -> AllocationMetrics {
+        let interval_start_live_bytes = self.live_bytes;
         AllocationMetrics {
             allocation_count: end.allocations.saturating_sub(self.allocations),
             deallocation_count: end.deallocations.saturating_sub(self.deallocations),
             allocated_bytes: end.allocated_bytes.saturating_sub(self.allocated_bytes),
             deallocated_bytes: end.deallocated_bytes.saturating_sub(self.deallocated_bytes),
-            current_live_bytes: end.live_bytes.saturating_sub(self.live_bytes),
-            peak_live_bytes: end.peak_live_bytes.saturating_sub(self.live_bytes),
+            net_live_bytes_delta: end.live_bytes.saturating_sub(interval_start_live_bytes),
+            peak_live_bytes_over_start: end
+                .peak_live_bytes
+                .saturating_sub(interval_start_live_bytes),
         }
     }
 }
@@ -495,15 +498,15 @@ fn assert_within_budget(budget: PerformanceBudget, metrics: ResourceMetrics) {
     );
     assert_allocation_budget(
         budget.profile.label,
-        "current live bytes",
-        metrics.allocations.current_live_bytes,
-        budget.current_live_bytes_budget,
+        "net live-byte delta",
+        metrics.allocations.net_live_bytes_delta,
+        budget.net_live_bytes_delta_budget,
     );
     assert_allocation_budget(
         budget.profile.label,
-        "peak live bytes",
-        metrics.allocations.peak_live_bytes,
-        budget.peak_live_bytes_budget,
+        "peak live bytes over interval start",
+        metrics.allocations.peak_live_bytes_over_start,
+        budget.peak_live_bytes_over_start_budget,
     );
 
     println!(
@@ -600,25 +603,25 @@ fn format_memory(metrics: ResourceMetrics) -> String {
 
 fn format_allocations(allocations: AllocationMetrics) -> String {
     format!(
-        "{} allocs, {} deallocs, {} B allocated, {} B deallocated, {} B current live, {} B peak live",
+        "{} allocs, {} deallocs, {} B allocated, {} B deallocated, {} B net live delta, {} B peak live over interval start",
         allocations.allocation_count,
         allocations.deallocation_count,
         allocations.allocated_bytes,
         allocations.deallocated_bytes,
-        allocations.current_live_bytes,
-        allocations.peak_live_bytes,
+        allocations.net_live_bytes_delta,
+        allocations.peak_live_bytes_over_start,
     )
 }
 
 fn format_reference_allocations(reference: ReferenceMetrics) -> String {
     format!(
-        "{} allocs, {} deallocs, {} B allocated, {} B deallocated, {} B current live, {} B peak live",
+        "{} allocs, {} deallocs, {} B allocated, {} B deallocated, {} B net live delta, {} B peak live over interval start",
         reference.allocation_count,
         reference.deallocation_count,
         reference.allocated_bytes,
         reference.deallocated_bytes,
-        reference.current_live_bytes,
-        reference.peak_live_bytes,
+        reference.net_live_bytes_delta,
+        reference.peak_live_bytes_over_start,
     )
 }
 

@@ -50,14 +50,17 @@ checking and lowering, then repeated Mantle in-memory execution of the lowered
 artifact.
 
 The smoke output reports wall time, allocation/deallocation counts, allocated
-and deallocated bytes, current/peak live bytes, process CPU time when the
-platform exposes it, and resident memory. Allocation metrics come from a
-test-only global allocator wrapper around `std::alloc::System`; the wrapper
-does not change allocation policy and only records atomic counters. Linux CI
-reports process CPU from `/proc/self/stat` and current/peak RSS through
-`/proc`; macOS and BSD local runs report current RSS through `ps`. RSS budgets
-are enforced against current RSS for each measured profile; process-lifetime
-peak RSS is reported as context when available.
+and deallocated bytes, interval-relative live-byte metrics, process CPU time
+when the platform exposes it, and resident memory. Allocation metrics come from
+a test-only global allocator wrapper around `std::alloc::System`; the wrapper
+does not change allocation policy and only records atomic counters. The live
+metrics are relative to the start of each measured profile: net live-byte delta
+is the end-of-interval live byte change, and peak live over interval start is
+the highest live byte count above that start baseline. Linux CI reports process
+CPU from `/proc/self/stat` and current/peak RSS through `/proc`; macOS and BSD
+local runs report current RSS through `ps`. RSS budgets are enforced against
+current RSS for each measured profile; process-lifetime peak RSS is reported as
+context when available.
 
 The gate uses intentionally broad budgets. It is meant to catch severe
 regressions in compilation, runtime, CPU, or memory paths without making PR CI
