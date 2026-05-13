@@ -579,12 +579,19 @@ fn check_list_pattern_bindings(
                     context: "pattern",
                     seen_bindings: &mut seen_bindings,
                 };
-                bindings.extend(check_nested_pattern_bindings(
+                let nested_bindings = check_nested_pattern_bindings(
                     &mut nested_scope,
                     element_type,
                     pattern,
                     &element_path,
-                )?);
+                    EmptyConstructorPattern::Reject,
+                )?;
+                if nested_bindings.is_empty() {
+                    return Err(Error::new(format!(
+                        "{subject} list nested pattern must bind at least one value"
+                    )));
+                }
+                bindings.extend(nested_bindings);
             }
             CollectionPatternBinding::Wildcard => {}
         }
@@ -657,12 +664,19 @@ fn check_map_pattern_bindings(
                     context: "pattern",
                     seen_bindings: &mut seen_bindings,
                 };
-                bindings.extend(check_nested_pattern_bindings(
+                let nested_bindings = check_nested_pattern_bindings(
                     &mut nested_scope,
                     value_type,
                     pattern,
                     &value_path,
-                )?);
+                    EmptyConstructorPattern::Reject,
+                )?;
+                if nested_bindings.is_empty() {
+                    return Err(Error::new(format!(
+                        "{subject} map nested pattern must bind at least one value"
+                    )));
+                }
+                bindings.extend(nested_bindings);
             }
             CollectionPatternBinding::Wildcard => {}
         }
@@ -936,25 +950,40 @@ pub(in crate::language::checker::source_functions) fn source_nested_pattern_subs
             let enum_decl = semantic_index.enum_decl(module, expected_type)?;
             let variant_index = semantic_index.enum_variant_index(module, expected_type, name)?;
             let variant = &enum_decl.variants[variant_index];
-            let ValueExpr::EnumVariant {
-                name: value_name,
-                payload: value_payload,
-            } = value
-            else {
-                return Ok(None);
-            };
-            if value_name != &variant.name {
-                return Ok(None);
-            }
             match (&variant.payload_type, payload) {
-                (None, None) => Ok(Some(Vec::new())),
+                (None, None) => match value {
+                    ValueExpr::Identifier(value_name) if value_name == &variant.name => {
+                        Ok(Some(Vec::new()))
+                    }
+                    _ => Ok(None),
+                },
                 (Some(_payload_type), Some(ConstructorPayloadPattern::Binding(binding))) => {
+                    let ValueExpr::EnumVariant {
+                        name: value_name,
+                        payload: value_payload,
+                    } = value
+                    else {
+                        return Ok(None);
+                    };
+                    if value_name != &variant.name {
+                        return Ok(None);
+                    }
                     Ok(Some(vec![SourceSubstitution::new(
                         binding.name.clone(),
                         (**value_payload).clone(),
                     )]))
                 }
                 (Some(payload_type), Some(ConstructorPayloadPattern::Destructure(pattern))) => {
+                    let ValueExpr::EnumVariant {
+                        name: value_name,
+                        payload: value_payload,
+                    } = value
+                    else {
+                        return Ok(None);
+                    };
+                    if value_name != &variant.name {
+                        return Ok(None);
+                    }
                     source_nested_pattern_substitutions(
                         module,
                         semantic_index,

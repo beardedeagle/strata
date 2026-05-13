@@ -49,6 +49,7 @@ pub(super) fn check_step_clauses<'a>(
                         step,
                         body: StepBodySource::Block(body),
                         payload_params: Vec::new(),
+                        payload_guard: None,
                     },
                 )?;
             }
@@ -86,6 +87,7 @@ pub(super) fn check_step_clauses<'a>(
                             step,
                             body: StepBodySource::Block(&arm.body),
                             payload_params: Vec::new(),
+                            payload_guard: None,
                         },
                     )?;
                 }
@@ -109,6 +111,7 @@ pub(super) fn check_step_clauses<'a>(
                         step,
                         body: StepBodySource::StateMatch(match_body),
                         payload_params: Vec::new(),
+                        payload_guard: None,
                     },
                 )?;
             }
@@ -164,6 +167,16 @@ pub(super) fn check_step_clauses<'a>(
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        validate_message_payload_guard_coverage(
+            module,
+            process,
+            process_id,
+            semantic_index,
+            message_cases,
+            variant_id,
+            message_variant,
+            clause.payload_guard.as_ref(),
+        )?;
         let message = message_cases.message_id(process_id, variant_id)?;
         match &clause.body {
             StepBodySource::Block(body) => {
@@ -271,10 +284,14 @@ fn preadmit_concrete_step_state_values(
                     if let TypedMatchPattern::Variant {
                         variant,
                         bindings: arm_bindings,
+                        payload_guard,
                     } = &arm.pattern
                     {
                         let variant_decl = &state_enum.variants[*variant];
-                        if variant_decl.payload_type.is_some() && arm_bindings.is_empty() {
+                        if variant_decl.payload_type.is_some()
+                            && arm_bindings.is_empty()
+                            && payload_guard.is_none()
+                        {
                             return Err(Error::new(format!(
                                 "process {} state match pattern {} requires a payload binding",
                                 process.name, variant_decl.name
@@ -688,6 +705,33 @@ fn validate_state_payload_binding_name(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn validate_message_payload_guard_coverage(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    message_cases: &MessageCaseTable,
+    variant: CheckedMessageVariantId,
+    message_variant: &EnumVariant,
+    payload_guard: Option<&PatternPayloadGuard>,
+) -> Result<()> {
+    let Some(payload_guard) = payload_guard else {
+        return Ok(());
+    };
+    for payload in message_cases.payload_values(process_id, variant)? {
+        if !payload_matches_guard(module, semantic_index, payload, payload_guard)? {
+            return Err(Error::new(format!(
+                "process {} step pattern for message {} does not match discovered payload {}",
+                process.name,
+                message_variant.name,
+                payload.label()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn state_match_arm_cases(
     module: &Module,
     process: &Process,
@@ -701,7 +745,11 @@ fn state_match_arm_cases(
     pattern: &TypedMatchPattern,
 ) -> Result<Vec<(CheckedStateId, Vec<StepStatePayloadBinding>)>> {
     match pattern {
-        TypedMatchPattern::Variant { variant, bindings } => {
+        TypedMatchPattern::Variant {
+            variant,
+            bindings,
+            payload_guard,
+        } => {
             let variant_decl = &state_enum.variants[*variant];
             match &variant_decl.payload_type {
                 None if bindings.is_empty() => {
@@ -714,7 +762,7 @@ fn state_match_arm_cases(
                     process.name, variant_decl.name
                 ))),
                 Some(payload_type) => {
-                    if bindings.is_empty() {
+                    if bindings.is_empty() && payload_guard.is_none() {
                         return Err(Error::new(format!(
                             "process {} state match pattern {} requires a payload binding",
                             process.name, variant_decl.name
@@ -734,6 +782,16 @@ fn state_match_arm_cases(
                     payloads
                         .into_iter()
                         .map(|payload| {
+                            if let Some(guard) = payload_guard
+                                && !payload_matches_guard(module, semantic_index, &payload, guard)?
+                            {
+                                return Err(Error::new(format!(
+                                    "process {} state match pattern {} does not match discovered payload {}",
+                                    process.name,
+                                    variant_decl.name,
+                                    payload.label()
+                                )));
+                            }
                             let payload_name = Identifier::new("__state_payload")?;
                             let state_value = ValueExpr::EnumVariant {
                                 name: variant_decl.name.clone(),
@@ -902,8 +960,13 @@ fn insert_step_body_clause<'a>(
     mut clause: StepBodyClause<'a>,
 ) -> Result<()> {
     match pattern {
-        StepPattern::Variant { message, bindings } => {
+        StepPattern::Variant {
+            message,
+            bindings,
+            payload_guard,
+        } => {
             clause.payload_params = bindings;
+            clause.payload_guard = payload_guard;
             if explicit_clauses[message.index()].replace(clause).is_some() {
                 return Err(Error::new(format!(
                     "process {} declares duplicate step pattern for message {}",

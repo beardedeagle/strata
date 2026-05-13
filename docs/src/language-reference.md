@@ -649,6 +649,8 @@ These bindings are immutable projections of the concrete payload value. A
 constructor payload, record field, list element, list rest, map value, or map
 rest can be used in whole-value state returns and downstream payloads, but
 process references still remain valid only as direct message payload bindings.
+Fieldless nested enum constructors such as `Envelope(Assign(Ready))` are
+accepted as typed shape predicates; they do not introduce bindings.
 Shape-only collection payload patterns such as `Items(List[_])`,
 `Lookup(Map[Ready => _])`, or `Lookup(Map[..])` are not admitted in this slice;
 use the constructor pattern without destructuring when the payload is ignored.

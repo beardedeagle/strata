@@ -388,9 +388,10 @@ impl Parser {
             } else if self.starts_payload_destructuring_pattern(&value) {
                 ConstructorPayloadPattern::Destructure(Box::new(self.parse_pattern(value)?))
             } else {
-                return Err(self.error_previous(format!(
-                    "constructor payload pattern {name}({value}) must bind the payload as {value}: Type or destructure a constructor, record, list, map, or wildcard"
-                )));
+                ConstructorPayloadPattern::Destructure(Box::new(Pattern::Constructor {
+                    name: Identifier::new(value)?,
+                    payload: None,
+                }))
             };
             self.expect_symbol(')')?;
             Some(payload)

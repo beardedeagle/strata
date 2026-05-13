@@ -244,6 +244,7 @@ struct StepBodyClause<'a> {
     step: &'a Function,
     body: StepBodySource<'a>,
     payload_params: Vec<PatternPayloadParam>,
+    payload_guard: Option<PatternPayloadGuard>,
 }
 
 #[derive(Debug, Clone)]
@@ -284,6 +285,7 @@ enum StepPattern {
     Variant {
         message: CheckedMessageVariantId,
         bindings: Vec<PatternPayloadParam>,
+        payload_guard: Option<PatternPayloadGuard>,
     },
     Wildcard,
 }
@@ -431,12 +433,25 @@ struct PatternPayloadParam {
     path: PayloadBindingPath,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PatternPayloadGuard {
+    enum_ty: TypeRef,
+    variant: CheckedEnumVariantId,
+    payload: Option<Box<PatternPayloadGuard>>,
+}
+
 struct NestedPatternBindingScope<'a, 'seen> {
     module: &'a Module,
     semantic_index: &'a SemanticIndex,
     binding_context: PatternBindingContext<'a>,
     context: &'a str,
     seen_bindings: &'seen mut BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmptyConstructorPattern {
+    Allow,
+    Reject,
 }
 
 impl NestedPatternBindingScope<'_, '_> {
@@ -568,6 +583,7 @@ enum TypedMatchPattern {
     Variant {
         variant: usize,
         bindings: Vec<PatternPayloadParam>,
+        payload_guard: Option<PatternPayloadGuard>,
     },
     Wildcard,
 }
@@ -886,9 +902,16 @@ fn check_typed_match_pattern(
                 context.payload_context,
                 context.binding_context,
             )?;
+            let payload_guard = check_pattern_payload_guard(
+                context.module,
+                context.semantic_index,
+                variant,
+                payload.as_ref(),
+            )?;
             Ok(TypedMatchPattern::Variant {
                 variant: variant_index,
                 bindings,
+                payload_guard,
             })
         }
         Pattern::Record { name, .. } => Err(Error::new(format!(
@@ -950,6 +973,65 @@ fn check_pattern_payload_bindings(
             )
         }
     }
+}
+
+fn check_pattern_payload_guard(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    variant: &EnumVariant,
+    payload: Option<&ConstructorPayloadPattern>,
+) -> Result<Option<PatternPayloadGuard>> {
+    let Some(payload_type) = &variant.payload_type else {
+        return Ok(None);
+    };
+    let Some(ConstructorPayloadPattern::Destructure(pattern)) = payload else {
+        return Ok(None);
+    };
+    nested_pattern_payload_guard(module, semantic_index, payload_type, pattern)
+}
+
+fn nested_pattern_payload_guard(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    pattern: &Pattern,
+) -> Result<Option<PatternPayloadGuard>> {
+    let Pattern::Constructor { name, payload } = pattern else {
+        return Ok(None);
+    };
+    let enum_decl = semantic_index
+        .enum_decl(module, expected_type)
+        .map_err(|_| {
+            Error::new(format!(
+                "nested constructor pattern {name} cannot match value type {expected_type}"
+            ))
+        })?;
+    let variant_index = semantic_index.enum_variant_index(module, expected_type, name)?;
+    let variant = &enum_decl.variants[variant_index];
+    let variant_id = CheckedEnumVariantId::from_index(variant_index)?;
+    let payload_guard = match (&variant.payload_type, payload) {
+        (None, None) => None,
+        (None, Some(_)) => {
+            return Err(Error::new(format!(
+                "nested constructor pattern {name} does not carry a payload"
+            )));
+        }
+        (Some(_), None) => {
+            return Err(Error::new(format!(
+                "nested constructor pattern {name} requires a payload pattern"
+            )));
+        }
+        (Some(_), Some(ConstructorPayloadPattern::Binding(_))) => None,
+        (Some(payload_type), Some(ConstructorPayloadPattern::Destructure(pattern))) => {
+            nested_pattern_payload_guard(module, semantic_index, payload_type, pattern)?
+                .map(Box::new)
+        }
+    };
+    Ok(Some(PatternPayloadGuard {
+        enum_ty: expected_type.clone(),
+        variant: variant_id,
+        payload: payload_guard,
+    }))
 }
 
 fn check_whole_payload_binding(
@@ -1085,6 +1167,7 @@ fn check_destructured_payload_bindings(
             payload_type,
             pattern,
             &base_path,
+            EmptyConstructorPattern::Allow,
         ),
         Pattern::Wildcard => Ok(Vec::new()),
     }
@@ -1095,6 +1178,7 @@ fn check_nested_pattern_bindings(
     expected_type: &TypeRef,
     pattern: &Pattern,
     base_path: &PayloadBindingPath,
+    empty_constructor: EmptyConstructorPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
     let subject = scope.subject();
     match pattern {
@@ -1188,9 +1272,13 @@ fn check_nested_pattern_bindings(
                 base_path,
             )
         }
-        Pattern::Constructor { .. } => {
-            check_constructor_payload_pattern_bindings(scope, expected_type, pattern, base_path)
-        }
+        Pattern::Constructor { .. } => check_constructor_payload_pattern_bindings(
+            scope,
+            expected_type,
+            pattern,
+            base_path,
+            empty_constructor,
+        ),
         Pattern::Wildcard => Ok(Vec::new()),
     }
 }
@@ -1200,6 +1288,7 @@ fn check_constructor_payload_pattern_bindings(
     enum_type: &TypeRef,
     pattern: &Pattern,
     base_path: &PayloadBindingPath,
+    empty_constructor: EmptyConstructorPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
     let Pattern::Constructor { name, payload } = pattern else {
         return Err(Error::new("expected constructor payload pattern"));
@@ -1220,10 +1309,13 @@ fn check_constructor_payload_pattern_bindings(
     let variant = &enum_decl.variants[variant_index];
     let variant_id = CheckedEnumVariantId::from_index(variant_index)?;
     match (&variant.payload_type, payload) {
-        (None, None) => Err(Error::new(format!(
-            "{subject} {} nested constructor pattern {name} must bind at least one nested value",
-            scope.context
-        ))),
+        (None, None) => match empty_constructor {
+            EmptyConstructorPattern::Allow => Ok(Vec::new()),
+            EmptyConstructorPattern::Reject => Err(Error::new(format!(
+                "{subject} {} nested constructor pattern {name} must bind at least one nested value",
+                scope.context
+            ))),
+        },
         (None, Some(_)) => Err(Error::new(format!(
             "{subject} {} nested constructor pattern {name} does not carry a payload",
             scope.context
@@ -1274,15 +1366,13 @@ fn check_constructor_payload_pattern_bindings(
                 payload_type.clone(),
                 variant_id,
             ));
-            let bindings =
-                check_nested_pattern_bindings(scope, payload_type, pattern, &nested_path)?;
-            if bindings.is_empty() {
-                return Err(Error::new(format!(
-                    "{subject} {} nested constructor pattern {name} must bind at least one nested value",
-                    scope.context
-                )));
-            }
-            Ok(bindings)
+            check_nested_pattern_bindings(
+                scope,
+                payload_type,
+                pattern,
+                &nested_path,
+                EmptyConstructorPattern::Allow,
+            )
         }
     }
 }
@@ -1382,12 +1472,21 @@ fn check_list_payload_pattern_bindings(
                 });
             }
             CollectionPatternBinding::Pattern(pattern) => {
-                bindings.extend(check_nested_pattern_bindings(
+                let nested_bindings = check_nested_pattern_bindings(
                     scope,
                     element_type,
                     pattern,
                     &element_path,
-                )?);
+                    EmptyConstructorPattern::Reject,
+                )?;
+                if nested_bindings.is_empty() {
+                    let subject = scope.subject();
+                    return Err(Error::new(format!(
+                        "{subject} {} list payload nested pattern must bind at least one value in this source slice",
+                        scope.context
+                    )));
+                }
+                bindings.extend(nested_bindings);
             }
             CollectionPatternBinding::Wildcard => {}
         }
@@ -1499,12 +1598,21 @@ fn check_map_payload_pattern_bindings(
                 });
             }
             CollectionPatternBinding::Pattern(pattern) => {
-                bindings.extend(check_nested_pattern_bindings(
+                let nested_bindings = check_nested_pattern_bindings(
                     scope,
                     map_type.value,
                     pattern,
                     &value_path,
-                )?);
+                    EmptyConstructorPattern::Reject,
+                )?;
+                if nested_bindings.is_empty() {
+                    let subject = scope.subject();
+                    return Err(Error::new(format!(
+                        "{subject} {} map payload nested pattern must bind at least one value in this source slice",
+                        scope.context
+                    )));
+                }
+                bindings.extend(nested_bindings);
             }
             CollectionPatternBinding::Wildcard => {}
         }
@@ -1669,6 +1777,52 @@ fn payload_binding_value(
         };
     }
     Ok(Some(value))
+}
+
+fn payload_matches_guard(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    payload: &CheckedPayloadValue,
+    guard: &PatternPayloadGuard,
+) -> Result<bool> {
+    let Some(value) = payload.value() else {
+        return Ok(false);
+    };
+    artifact_value_matches_guard(module, semantic_index, value, guard)
+}
+
+fn artifact_value_matches_guard(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    value: &ArtifactValue,
+    guard: &PatternPayloadGuard,
+) -> Result<bool> {
+    let enum_decl = semantic_index.enum_decl(module, &guard.enum_ty)?;
+    let Some(variant) = enum_decl.variants.get(guard.variant.index()) else {
+        return Ok(false);
+    };
+    match (&variant.payload_type, &guard.payload, value) {
+        (None, None, ArtifactValue::Atom(actual)) => Ok(actual == variant.name.as_str()),
+        (None, None, _) => Ok(false),
+        (None, Some(_), _) => Err(Error::new(format!(
+            "fieldless enum variant {} has a nested payload guard",
+            variant.name
+        ))),
+        (
+            Some(_),
+            nested_guard,
+            ArtifactValue::EnumVariant {
+                variant: actual,
+                payload,
+            },
+        ) if actual == variant.name.as_str() => match nested_guard {
+            Some(nested_guard) => {
+                artifact_value_matches_guard(module, semantic_index, payload, nested_guard)
+            }
+            None => Ok(true),
+        },
+        (Some(_), _, _) => Ok(false),
+    }
 }
 
 fn checked_payload_binding(

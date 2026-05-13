@@ -143,6 +143,102 @@ proc Worker mailbox bounded(4) {
 }
 
 #[test]
+fn step_patterns_accept_fieldless_nested_enum_constructor_payloads() {
+    let source = r#"
+module fieldless_nested_constructor_payload;
+
+record MainState;
+enum JobKind { Ready, Done }
+enum Routed { Assign(JobKind) }
+enum MainMsg { Start }
+enum WorkerMsg { Envelope(Routed) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Ready));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = MainState;
+    type Msg = WorkerMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Envelope(Assign(Ready))) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked =
+        check_source(source).expect("fieldless nested enum constructor pattern should check");
+    lower_to_artifact(&checked, source)
+        .expect("fieldless nested enum constructor pattern should lower");
+}
+
+#[test]
+fn step_patterns_reject_fieldless_nested_enum_constructor_payload_mismatch() {
+    let source = r#"
+module fieldless_nested_constructor_payload_mismatch;
+
+record MainState;
+enum JobKind { Ready, Done }
+enum Routed { Assign(JobKind) }
+enum MainMsg { Start }
+enum WorkerMsg { Envelope(Routed) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Done));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = MainState;
+    type Msg = WorkerMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Envelope(Assign(Ready))) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err =
+        check_source(source).expect_err("nonmatching fieldless nested enum payload should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker step pattern for message Envelope does not match discovered payload Assign(Done)"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn match_msg_binds_nested_constructor_record_list_and_map_values() {
     let source = r#"
 module nested_match_msg_patterns;
@@ -298,6 +394,110 @@ proc Worker mailbox bounded(1) {
 }
 
 #[test]
+fn state_match_accepts_fieldless_nested_enum_constructor_payload() {
+    let source = r#"
+module fieldless_nested_state_match_pattern;
+
+record MainState;
+enum Phase { Ready, Done }
+enum Routed { Assign(Phase) }
+enum WorkerState { Holding(Routed) }
+enum MainMsg { Start }
+enum WorkerMsg { Advance }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Advance;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Holding(Assign(Ready));
+    }
+
+    fn step(state: WorkerState, Advance) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match state {
+            Holding(Assign(Ready)) => {
+                return Stop(state);
+            }
+        }
+    }
+}
+"#;
+
+    check_source(source).expect("fieldless nested state payload pattern should check");
+}
+
+#[test]
+fn state_match_rejects_fieldless_nested_enum_constructor_payload_mismatch() {
+    let source = r#"
+module fieldless_nested_state_match_pattern_mismatch;
+
+record MainState;
+enum Phase { Ready, Done }
+enum Routed { Assign(Phase) }
+enum WorkerState { Holding(Routed) }
+enum MainMsg { Start }
+enum WorkerMsg { Advance }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Advance;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Holding(Assign(Done));
+    }
+
+    fn step(state: WorkerState, Advance) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match state {
+            Holding(Assign(Ready)) => {
+                return Stop(state);
+            }
+        }
+    }
+}
+"#;
+
+    let err = check_source(source)
+        .expect_err("nonmatching fieldless nested enum state payload should fail");
+
+    assert!(
+        err.to_string().contains(
+            "process Worker state match pattern Holding does not match discovered payload Assign(Done)"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn source_helpers_bind_nested_patterns_in_signature_body_and_return_match() {
     let source = r#"
 module nested_helper_patterns;
@@ -307,10 +507,14 @@ record MainState {
     body: Phase,
     ret: Phase,
     list: Phase,
+    fieldless_signature: Phase,
+    fieldless_body: Phase,
+    fieldless_ret: Phase,
 }
 record Job { phase: Phase }
 enum Phase { Ready, Done }
 enum Routed { Assign(Job) }
+enum RoutedKind { Mark(Phase) }
 enum MainMsg { Start }
 
 fn phase_signature(Assign(Job { phase })) -> Phase ! [] ~ [] @det {
@@ -337,6 +541,26 @@ fn phase_list(List<Routed,1>[Assign(Job { phase })]) -> Phase ! [] ~ [] @det {
     return phase;
 }
 
+fn fieldless_signature(Mark(Ready)) -> Phase ! [] ~ [] @det {
+    return Ready;
+}
+
+fn fieldless_body(route: RoutedKind) -> Phase ! [] ~ [] @det {
+    match route {
+        Mark(Ready) => {
+            return Ready;
+        }
+    }
+}
+
+fn fieldless_return(route: RoutedKind) -> Phase ! [] ~ [] @det {
+    return match route {
+        Mark(Ready) => {
+            return Ready;
+        }
+    };
+}
+
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
@@ -347,6 +571,9 @@ proc Main mailbox bounded(1) {
             body: phase_body(Assign(Job { phase: Done })),
             ret: phase_return(Assign(Job { phase: Ready })),
             list: phase_list(List<Routed,1>[Assign(Job { phase: Done })]),
+            fieldless_signature: fieldless_signature(Mark(Ready)),
+            fieldless_body: fieldless_body(Mark(Ready)),
+            fieldless_ret: fieldless_return(Mark(Ready)),
         };
     }
 
@@ -357,6 +584,79 @@ proc Main mailbox bounded(1) {
 "#;
 
     check_source(source).expect("nested source helper patterns should check");
+}
+
+fn fieldless_helper_mismatch_source(selected_call: &str) -> String {
+    format!(
+        r#"
+module fieldless_helper_mismatch;
+
+record MainState {{ selected: Phase }}
+enum Phase {{ Ready, Done }}
+enum RoutedKind {{ Mark(Phase) }}
+enum MainMsg {{ Start }}
+
+fn fieldless_signature(Mark(Ready)) -> Phase ! [] ~ [] @det {{
+    return Ready;
+}}
+
+fn fieldless_body(route: RoutedKind) -> Phase ! [] ~ [] @det {{
+    match route {{
+        Mark(Ready) => {{
+            return Ready;
+        }}
+    }}
+}}
+
+fn fieldless_return(route: RoutedKind) -> Phase ! [] ~ [] @det {{
+    return match route {{
+        Mark(Ready) => {{
+            return Ready;
+        }}
+    }};
+}}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState {{ selected: {selected_call} }};
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+    )
+}
+
+#[test]
+fn source_helpers_reject_fieldless_nested_enum_constructor_mismatches() {
+    for (selected_call, expected) in [
+        (
+            "fieldless_signature(Mark(Done))",
+            "function fieldless_signature signature nested payload pattern does not match concrete Done",
+        ),
+        (
+            "fieldless_body(Mark(Done))",
+            "function fieldless_body match nested payload pattern does not match concrete Done",
+        ),
+        (
+            "fieldless_return(Mark(Done))",
+            "function fieldless_return return match nested payload pattern does not match concrete Done",
+        ),
+    ] {
+        let source = fieldless_helper_mismatch_source(selected_call);
+        let err = check_source(&source)
+            .expect_err("fieldless nested enum constructor helper mismatch should fail checking");
+
+        assert!(
+            err.to_string().contains(expected),
+            "expected diagnostic containing {expected:?}, got {err}"
+        );
+    }
 }
 
 #[test]

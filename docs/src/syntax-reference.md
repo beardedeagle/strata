@@ -119,6 +119,7 @@ pattern =
 
 constructor_payload_pattern =
     ident ":" type_ref
+  | ident
   | ident "(" constructor_payload_pattern ")"
   | ident "{" record_pattern_fields "}"
   | "List" list_type_args? "[" list_pattern_items? "]"
@@ -230,9 +231,11 @@ comma is a message constructor accepted by the process message type. A payload
 pattern such as `Assign(job: Job)` binds the received payload as an immutable
 transition-local value. A constructor payload pattern such as
 `Assign(Job { phase })`, `Envelope(Assign(Job { phase }))`,
-`Assign(List[Job { phase }, ..tail])`, or
+`Assign(Ready)`, `Assign(List[Job { phase }, ..tail])`, or
 `Assign(Map[Ready => Job { phase }])` destructures an immutable concrete payload
-and binds only the selected values. List rest patterns are suffix-only in this slice:
+and binds only the selected values. A fieldless nested enum constructor such as
+`Ready` is a typed shape predicate and does not introduce a binding. List rest
+patterns are suffix-only in this slice:
 `..tail` must follow at least one fixed-position element and binds an immutable
 whole list containing the unmatched suffix. Map payload patterns are exact unless
 they end with `..`, as in `Assign(Map[Ready => selected, ..])`; the subset marker

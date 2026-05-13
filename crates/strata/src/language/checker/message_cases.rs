@@ -102,10 +102,12 @@ impl MessageCaseTable {
                         step_discovery_clauses(module, process, process_id, semantic_index, step)?
                     {
                         for sender_case in matching_message_cases(
+                            module,
+                            semantic_index,
                             sender_cases,
                             &clause.pattern,
                             &explicit_step_variants[process_index],
-                        ) {
+                        )? {
                             let bindings = payload_value_bindings(
                                 module,
                                 semantic_index,
