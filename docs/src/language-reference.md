@@ -349,8 +349,9 @@ fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
 }
 ```
 
-Whole-body helper matches can destructure exact list and map shapes. A wildcard
-arm may provide a fallback for collection shapes that are not listed:
+Whole-body helper matches can destructure exact list patterns, suffix-only list
+rest patterns, exact map patterns, and map subset/rest patterns. A wildcard arm
+may provide a fallback for collection shapes that are not listed:
 
 ```strata
 fn first_or_unknown(items: List<Phase,1>) -> Phase ! [] ~ [] @det {
@@ -409,9 +410,10 @@ fn ready_value(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
 
 Enum matches are exhaustive, duplicate-free, and immutable. Record body matches
 and return matches use one record pattern arm for the matched record type.
-Collection patterns match exact list length. Map patterns match exact key sets
-unless they use the trailing `..` subset marker, with `_` available as a
-collection fallback in helper match bodies and return matches.
+Collection patterns match exact list length unless they use the trailing
+`..tail` suffix rest binding. Map patterns match exact key sets unless they use
+the trailing `..` subset or rest marker. `_` remains available as a collection
+fallback in helper match bodies and return matches.
 Payload-bearing source helper patterns and record/list/map destructuring
 patterns bind immutable source values. A helper call must provide a concrete
 enum constructor value for signature-pattern, whole-body match, or enum helper
