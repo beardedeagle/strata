@@ -12,7 +12,7 @@ enum MainMsg {
 }
 
 enum WorkerMsg {
-    Replace(Phase),
+    Replace(List<Phase,2>),
 }
 
 enum MapWorkerMsg {
@@ -30,7 +30,7 @@ proc Main mailbox bounded(1) {
     fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         let map_worker: ProcessRef<MapWorker> = spawn MapWorker;
-        send worker Replace(Done);
+        send worker Replace(List<Phase,2>[Ready, Done]);
         send map_worker ReplaceMap(Map<Phase,Phase,2>[Ready => Done, Done => Ready]);
         return Stop(state);
     }
@@ -44,9 +44,9 @@ proc Worker mailbox bounded(1) {
         return List<Phase,1>[Ready];
     }
 
-    fn step(state: List<Phase,1>, Replace(next: Phase)) -> ProcResult<List<Phase,1>> ! [emit] ~ [] @det {
+    fn step(state: List<Phase,1>, Replace(List[_, ..tail])) -> ProcResult<List<Phase,1>> ! [emit] ~ [] @det {
         emit "collection state replaced";
-        return Stop(List<Phase,1>[next]);
+        return Stop(tail);
     }
 }
 

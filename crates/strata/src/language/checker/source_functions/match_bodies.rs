@@ -1,6 +1,7 @@
 use super::*;
 use crate::language::checker::source_functions::collection_patterns::{
-    check_collection_pattern_bindings, collection_pattern_shape,
+    check_collection_pattern_bindings, collection_pattern_capacity, collection_pattern_shape,
+    collection_shape_label, first_overlapping_collection_pattern,
 };
 use crate::language::checker::source_functions::record_patterns::check_record_pattern_bindings;
 
@@ -156,7 +157,8 @@ fn validate_binding_source_function_collection_match_body(
     match_body: &Match,
 ) -> Result<()> {
     let mut wildcard_seen = false;
-    let mut shapes = BTreeSet::new();
+    let capacity = collection_pattern_capacity(semantic_index, &param.ty)?;
+    let mut shapes = Vec::new();
     for arm in &match_body.arms {
         validate_pure_source_function_block(owner, function, &arm.body)?;
         match &arm.pattern {
@@ -180,12 +182,17 @@ fn validate_binding_source_function_collection_match_body(
                 )?;
                 let shape =
                     collection_pattern_shape(module, semantic_index, &param.ty, &arm.pattern)?;
-                if !shapes.insert(shape.clone()) {
+                if let Some(overlap) =
+                    first_overlapping_collection_pattern(&shapes, &shape, capacity)
+                {
                     return Err(Error::new(format!(
-                        "{owner} function {} match declares duplicate collection pattern",
-                        function.name
+                        "{owner} function {} match declares overlapping collection patterns {} and {}",
+                        function.name,
+                        collection_shape_label(overlap),
+                        collection_shape_label(&shape)
                     )));
                 }
+                shapes.push(shape);
             }
             Pattern::Constructor { name, .. } => {
                 return Err(Error::new(format!(

@@ -30,7 +30,7 @@ use super::checked::{
     CheckedTypeRef, CheckedValueTemplate,
 };
 use super::diagnostic::{Error, Result};
-use super::{MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
+use super::{LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
 use init::check_init;
 use message_cases::{DiscoveredMessageCase, MessageCaseTable};
 use outputs::OutputPool;
@@ -303,6 +303,13 @@ enum PayloadBindingPath {
         index: usize,
         len: usize,
     },
+    ListPrefixIndex {
+        index: usize,
+        prefix_len: usize,
+    },
+    ListRest {
+        prefix_len: usize,
+    },
     MapValue {
         key: ArtifactValue,
         keys: Vec<ArtifactValue>,
@@ -334,6 +341,19 @@ fn map_rest_type(
     Ok(TypeRef::Applied {
         constructor: Identifier::new(MAP_TYPE)?,
         args: vec![key_type.clone(), value_type.clone()],
+        const_args: vec![rest_capacity],
+    })
+}
+
+fn list_rest_type(element_type: &TypeRef, capacity: usize, prefix_len: usize) -> Result<TypeRef> {
+    let rest_capacity = capacity.checked_sub(prefix_len).ok_or_else(|| {
+        Error::new(format!(
+            "list rest binding removes {prefix_len} prefix elements from capacity {capacity}"
+        ))
+    })?;
+    Ok(TypeRef::Applied {
+        constructor: Identifier::new(LIST_TYPE)?,
+        args: vec![element_type.clone()],
         const_args: vec![rest_capacity],
     })
 }
@@ -870,6 +890,7 @@ fn check_destructured_payload_bindings(
                 binding_context,
                 context,
                 element,
+                capacity,
                 pattern,
             )
         }
@@ -984,6 +1005,7 @@ fn check_list_payload_pattern_bindings(
     binding_context: PatternBindingContext<'_>,
     context: &str,
     element_type: &TypeRef,
+    capacity: usize,
     pattern: &ListPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
     let mut seen_bindings = BTreeSet::new();
@@ -1002,9 +1024,22 @@ fn check_list_payload_pattern_bindings(
         bindings.push(PatternPayloadParam {
             name: name.clone(),
             ty: element_type.clone(),
-            path: PayloadBindingPath::ListIndex {
-                index,
-                len: pattern.elements.len(),
+            path: list_element_binding_path(index, pattern),
+        });
+    }
+    if let Some(rest) = &pattern.rest {
+        let subject = pattern_binding_subject(binding_context);
+        if !seen_bindings.insert(rest.as_str()) {
+            return Err(Error::new(format!(
+                "{subject} {context} list payload pattern binding {rest} is declared more than once"
+            )));
+        }
+        validate_pattern_binding_name(binding_context, semantic_index, rest)?;
+        bindings.push(PatternPayloadParam {
+            name: rest.clone(),
+            ty: list_rest_type(element_type, capacity, pattern.elements.len())?,
+            path: PayloadBindingPath::ListRest {
+                prefix_len: pattern.elements.len(),
             },
         });
     }
@@ -1035,6 +1070,11 @@ fn validate_list_payload_pattern_capacity(
         return Err(Error::new(format!(
             "{subject} {context} list payload pattern length {} exceeds capacity {capacity} for {payload_type}",
             pattern.elements.len()
+        )));
+    }
+    if pattern.rest.is_some() && pattern.elements.is_empty() {
+        return Err(Error::new(format!(
+            "{subject} {context} list rest payload pattern must declare at least one prefix element"
         )));
     }
     Ok(())
@@ -1160,6 +1200,20 @@ fn map_pattern_projection(pattern: &MapPattern) -> MapProjectionMode {
     }
 }
 
+fn list_element_binding_path(index: usize, pattern: &ListPattern) -> PayloadBindingPath {
+    if pattern.rest.is_some() {
+        PayloadBindingPath::ListPrefixIndex {
+            index,
+            prefix_len: pattern.elements.len(),
+        }
+    } else {
+        PayloadBindingPath::ListIndex {
+            index,
+            len: pattern.elements.len(),
+        }
+    }
+}
+
 fn payload_binding_value(
     payload_value: &ArtifactValue,
     binding: &PatternPayloadParam,
@@ -1171,6 +1225,12 @@ fn payload_binding_value(
         }
         PayloadBindingPath::ListIndex { index, len } => {
             Ok(payload_value.project_list_element(*index, *len).ok())
+        }
+        PayloadBindingPath::ListPrefixIndex { index, prefix_len } => Ok(payload_value
+            .project_list_prefix_element(*index, *prefix_len)
+            .ok()),
+        PayloadBindingPath::ListRest { prefix_len } => {
+            Ok(payload_value.project_list_rest(*prefix_len).ok())
         }
         PayloadBindingPath::MapValue {
             key,

@@ -1,301 +1,306 @@
 # Strata
 
-Strata is an experimental systems language for explicit authority, typed
-concurrency, and runtime-visible execution.
+Strata is a systems language for programs whose authority, effects,
+concurrency, and state transitions should be visible in source code and checked
+before execution.
 
-Mantle is the runtime target for Strata programs. Strata source files are
-written as `.str`; the compiler builds language-neutral Mantle Target Artifacts
-as `.mta`; Mantle validates and executes those artifacts.
+Mantle is the runtime target. Strata source files are written as `.str`; the
+Strata frontend checks those files and builds language-neutral Mantle Target
+Artifacts as `.mta`; Mantle validates and executes the artifacts.
 
-The shape is deliberate: Strata should make effects, authority, process
-behavior, determinism, and communication protocols visible in the program text
-and checkable before execution. Mantle should execute only what the artifact is
-allowed to do, and it should leave an observability trail that can be inspected
-after the run.
+The design goal is not just to run code. The goal is to make runtime behavior
+part of the checked interface of the program:
 
-## Runnable Gates
+- which effects a function or transition may perform;
+- which process can send which message;
+- which state transitions are admitted;
+- which values can carry process authority;
+- which operations are deterministic;
+- which runtime events prove what happened.
 
-The first source-to-runtime gate:
+## Status
 
-```sh
-cargo build
-cargo run -p strata --bin strata -- check examples/hello.str
-cargo run -p strata --bin strata -- build examples/hello.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+This repository is a buildable source-to-runtime implementation slice. A real
+`.str` program can be checked, lowered into a `.mta` artifact, and executed by
+Mantle with an observability trace.
+
+It is not a complete language release. The accepted source surface is documented
+in the mdBook, especially:
+
+- [Language reference](docs/src/language-reference.md)
+- [Syntax reference](docs/src/syntax-reference.md)
+- [Source-to-runtime gates](docs/src/source-to-runtime-gates.md)
+- [Artifact/runtime boundary](docs/src/artifact-runtime-boundary.md)
+
+## Final Direction
+
+The final Strata/Mantle shape is a statically checked language and runtime pair
+for local and distributed systems where authority, effects, ownership, state
+transitions, distribution, failure, and evidence are part of the checked program
+contract.
+
+Strata owns source syntax, type meaning, diagnostics, semantic checking, checked
+IR, exact effects, determinism classes, capability types, process declarations,
+protocol and component declarations, archive semantics, post-quantum
+cryptographic obligations, policy-facing semantic artifacts, provenance, and
+reproducibility rules. Lowering owns the explicit conversion from checked Strata
+IR into Mantle target artifacts.
+
+Mantle owns the operational contract for admitted artifacts: process identity
+and scheduling, bounded mailboxes, isolated process state, supervision, effect
+dispatch, runtime capability validation, artifact admission, archive validation,
+repository/code-distribution behavior, host boundaries, transport, membership,
+partition observation, revocation propagation, federation, and observability.
+Mantle can choose an implementation strategy for schedulers, queues, transports,
+allocators, repositories, and drivers, but it must not widen or weaken
+Strata-visible meaning.
+
+The intended language surface includes:
+
+- explicit authority rather than ambient access to filesystems, networks,
+  environment, arguments, standard I/O, clocks, randomness, cluster membership,
+  remote spawn, or cross-cluster federation;
+- ownership, borrowing, deterministic destruction, process isolation, and no
+  shared mutable state across processes or nodes;
+- typed local and remote process references, typed messages, typed init bundles,
+  explicit send/spawn sites, bounded mailboxes, and supervisor-declared failure
+  topology;
+- component and protocol boundaries with declared authority, typed ports,
+  explicit failure behavior, and checked component composition;
+- exact effects, declared blocking/nondeterminism, deterministic artifact
+  generation, and allocation treated as an operational effect unless proven
+  fixed-frame, stack-local, static, or caller-provided;
+- distribution as a typed semantic fact, not a transparent call boundary:
+  transport reachability is never authority, remote failure is typed, partition
+  behavior is observable, and cross-cluster operations require explicit
+  admitted capability and policy;
+- post-quantum cryptographic trust as a core semantic and admission
+  requirement: ML-DSA signatures, ML-KEM or policy-admitted hybrid key
+  establishment, crypto manifests, and active policy checks for signed
+  artifacts, capability attestations, node identity, cluster membership,
+  repository admission, artifact admission, and node-to-node sessions;
+- classical-only cryptography excluded from the core trust path, with hybrid
+  establishment treated as a policy-declared transition mechanism rather than a
+  fallback to classical-only security;
+- fail-closed operational behavior: accepted messages are not silently dropped,
+  dequeued messages and completed effects are not automatically replayed, and
+  runtime retries cannot hide commit-or-return outcomes;
+- optional high-assurance profiles for information-flow control,
+  constant-time checking, revocable future-use capability leases, upgrade, and
+  federation, with profile-specific evidence and explicit non-claims;
+- canonical typed artifacts, manifests, semantic hashes, archive/type hashes,
+  provenance, attestation, publication bundles, and redaction policy that bind
+  claims to reproducible source-to-runtime evidence.
+
+Source names are for syntax, diagnostics, traces, provenance, and metadata.
+Executable semantics cross the Strata/Mantle boundary as typed IDs and typed
+artifact structures, not as source strings. Runtime dispatch uses admitted
+typed tables and loaded runtime identities, not source text.
+
+The end state is not proof artifacts in place of behavior. The closure bar is a
+checked `.str` program lowered to a language-neutral `.mta` artifact, admitted
+and executed by Mantle, with observability and evidence that explain both
+accepted and rejected outcomes.
+
+## Language Tour
+
+### Source Units
+
+A Strata file starts with a module declaration and defines records, enums,
+source helpers, and processes:
+
+```strata
+module hello;
+
+record MainState;
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "hello from Strata";
+        return Stop(state);
+    }
+}
 ```
 
-The example program emits `hello from Strata` through an explicit `emit` effect.
-Mantle prints the emitted output and records the runtime events in:
+`Main` is the entry process. Mantle starts it and delivers the first message
+variant of its message enum.
+
+### Explicit Effects
+
+Effects are declared in function signatures:
+
+```strata
+fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det
+```
+
+The current buildable surface includes `emit`, `spawn`, and `send`. Undeclared
+effects are rejected before artifact execution.
+
+### Actors And Messages
+
+Processes declare a state type, a message type, and message-keyed transitions:
+
+```strata
+enum WorkerState { Idle, Done }
+enum WorkerMsg { Ping }
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled Ping";
+        return Stop(Done);
+    }
+}
+```
+
+State changes are immutable whole-value transitions through `Continue(value)`,
+`Stop(value)`, or `Panic(value)`.
+
+### Typed Process References
+
+Spawning returns a typed process reference. Sends use that typed reference, not a
+string process name:
+
+```strata
+let worker: ProcessRef<Worker> = spawn Worker;
+send worker Ping;
+```
+
+Process references can also travel as typed immutable message payloads when the
+payload type admits them.
+
+### Records, Enums, And Payloads
+
+Records and enum payloads are immutable values:
+
+```strata
+enum Phase { Ready, Done }
+
+record Job {
+    phase: Phase,
+}
+
+enum WorkerMsg {
+    Assign(Job),
+}
+
+enum WorkerState {
+    Idle,
+    Working(Job),
+}
+```
+
+Payloads can be bound directly in step signatures or in `match msg` bodies:
+
+```strata
+fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Continue(Working(job));
+}
+```
+
+### Pattern Matching
+
+Strata supports checked pattern dispatch in source helpers, step signatures,
+whole-body message matches, state matches, and helper return-match expressions.
+
+```strata
+enum JobStatus {
+    Assigned(Job),
+}
+
+fn status(Assigned(job: Job)) -> Phase ! [] ~ [] @det {
+    return match job {
+        Job { phase } => {
+            return phase;
+        }
+    };
+}
+```
+
+Patterns bind immutable local values. Invalid, duplicate, unreachable, and
+overlapping patterns are rejected before lowering.
+
+### Immutable Collections
+
+Lists and maps are bounded immutable source values:
+
+```strata
+List<Phase,2>[Ready, Done]
+Map<Phase,Phase,2>[Ready => Done, Done => Ready]
+```
+
+List rest patterns bind immutable suffix lists:
+
+```strata
+fn tail_of(List<Phase,2>[_, ..tail]) -> List<Phase,1> ! [] ~ [] @det {
+    return tail;
+}
+```
+
+Map subset/rest patterns bind over static keys:
+
+```strata
+fn selected(Map<Phase,Phase,2>[Ready => phase, ..rest]) -> Phase ! [] ~ [] @det {
+    return phase;
+}
+```
+
+Collection rest bindings are whole values, not mutable views. This slice does
+not expose collection mutation, iteration APIs, dynamic-key map dispatch, or
+source-visible in-place update.
+
+### Mantle Artifacts And Runtime Evidence
+
+Lowering converts checked Strata IR into a typed `.mta` artifact. Mantle admits
+the artifact, executes admitted transitions, and writes line-delimited runtime
+evidence such as process spawn, message delivery, state update, output, stop,
+and failure events.
+
+## Try It
+
+Run the smallest source-to-runtime gate:
+
+```sh
+cargo +stable run -p strata --bin strata -- check examples/hello.str
+cargo +stable run -p strata --bin strata -- build examples/hello.str
+cargo +stable run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+```
+
+The program emits:
+
+```text
+hello from Strata
+```
+
+Mantle writes the trace to:
 
 ```text
 target/strata/hello.observability.jsonl
 ```
 
-This slice is a source-to-runtime slice, not a complete language or release-ready
-runtime: a real `.str` file can be checked, built into `.mta`, and executed by
-Mantle.
-
-The actor/runtime gate:
-
-```sh
-cargo run -p strata --bin strata -- check examples/actor_ping.str
-cargo run -p strata --bin strata -- build examples/actor_ping.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
-```
-
-That example spawns a worker process, sends it a message, handles the message,
-updates worker state, terminates both processes normally, and records the
-runtime trace at:
-
-```text
-target/strata/actor_ping.observability.jsonl
-```
-
-Multi-step immutable actor execution uses message-keyed process transitions:
-
-```sh
-cargo run -p strata --bin strata -- check examples/actor_sequence.str
-cargo run -p strata --bin strata -- build examples/actor_sequence.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
-```
-
-That example sends two messages to a worker. The worker handles the first
-message, returns a whole replacement state with `Continue(...)`, then handles a
-later message and returns a whole replacement state with `Stop(...)`. Mantle
-records process, message, state, and output IDs in:
-
-```text
-target/strata/actor_sequence.observability.jsonl
-```
-
-The same message-keyed transitions can be authored with a whole-body match:
-
-```sh
-cargo run -p strata --bin strata -- check examples/actor_match.str
-cargo run -p strata --bin strata -- build examples/actor_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
-```
-
-That example uses `match msg` as an authoring form while lowering to typed
-Mantle transition IDs, not runtime source-string dispatch.
-
-Non-step match bodies can select an immutable initial state:
-
-```sh
-cargo run -p strata --bin strata -- check examples/init_match.str
-cargo run -p strata --bin strata -- build examples/init_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/init_match.mta
-```
-
-That example uses a typed `init` match over an enum constructor and lowers the
-selected whole-state record value into the Mantle initial state ID.
-
-Normal source functions can live at module level or inside a process:
-
-```sh
-cargo run -p strata --bin strata -- check examples/function_match.str
-cargo run -p strata --bin strata -- build examples/function_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/function_match.mta
-```
-
-That example uses module-level signature-pattern functions, a module-level
-whole-body match helper, process-local helpers in `Main` and `Worker`, and a
-helper-produced send payload. The checker expands those immutable value helpers
-before Mantle artifact generation.
-
-Source helper patterns can bind typed enum payloads:
-
-```sh
-cargo run -p strata --bin strata -- check examples/function_payload_match.str
-cargo run -p strata --bin strata -- build examples/function_payload_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/function_payload_match.mta
-```
-
-That example constructs payload-bearing enum values in immutable source helper
-returns, matches them through signature patterns and whole-body matches, and
-lowers dynamic received payload wrapping into a Mantle value template.
-
-Source helper return matches and record destructuring are checked before
-lowering:
-
-```sh
-cargo run -p strata --bin strata -- check examples/function_record_return_match.str
-cargo run -p strata --bin strata -- build examples/function_record_return_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/function_record_return_match.mta
-cargo run -p strata --bin strata -- check examples/function_record_body_match.str
-cargo run -p strata --bin strata -- build examples/function_record_body_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/function_record_body_match.mta
-```
-
-These examples destructure immutable record values inside a helper
-`return match` and a whole-body helper match; Mantle admits only the resolved
-whole-state values.
-
-Process state enums can carry typed immutable payloads:
-
-```sh
-cargo run -p strata --bin strata -- check examples/state_payload_enum.str
-cargo run -p strata --bin strata -- build examples/state_payload_enum.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
-```
-
-That example admits `Idle` and `Working(Job { phase: Ready })` as typed state
-values, then lowers a received payload state transition into a Mantle value
-template that must resolve to the admitted state table before execution.
-
-Current process state can also be matched as immutable data:
-
-```sh
-cargo run -p strata --bin strata -- check examples/state_payload_match.str
-cargo run -p strata --bin strata -- build examples/state_payload_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta
-```
-
-That example enters `Working(Job { phase: Ready })`, later matches
-`Working(job: Job)` through the current state parameter, and returns the whole
-replacement state `Done(job)`. Lowering emits typed state-specific Mantle
-transitions, and runtime dispatch selects by admitted message ID plus admitted
-current state ID.
-
-Process references support multiple runtime instances of one process definition:
-
-```sh
-cargo run -p strata --bin strata -- check examples/actor_instances.str
-cargo run -p strata --bin strata -- build examples/actor_instances.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
-```
-
-That example spawns two `Worker` instances through distinct process references
-and sends `Ping` to both. Mantle records different runtime `pid` values for the
-two workers while retaining the same loaded process definition ID.
-
-Actor messages can also carry typed immutable payloads:
-
-```sh
-cargo run -p strata --bin strata -- check examples/actor_payloads.str
-cargo run -p strata --bin strata -- build examples/actor_payloads.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
-```
-
-That example sends `Assign(Job { phase: Ready })`, binds the payload with a
-`step` parameter pattern as `Assign(job: Job)`, and returns a whole replacement
-state containing the bound payload value.
-
-The same payload binding can be authored inside a whole-body match:
-
-```sh
-cargo run -p strata --bin strata -- check examples/actor_payload_match.str
-cargo run -p strata --bin strata -- build examples/actor_payload_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta
-```
-
-That example binds `Assign(job: Job)` inside `match msg` and lowers to the same
-typed payload and transition model as the signature-pattern form.
-
-Process references can travel as typed immutable payloads:
-
-```sh
-cargo run -p strata --bin strata -- check examples/actor_reply.str
-cargo run -p strata --bin strata -- build examples/actor_reply.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
-```
-
-That example sends `Work(ProcessRef<Sink>)` to a worker, binds the received
-reference as `Work(reply_to: ProcessRef<Sink>)`, and sends `Done` through the
-received typed reference. Mantle traces both the runtime `pid` and admitted
-process ID for the transported reference.
-
-Fail-closed actor failure has source-to-runtime evidence:
-
-```sh
-cargo run -p strata --bin strata -- check examples/actor_panic_no_replay.str
-cargo run -p strata --bin strata -- build examples/actor_panic_no_replay.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta
-```
-
-That example returns `Panic(Failed)` after a worker dequeues one of two accepted
-messages. Mantle records the abnormal step and `process_failed` event, exits
-non-zero, and does not replay the consumed message.
-
-## What Strata Is For
-
-Strata is aimed at programs where the important behavior should be explicit:
-
-- which effects a function may perform;
-- which authority a process or component may exercise;
-- which messages a process accepts and emits;
-- which state transitions are valid;
-- which operations must be deterministic;
-- which protocols govern local or distributed communication.
-
-The goal is not just to run code. The goal is to make runtime behavior part of
-the checked interface of the program.
-
-## What Mantle Is For
-
-Mantle is the execution layer. Its job is to validate and run `.mta` artifacts,
-manage processes and mailboxes, dispatch approved effects, supervise failures,
-and emit runtime evidence.
-
-The `.mta` format is intentionally language-neutral. Strata is the first
-frontend, but Mantle should remain a stable target for other frontends that want
-the same runtime semantics.
-
-## Design Principles
-
-- Source first: `.str` is the authoring surface.
-- Explicit effects: undeclared side effects should be rejected.
-- Explicit authority: runtime capability use should be visible and checked.
-- Runtime evidence: execution-bearing milestones should produce traces.
-- Fail closed: invalid artifacts, unsupported authority, and unsafe runtime
-  states should be rejected rather than silently widened.
-- Language-neutral runtime artifacts: Mantle artifacts identify their format,
-  version, and source language internally, and carry executable type identity
-  through Mantle type-table IDs rather than source type strings.
-- Corpus matters: examples, libraries, fixtures, and conformance cases are part
-  of the language/runtime, not an afterthought.
-
-## Corpus And Libraries
-
-New languages do not succeed on syntax alone. They need a durable body of high
-quality code: examples, standard patterns, libraries, tests, rejection cases,
-and runtime traces.
-
-Strata and Mantle grow through two tracks:
-
-- native Strata programs and libraries that show the language as it is intended
-  to be written;
-- companion Rust crates that expose Mantle-oriented ideas where using an
-  existing language is the right engineering path.
-
-Those two tracks should reinforce each other. Rust libraries can make the
-runtime semantics useful earlier, while Strata examples and libraries build the
-idiomatic corpus needed for the language itself.
-
-## Project Direction
-
-MVP expansion targets:
-
-- richer `.str` parsing and diagnostics;
-- richer actors/processes with typed mailboxes;
-- broader process references plus message send and receive behavior;
-- broader process state transitions;
-- normal termination and failure reporting;
-- explicit effect checking beyond the `emit`, `spawn`, and `send` slice;
-- Mantle runtime traces that prove execution happened inside the runtime;
-- conformance tests and example programs that double as corpus material.
-
-Full-shape targets include typed distribution, supervision,
-capability-aware runtime behavior, artifact validation, upgrade coordination,
-and reproducible publication.
+More runnable examples are listed in [docs/src/examples.md](docs/src/examples.md).
 
 ## File Types
 
 - `.str` files are Strata source files.
 - `.mta` files are Mantle Target Artifacts.
 
-See [docs/src/file-types.md](docs/src/file-types.md) for the source/artifact
-boundary, MIME identifiers, and tooling notes.
+Mantle artifacts identify their format, schema version, and source language
+internally. The file extension is not the trust boundary.
 
 ## Repository Layout
 
@@ -306,88 +311,19 @@ crates/mantle-artifact/    Mantle Target Artifact encode/decode/validation
 crates/mantle-runtime/     local Mantle runtime and CLI
 crates/strata-mantle-acceptance/
                           Strata/Mantle source-to-runtime acceptance tests
-tools/                     editor and MIME metadata
+docs/                     mdBook documentation
+tools/                    editor and MIME metadata
 ```
 
 ## Development
 
-Repository automation is centralized in `Justfile`. GitHub Actions and
-lefthook delegate to the same recipes used locally.
+The detailed development workflow lives in the docs:
 
-CI caches Cargo registry/git data and per-job target directories using
-GitHub-owned, SHA-pinned actions.
+- [Getting started](docs/src/getting-started.md)
+- [Development gates](docs/src/development-gates.md)
 
-The mdBook under `docs/` is the primary project documentation. Start with
-`docs/src/getting-started.md` for first use, then `docs/src/language-reference.md`
-and `docs/src/syntax-reference.md` for the accepted source surface.
-
-The workspace uses Rust Edition 2024 and requires Rust 1.85 or newer. The
-standard gates select stable Rust explicitly. Nightly is used only by the fuzz
-and Miri recipes, which select it per command. Do not set a repository-wide
-nightly override.
-
-Install the local command runner:
-
-```sh
-rustup toolchain install stable --profile minimal --component rustfmt,clippy
-cargo +stable install just --version 1.50.0 --locked
-```
-
-The `1.50.0` value is the pinned `just` command runner version, not the Rust
-compiler version.
-
-List available commands:
-
-```sh
-just --list
-```
-
-Run the verification bundle:
+The main local verification bundle is:
 
 ```sh
 just quality
-```
-
-Install local hooks:
-
-```sh
-brew install lefthook
-# or: winget install -e --id evilmartians.lefthook
-# or: go install github.com/evilmartians/lefthook@latest
-lefthook install
-```
-
-Run native checks plus the Linux quality job through `act`:
-
-```sh
-just ci-local
-```
-
-The underlying stable gate recipes are:
-
-```sh
-just fmt-check
-just check
-just test
-just lint
-just build
-just metadata-check
-just toolchain-policy-check
-just docs
-just diff-check
-```
-
-Run the source-to-runtime gates manually:
-
-```sh
-just source-to-runtime-gates
-```
-
-Nightly-only validation is also available for fuzz and Miri smoke coverage:
-
-```sh
-just install-fuzz-tools
-just fuzz-ci
-just install-miri-tools
-just miri-ci
 ```

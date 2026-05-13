@@ -159,6 +159,19 @@ fn checked_binding_value_template(binding: &ValueTemplateBinding<'_>) -> Checked
             index: *index,
             len: *len,
         },
+        PayloadBindingPath::ListPrefixIndex { index, prefix_len } => {
+            CheckedValueTemplate::ListPrefixElement {
+                ty: binding.checked_ty.clone(),
+                list: Box::new(root),
+                index: *index,
+                prefix_len: *prefix_len,
+            }
+        }
+        PayloadBindingPath::ListRest { prefix_len } => CheckedValueTemplate::ListRest {
+            ty: binding.checked_ty.clone(),
+            list: Box::new(root),
+            prefix_len: *prefix_len,
+        },
         PayloadBindingPath::MapValue {
             key,
             keys,
@@ -478,6 +491,8 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         | CheckedValueTemplate::CurrentStatePayload { .. }
         | CheckedValueTemplate::RecordField { .. }
         | CheckedValueTemplate::ListElement { .. }
+        | CheckedValueTemplate::ListPrefixElement { .. }
+        | CheckedValueTemplate::ListRest { .. }
         | CheckedValueTemplate::MapValue { .. }
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. } => None,

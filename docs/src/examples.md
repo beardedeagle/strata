@@ -210,9 +210,9 @@ Key source ideas:
   bounded immutable collection values.
 - `fn first(List<Phase,2>[phase, _])` dispatches on exact list length and binds
   one immutable element.
-- Helper body and return matches can use list patterns, exact map patterns, and
-  subset map patterns such as `Map[Ready => selected, ..rest]` with `_`
-  fallback arms.
+- Helper body and return matches can use exact list patterns, list rest patterns
+  such as `List[_, ..tail]`, exact map patterns, and subset map patterns such as
+  `Map[Ready => selected, ..rest]` with `_` fallback arms.
 - The helper expansion leaves Mantle with a resolved `MainState` value, not
   source helper dispatch names.
 
@@ -318,8 +318,8 @@ Key source ideas:
 ## Collection State
 
 `examples/collection_state.str` admits immutable `List<Phase,1>` and
-`Map<Phase,Phase,2>` process states and lowers received payloads, including a
-subset map payload projection, into collection next-state templates.
+`Map<Phase,Phase,2>` process states and lowers received payloads, including list
+rest and subset map payload projections, into collection next-state templates.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/collection_state.str
@@ -331,11 +331,11 @@ Key source ideas:
 
 - `type State = List<Phase,1>;` and `type State = Map<Phase,Phase,2>;` make
   worker states collection values rather than records or enums.
-- `return Stop(List<Phase,1>[next]);` and
+- `return Stop(tail);` and
   `return Stop(Map<Phase,Phase,2>[Ready => next, Done => Ready]);` create new
   immutable whole collection states from received payload bindings.
-- Mantle receives list and map value templates and evaluates them during
-  runtime execution.
+- Mantle receives typed list-rest and map value templates and evaluates them
+  during runtime execution.
 
 ## State Payload Match
 

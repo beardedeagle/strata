@@ -221,6 +221,7 @@ pub struct ListPattern {
     pub element_type: Option<TypeRef>,
     pub capacity: Option<usize>,
     pub elements: Vec<CollectionPatternBinding>,
+    pub rest: Option<Identifier>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

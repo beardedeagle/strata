@@ -65,6 +65,58 @@ fn artifact_round_trips_map_rest_template_with_excluded_keys() {
 }
 
 #[test]
+fn artifact_round_trips_list_rest_template_with_prefix_len() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].state_type = JOB;
+    artifact.processes[0].state_values = vec![state_value(JOB, "List[Done]")];
+    artifact.processes[0].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::ListRest {
+            ty: JOB,
+            list: Box::new(ArtifactValueTemplate::Literal {
+                ty: JOB,
+                value: artifact_value("List[Ready,Done]"),
+            }),
+            prefix_len: 1,
+        });
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("list rest artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains("process.0.transition.0.next_state_template.kind=list_rest"));
+    assert!(encoded.contains("process.0.transition.0.next_state_template.prefix_len=1"));
+    assert!(!encoded.contains("process.0.transition.0.next_state_template.expected_key.0"));
+    assert!(!encoded.contains("process.0.transition.0.next_state_template.excluded_key.0"));
+}
+
+#[test]
+fn artifact_round_trips_list_prefix_template_with_prefix_len() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].state_type = JOB;
+    artifact.processes[0].state_values = vec![state_value(JOB, "Ready")];
+    artifact.processes[0].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::ListPrefixElement {
+            ty: JOB,
+            list: Box::new(ArtifactValueTemplate::Literal {
+                ty: JOB,
+                value: artifact_value("List[Ready,Done]"),
+            }),
+            index: 0,
+            prefix_len: 1,
+        });
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("list prefix artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(
+        encoded.contains("process.0.transition.0.next_state_template.kind=list_prefix_element")
+    );
+    assert!(encoded.contains("process.0.transition.0.next_state_template.index=0"));
+    assert!(encoded.contains("process.0.transition.0.next_state_template.prefix_len=1"));
+}
+
+#[test]
 fn decode_rejects_unknown_step_result() {
     let encoded = valid_artifact().encode().replace(
         "process.1.transition.0.step_result=Stop",

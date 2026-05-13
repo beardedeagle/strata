@@ -78,6 +78,41 @@ fn evaluate_checked_runtime_template(
                 .map_err(|err| Error::new(err.to_string()))?;
             Ok(CheckedPayloadValue::new(ty.clone(), value))
         }
+        CheckedValueTemplate::ListPrefixElement {
+            ty,
+            list,
+            index,
+            prefix_len,
+        } => {
+            let list = evaluate_checked_runtime_template(
+                list,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+            )?;
+            let value = checked_payload_value(&list)?
+                .project_list_prefix_element(*index, *prefix_len)
+                .map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
+        }
+        CheckedValueTemplate::ListRest {
+            ty,
+            list,
+            prefix_len,
+        } => {
+            let list = evaluate_checked_runtime_template(
+                list,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+            )?;
+            let value = checked_payload_value(&list)?
+                .project_list_rest(*prefix_len)
+                .map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
+        }
         CheckedValueTemplate::MapValue {
             ty,
             map,

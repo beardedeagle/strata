@@ -276,6 +276,26 @@ fn lower_value_template(
             index: *index,
             len: *len,
         }),
+        CheckedValueTemplate::ListPrefixElement {
+            ty,
+            list,
+            index,
+            prefix_len,
+        } => Ok(ArtifactValueTemplate::ListPrefixElement {
+            ty: types.artifact_id(ty)?,
+            list: Box::new(lower_value_template(list, types)?),
+            index: *index,
+            prefix_len: *prefix_len,
+        }),
+        CheckedValueTemplate::ListRest {
+            ty,
+            list,
+            prefix_len,
+        } => Ok(ArtifactValueTemplate::ListRest {
+            ty: types.artifact_id(ty)?,
+            list: Box::new(lower_value_template(list, types)?),
+            prefix_len: *prefix_len,
+        }),
         CheckedValueTemplate::MapValue {
             ty,
             map,

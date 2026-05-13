@@ -17,6 +17,8 @@ impl ArtifactValueTemplate {
             | Self::CurrentStatePayload { ty }
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
+            | Self::ListPrefixElement { ty, .. }
+            | Self::ListRest { ty, .. }
             | Self::MapValue { ty, .. }
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
@@ -91,6 +93,31 @@ impl ArtifactValueTemplate {
                     list.evaluate_state_value(received_payload, current_state_payload, type_label)?;
                 let value = list.value.project_list_element(*index, *len)?;
                 validate_value_label("list element projection value", &value.label())?;
+                ArtifactStateValue::from_value(*ty, value)
+            }
+            Self::ListPrefixElement {
+                ty,
+                list,
+                index,
+                prefix_len,
+            } => {
+                let list =
+                    list.evaluate_state_value(received_payload, current_state_payload, type_label)?;
+                let value = list
+                    .value
+                    .project_list_prefix_element(*index, *prefix_len)?;
+                validate_value_label("list prefix projection value", &value.label())?;
+                ArtifactStateValue::from_value(*ty, value)
+            }
+            Self::ListRest {
+                ty,
+                list,
+                prefix_len,
+            } => {
+                let list =
+                    list.evaluate_state_value(received_payload, current_state_payload, type_label)?;
+                let value = list.value.project_list_rest(*prefix_len)?;
+                validate_value_label("list rest projection value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::MapValue {
@@ -217,7 +244,9 @@ impl ArtifactValueTemplate {
             Self::ReceivedPayload { .. } => true,
             Self::CurrentStatePayload { .. } => false,
             Self::RecordField { record, .. } => record.depends_on_received_payload(),
-            Self::ListElement { list, .. } => list.depends_on_received_payload(),
+            Self::ListElement { list, .. }
+            | Self::ListPrefixElement { list, .. }
+            | Self::ListRest { list, .. } => list.depends_on_received_payload(),
             Self::MapValue { map, .. } => map.depends_on_received_payload(),
             Self::MapRest { map, .. } => map.depends_on_received_payload(),
             Self::ProcessRef { .. } => false,
@@ -332,6 +361,56 @@ impl ArtifactValueTemplate {
                         "{field}.index {index} is outside list length {len}"
                     )));
                 }
+                list.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.list"),
+                    None,
+                    received_payload_type,
+                    current_state_payload_type,
+                    depth + 1,
+                )
+            }
+            Self::ListPrefixElement {
+                ty,
+                list,
+                index,
+                prefix_len,
+            } => {
+                reject_projected_process_ref_type(artifact, field, *ty)?;
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+                validate_count(
+                    &format!("{field}.prefix_len"),
+                    *prefix_len,
+                    1,
+                    MAX_VALUE_TEMPLATE_FIELDS,
+                )?;
+                if *index >= *prefix_len {
+                    return Err(Error::new(format!(
+                        "{field}.index {index} is outside list prefix length {prefix_len}"
+                    )));
+                }
+                list.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.list"),
+                    None,
+                    received_payload_type,
+                    current_state_payload_type,
+                    depth + 1,
+                )
+            }
+            Self::ListRest {
+                ty,
+                list,
+                prefix_len,
+            } => {
+                reject_projected_process_ref_type(artifact, field, *ty)?;
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+                validate_count(
+                    &format!("{field}.prefix_len"),
+                    *prefix_len,
+                    1,
+                    MAX_VALUE_TEMPLATE_FIELDS,
+                )?;
                 list.validate_for_received_payload(
                     artifact,
                     &format!("{field}.list"),
@@ -532,6 +611,8 @@ fn is_static_map_key_template(template: &ArtifactValueTemplate) -> bool {
         | ArtifactValueTemplate::CurrentStatePayload { .. }
         | ArtifactValueTemplate::RecordField { .. }
         | ArtifactValueTemplate::ListElement { .. }
+        | ArtifactValueTemplate::ListPrefixElement { .. }
+        | ArtifactValueTemplate::ListRest { .. }
         | ArtifactValueTemplate::MapValue { .. }
         | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. } => false,
