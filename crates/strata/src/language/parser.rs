@@ -23,6 +23,11 @@ struct CollectionTypeArgs {
     capacity: usize,
 }
 
+struct ListPatternItems {
+    elements: Vec<CollectionPatternBinding>,
+    rest: Option<Identifier>,
+}
+
 impl Parser {
     fn new(source: &str) -> Result<Self> {
         if source.len() > MAX_SOURCE_BYTES {
@@ -331,10 +336,12 @@ impl Parser {
                     Some(mut args) => (Some(args.types.remove(0)), Some(args.capacity)),
                     None => (None, None),
                 };
+                let items = self.parse_list_pattern_elements()?;
                 return Ok(Pattern::List(ListPattern {
                     element_type,
                     capacity,
-                    elements: self.parse_list_pattern_elements()?,
+                    elements: items.elements,
+                    rest: items.rest,
                 }));
             }
             if type_args.is_some() {
@@ -450,14 +457,31 @@ impl Parser {
         }))
     }
 
-    fn parse_list_pattern_elements(&mut self) -> Result<Vec<CollectionPatternBinding>> {
+    fn parse_list_pattern_elements(&mut self) -> Result<ListPatternItems> {
         let mut elements = Vec::new();
         if self.consume_symbol(']') {
-            return Ok(elements);
+            return Ok(ListPatternItems {
+                elements,
+                rest: None,
+            });
         }
+        if self.consume_dotdot() {
+            let rest = self.parse_list_pattern_rest_binding()?;
+            self.expect_list_rest_pattern_end()?;
+            return Ok(ListPatternItems {
+                elements,
+                rest: Some(rest),
+            });
+        }
+        let mut rest = None;
         loop {
             elements.push(self.parse_collection_pattern_binding()?);
             if self.consume_symbol(',') {
+                if self.consume_dotdot() {
+                    rest = Some(self.parse_list_pattern_rest_binding()?);
+                    self.expect_list_rest_pattern_end()?;
+                    break;
+                }
                 if self.consume_symbol(']') {
                     break;
                 }
@@ -466,7 +490,22 @@ impl Parser {
             self.expect_symbol(']')?;
             break;
         }
-        Ok(elements)
+        Ok(ListPatternItems { elements, rest })
+    }
+
+    fn parse_list_pattern_rest_binding(&mut self) -> Result<Identifier> {
+        let binding = self.expect_ident()?;
+        if binding == "_" {
+            return Err(self.error_previous(
+                "list rest binding cannot be a wildcard; bind the suffix with `..name`",
+            ));
+        }
+        Identifier::new(binding)
+    }
+
+    fn expect_list_rest_pattern_end(&mut self) -> Result<()> {
+        self.consume_symbol(',');
+        self.expect_symbol(']')
     }
 
     fn parse_map_pattern_entries(

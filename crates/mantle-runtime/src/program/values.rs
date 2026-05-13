@@ -191,6 +191,17 @@ pub(crate) enum LoadedValueTemplate {
         index: usize,
         len: usize,
     },
+    ListPrefixElement {
+        ty: TypeId,
+        list: Box<LoadedValueTemplate>,
+        index: usize,
+        prefix_len: usize,
+    },
+    ListRest {
+        ty: TypeId,
+        list: Box<LoadedValueTemplate>,
+        prefix_len: usize,
+    },
     MapValue {
         ty: TypeId,
         map: Box<LoadedValueTemplate>,
@@ -262,6 +273,32 @@ impl LoadedValueTemplate {
                 index: *index,
                 len: *len,
             }),
+            ArtifactValueTemplate::ListPrefixElement {
+                ty,
+                list,
+                index,
+                prefix_len,
+            } => {
+                validate_list_prefix_projection("list prefix projection", *index, *prefix_len)?;
+                Ok(Self::ListPrefixElement {
+                    ty: *ty,
+                    list: Box::new(Self::from_artifact(list)?),
+                    index: *index,
+                    prefix_len: *prefix_len,
+                })
+            }
+            ArtifactValueTemplate::ListRest {
+                ty,
+                list,
+                prefix_len,
+            } => {
+                validate_list_rest_prefix_len("list rest projection", *prefix_len)?;
+                Ok(Self::ListRest {
+                    ty: *ty,
+                    list: Box::new(Self::from_artifact(list)?),
+                    prefix_len: *prefix_len,
+                })
+            }
             ArtifactValueTemplate::MapValue {
                 ty,
                 map,
@@ -339,6 +376,8 @@ impl LoadedValueTemplate {
             | Self::CurrentStatePayload { ty }
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
+            | Self::ListPrefixElement { ty, .. }
+            | Self::ListRest { ty, .. }
             | Self::MapValue { ty, .. }
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
@@ -368,6 +407,29 @@ pub(super) fn validate_map_projection_keys(
 
 pub(super) fn validate_map_rest_keys(field: &str, keys: &[RuntimeValue]) -> Result<()> {
     validate_map_key_set(field, keys, MapKeySetKind::Excluded)
+}
+
+pub(super) fn validate_list_rest_prefix_len(field: &str, prefix_len: usize) -> Result<()> {
+    if prefix_len == 0 || prefix_len > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "{field}.prefix_len must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_list_prefix_projection(
+    field: &str,
+    index: usize,
+    prefix_len: usize,
+) -> Result<()> {
+    validate_list_rest_prefix_len(field, prefix_len)?;
+    if index >= prefix_len {
+        return Err(Error::new(format!(
+            "{field}.index {index} is outside list prefix length {prefix_len}"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_map_key_set(field: &str, keys: &[RuntimeValue], kind: MapKeySetKind) -> Result<()> {

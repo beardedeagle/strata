@@ -246,6 +246,49 @@ fn runtime_rejects_loaded_duplicate_map_rest_projection_keys_before_artifact_loa
 }
 
 #[test]
+fn runtime_rejects_loaded_zero_list_rest_prefix_before_artifact_loaded() {
+    let template = ArtifactValueTemplate::ListRest {
+        ty: JOB,
+        list: Box::new(ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("List[Ready]"),
+        }),
+        prefix_len: 0,
+    };
+
+    let err = LoadedValueTemplate::from_artifact(&template)
+        .expect_err("zero list rest prefix should fail loaded admission");
+
+    assert!(
+        err.to_string()
+            .contains("list rest projection.prefix_len must be between 1"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_list_prefix_index_outside_prefix_before_artifact_loaded() {
+    let template = ArtifactValueTemplate::ListPrefixElement {
+        ty: JOB,
+        list: Box::new(ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("List[Ready,Done]"),
+        }),
+        index: 1,
+        prefix_len: 1,
+    };
+
+    let err = LoadedValueTemplate::from_artifact(&template)
+        .expect_err("outside-prefix list element should fail loaded admission");
+
+    assert!(
+        err.to_string()
+            .contains("list prefix projection.index 1 is outside list prefix length 1"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_unsorted_map_projection_keys_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

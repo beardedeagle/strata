@@ -719,11 +719,14 @@ fn function_collection_match_checks_builds_and_runs_on_mantle() {
 
     let artifact = gate.read_artifact("target/strata/function_collection_match.mta");
     let main = &artifact.processes[0];
-    assert_eq!(main.state_values[0].label, "MainState{selected:Ready}");
+    assert_eq!(
+        main.state_values[0].label,
+        "MainState{selected:Ready,tail:List[Done]}"
+    );
 
     let trace = gate.read_trace("function_collection_match");
     assert!(trace.contains(
-        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{selected:Ready}""#
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{selected:Ready,tail:List[Done]}""#
     ));
     assert!(trace.contains(
         r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper collection match selected values""#
@@ -890,14 +893,18 @@ fn collection_state_checks_builds_and_runs_on_mantle() {
     let artifact = gate.read_artifact("target/strata/collection_state.mta");
     let worker = &artifact.processes[1];
     let list_type = value_type_id(&artifact, "__strata_checked_4_List_1_1_5_Phase_1");
+    let payload_list_type = value_type_id(&artifact, "__strata_checked_4_List_1_1_5_Phase_2");
     let phase_type = value_type_id(&artifact, "Phase");
     assert_eq!(worker.state_values[0].label, "List[Ready]");
     assert_eq!(worker.state_values[1].label, "List[Done]");
     assert_eq!(
         worker.transitions[0].next_state,
-        mantle_artifact::NextState::Template(ArtifactValueTemplate::List {
+        mantle_artifact::NextState::Template(ArtifactValueTemplate::ListRest {
             ty: list_type,
-            items: vec![ArtifactValueTemplate::ReceivedPayload { ty: phase_type }],
+            list: Box::new(ArtifactValueTemplate::ReceivedPayload {
+                ty: payload_list_type,
+            }),
+            prefix_len: 1,
         })
     );
 

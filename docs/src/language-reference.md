@@ -156,9 +156,22 @@ Map<Phase,Phase,1>[Ready => Done]
 
 Collection constructors are explicit. Bare `[Ready, Done]` and `{ Ready: Done }`
 forms are not admitted in this slice. Map keys are canonical source values; a
-map value or map pattern that repeats a canonical key is rejected. Map patterns
-are exact by default. A trailing `..` marker makes a map pattern a subset
-pattern over the listed static keys:
+map value or map pattern that repeats a canonical key is rejected. List and map
+patterns are exact by default. List rest patterns are suffix-only:
+
+```strata
+List[first, second] // exact list length
+List[first, ..tail] // first must exist; tail is the unmatched suffix
+```
+
+`..tail` binds an immutable whole list containing entries after the fixed prefix.
+If the matched value has type `List<T,N>` and the pattern lists `M` fixed prefix
+elements, the tail binding has type `List<T,N-M>`. The actual tail value may
+contain fewer entries because bounded list values may be shorter than capacity.
+Arbitrary prefix/rest/suffix matching remains deferred.
+
+A trailing `..` marker makes a map pattern a subset pattern over the listed
+static keys:
 
 ```strata
 Map[Ready => selected]     // exact key set
@@ -166,7 +179,7 @@ Map[Ready => selected, ..] // Ready must exist; extra keys are allowed
 Map[Ready => selected, ..rest] // rest binds a map without Ready
 ```
 
-`..rest` binds an immutable whole map containing entries except the listed
+Map `..rest` binds an immutable whole map containing entries except the listed
 static keys. If the matched value has type `Map<K,V,N>` and the pattern lists
 `M` distinct static keys, the rest binding has type `Map<K,V,N-M>`. The actual
 rest value may contain fewer entries because subset patterns still match maps
@@ -176,8 +189,8 @@ Overlapping exact and subset map patterns are rejected instead of relying on
 source order or specificity. Subset overlap is capacity-aware: two subset
 patterns overlap when one bounded map can contain both required key sets.
 Runtime-bound map value keys must be static source values in this slice;
-dynamic-key dictionaries remain deferred. Rest binding does not expose map
-iteration, order-dependent dispatch, mutation, or dynamic keys.
+dynamic-key dictionaries remain deferred. Rest binding does not expose collection
+iteration, order-dependent dispatch, mutation, dynamic keys, or mutable views.
 
 Record field order and map entry order are preserved in source-authored values,
 emitted artifact values, labels, and traces. Projection still addresses map
@@ -594,7 +607,7 @@ fn step(state: WorkerState, Assign(Job { phase })) -> ProcResult<WorkerState> ! 
     return Continue(WorkerState { seen: phase });
 }
 
-fn step(state: WorkerState, Items(List[phase, _])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+fn step(state: WorkerState, Items(List[phase, ..tail])) -> ProcResult<WorkerState> ! [] ~ [] @det {
     return Continue(WorkerState { seen: phase });
 }
 
@@ -604,10 +617,10 @@ fn step(state: WorkerState, Lookup(Map[Ready => phase, ..rest])) -> ProcResult<W
 ```
 
 These bindings are immutable projections of the concrete payload value. A
-record field, list element, map value, or map rest can be used in whole-value
-state returns and downstream payloads, but process references still remain
-valid only as direct message payload bindings. Shape-only collection payload
-patterns such as `Items(List[_])`, `Lookup(Map[Ready => _])`, or
+record field, list element, list rest, map value, or map rest can be used in
+whole-value state returns and downstream payloads, but process references still
+remain valid only as direct message payload bindings. Shape-only collection
+payload patterns such as `Items(List[_])`, `Lookup(Map[Ready => _])`, or
 `Lookup(Map[..])` are not admitted in this slice;
 use the constructor pattern without destructuring when the payload is ignored.
 

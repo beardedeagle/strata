@@ -60,6 +60,17 @@ pub enum ArtifactValueTemplate {
         index: usize,
         len: usize,
     },
+    ListPrefixElement {
+        ty: TypeId,
+        list: Box<ArtifactValueTemplate>,
+        index: usize,
+        prefix_len: usize,
+    },
+    ListRest {
+        ty: TypeId,
+        list: Box<ArtifactValueTemplate>,
+        prefix_len: usize,
+    },
     MapValue {
         ty: TypeId,
         map: Box<ArtifactValueTemplate>,

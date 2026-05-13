@@ -312,6 +312,17 @@ pub(in crate::language) enum CheckedValueTemplate {
         index: usize,
         len: usize,
     },
+    ListPrefixElement {
+        ty: CheckedTypeRef,
+        list: Box<CheckedValueTemplate>,
+        index: usize,
+        prefix_len: usize,
+    },
+    ListRest {
+        ty: CheckedTypeRef,
+        list: Box<CheckedValueTemplate>,
+        prefix_len: usize,
+    },
     MapValue {
         ty: CheckedTypeRef,
         map: Box<CheckedValueTemplate>,
@@ -356,6 +367,8 @@ impl CheckedValueTemplate {
             | Self::CurrentStatePayload { ty }
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
+            | Self::ListPrefixElement { ty, .. }
+            | Self::ListRest { ty, .. }
             | Self::MapValue { ty, .. }
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }

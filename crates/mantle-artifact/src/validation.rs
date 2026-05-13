@@ -497,6 +497,36 @@ fn add_value_template_bytes(
             add_field_bytes(total, &format!("{prefix}.len"), &len.to_string())?;
             add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
         }
+        ArtifactValueTemplate::ListPrefixElement {
+            ty,
+            list,
+            index,
+            prefix_len,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "list_prefix_element")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, &format!("{prefix}.index"), &index.to_string())?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.prefix_len"),
+                &prefix_len.to_string(),
+            )?;
+            add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
+        }
+        ArtifactValueTemplate::ListRest {
+            ty,
+            list,
+            prefix_len,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "list_rest")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.prefix_len"),
+                &prefix_len.to_string(),
+            )?;
+            add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
+        }
         ArtifactValueTemplate::MapValue {
             ty,
             map,

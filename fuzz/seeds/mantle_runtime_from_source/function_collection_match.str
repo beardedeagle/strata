@@ -8,6 +8,7 @@ enum Phase {
 
 record MainState {
     selected: Phase,
+    tail: List<Phase,1>,
 }
 
 enum MainMsg {
@@ -44,6 +45,17 @@ fn from_return(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
     };
 }
 
+fn from_list_rest(items: List<Phase,2>) -> List<Phase,1> ! [] ~ [] @det {
+    return match items {
+        List[_, ..tail] => {
+            return tail;
+        }
+        _ => {
+            return List<Phase,1>[];
+        }
+    };
+}
+
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
@@ -51,6 +63,7 @@ proc Main mailbox bounded(1) {
     fn init() -> MainState ! [] ~ [] @det {
         return MainState {
             selected: from_return(Map<Phase,Phase,2>[Ready => from_body(List<Phase,1>[first(List<Phase,2>[Ready, Done])]), Unknown => Unknown]),
+            tail: from_list_rest(List<Phase,2>[Ready, Done]),
         };
     }
 

@@ -217,6 +217,55 @@ impl ArtifactValue {
         })
     }
 
+    pub fn project_list_prefix_element(&self, index: usize, prefix_len: usize) -> Result<Self> {
+        if prefix_len == 0 {
+            return Err(Error::new(
+                "list prefix projection requires at least one prefix element",
+            ));
+        }
+        let Self::List(items) = self else {
+            return Err(Error::new(format!(
+                "list prefix projection requires a list value, got {}",
+                self.label()
+            )));
+        };
+        if items.len() < prefix_len {
+            return Err(Error::new(format!(
+                "list prefix projection requires at least {prefix_len} prefix elements, found {} in {}",
+                items.len(),
+                self.label()
+            )));
+        }
+        if index >= prefix_len {
+            return Err(Error::new(format!(
+                "list prefix projection index {index} is outside prefix length {prefix_len}"
+            )));
+        }
+        Ok(items[index].clone())
+    }
+
+    pub fn project_list_rest(&self, prefix_len: usize) -> Result<Self> {
+        if prefix_len == 0 {
+            return Err(Error::new(
+                "list rest projection requires at least one prefix element",
+            ));
+        }
+        let Self::List(items) = self else {
+            return Err(Error::new(format!(
+                "list rest projection requires a list value, got {}",
+                self.label()
+            )));
+        };
+        if items.len() < prefix_len {
+            return Err(Error::new(format!(
+                "list rest projection requires at least {prefix_len} prefix elements, found {} in {}",
+                items.len(),
+                self.label()
+            )));
+        }
+        Ok(Self::List(items.iter().skip(prefix_len).cloned().collect()))
+    }
+
     pub fn project_map_value(
         &self,
         key: &ArtifactValue,

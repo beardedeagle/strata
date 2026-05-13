@@ -386,6 +386,29 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
             ));
             encode_value_template(encoded, &format!("{prefix}.list"), list);
         }
+        ArtifactValueTemplate::ListPrefixElement {
+            ty,
+            list,
+            index,
+            prefix_len,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=list_prefix_element\n{prefix}.type_id={}\n{prefix}.index={index}\n{prefix}.prefix_len={prefix_len}\n",
+                ty.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.list"), list);
+        }
+        ArtifactValueTemplate::ListRest {
+            ty,
+            list,
+            prefix_len,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=list_rest\n{prefix}.type_id={}\n{prefix}.prefix_len={prefix_len}\n",
+                ty.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.list"), list);
+        }
         ArtifactValueTemplate::MapValue {
             ty,
             map,
@@ -547,6 +570,37 @@ fn decode_value_template(
             )?,
             len: fields.take_bounded_usize(
                 &format!("{prefix}.len"),
+                1,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?,
+            list: Box::new(decode_value_template(
+                fields,
+                &format!("{prefix}.list"),
+                depth + 1,
+            )?),
+        }),
+        "list_prefix_element" => Ok(ArtifactValueTemplate::ListPrefixElement {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            index: fields.take_bounded_usize(
+                &format!("{prefix}.index"),
+                0,
+                MAX_VALUE_TEMPLATE_FIELDS - 1,
+            )?,
+            prefix_len: fields.take_bounded_usize(
+                &format!("{prefix}.prefix_len"),
+                1,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?,
+            list: Box::new(decode_value_template(
+                fields,
+                &format!("{prefix}.list"),
+                depth + 1,
+            )?),
+        }),
+        "list_rest" => Ok(ArtifactValueTemplate::ListRest {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            prefix_len: fields.take_bounded_usize(
+                &format!("{prefix}.prefix_len"),
                 1,
                 MAX_VALUE_TEMPLATE_FIELDS,
             )?,

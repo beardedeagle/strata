@@ -4,12 +4,19 @@ use crate::language::{LIST_TYPE, MAP_TYPE};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::language::checker::source_functions) enum CollectionPatternShape {
     List {
-        len: usize,
+        prefix_len: usize,
+        completeness: ListPatternCompleteness,
     },
     Map {
         keys: Vec<ArtifactValue>,
         completeness: MapPatternCompleteness,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(in crate::language::checker::source_functions) enum ListPatternCompleteness {
+    Exact,
+    Rest,
 }
 
 pub(in crate::language::checker::source_functions) struct CollectionPatternResolution {
@@ -110,7 +117,7 @@ pub(in crate::language::checker::source_functions) fn check_collection_pattern_b
                 element,
                 capacity,
             )?;
-            check_list_pattern_bindings(semantic_index, subject, element, pattern)
+            check_list_pattern_bindings(semantic_index, subject, element, capacity, pattern)
         }
         Some(CollectionType::Map {
             key,
@@ -161,7 +168,8 @@ pub(in crate::language::checker::source_functions) fn collection_pattern_shape(
                 ));
             };
             Ok(CollectionPatternShape::List {
-                len: pattern.elements.len(),
+                prefix_len: pattern.elements.len(),
+                completeness: list_pattern_completeness(pattern),
             })
         }
         Some(CollectionType::Map { key, .. }) => {
@@ -206,7 +214,7 @@ pub(in crate::language::checker::source_functions) fn resolve_collection_pattern
                     bindings: Vec::new(),
                 })),
                 Pattern::List(pattern) => {
-                    if pattern.elements.len() != list.items.len() {
+                    if !list_pattern_matches(pattern, list) {
                         return Ok(None);
                     }
                     let subject = format!("function {function_name} {usage}");
@@ -218,10 +226,17 @@ pub(in crate::language::checker::source_functions) fn resolve_collection_pattern
                         element,
                         capacity,
                     )?;
-                    let bindings =
-                        check_list_pattern_bindings(semantic_index, &subject, element, pattern)?;
+                    let bindings = check_list_pattern_bindings(
+                        semantic_index,
+                        &subject,
+                        element,
+                        capacity,
+                        pattern,
+                    )?;
                     Ok(Some(CollectionPatternResolution {
-                        substitutions: list_pattern_substitutions(pattern, list),
+                        substitutions: list_pattern_substitutions(
+                            element, capacity, pattern, list,
+                        )?,
                         bindings,
                     }))
                 }
@@ -411,6 +426,21 @@ fn validate_collection_kind(
     }
 }
 
+fn list_pattern_completeness(pattern: &ListPattern) -> ListPatternCompleteness {
+    if pattern.rest.is_some() {
+        ListPatternCompleteness::Rest
+    } else {
+        ListPatternCompleteness::Exact
+    }
+}
+
+fn list_pattern_matches(pattern: &ListPattern, value: &ListValue) -> bool {
+    match list_pattern_completeness(pattern) {
+        ListPatternCompleteness::Exact => pattern.elements.len() == value.items.len(),
+        ListPatternCompleteness::Rest => value.items.len() >= pattern.elements.len(),
+    }
+}
+
 fn validate_list_pattern_type(
     semantic_index: &SemanticIndex,
     subject: &str,
@@ -437,6 +467,11 @@ fn validate_list_pattern_type(
         return Err(Error::new(format!(
             "{subject} list pattern length {} exceeds capacity {capacity} for {expected_type}",
             pattern.elements.len()
+        )));
+    }
+    if pattern.rest.is_some() && pattern.elements.is_empty() {
+        return Err(Error::new(format!(
+            "{subject} list rest pattern must declare at least one prefix element"
         )));
     }
     Ok(())
@@ -500,6 +535,7 @@ fn check_list_pattern_bindings(
     semantic_index: &SemanticIndex,
     subject: &str,
     element_type: &TypeRef,
+    capacity: usize,
     pattern: &ListPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
     let mut seen_bindings = BTreeSet::new();
@@ -517,9 +553,21 @@ fn check_list_pattern_bindings(
         bindings.push(PatternPayloadParam {
             name: name.clone(),
             ty: element_type.clone(),
-            path: PayloadBindingPath::ListIndex {
-                index,
-                len: pattern.elements.len(),
+            path: list_element_binding_path(index, pattern),
+        });
+    }
+    if let Some(rest) = &pattern.rest {
+        if !seen_bindings.insert(rest.as_str()) {
+            return Err(Error::new(format!(
+                "{subject} list pattern binding {rest} is declared more than once"
+            )));
+        }
+        validate_source_pattern_binding_name(subject, semantic_index, rest)?;
+        bindings.push(PatternPayloadParam {
+            name: rest.clone(),
+            ty: list_rest_type(element_type, capacity, pattern.elements.len())?,
+            path: PayloadBindingPath::ListRest {
+                prefix_len: pattern.elements.len(),
             },
         });
     }
@@ -608,8 +656,13 @@ fn canonical_map_pattern_keys(
     Ok(keys.into_iter().collect())
 }
 
-fn list_pattern_substitutions(pattern: &ListPattern, value: &ListValue) -> Vec<SourceSubstitution> {
-    pattern
+fn list_pattern_substitutions(
+    element_type: &TypeRef,
+    capacity: usize,
+    pattern: &ListPattern,
+    value: &ListValue,
+) -> Result<Vec<SourceSubstitution>> {
+    let mut substitutions = pattern
         .elements
         .iter()
         .zip(&value.items)
@@ -619,7 +672,31 @@ fn list_pattern_substitutions(pattern: &ListPattern, value: &ListValue) -> Vec<S
             }
             CollectionPatternBinding::Wildcard => None,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    if let Some(rest) = &pattern.rest {
+        let rest_capacity = capacity
+            .checked_sub(pattern.elements.len())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "list rest binding removes {} prefix elements from capacity {capacity}",
+                    pattern.elements.len()
+                ))
+            })?;
+        substitutions.push(SourceSubstitution::new(
+            rest.clone(),
+            ValueExpr::List(ListValue {
+                element_type: Some(element_type.clone()),
+                capacity: Some(rest_capacity),
+                items: value
+                    .items
+                    .iter()
+                    .skip(pattern.elements.len())
+                    .cloned()
+                    .collect(),
+            }),
+        ));
+    }
+    Ok(substitutions)
 }
 
 fn map_pattern_substitutions(
@@ -713,7 +790,13 @@ pub(in crate::language::checker::source_functions) fn collection_shape_label(
     shape: &CollectionPatternShape,
 ) -> String {
     match shape {
-        CollectionPatternShape::List { len } => format!("List length {len}"),
+        CollectionPatternShape::List {
+            prefix_len,
+            completeness,
+        } => match completeness {
+            ListPatternCompleteness::Exact => format!("List exact length {prefix_len}"),
+            ListPatternCompleteness::Rest => format!("List prefix length {prefix_len} with rest"),
+        },
         CollectionPatternShape::Map { keys, completeness } => {
             let marker = match completeness {
                 MapPatternCompleteness::Exact => "exact",
@@ -760,9 +843,21 @@ fn collection_pattern_shapes_overlap(
 ) -> bool {
     match (left, right) {
         (
-            CollectionPatternShape::List { len: left },
-            CollectionPatternShape::List { len: right },
-        ) => left == right,
+            CollectionPatternShape::List {
+                prefix_len: left,
+                completeness: left_completeness,
+            },
+            CollectionPatternShape::List {
+                prefix_len: right,
+                completeness: right_completeness,
+            },
+        ) => list_pattern_shapes_overlap(
+            *left,
+            *left_completeness,
+            *right,
+            *right_completeness,
+            capacity,
+        ),
         (
             CollectionPatternShape::Map {
                 keys: left,
@@ -780,6 +875,23 @@ fn collection_pattern_shapes_overlap(
             capacity,
         ),
         _ => false,
+    }
+}
+
+fn list_pattern_shapes_overlap(
+    left: usize,
+    left_completeness: ListPatternCompleteness,
+    right: usize,
+    right_completeness: ListPatternCompleteness,
+    capacity: usize,
+) -> bool {
+    match (left_completeness, right_completeness) {
+        (ListPatternCompleteness::Exact, ListPatternCompleteness::Exact) => left == right,
+        (ListPatternCompleteness::Exact, ListPatternCompleteness::Rest) => left >= right,
+        (ListPatternCompleteness::Rest, ListPatternCompleteness::Exact) => right >= left,
+        (ListPatternCompleteness::Rest, ListPatternCompleteness::Rest) => {
+            left.max(right) <= capacity
+        }
     }
 }
 

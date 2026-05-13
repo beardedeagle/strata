@@ -138,7 +138,7 @@ map_type_args =
     "<" type_ref "," type_ref "," number ">"
 
 list_pattern_items =
-    collection_pattern_binding ("," collection_pattern_binding)* ","?
+    collection_pattern_binding ("," collection_pattern_binding)* ("," ".." ident ","? | ","?)
 
 map_pattern_entries =
     ".." ident? ","?
@@ -216,13 +216,16 @@ The first `type_ref` must name the process state type. An `ident` after the
 comma is a message constructor accepted by the process message type. A payload
 pattern such as `Assign(job: Job)` binds the received payload as an immutable
 transition-local value. A constructor payload pattern such as
-`Assign(Job { phase })`, `Assign(List[head, _])`, or
+`Assign(Job { phase })`, `Assign(List[head, ..tail])`, or
 `Assign(Map[Ready => selected])` destructures an immutable concrete payload and
-binds only the selected values. Map payload patterns are exact unless they end
-with `..`, as in `Assign(Map[Ready => selected, ..])`; the subset marker permits
-additional static keys while requiring the listed keys. `..rest` additionally
-binds an immutable map containing entries except the listed static keys. `_` is
-a wildcard pattern that covers accepted variants without explicit clauses.
+binds only the selected values. List rest patterns are suffix-only in this slice:
+`..tail` must follow at least one fixed-position element and binds an immutable
+whole list containing the unmatched suffix. Map payload patterns are exact unless
+they end with `..`, as in `Assign(Map[Ready => selected, ..])`; the subset marker
+permits additional static keys while requiring the listed keys. `..rest`
+additionally binds an immutable map containing entries except the listed static
+keys. `_` is a wildcard pattern that covers accepted variants without explicit
+clauses.
 
 A match `step` uses a typed message parameter and a whole-body
 `match` over that parameter:

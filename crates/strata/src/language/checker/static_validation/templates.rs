@@ -128,6 +128,18 @@ pub(super) fn validate_value_template_binding_types(
             received_payload_type,
             current_state_payload_type,
         ),
+        CheckedValueTemplate::ListPrefixElement { list, .. } => {
+            validate_value_template_binding_types(
+                list,
+                received_payload_type,
+                current_state_payload_type,
+            )
+        }
+        CheckedValueTemplate::ListRest { list, .. } => validate_value_template_binding_types(
+            list,
+            received_payload_type,
+            current_state_payload_type,
+        ),
         CheckedValueTemplate::MapValue { map, .. } => validate_value_template_binding_types(
             map,
             received_payload_type,
@@ -193,6 +205,21 @@ pub(super) fn validate_value_template_payload_labels(
             validate_value_template_payload_labels(record)
         }
         CheckedValueTemplate::ListElement { list, .. } => {
+            validate_value_template_payload_labels(list)
+        }
+        CheckedValueTemplate::ListPrefixElement {
+            list,
+            index,
+            prefix_len,
+            ..
+        } => {
+            validate_list_prefix_projection(*index, *prefix_len)?;
+            validate_value_template_payload_labels(list)
+        }
+        CheckedValueTemplate::ListRest {
+            list, prefix_len, ..
+        } => {
+            validate_list_rest_projection_prefix(*prefix_len)?;
             validate_value_template_payload_labels(list)
         }
         CheckedValueTemplate::MapValue { map, key, keys, .. } => {
@@ -314,6 +341,8 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         | CheckedValueTemplate::CurrentStatePayload { .. }
         | CheckedValueTemplate::RecordField { .. }
         | CheckedValueTemplate::ListElement { .. }
+        | CheckedValueTemplate::ListPrefixElement { .. }
+        | CheckedValueTemplate::ListRest { .. }
         | CheckedValueTemplate::MapValue { .. }
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. } => None,
@@ -377,6 +406,29 @@ fn validate_map_projection_keys(key: &ArtifactValue, keys: &[ArtifactValue]) -> 
 
 fn validate_map_rest_projection_keys(keys: &[ArtifactValue]) -> Result<()> {
     validate_map_key_set("map rest projection", keys, MapKeySetKind::Excluded)
+}
+
+fn validate_list_rest_projection_prefix(prefix_len: usize) -> Result<()> {
+    if prefix_len == 0 || prefix_len > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "list rest projection prefix length must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_list_prefix_projection(index: usize, prefix_len: usize) -> Result<()> {
+    if prefix_len == 0 || prefix_len > MAX_VALUE_TEMPLATE_FIELDS {
+        return Err(Error::new(format!(
+            "list prefix projection prefix length must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
+        )));
+    }
+    if index >= prefix_len {
+        return Err(Error::new(format!(
+            "list prefix projection index {index} is outside prefix length {prefix_len}"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -453,7 +505,9 @@ pub(super) fn validate_value_template_process_refs(
         CheckedValueTemplate::RecordField { record, .. } => {
             validate_value_template_process_refs(processes, process, record, spawned_refs, false)
         }
-        CheckedValueTemplate::ListElement { list, .. } => {
+        CheckedValueTemplate::ListElement { list, .. }
+        | CheckedValueTemplate::ListPrefixElement { list, .. }
+        | CheckedValueTemplate::ListRest { list, .. } => {
             validate_value_template_process_refs(processes, process, list, spawned_refs, false)
         }
         CheckedValueTemplate::MapValue { map, .. } => {
@@ -574,6 +628,18 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
             }
             reject_process_ref_template_in_next_state(list)
         }
+        CheckedValueTemplate::ListPrefixElement { ty, list, .. } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            reject_process_ref_template_in_next_state(list)
+        }
+        CheckedValueTemplate::ListRest { ty, list, .. } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            reject_process_ref_template_in_next_state(list)
+        }
         CheckedValueTemplate::MapValue { ty, map, .. } => {
             if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
                 return Err(process_ref_next_state_error());
@@ -626,7 +692,9 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
         CheckedValueTemplate::RecordField { record, .. } => {
             checked_template_depends_on_received_payload(record)
         }
-        CheckedValueTemplate::ListElement { list, .. } => {
+        CheckedValueTemplate::ListElement { list, .. }
+        | CheckedValueTemplate::ListPrefixElement { list, .. }
+        | CheckedValueTemplate::ListRest { list, .. } => {
             checked_template_depends_on_received_payload(list)
         }
         CheckedValueTemplate::MapValue { map, .. } => {
@@ -707,6 +775,29 @@ fn evaluate_checked_template(
             let list = evaluate_checked_template(list, received_payload, current_state_payload)?;
             let value = checked_payload_value(&list)?
                 .project_list_element(*index, *len)
+                .map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
+        }
+        CheckedValueTemplate::ListPrefixElement {
+            ty,
+            list,
+            index,
+            prefix_len,
+        } => {
+            let list = evaluate_checked_template(list, received_payload, current_state_payload)?;
+            let value = checked_payload_value(&list)?
+                .project_list_prefix_element(*index, *prefix_len)
+                .map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), value))
+        }
+        CheckedValueTemplate::ListRest {
+            ty,
+            list,
+            prefix_len,
+        } => {
+            let list = evaluate_checked_template(list, received_payload, current_state_payload)?;
+            let value = checked_payload_value(&list)?
+                .project_list_rest(*prefix_len)
                 .map_err(|err| Error::new(err.to_string()))?;
             Ok(CheckedPayloadValue::new(ty.clone(), value))
         }

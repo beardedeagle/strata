@@ -472,7 +472,9 @@ impl ArtifactProcess {
             ArtifactValueTemplate::RecordField { record, .. } => {
                 self.validate_template_process_refs(artifact, record, spawned_refs)
             }
-            ArtifactValueTemplate::ListElement { list, .. } => {
+            ArtifactValueTemplate::ListElement { list, .. }
+            | ArtifactValueTemplate::ListPrefixElement { list, .. }
+            | ArtifactValueTemplate::ListRest { list, .. } => {
                 self.validate_template_process_refs(artifact, list, spawned_refs)
             }
             ArtifactValueTemplate::MapValue { map, .. } => {

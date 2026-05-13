@@ -1,5 +1,6 @@
 use super::values::{
-    validate_map_projection_keys, validate_map_rest_keys, validate_non_process_ref_value,
+    validate_list_prefix_projection, validate_list_rest_prefix_len, validate_map_projection_keys,
+    validate_map_rest_keys, validate_non_process_ref_value,
 };
 use super::*;
 use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField};
@@ -72,6 +73,37 @@ fn evaluate_loaded_payload_value(
                 current_state_payload,
             )?;
             RuntimePayload::value(*ty, list.value.project_list_element(*index, *len)?)
+        }
+        LoadedValueTemplate::ListPrefixElement {
+            ty,
+            list,
+            index,
+            prefix_len,
+        } => {
+            let list = evaluate_loaded_payload_value(
+                program,
+                list,
+                received_payload,
+                current_state_payload,
+            )?;
+            RuntimePayload::value(
+                *ty,
+                list.value
+                    .project_list_prefix_element(*index, *prefix_len)?,
+            )
+        }
+        LoadedValueTemplate::ListRest {
+            ty,
+            list,
+            prefix_len,
+        } => {
+            let list = evaluate_loaded_payload_value(
+                program,
+                list,
+                received_payload,
+                current_state_payload,
+            )?;
+            RuntimePayload::value(*ty, list.value.project_list_rest(*prefix_len)?)
         }
         LoadedValueTemplate::MapValue {
             ty,
@@ -284,6 +316,39 @@ impl LoadedTemplateAdmission<'_> {
                         "{field}.index {index} is outside list length {len}"
                     )));
                 }
+                let nested = Self {
+                    expected_type: None,
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.list"), list, depth + 1)
+            }
+            LoadedValueTemplate::ListPrefixElement {
+                ty,
+                list,
+                index,
+                prefix_len,
+            } => {
+                self.reject_projected_process_ref_type(field, *ty)?;
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                validate_list_prefix_projection(field, *index, *prefix_len)?;
+                let nested = Self {
+                    expected_type: None,
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.list"), list, depth + 1)
+            }
+            LoadedValueTemplate::ListRest {
+                ty,
+                list,
+                prefix_len,
+            } => {
+                self.reject_projected_process_ref_type(field, *ty)?;
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                validate_list_rest_prefix_len(field, *prefix_len)?;
                 let nested = Self {
                     expected_type: None,
                     allow_direct_process_ref: false,
@@ -580,6 +645,8 @@ fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) -> bool {
         | LoadedValueTemplate::CurrentStatePayload { .. }
         | LoadedValueTemplate::RecordField { .. }
         | LoadedValueTemplate::ListElement { .. }
+        | LoadedValueTemplate::ListPrefixElement { .. }
+        | LoadedValueTemplate::ListRest { .. }
         | LoadedValueTemplate::MapValue { .. }
         | LoadedValueTemplate::MapRest { .. }
         | LoadedValueTemplate::ProcessRef { .. } => false,
@@ -607,7 +674,9 @@ pub(super) fn loaded_template_depends_on_received_payload(template: &LoadedValue
         LoadedValueTemplate::RecordField { record, .. } => {
             loaded_template_depends_on_received_payload(record)
         }
-        LoadedValueTemplate::ListElement { list, .. } => {
+        LoadedValueTemplate::ListElement { list, .. }
+        | LoadedValueTemplate::ListPrefixElement { list, .. }
+        | LoadedValueTemplate::ListRest { list, .. } => {
             loaded_template_depends_on_received_payload(list)
         }
         LoadedValueTemplate::MapValue { map, .. } => {

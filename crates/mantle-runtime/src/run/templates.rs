@@ -56,6 +56,29 @@ pub(super) fn evaluate_runtime_template(
                 evaluate_runtime_template(program, list, received_payload, step, process_refs)?;
             RuntimePayload::value(*ty, list.value.project_list_element(*index, *len)?)
         }
+        LoadedValueTemplate::ListPrefixElement {
+            ty,
+            list,
+            index,
+            prefix_len,
+        } => {
+            let list =
+                evaluate_runtime_template(program, list, received_payload, step, process_refs)?;
+            RuntimePayload::value(
+                *ty,
+                list.value
+                    .project_list_prefix_element(*index, *prefix_len)?,
+            )
+        }
+        LoadedValueTemplate::ListRest {
+            ty,
+            list,
+            prefix_len,
+        } => {
+            let list =
+                evaluate_runtime_template(program, list, received_payload, step, process_refs)?;
+            RuntimePayload::value(*ty, list.value.project_list_rest(*prefix_len)?)
+        }
         LoadedValueTemplate::MapValue {
             ty,
             map,
