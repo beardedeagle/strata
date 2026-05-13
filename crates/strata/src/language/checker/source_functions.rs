@@ -477,7 +477,9 @@ fn validate_enum_pattern_source_function_group(
                 };
                 let checked_pattern = check_typed_match_pattern(&pattern_context, pattern)?;
                 match checked_pattern {
-                    TypedMatchPattern::Variant { variant, bindings } => {
+                    TypedMatchPattern::Variant {
+                        variant, bindings, ..
+                    } => {
                         if explicit_arms[variant] {
                             return Err(Error::new(format!(
                                 "{owner} function {} declares duplicate pattern for variant {}",

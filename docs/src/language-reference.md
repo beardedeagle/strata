@@ -19,7 +19,7 @@ Mantle artifact internals.
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
-| Patterns | Constructor patterns, constructor payload bindings, record/list/map payload destructuring in helpers and step/state matches, helper return-match expressions, and `_` wildcards. |
+| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers and step/state matches, helper return-match expressions, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
 | Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, and whole-body `match state` inside message-specific step clauses. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
@@ -192,6 +192,11 @@ Runtime-bound map value keys must be static source values in this slice;
 dynamic-key dictionaries remain deferred. Rest binding does not expose collection
 iteration, order-dependent dispatch, mutation, dynamic keys, or mutable views.
 
+Collection pattern element and map-value positions may contain nested structural
+patterns, such as `List[Job { phase }, ..tail]` or
+`Map[Ready => Job { phase }, ..rest]`. Map nesting still uses only the listed
+static keys; dynamic-key map dispatch remains outside this source slice.
+
 Record field order and map entry order are preserved in source-authored values,
 emitted artifact values, labels, and traces. Projection still addresses map
 entries by key, and this slice does not expose source-level map iteration or
@@ -319,6 +324,19 @@ fn first(List<Phase,2>[phase, _]) -> Phase ! [] ~ [] @det {
 
 fn lookup(Map<Phase,Phase,1>[Ready => selected]) -> Phase ! [] ~ [] @det {
     return selected;
+}
+```
+
+Nested helper patterns compose constructor payloads, records, and collection
+element/value projections:
+
+```strata
+fn routed_phase(Assign(Job { phase })) -> Phase ! [] ~ [] @det {
+    return phase;
+}
+
+fn listed_phase(List<Routed,1>[Assign(Job { phase })]) -> Phase ! [] ~ [] @det {
+    return phase;
 }
 ```
 
@@ -483,9 +501,9 @@ process ID. Source names remain diagnostics and trace metadata.
 
 Patterns are source-level syntax for typed value decomposition. The current
 runnable subset admits constructor patterns, constructor payload bindings,
-record/list/map payload destructuring, helper return-match expressions, and
-wildcards. Normal source helpers may match concrete enum values or destructure
-concrete record/list/map values, `init` may use one whole-body match over a
+nested constructor and record/list/map payload destructuring, helper return-match
+expressions, and wildcards. Normal source helpers may match concrete enum values
+or destructure concrete record/list/map values, `init` may use one whole-body match over a
 fieldless enum constructor to select the initial state, and actor message
 dispatch may use one whole-body match over the typed message parameter:
 
@@ -505,10 +523,11 @@ fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] 
 ```
 
 Step `match` is an authoring form for the same semantics as step parameter
-patterns, including typed payload bindings and record/list/map payload
+patterns, including typed payload bindings and nested record/list/map payload
 destructuring. Checking resolves each arm into typed message-keyed transitions
-before lowering. Mantle still dispatches by admitted message IDs and payload
-type IDs, not by source strings. In this buildable step subset the match
+and typed projection templates before lowering. Mantle still dispatches by
+admitted message IDs, payload type IDs, and loaded template structure, not by
+source strings. In this buildable step subset the match
 scrutinee must be the typed message parameter, and match arms are
 block-delimited without comma separators.
 
@@ -616,14 +635,24 @@ fn step(state: WorkerState, Items(List[phase, ..tail])) -> ProcResult<WorkerStat
 fn step(state: WorkerState, Lookup(Map[Ready => phase, ..rest])) -> ProcResult<WorkerState> ! [] ~ [] @det {
     return Continue(WorkerState { seen: phase });
 }
+
+fn step(state: WorkerState, Envelope(Assign(Job { phase }))) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Continue(WorkerState { seen: phase });
+}
+
+fn step(state: WorkerState, Holding(List[Job { phase }, ..tail])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Continue(WorkerState { tail: tail });
+}
 ```
 
 These bindings are immutable projections of the concrete payload value. A
-record field, list element, list rest, map value, or map rest can be used in
-whole-value state returns and downstream payloads, but process references still
-remain valid only as direct message payload bindings. Shape-only collection
-payload patterns such as `Items(List[_])`, `Lookup(Map[Ready => _])`, or
-`Lookup(Map[..])` are not admitted in this slice;
+constructor payload, record field, list element, list rest, map value, or map
+rest can be used in whole-value state returns and downstream payloads, but
+process references still remain valid only as direct message payload bindings.
+Fieldless nested enum constructors such as `Envelope(Assign(Ready))` are
+accepted as typed shape predicates; they do not introduce bindings.
+Shape-only collection payload patterns such as `Items(List[_])`,
+`Lookup(Map[Ready => _])`, or `Lookup(Map[..])` are not admitted in this slice;
 use the constructor pattern without destructuring when the payload is ignored.
 
 If a process accepts more than one message, it can declare explicit clauses for

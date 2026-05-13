@@ -206,7 +206,7 @@ fn validate_transition(
                     transition,
                     target_process,
                     *message,
-                    payload.as_ref(),
+                    payload.as_deref(),
                     &spawned_refs,
                     processes,
                 )?;

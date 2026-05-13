@@ -231,8 +231,21 @@ fn status(Assigned(job: Job)) -> Phase ! [] ~ [] @det {
 }
 ```
 
-Patterns bind immutable local values. Invalid, duplicate, unreachable, and
-overlapping patterns are rejected before lowering.
+Patterns bind immutable local values. Nested patterns compose constructor
+payloads, records, and collection element/value projections:
+
+```strata
+fn step(state: WorkerState, Envelope(Assign(Job { phase }))) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Continue(Seen(phase));
+}
+
+fn step(state: WorkerState, Holding(List[Job { phase }, ..tail])) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    return Continue(Held(tail));
+}
+```
+
+Invalid, duplicate, unreachable, and overlapping patterns are rejected before
+lowering.
 
 ### Immutable Collections
 
@@ -261,7 +274,8 @@ fn selected(Map<Phase,Phase,2>[Ready => phase, ..rest]) -> Phase ! [] ~ [] @det 
 
 Collection rest bindings are whole values, not mutable views. This slice does
 not expose collection mutation, iteration APIs, dynamic-key map dispatch, or
-source-visible in-place update.
+source-visible in-place update. Nested collection patterns stay within typed
+projection paths and static map-key semantics.
 
 ### Mantle Artifacts And Runtime Evidence
 

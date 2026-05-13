@@ -165,6 +165,18 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
             &format!("{prefix}.kind"),
             ty.kind.as_str(),
         )?;
+        add_field_bytes(
+            &mut encoded_len,
+            &format!("{prefix}.enum_variant_count"),
+            &ty.enum_variants.len().to_string(),
+        )?;
+        for (variant_index, variant) in ty.enum_variants.iter().enumerate() {
+            add_field_bytes(
+                &mut encoded_len,
+                &format!("{prefix}.enum_variant.{variant_index}"),
+                variant,
+            )?;
+        }
         if let ArtifactTypeKind::ProcessRef { target } = ty.kind {
             add_field_bytes(
                 &mut encoded_len,
@@ -479,6 +491,16 @@ fn add_value_template_bytes(
             add_field_bytes(total, &format!("{prefix}.kind"), "current_state_payload")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
         }
+        ArtifactValueTemplate::EnumPayload { ty, value, variant } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "enum_payload")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.variant_id"),
+                &variant.as_u32().to_string(),
+            )?;
+            add_value_template_bytes(total, &format!("{prefix}.value"), value)?;
+        }
         ArtifactValueTemplate::RecordField { ty, record, field } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "record_field")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
@@ -598,7 +620,11 @@ fn add_value_template_bytes(
         } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "enum_variant")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.variant"), variant)?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.variant_id"),
+                &variant.as_u32().to_string(),
+            )?;
             add_value_template_bytes(total, &format!("{prefix}.payload"), payload)?;
         }
         ArtifactValueTemplate::Record { ty, fields } => {

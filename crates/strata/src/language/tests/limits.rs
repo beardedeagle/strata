@@ -109,6 +109,26 @@ fn rejects_message_count_above_artifact_limit_during_checking() {
 }
 
 #[test]
+fn rejects_enum_variant_count_above_artifact_limit_during_checking() {
+    let variants = (0..=MAX_ENUM_VARIANTS_PER_TYPE)
+        .map(|index| format!("Msg{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = HELLO.replace(
+        "enum MainMsg { Start }",
+        &format!("enum MainMsg {{ {variants} }}"),
+    );
+    let module = parse_source(&source).expect("enum-variant-count source should parse");
+
+    let err =
+        check_module(module).expect_err("enum variant count above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "enum MainMsg variant_count must be no greater than {MAX_ENUM_VARIANTS_PER_TYPE}"
+    )));
+}
+
+#[test]
 fn rejects_checked_type_count_above_artifact_limit_during_checking() {
     let module = checked_type_count_overflow_module();
 

@@ -17,7 +17,7 @@ pub use artifact::{
 };
 pub use constants::*;
 pub use error::{Error, Result};
-pub use ids::{MessageId, OutputId, ProcessId, ProcessRefId, StateId, TypeId};
+pub use ids::{EnumVariantId, MessageId, OutputId, ProcessId, ProcessRefId, StateId, TypeId};
 pub use io::{read_artifact, source_hash_fnv1a64, write_artifact};
 pub use validation::{
     validate_message_label, validate_payload_value_label, validate_state_value_identity_label,

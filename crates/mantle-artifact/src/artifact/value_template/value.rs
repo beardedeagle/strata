@@ -177,6 +177,25 @@ impl ArtifactValue {
         }
     }
 
+    pub fn project_enum_payload(&self, variant: &str) -> Result<Self> {
+        let Self::EnumVariant {
+            variant: actual,
+            payload,
+        } = self
+        else {
+            return Err(Error::new(format!(
+                "enum payload projection requires an enum value, got {}",
+                self.label()
+            )));
+        };
+        if actual != variant {
+            return Err(Error::new(format!(
+                "enum payload projection expected variant {variant}, found {actual}"
+            )));
+        }
+        Ok((**payload).clone())
+    }
+
     pub fn project_record_field(&self, field: &str) -> Result<Self> {
         let Self::Record { fields, .. } = self else {
             return Err(Error::new(format!(

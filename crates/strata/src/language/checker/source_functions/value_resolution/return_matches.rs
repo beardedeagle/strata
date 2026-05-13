@@ -102,6 +102,7 @@ fn resolve_source_function_return_enum_match_value(
                     resolve_constructor_payload_pattern_bindings(
                         context.scope,
                         context.function,
+                        "return match",
                         name,
                         &context
                             .scope

@@ -98,6 +98,7 @@ fn resolve_source_function_body_enum_match_value(
                     resolve_constructor_payload_pattern_bindings(
                         context.scope,
                         context.function,
+                        "match",
                         &enum_decl.variants[variant].name,
                         &enum_decl.variants[variant],
                         match &source_arm.pattern {

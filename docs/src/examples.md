@@ -34,9 +34,11 @@ Read them in this order:
    bindings in actor step parameter patterns.
 18. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-19. `actor_reply.str` for transporting typed process references through message
+19. `nested_patterns.str` for nested immutable constructor, record, list, and
+   map payload destructuring.
+20. `actor_reply.str` for transporting typed process references through message
    payloads.
-20. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+21. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -421,6 +423,28 @@ Key source ideas:
   signature patterns.
 - `Assign(job: Job)` binds the received payload immutably inside the match arm.
 - Runtime still dispatches by admitted message IDs and payload type IDs.
+
+## Nested Patterns
+
+`examples/nested_patterns.str` composes immutable destructuring across
+constructor payloads, records, list elements/rest, and map values/rest.
+
+```sh
+cargo run -p strata --bin strata -- check examples/nested_patterns.str
+cargo run -p strata --bin strata -- build examples/nested_patterns.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/nested_patterns.mta
+```
+
+Key source ideas:
+
+- `AssignEnvelope(Assign(Job { phase }))` binds a nested record field from a
+  constructor payload through typed projection paths.
+- `HoldEnvelope(Hold(List[Job { phase }, ..tail]))` binds an immutable list
+  suffix whole value, not a mutable view.
+- `LookupEnvelope(Lookup(Map[Ready => Job { phase }, ..rest]))` keeps map
+  matching on static keys while binding nested values and an immutable rest map.
+- Lowering emits typed Mantle value templates; runtime execution does not use
+  source strings as executable references.
 
 ## Actor Reply References
 

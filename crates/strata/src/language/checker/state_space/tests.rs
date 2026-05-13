@@ -16,7 +16,7 @@ fn state_value_limit_reports_process_context() {
     let semantic_index =
         SemanticIndex::build(&module).expect("test module should index successfully");
     let process = &module.processes[0];
-    let mut types = CheckedTypeInterner::new(&semantic_index);
+    let mut types = CheckedTypeInterner::new(&module, &semantic_index);
     let mut state_space = StateSpace::new(&module, &semantic_index, process, &mut types)
         .expect("state space should build");
     state_space.values = (0..MAX_STATE_VALUES_PER_PROCESS)
@@ -47,7 +47,7 @@ fn state_value_nesting_limit_rejects_programmatic_ast() {
     let semantic_index =
         SemanticIndex::build(&module).expect("recursive state module should index");
     let process = &module.processes[0];
-    let mut types = CheckedTypeInterner::new(&semantic_index);
+    let mut types = CheckedTypeInterner::new(&module, &semantic_index);
     let mut state_space = StateSpace::new(&module, &semantic_index, process, &mut types)
         .expect("state space should build");
     let value = nested_record_value(MAX_VALUE_NESTING + 1);
@@ -68,7 +68,7 @@ fn state_space_rejects_empty_braced_record_value_ast() {
     let semantic_index =
         SemanticIndex::build(&module).expect("test module should index successfully");
     let process = &module.processes[0];
-    let mut types = CheckedTypeInterner::new(&semantic_index);
+    let mut types = CheckedTypeInterner::new(&module, &semantic_index);
     let mut state_space = StateSpace::new(&module, &semantic_index, process, &mut types)
         .expect("state space should build");
     let value = ValueExpr::Record(RecordValue {

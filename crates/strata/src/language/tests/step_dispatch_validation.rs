@@ -114,17 +114,17 @@ fn rejects_typed_msg_step_parameter() {
 }
 
 #[test]
-fn rejects_constructor_payload_binding_without_type_at_parse_time() {
+fn rejects_constructor_payload_binding_without_type() {
     let source = payload_source_with(
         "send worker Assign(Job { phase: Ready });",
         "fn step(state: WorkerState, Assign(job))",
     );
 
-    let err = parse_source(&source).expect_err("untyped payload binding should fail parsing");
+    let err = check_source(&source).expect_err("untyped payload binding should fail checking");
 
     assert!(
         err.to_string().contains(
-            "constructor payload pattern Assign(job) must bind the payload as job: Type or destructure a record, list, map, or wildcard"
+            "process Worker step pattern nested constructor pattern job cannot match value type Job"
         ),
         "unexpected error: {err}"
     );
@@ -347,6 +347,54 @@ proc Main mailbox bounded(2) {
     assert!(
         err.to_string().contains(
             "process Main step pattern list payload pattern must bind at least one value"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_shape_only_nested_constructor_in_list_payload_step_pattern() {
+    let source = r#"
+module shape_only_nested_constructor_in_list_payload_step_pattern;
+
+enum Phase {
+    Ready,
+    Done,
+}
+enum Routed {
+    Assign(Phase),
+}
+record MainState;
+enum MainMsg {
+    Start,
+    Items(List<Routed,2>),
+}
+
+proc Main mailbox bounded(2) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [send] ~ [] @det {
+        send Main Items(List<Routed,2>[Assign(Ready), Assign(Done)]);
+        return Continue(state);
+    }
+
+    fn step(state: MainState, Items(List[Assign(Ready), ..tail])) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source)
+        .expect_err("shape-only nested constructor in list payload pattern should fail");
+
+    assert!(
+        err.to_string().contains(
+            "process Main step pattern list payload nested pattern must bind at least one value"
         ),
         "unexpected error: {err}"
     );

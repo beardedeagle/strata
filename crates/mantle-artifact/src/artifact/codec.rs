@@ -322,10 +322,16 @@ fn decode_state_value(fields: &mut ArtifactFields, prefix: &str) -> Result<Artif
 fn encode_type(encoded: &mut String, type_index: usize, ty: &ArtifactType) {
     let prefix = format!("type.{type_index}");
     encoded.push_str(&format!(
-        "{prefix}.label={}\n{prefix}.kind={}\n",
+        "{prefix}.label={}\n{prefix}.kind={}\n{prefix}.enum_variant_count={}\n",
         ty.label,
-        ty.kind.as_str()
+        ty.kind.as_str(),
+        ty.enum_variants.len()
     ));
+    for (variant_index, variant) in ty.enum_variants.iter().enumerate() {
+        encoded.push_str(&format!(
+            "{prefix}.enum_variant.{variant_index}={variant}\n"
+        ));
+    }
     if let ArtifactTypeKind::ProcessRef { target } = ty.kind {
         encoded.push_str(&format!("{prefix}.target_process={}\n", target.as_u32()));
     }
@@ -340,9 +346,20 @@ fn decode_type(fields: &mut ArtifactFields, type_index: usize) -> Result<Artifac
     } else {
         None
     };
+    let variant_count = fields.take_bounded_usize(
+        &format!("{prefix}.enum_variant_count"),
+        0,
+        MAX_ENUM_VARIANTS_PER_TYPE,
+    )?;
+    let mut enum_variants = Vec::with_capacity(variant_count);
+    for variant_index in 0..variant_count {
+        enum_variants
+            .push(fields.take_required(&format!("{prefix}.enum_variant.{variant_index}"))?);
+    }
     Ok(ArtifactType {
         label,
         kind: ArtifactTypeKind::parse(&kind_value, target)?,
+        enum_variants,
     })
 }
 
@@ -366,6 +383,14 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
                 "{prefix}.kind=current_state_payload\n{prefix}.type_id={}\n",
                 ty.as_u32()
             ));
+        }
+        ArtifactValueTemplate::EnumPayload { ty, value, variant } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=enum_payload\n{prefix}.type_id={}\n{prefix}.variant_id={}\n",
+                ty.as_u32(),
+                variant.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.value"), value);
         }
         ArtifactValueTemplate::RecordField { ty, record, field } => {
             encoded.push_str(&format!(
@@ -467,8 +492,9 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
             payload,
         } => {
             encoded.push_str(&format!(
-                "{prefix}.kind=enum_variant\n{prefix}.type_id={}\n{prefix}.variant={variant}\n",
-                ty.as_u32()
+                "{prefix}.kind=enum_variant\n{prefix}.type_id={}\n{prefix}.variant_id={}\n",
+                ty.as_u32(),
+                variant.as_u32()
             ));
             encode_value_template(encoded, &format!("{prefix}.payload"), payload);
         }
@@ -551,6 +577,15 @@ fn decode_value_template(
         }),
         "current_state_payload" => Ok(ArtifactValueTemplate::CurrentStatePayload {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+        }),
+        "enum_payload" => Ok(ArtifactValueTemplate::EnumPayload {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            variant: fields.take_enum_variant_id(&format!("{prefix}.variant_id"))?,
+            value: Box::new(decode_value_template(
+                fields,
+                &format!("{prefix}.value"),
+                depth + 1,
+            )?),
         }),
         "record_field" => Ok(ArtifactValueTemplate::RecordField {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
@@ -673,7 +708,7 @@ fn decode_value_template(
         }),
         "enum_variant" => Ok(ArtifactValueTemplate::EnumVariant {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
-            variant: fields.take_required(&format!("{prefix}.variant"))?,
+            variant: fields.take_enum_variant_id(&format!("{prefix}.variant_id"))?,
             payload: Box::new(decode_value_template(
                 fields,
                 &format!("{prefix}.payload"),

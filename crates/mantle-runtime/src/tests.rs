@@ -6,8 +6,8 @@ use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
     ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
     ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue,
-    ArtifactValueTemplate, ArtifactValueTemplateField, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, write_artifact,
+    ArtifactValueTemplate, ArtifactValueTemplateField, EnumVariantId, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, write_artifact,
 };
 
 use super::program::LoadedProgram;
@@ -595,7 +595,7 @@ fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
             step_result: StepResult::Stop,
             next_state: NextState::Template(ArtifactValueTemplate::EnumVariant {
                 ty: WORKER_STATE,
-                variant: "Done".to_string(),
+                variant: EnumVariantId::new(3),
                 payload: Box::new(ArtifactValueTemplate::CurrentStatePayload { ty: JOB }),
             }),
             effects: Vec::new(),
@@ -1025,7 +1025,16 @@ fn base_types() -> Vec<ArtifactType> {
     vec![
         ArtifactType::value("MainState"),
         ArtifactType::value("MainMsg"),
-        ArtifactType::value("WorkerState"),
+        ArtifactType::enum_value(
+            "WorkerState",
+            vec![
+                "Idle".to_string(),
+                "Handled".to_string(),
+                "Working".to_string(),
+                "Done".to_string(),
+                "Routed".to_string(),
+            ],
+        ),
         ArtifactType::value("WorkerMsg"),
         ArtifactType::value("Job"),
         ArtifactType::value("HelperState"),

@@ -112,7 +112,8 @@ fn parses_checks_and_lowers_source_functions_with_payload_matching() {
     );
     let encoded = artifact.encode();
     assert!(encoded.contains("kind=enum_variant"));
-    assert!(encoded.contains("variant=Assigned"));
+    assert!(encoded.contains("variant_id=1"));
+    assert!(!encoded.contains("variant=Assigned"));
     assert!(!encoded.contains("status_sig"));
     assert!(!encoded.contains("status_body"));
     assert!(!encoded.contains("state_for"));

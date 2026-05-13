@@ -287,7 +287,7 @@ pub fn run_strata_from_env() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mantle_artifact::{MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS};
+    use mantle_artifact::{MAX_ACTIONS_PER_PROCESS, MAX_OUTPUT_LITERALS};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_SOURCE_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -444,32 +444,35 @@ mod tests {
     }
 
     fn oversized_artifact_source() -> String {
-        let state_values = (0..MAX_STATE_VALUES_PER_PROCESS)
-            .map(|index| format!("S{index}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let mut source = format!(
-            "module oversized_artifact;\nrecord Marker;\nenum MainState {{ {state_values} }}\nenum MainMsg {{ Start }}\n"
-        );
-        for process_index in 0..MAX_PROCESS_COUNT {
-            let process_name = if process_index == 0 {
-                "Main".to_string()
-            } else {
-                format!("Proc{process_index}")
-            };
-            source.push_str(&format!(
-                r#"
-proc {process_name} mailbox bounded(1) {{
+        let emit_count = MAX_OUTPUT_LITERALS.min(MAX_ACTIONS_PER_PROCESS);
+        let output_padding = "x".repeat(190);
+        let mut source = String::from(
+            r#"module oversized_artifact;
+record MainState;
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
-    fn init() -> MainState ! [] ~ [] @det {{ return S0; }}
-    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {{
-        return Stop(state);
-    }}
-}}
-"#
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+"#,
+        );
+        for index in 0..emit_count {
+            source.push_str(&format!(
+                "        emit \"oversized-artifact-output-{index:04}-{output_padding}\";\n"
             ));
         }
+        source.push_str(
+            r#"        return Stop(state);
+    }
+}
+"#,
+        );
         assert!(
             source.len() <= MAX_SOURCE_BYTES,
             "test source must stay below the source size limit"

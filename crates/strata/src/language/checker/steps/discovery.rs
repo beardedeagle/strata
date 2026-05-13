@@ -63,7 +63,9 @@ pub(in crate::language::checker) fn step_discovery_clauses<'a>(
                 .into_iter()
                 .map(|arm| {
                     let state_payload_bindings = match &arm.pattern {
-                        TypedMatchPattern::Variant { variant, bindings } => {
+                        TypedMatchPattern::Variant {
+                            variant, bindings, ..
+                        } => {
                             let variant_decl = &state_enum.variants[*variant];
                             if bindings.is_empty() {
                                 Vec::new()
@@ -153,20 +155,46 @@ pub(in crate::language::checker) fn collect_explicit_step_variants(
 }
 
 pub(in crate::language::checker) fn matching_message_cases<'a>(
+    module: &Module,
+    semantic_index: &SemanticIndex,
     cases: &'a [DiscoveredMessageCase],
     pattern: &StepPattern,
     explicit_variants: &BTreeSet<CheckedMessageVariantId>,
-) -> Vec<&'a DiscoveredMessageCase> {
-    cases
-        .iter()
-        .filter(|case| match pattern {
-            StepPattern::Variant { message, .. } => case.variant() == *message,
+) -> Result<Vec<&'a DiscoveredMessageCase>> {
+    let mut matches = Vec::new();
+    for case in cases {
+        let is_match = match pattern {
+            StepPattern::Variant {
+                message,
+                payload_guard,
+                ..
+            } => {
+                case.variant() == *message
+                    && payload_guard
+                        .as_ref()
+                        .map(|guard| {
+                            case.payload()
+                                .map(|payload| {
+                                    payload_matches_guard(module, semantic_index, payload, guard)
+                                })
+                                .transpose()
+                                .map(|matched| matched.unwrap_or(false))
+                        })
+                        .transpose()?
+                        .unwrap_or(true)
+            }
             StepPattern::Wildcard => !explicit_variants.contains(&case.variant()),
-        })
-        .collect()
+        };
+        if is_match {
+            matches.push(case);
+        }
+    }
+    Ok(matches)
 }
 
 pub(in crate::language::checker) fn payload_value_bindings<'a>(
+    module: &Module,
+    semantic_index: &SemanticIndex,
     pattern: &'a StepPattern,
     case: &'a DiscoveredMessageCase,
 ) -> Result<Vec<DiscoveryValueBinding>> {
@@ -174,13 +202,16 @@ pub(in crate::language::checker) fn payload_value_bindings<'a>(
         (StepPattern::Variant { bindings, .. }, Some(payload)) => bindings
             .iter()
             .map(|param| {
-                let (label, value) = checked_payload_binding(payload, param)?.ok_or_else(|| {
-                    Error::new(format!(
-                        "message payload {} does not match pattern binding {}",
-                        payload.label(),
-                        param.name
-                    ))
-                })?;
+                let (label, value) =
+                    checked_payload_binding(module, semantic_index, payload, param)?.ok_or_else(
+                        || {
+                            Error::new(format!(
+                                "message payload {} does not match pattern binding {}",
+                                payload.label(),
+                                param.name
+                            ))
+                        },
+                    )?;
                 Ok(DiscoveryValueBinding {
                     name: param.name.clone(),
                     ty: param.ty.clone(),
@@ -255,9 +286,12 @@ fn check_step_typed_pattern(
                 variant,
                 payload.as_ref(),
             )?;
+            let payload_guard =
+                check_pattern_payload_guard(module, semantic_index, variant, payload.as_ref())?;
             Ok(TypedMatchPattern::Variant {
                 variant: message.index(),
                 bindings,
+                payload_guard,
             })
         }
         Pattern::Record { name, .. } => Err(Error::new(format!(
@@ -278,9 +312,14 @@ fn check_step_typed_pattern(
 
 fn step_pattern_from_typed(pattern: TypedMatchPattern) -> Result<StepPattern> {
     match pattern {
-        TypedMatchPattern::Variant { variant, bindings } => Ok(StepPattern::Variant {
+        TypedMatchPattern::Variant {
+            variant,
+            bindings,
+            payload_guard,
+        } => Ok(StepPattern::Variant {
             message: CheckedMessageVariantId::from_index(variant)?,
             bindings,
+            payload_guard,
         }),
         TypedMatchPattern::Wildcard => Ok(StepPattern::Wildcard),
     }

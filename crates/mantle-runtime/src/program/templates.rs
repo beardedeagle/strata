@@ -51,6 +51,16 @@ fn evaluate_loaded_payload_value(
             }
             Ok(payload.clone())
         }
+        LoadedValueTemplate::EnumPayload { ty, value, variant } => {
+            let value = evaluate_loaded_payload_value(
+                program,
+                value,
+                received_payload,
+                current_state_payload,
+            )?;
+            let variant = program.enum_variant_label(value.ty, *variant)?;
+            RuntimePayload::value(*ty, value.value.project_enum_payload(variant)?)
+        }
         LoadedValueTemplate::RecordField { ty, record, field } => {
             let record = evaluate_loaded_payload_value(
                 program,
@@ -150,7 +160,7 @@ fn evaluate_loaded_payload_value(
             RuntimePayload::value(
                 *ty,
                 RuntimeValue::EnumVariant {
-                    variant: variant.clone(),
+                    variant: program.enum_variant_label(*ty, *variant)?.to_string(),
                     payload: Box::new(payload.value),
                 },
             )
@@ -281,6 +291,18 @@ impl LoadedTemplateAdmission<'_> {
             LoadedValueTemplate::CurrentStatePayload { ty } => {
                 self.validate_current_state_payload(field, *ty)
             }
+            LoadedValueTemplate::EnumPayload { ty, value, variant } => {
+                self.reject_projected_process_ref_type(field, *ty)?;
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_enum_variant_projection(field, value.result_type(), *variant)?;
+                let nested = Self {
+                    expected_type: None,
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.value"), value, depth + 1)
+            }
             LoadedValueTemplate::RecordField {
                 ty,
                 record,
@@ -402,7 +424,7 @@ impl LoadedTemplateAdmission<'_> {
             } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
-                validate_loaded_ident_field(&format!("{field}.variant"), variant)?;
+                self.validate_enum_variant_projection(field, *ty, *variant)?;
                 let nested = Self {
                     expected_type: None,
                     allow_direct_process_ref: false,
@@ -437,6 +459,20 @@ impl LoadedTemplateAdmission<'_> {
                 "{field} process reference template must be a direct message payload"
             )));
         }
+        Ok(())
+    }
+
+    fn validate_enum_variant_projection(
+        &self,
+        field: &str,
+        enum_ty: TypeId,
+        variant: EnumVariantId,
+    ) -> Result<()> {
+        self.program
+            .validate_value_type(&format!("{field}.enum_type"), enum_ty)?;
+        self.program
+            .enum_variant_label(enum_ty, variant)
+            .map_err(|err| Error::new(format!("{field}.variant_id {}", err)))?;
         Ok(())
     }
 
@@ -643,6 +679,7 @@ fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) -> bool {
         LoadedValueTemplate::Literal { .. } => true,
         LoadedValueTemplate::ReceivedPayload { .. }
         | LoadedValueTemplate::CurrentStatePayload { .. }
+        | LoadedValueTemplate::EnumPayload { .. }
         | LoadedValueTemplate::RecordField { .. }
         | LoadedValueTemplate::ListElement { .. }
         | LoadedValueTemplate::ListPrefixElement { .. }
@@ -671,6 +708,9 @@ pub(super) fn loaded_template_depends_on_received_payload(template: &LoadedValue
         LoadedValueTemplate::Literal { .. } | LoadedValueTemplate::ProcessRef { .. } => false,
         LoadedValueTemplate::ReceivedPayload { .. } => true,
         LoadedValueTemplate::CurrentStatePayload { .. } => false,
+        LoadedValueTemplate::EnumPayload { value, .. } => {
+            loaded_template_depends_on_received_payload(value)
+        }
         LoadedValueTemplate::RecordField { record, .. } => {
             loaded_template_depends_on_received_payload(record)
         }

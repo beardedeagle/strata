@@ -1,5 +1,6 @@
 use super::collection_patterns::{
     collection_pattern_type, resolve_collection_pattern_value_bindings,
+    source_nested_pattern_substitutions,
 };
 use super::record_patterns::{check_record_pattern_bindings, record_pattern_type};
 use super::values::{check_source_value_type, resolve_source_value_expr};
@@ -92,6 +93,7 @@ pub(super) fn resolve_pattern_source_function_call(
                         resolve_constructor_payload_pattern_bindings(
                             scope,
                             function,
+                            "signature",
                             name,
                             &enum_decl.variants[variant],
                             payload_pattern.as_ref(),
@@ -162,6 +164,7 @@ pub(super) fn resolve_pattern_source_function_call(
 fn resolve_constructor_payload_pattern_bindings(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
+    pattern_context: &str,
     variant_name: &Identifier,
     variant: &EnumVariant,
     payload_pattern: Option<&ConstructorPayloadPattern>,
@@ -172,13 +175,13 @@ fn resolve_constructor_payload_pattern_bindings(
     };
     let Some(payload_type) = &variant.payload_type else {
         return Err(Error::new(format!(
-            "function {} signature pattern {} does not carry a payload",
+            "function {} {pattern_context} pattern {} does not carry a payload",
             function.name, variant_name
         )));
     };
     let Some(payload) = selected_payload else {
         return Err(Error::new(format!(
-            "function {} signature pattern {} requires a payload value",
+            "function {} {pattern_context} pattern {} requires a payload value",
             function.name, variant_name
         )));
     };
@@ -191,18 +194,24 @@ fn resolve_constructor_payload_pattern_bindings(
             vec![PatternPayloadParam {
                 name: binding.name.clone(),
                 ty: binding.ty.clone(),
-                path: PayloadBindingPath::Whole,
+                path: PayloadBindingPath::whole(),
             }],
         )),
-        ConstructorPayloadPattern::Destructure(pattern) => {
-            resolve_destructured_payload_pattern(scope, function, payload_type, pattern, payload)
-        }
+        ConstructorPayloadPattern::Destructure(pattern) => resolve_destructured_payload_pattern(
+            scope,
+            function,
+            pattern_context,
+            payload_type,
+            pattern,
+            payload,
+        ),
     }
 }
 
 fn resolve_destructured_payload_pattern(
     scope: &SourceFunctionScope<'_>,
     function: &Function,
+    pattern_context: &str,
     payload_type: &TypeRef,
     pattern: &Pattern,
     payload: &ValueExpr,
@@ -214,13 +223,13 @@ fn resolve_destructured_payload_pattern(
                 .record_decl(scope.module, payload_type)?;
             if record.name != *name {
                 return Err(Error::new(format!(
-                    "function {} signature record payload pattern {name} cannot match record {}",
+                    "function {} {pattern_context} record payload pattern {name} cannot match record {}",
                     function.name, record.name
                 )));
             }
             let ValueExpr::Record(record_value) = payload else {
                 return Err(Error::new(format!(
-                    "function {} signature record payload pattern {name} requires a concrete record value",
+                    "function {} {pattern_context} record payload pattern {name} requires a concrete record value",
                     function.name
                 )));
             };
@@ -238,10 +247,39 @@ fn resolve_destructured_payload_pattern(
             resolve_collection_payload_pattern(scope, function, payload_type, pattern, payload)
         }
         Pattern::Wildcard => Ok((Vec::new(), Vec::new())),
-        Pattern::Constructor { name, .. } => Err(Error::new(format!(
-            "function {} nested constructor payload pattern {name} is not supported in this source slice",
-            function.name
-        ))),
+        Pattern::Constructor { .. } => {
+            let subject = format!("function {}", function.name);
+            let mut seen_bindings = BTreeSet::new();
+            let nested_context = format!("{pattern_context} payload pattern");
+            let mut nested_scope = NestedPatternBindingScope {
+                module: scope.module,
+                semantic_index: scope.semantic_index,
+                binding_context: PatternBindingContext::Source { owner: &subject },
+                context: &nested_context,
+                seen_bindings: &mut seen_bindings,
+            };
+            let bindings = check_nested_pattern_bindings(
+                &mut nested_scope,
+                payload_type,
+                pattern,
+                &PayloadBindingPath::whole(),
+                EmptyConstructorPattern::Allow,
+            )?;
+            let Some(substitutions) = source_nested_pattern_substitutions(
+                scope.module,
+                scope.semantic_index,
+                payload_type,
+                pattern,
+                payload,
+            )?
+            else {
+                return Err(Error::new(format!(
+                    "function {} {pattern_context} nested payload pattern does not match concrete {}",
+                    function.name, payload
+                )));
+            };
+            Ok((substitutions, bindings))
+        }
     }
 }
 

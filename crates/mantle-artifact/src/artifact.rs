@@ -17,12 +17,12 @@ pub use value_template::{
 };
 
 use crate::{
-    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, Error, MAX_ACTIONS_PER_PROCESS,
-    MAX_EFFECTS_PER_TRANSITION, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId,
-    ProcessRefId, Result, StateId, TypeId,
+    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, EnumVariantId, Error,
+    MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE,
+    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
+    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId,
+    ProcessId, ProcessRefId, Result, StateId, TypeId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +133,7 @@ impl ArtifactTypeKind {
 pub struct ArtifactType {
     pub label: String,
     pub kind: ArtifactTypeKind,
+    pub enum_variants: Vec<String>,
 }
 
 impl ArtifactType {
@@ -140,6 +141,15 @@ impl ArtifactType {
         Self {
             label: label.into(),
             kind: ArtifactTypeKind::Value,
+            enum_variants: Vec::new(),
+        }
+    }
+
+    pub fn enum_value(label: impl Into<String>, enum_variants: Vec<String>) -> Self {
+        Self {
+            label: label.into(),
+            kind: ArtifactTypeKind::Value,
+            enum_variants,
         }
     }
 
@@ -147,6 +157,7 @@ impl ArtifactType {
         Self {
             label: label.into(),
             kind: ArtifactTypeKind::ProcessRef { target },
+            enum_variants: Vec::new(),
         }
     }
 }
@@ -231,6 +242,21 @@ impl MantleArtifact {
         Ok(self.type_entry(ty)?.label.as_str())
     }
 
+    pub fn enum_variant_label(&self, ty: TypeId, variant: EnumVariantId) -> Result<&str> {
+        let type_entry = self.type_entry(ty)?;
+        type_entry
+            .enum_variants
+            .get(variant.index())
+            .map(String::as_str)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "artifact type id {} has no enum variant id {}",
+                    ty.as_u32(),
+                    variant.as_u32()
+                ))
+            })
+    }
+
     pub fn validate_value_type(&self, field: &str, ty: TypeId) -> Result<()> {
         match self.type_entry(ty)?.kind {
             ArtifactTypeKind::Value => Ok(()),
@@ -293,13 +319,14 @@ impl MantleArtifact {
         current_state_payload: Option<&ArtifactPayload>,
     ) -> Result<ArtifactStateValue> {
         template.evaluate_state_value(received_payload, current_state_payload, &|ty| {
-            self.type_label(ty).map(str::to_owned)
+            self.type_entry(ty).cloned()
         })
     }
 
     fn validate_type_table(&self) -> Result<()> {
         for (type_index, ty) in self.types.iter().enumerate() {
             validate_ident_field(&format!("type.{type_index}.label"), &ty.label)?;
+            validate_type_enum_variants(type_index, ty)?;
             if let ArtifactTypeKind::ProcessRef { target } = ty.kind {
                 if target.index() >= self.processes.len() {
                     return Err(Error::new(format!(
@@ -337,6 +364,33 @@ fn validate_unique_process_ref_list(process_refs: &[ArtifactProcessRef]) -> Resu
                 process_ref.debug_name
             )));
         }
+    }
+    Ok(())
+}
+
+fn validate_type_enum_variants(type_index: usize, ty: &ArtifactType) -> Result<()> {
+    validate_count(
+        &format!("type.{type_index}.enum_variant_count"),
+        ty.enum_variants.len(),
+        0,
+        MAX_ENUM_VARIANTS_PER_TYPE,
+    )?;
+    let mut seen = BTreeSet::new();
+    for (variant_index, variant) in ty.enum_variants.iter().enumerate() {
+        validate_ident_field(
+            &format!("type.{type_index}.enum_variant.{variant_index}"),
+            variant,
+        )?;
+        if !seen.insert(variant.as_str()) {
+            return Err(Error::new(format!(
+                "type.{type_index} duplicates enum variant {variant}"
+            )));
+        }
+    }
+    if matches!(ty.kind, ArtifactTypeKind::ProcessRef { .. }) && !ty.enum_variants.is_empty() {
+        return Err(Error::new(format!(
+            "type.{type_index} process reference type must not declare enum variants"
+        )));
     }
     Ok(())
 }

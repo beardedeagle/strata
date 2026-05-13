@@ -34,7 +34,16 @@ pub(super) fn valid_artifact() -> MantleArtifact {
         types: vec![
             ArtifactType::value("MainState"),
             ArtifactType::value("MainMsg"),
-            ArtifactType::value("WorkerState"),
+            ArtifactType::enum_value(
+                "WorkerState",
+                vec![
+                    "Idle".to_string(),
+                    "Handled".to_string(),
+                    "Working".to_string(),
+                    "Done".to_string(),
+                    "Routed".to_string(),
+                ],
+            ),
             ArtifactType::value("WorkerMsg"),
             ArtifactType::value("Job"),
             ArtifactType::value("OtherJob"),

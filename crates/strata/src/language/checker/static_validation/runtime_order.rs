@@ -47,6 +47,20 @@ fn evaluate_checked_runtime_template(
             }
             Ok(payload.clone())
         }
+        CheckedValueTemplate::EnumPayload { ty, value, variant } => {
+            let value = evaluate_checked_runtime_template(
+                value,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+            )?;
+            let variant = value.ty().enum_variant_label(*variant)?;
+            let payload = checked_payload_value(&value)?
+                .project_enum_payload(variant.as_str())
+                .map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), payload))
+        }
         CheckedValueTemplate::RecordField { ty, record, field } => {
             let record = evaluate_checked_runtime_template(
                 record,
@@ -177,7 +191,7 @@ fn evaluate_checked_runtime_template(
             Ok(CheckedPayloadValue::new(
                 ty.clone(),
                 ArtifactValue::EnumVariant {
-                    variant: variant.to_string(),
+                    variant: ty.enum_variant_label(*variant)?.to_string(),
                     payload: Box::new(checked_payload_value(&payload)?),
                 },
             ))
