@@ -29,15 +29,15 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=4
+schema_version=1
 source_language=strata
 ```
 
 The schema version identifies the admitted `.mta` encoding shape. It is not a
 Strata language release, a migration counter, or a stability guarantee. In the
-current greenfield implementation, `4` is the single admitted artifact schema
-baseline. Older schema versions are rejected; artifact producers must rebuild
-for the admitted schema.
+current greenfield implementation, `1` is the single admitted artifact schema
+baseline. Unsupported schema versions are rejected; artifact producers must emit
+the admitted schema.
 
 Executable references, type identity, and state transitions inside `.mta` use
 validated table IDs and typed transition forms. Process transition records are
