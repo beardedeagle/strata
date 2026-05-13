@@ -77,7 +77,7 @@ fn validate_binding_source_function_enum_match_body(
         payload_context: PatternPayloadContext::SourceValue,
         binding_context: PatternBindingContext::Source { owner: &subject },
     };
-    for arm in check_typed_match_arms(&pattern_context, &match_body.arms)? {
+    for arm in check_payload_sensitive_typed_match_arms(&pattern_context, &match_body.arms)? {
         validate_pure_source_function_block(owner, function, arm.body)?;
     }
     Ok(())

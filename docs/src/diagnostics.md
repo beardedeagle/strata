@@ -54,6 +54,8 @@ result of the first invalid shape.
 | `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
 | `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |
 | `function ... wildcard pattern is unreachable` | Explicit source function clauses already cover every variant. | Remove the wildcard clause or remove the explicit clauses it should cover. |
+| `pattern ... overlaps an earlier pattern for the same typed payload shape` | A helper match or return-match repeats a constructor with an identical, unguarded, or not-provably-disjoint nested predicate. | Keep one unguarded constructor arm, or split the constructor only by disjoint nested enum predicates. |
+| `match has no matching pattern for ...` / `return match has no matching pattern for ...` | A helper call reached a concrete nested payload shape not covered by the helper match arms. | Add a disjoint nested predicate arm for that shape or add one `_` fallback where fallback behavior is intended. |
 | `record pattern ... has no field ...` | A source helper record pattern names a field outside the matched record. | Bind a declared field from the record. |
 | `record pattern ... binds field ... more than once` | A source helper record pattern repeats one field. | Bind each record field at most once. |
 | `record pattern binding ... is declared more than once` | A source helper record pattern binds two fields to the same local name. | Use one distinct immutable binding name per field. |

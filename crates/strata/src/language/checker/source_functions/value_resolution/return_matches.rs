@@ -84,20 +84,51 @@ fn resolve_source_function_return_enum_match_value(
         enum_type,
         variant_name,
     )?;
+    let subject = format!("function {}", context.function.name);
+    let pattern_context = PatternCheckContext {
+        module: context.scope.module,
+        semantic_index: context.scope.semantic_index,
+        enum_decl,
+        enum_type,
+        subject: &subject,
+        label: "return match",
+        payload_context: PatternPayloadContext::SourceValue,
+        binding_context: PatternBindingContext::Source { owner: &subject },
+    };
+    let arms =
+        check_payload_sensitive_typed_match_arms(&pattern_context, &context.match_body.arms)?;
     let mut wildcard = None;
-    for arm in &context.match_body.arms {
-        match &arm.pattern {
-            Pattern::Constructor { name, payload } => {
-                let variant = context.scope.semantic_index.enum_variant_index(
-                    context.scope.module,
-                    enum_type,
-                    name,
-                )?;
+    let mut same_variant_candidates = 0usize;
+    for (arm, source_arm) in arms.into_iter().zip(&context.match_body.arms) {
+        match arm.pattern {
+            TypedMatchPattern::Variant {
+                variant,
+                payload_guard,
+                ..
+            } => {
                 if variant != selected_variant {
+                    continue;
+                }
+                same_variant_candidates =
+                    same_variant_candidates.checked_add(1).ok_or_else(|| {
+                        Error::new("source function return match candidate count overflowed")
+                    })?;
+                if !source_payload_matches_guard(
+                    context.scope.module,
+                    context.scope.semantic_index,
+                    selected_payload,
+                    payload_guard.as_ref(),
+                )? {
                     continue;
                 }
                 let mut arm_substitutions = context.substitutions.to_vec();
                 let mut arm_bindings = context.local_bindings.to_vec();
+                let Pattern::Constructor { name, payload } = &source_arm.pattern else {
+                    return Err(Error::new(format!(
+                        "function {} return match expected enum constructor pattern",
+                        context.function.name
+                    )));
+                };
                 let (pattern_substitutions, pattern_bindings) =
                     resolve_constructor_payload_pattern_bindings(
                         context.scope,
@@ -120,35 +151,26 @@ fn resolve_source_function_return_enum_match_value(
                 return resolve_source_function_block_return_value(
                     context.scope,
                     context.function,
-                    &arm.body,
+                    arm.body,
                     &arm_substitutions,
                     &arm_bindings,
                     context.bindings,
                     context.depth + 1,
                 );
             }
-            Pattern::Wildcard => {
-                wildcard = Some(&arm.body);
-            }
-            Pattern::Record { name, .. } => {
-                return Err(Error::new(format!(
-                    "function {} return match pattern {name} destructures a record, but this match expects enum constructors",
-                    context.function.name
-                )));
-            }
-            Pattern::List(_) => {
-                return Err(Error::new(format!(
-                    "function {} return match pattern List[...] destructures a list, but this match expects enum constructors",
-                    context.function.name
-                )));
-            }
-            Pattern::Map(_) => {
-                return Err(Error::new(format!(
-                    "function {} return match pattern Map[...] destructures a map, but this match expects enum constructors",
-                    context.function.name
-                )));
+            TypedMatchPattern::Wildcard => {
+                wildcard = Some(arm.body);
             }
         }
+    }
+    if wildcard.is_none()
+        && same_variant_candidates == 1
+        && let Some(payload) = selected_payload
+    {
+        return Err(Error::new(format!(
+            "function {} return match nested payload pattern does not match concrete {}",
+            context.function.name, payload
+        )));
     }
     if let Some(body) = wildcard {
         return resolve_source_function_block_return_value(
@@ -162,8 +184,8 @@ fn resolve_source_function_return_enum_match_value(
         );
     }
     Err(Error::new(format!(
-        "function {} return match has no arm for variant {} of enum {}",
-        context.function.name, variant_name, enum_decl.name
+        "function {} return match has no matching pattern for {} of enum {}",
+        context.function.name, selected, enum_decl.name
     )))
 }
 

@@ -586,6 +586,339 @@ proc Main mailbox bounded(1) {
     check_source(source).expect("nested source helper patterns should check");
 }
 
+#[test]
+fn source_helpers_dispatch_same_constructor_by_disjoint_fieldless_nested_predicates() {
+    let source = r#"
+module payload_sensitive_helper_dispatch;
+
+record MainState {
+    body_ready: Phase,
+    body_done: Phase,
+    body_fallback: Phase,
+    return_ready: Phase,
+    return_done: Phase,
+    return_fallback: Phase,
+    bound_assign: Phase,
+    bound_hold: Phase,
+}
+record Job { phase: Phase }
+enum Phase { Ready, Done, Other }
+enum Routed {
+    Assign(Phase),
+    AssignJob(Job),
+    Hold(List<Job,2>),
+}
+enum Packet { Envelope(Routed) }
+enum MainMsg { Start }
+
+fn route_body(packet: Packet) -> Phase ! [] ~ [] @det {
+    match packet {
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+        Envelope(Assign(Done)) => {
+            return Done;
+        }
+    }
+}
+
+fn route_return(packet: Packet) -> Phase ! [] ~ [] @det {
+    return match packet {
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+        Envelope(Assign(Done)) => {
+            return Done;
+        }
+    };
+}
+
+fn route_body_with_fallback(packet: Packet) -> Phase ! [] ~ [] @det {
+    match packet {
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+        _ => {
+            return Other;
+        }
+    }
+}
+
+fn route_return_with_fallback(packet: Packet) -> Phase ! [] ~ [] @det {
+    return match packet {
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+        _ => {
+            return Other;
+        }
+    };
+}
+
+fn route_bound(packet: Packet) -> Phase ! [] ~ [] @det {
+    match packet {
+        Envelope(AssignJob(Job { phase })) => {
+            return phase;
+        }
+        Envelope(Hold(List[Job { phase }, ..tail])) => {
+            return phase;
+        }
+    }
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            body_ready: route_body(Envelope(Assign(Ready))),
+            body_done: route_body(Envelope(Assign(Done))),
+            body_fallback: route_body_with_fallback(Envelope(Assign(Done))),
+            return_ready: route_return(Envelope(Assign(Ready))),
+            return_done: route_return(Envelope(Assign(Done))),
+            return_fallback: route_return_with_fallback(Envelope(Assign(Done))),
+            bound_assign: route_bound(Envelope(AssignJob(Job { phase: Ready }))),
+            bound_hold: route_bound(Envelope(Hold(List<Job,2>[
+                Job { phase: Done },
+                Job { phase: Other },
+            ]))),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("payload-sensitive helper dispatch should check");
+    lower_to_artifact(&checked, source).expect("payload-sensitive helper dispatch should lower");
+}
+
+fn payload_sensitive_helper_case(route: &str, init_value: &str) -> String {
+    format!(
+        r#"
+module payload_sensitive_helper_case;
+
+record MainState {{ phase: Phase }}
+enum Phase {{ Ready, Done, Other }}
+enum Routed {{ Assign(Phase) }}
+enum Packet {{ Envelope(Routed) }}
+enum MainMsg {{ Start }}
+
+{route}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return {init_value};
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+    )
+}
+
+#[test]
+fn rejects_duplicate_payload_sensitive_helper_predicate() {
+    let source = payload_sensitive_helper_case(
+        r#"
+fn route(packet: Packet) -> Phase ! [] ~ [] @det {
+    match packet {
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+    }
+}
+"#,
+        "MainState { phase: Ready }",
+    );
+
+    let err = check_source(&source).expect_err("duplicate nested predicate should fail");
+    assert!(
+        err.to_string()
+            .contains("pattern Envelope(Assign(Ready)) overlaps an earlier pattern"),
+        "expected duplicate nested predicate diagnostic, got {err}"
+    );
+}
+
+#[test]
+fn rejects_guarded_and_unguarded_helper_constructor_overlap() {
+    let source = payload_sensitive_helper_case(
+        r#"
+fn route(packet: Packet) -> Phase ! [] ~ [] @det {
+    return match packet {
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+        Envelope => {
+            return Done;
+        }
+    };
+}
+"#,
+        "MainState { phase: Ready }",
+    );
+
+    let err = check_source(&source).expect_err("guarded and unguarded overlap should fail");
+    assert!(
+        err.to_string()
+            .contains("pattern Envelope overlaps an earlier pattern"),
+        "expected guarded/unguarded overlap diagnostic, got {err}"
+    );
+}
+
+#[test]
+fn rejects_payload_sensitive_helper_predicates_that_are_not_provably_disjoint() {
+    let source = payload_sensitive_helper_case(
+        r#"
+fn route(packet: Packet) -> Phase ! [] ~ [] @det {
+    match packet {
+        Envelope(Assign(phase: Phase)) => {
+            return phase;
+        }
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+    }
+}
+"#,
+        "MainState { phase: Ready }",
+    );
+
+    let err = check_source(&source).expect_err("unproven predicate disjointness should fail");
+    assert!(
+        err.to_string()
+            .contains("pattern Envelope(Assign(Ready)) overlaps an earlier pattern"),
+        "expected unproven overlap diagnostic, got {err}"
+    );
+}
+
+#[test]
+fn rejects_uncovered_payload_sensitive_helper_predicate_at_expansion_time() {
+    let source = payload_sensitive_helper_case(
+        r#"
+fn route(packet: Packet) -> Phase ! [] ~ [] @det {
+    match packet {
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+        Envelope(Assign(Done)) => {
+            return Done;
+        }
+    }
+}
+"#,
+        "MainState { phase: route(Envelope(Assign(Other))) }",
+    );
+
+    let err = check_source(&source).expect_err("uncovered nested predicate should fail");
+    assert!(
+        err.to_string()
+            .contains("function route match has no matching pattern for Envelope(Assign(Other))"),
+        "expected uncovered nested predicate diagnostic, got {err}"
+    );
+}
+
+fn same_message_step_split_case(worker_step: &str) -> String {
+    format!(
+        r#"
+module same_message_step_split_case;
+
+record MainState;
+enum Phase {{ Ready, Done }}
+enum Routed {{ Assign(Phase) }}
+enum MainMsg {{ Start }}
+enum WorkerMsg {{ Envelope(Routed) }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {{
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Ready));
+        send worker Envelope(Assign(Done));
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(2) {{
+    type State = MainState;
+    type Msg = WorkerMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+{worker_step}
+}}
+"#
+    )
+}
+
+#[test]
+fn step_signature_same_message_payload_predicate_splitting_remains_rejected() {
+    let source = same_message_step_split_case(
+        r#"
+    fn step(state: MainState, Envelope(Assign(Ready))) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+
+    fn step(state: MainState, Envelope(Assign(Done))) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+"#,
+    );
+
+    let err = check_source(&source)
+        .expect_err("step signature same-message predicate split should remain rejected");
+    assert!(
+        err.to_string()
+            .contains("process Worker declares duplicate step pattern for message Envelope"),
+        "expected duplicate step pattern diagnostic, got {err}"
+    );
+}
+
+#[test]
+fn match_msg_same_message_payload_predicate_splitting_remains_rejected() {
+    let source = same_message_step_split_case(
+        r#"
+    fn step(state: MainState, msg: WorkerMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        match msg {
+            Envelope(Assign(Ready)) => {
+                return Continue(state);
+            }
+            Envelope(Assign(Done)) => {
+                return Stop(state);
+            }
+        }
+    }
+"#,
+    );
+
+    let err = check_source(&source)
+        .expect_err("match msg same-message predicate split should remain rejected");
+    assert!(
+        err.to_string()
+            .contains("process Worker declares duplicate step pattern for message Envelope"),
+        "expected duplicate match msg step diagnostic, got {err}"
+    );
+}
+
 fn fieldless_helper_mismatch_source(selected_call: &str) -> String {
     format!(
         r#"

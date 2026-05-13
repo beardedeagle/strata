@@ -89,11 +89,29 @@ fn resolve_source_function_body_enum_match_value(
         payload_context: PatternPayloadContext::SourceValue,
         binding_context: PatternBindingContext::Source { owner: &subject },
     };
-    let arms = check_typed_match_arms(&pattern_context, &context.match_body.arms)?;
+    let arms =
+        check_payload_sensitive_typed_match_arms(&pattern_context, &context.match_body.arms)?;
     let mut wildcard = None;
+    let mut same_variant_candidates = 0usize;
     for (arm, source_arm) in arms.into_iter().zip(&context.match_body.arms) {
         match arm.pattern {
-            TypedMatchPattern::Variant { variant, .. } if variant == selected_variant => {
+            TypedMatchPattern::Variant {
+                variant,
+                payload_guard,
+                ..
+            } if variant == selected_variant => {
+                same_variant_candidates =
+                    same_variant_candidates.checked_add(1).ok_or_else(|| {
+                        Error::new("source function match candidate count overflowed")
+                    })?;
+                if !source_payload_matches_guard(
+                    context.scope.module,
+                    context.scope.semantic_index,
+                    selected_payload,
+                    payload_guard.as_ref(),
+                )? {
+                    continue;
+                }
                 let (pattern_substitutions, pattern_bindings) =
                     resolve_constructor_payload_pattern_bindings(
                         context.scope,
@@ -130,6 +148,15 @@ fn resolve_source_function_body_enum_match_value(
             _ => {}
         }
     }
+    if wildcard.is_none()
+        && same_variant_candidates == 1
+        && let Some(payload) = selected_payload
+    {
+        return Err(Error::new(format!(
+            "function {} match nested payload pattern does not match concrete {}",
+            context.function.name, payload
+        )));
+    }
     if let Some(body) = wildcard {
         return resolve_source_function_block_return_value(
             context.scope,
@@ -142,8 +169,8 @@ fn resolve_source_function_body_enum_match_value(
         );
     }
     Err(Error::new(format!(
-        "function {} match has no arm for variant {} of enum {}",
-        context.function.name, variant_name, enum_decl.name
+        "function {} match has no matching pattern for {} of enum {}",
+        context.function.name, selected, enum_decl.name
     )))
 }
 

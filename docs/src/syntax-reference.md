@@ -209,9 +209,11 @@ signatures and match bodies, helper return-match expressions, fieldless enum
 `match state` step bodies. Record/list/map destructuring patterns are accepted
 in normal source helper signatures, helper match bodies, helper return-match
 expressions, message constructor payloads, and current-state enum payloads when
-the payload has the matching type. Source helper calls still expand before
-lowering; enum pattern dispatch requires a concrete enum constructor value and
-record/list/map destructuring requires a concrete value.
+the payload has the matching type. Helper match bodies and helper return-match
+expressions may split a top-level constructor by disjoint nested enum predicates.
+Source helper calls still expand before lowering; enum pattern dispatch requires
+a concrete enum constructor value and record/list/map destructuring requires a
+concrete value.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message

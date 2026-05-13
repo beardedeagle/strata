@@ -355,6 +355,24 @@ fn readiness_body(mode: StartupMode) -> Readiness ! [] ~ [] @det {
 }
 ```
 
+Whole-body helper matches and helper return-match expressions may split one
+top-level constructor when nested typed enum predicates are provably disjoint.
+The split remains checker-time source dispatch; helper expansion resolves the
+concrete source value before lowering:
+
+```strata
+fn route(packet: Packet) -> Phase ! [] ~ [] @det {
+    match packet {
+        Envelope(Assign(Ready)) => {
+            return Ready;
+        }
+        Envelope(Assign(Done)) => {
+            return Done;
+        }
+    }
+}
+```
+
 Whole-body helper matches may also destructure a concrete record binding:
 
 ```strata
@@ -426,8 +444,12 @@ fn ready_value(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
 }
 ```
 
-Enum matches are exhaustive, duplicate-free, and immutable. Record body matches
-and return matches use one record pattern arm for the matched record type.
+Enum matches are exhaustive and immutable. Source helper whole-body matches and
+helper return-match expressions may repeat a top-level constructor only when the
+nested typed enum predicates are provably disjoint; identical predicates,
+unguarded constructor arms, and unproven overlaps are rejected. Source helper
+signature groups still keep one clause per top-level constructor. Record body
+matches and return matches use one record pattern arm for the matched record type.
 Collection patterns match exact list length unless they use the trailing
 `..tail` suffix rest binding. Map patterns match exact key sets unless they use
 the trailing `..` subset or rest marker. `_` remains available as a collection
