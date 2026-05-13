@@ -121,6 +121,30 @@ fn runtime_rejects_loaded_invalid_literal_template_shape_before_artifact_loaded(
 }
 
 #[test]
+fn runtime_rejects_loaded_invalid_enum_payload_projection_variant_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].current_state = Some(StateId::new(0));
+    program.processes[0].transitions[0].next_state =
+        LoadedNextState::Template(LoadedValueTemplate::EnumPayload {
+            ty: MAIN_STATE,
+            value: Box::new(LoadedValueTemplate::Literal {
+                ty: MAIN_STATE,
+                value: RuntimeValue::EnumVariant {
+                    variant: "Route".to_string(),
+                    payload: Box::new(RuntimeValue::Atom("MainState".to_string())),
+                },
+            }),
+            variant: EnumVariantId::new(99),
+        });
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "next_state_template.variant_id loaded type id 0 has no enum variant id 99",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
@@ -129,7 +153,7 @@ fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_lo
     program.processes[1].transitions[0].next_state =
         loaded_next_state(NextState::Template(ArtifactValueTemplate::EnumVariant {
             ty: WORKER_STATE,
-            variant: "Routed".to_string(),
+            variant: EnumVariantId::new(4),
             payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
                 ty: PROCESS_REF_WORKER,
             }),

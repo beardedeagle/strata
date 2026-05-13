@@ -1,4 +1,4 @@
-use crate::{ProcessId, ProcessRefId, TypeId};
+use crate::{EnumVariantId, ProcessId, ProcessRefId, TypeId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ArtifactRecordField {
@@ -49,6 +49,11 @@ pub enum ArtifactValueTemplate {
     CurrentStatePayload {
         ty: TypeId,
     },
+    EnumPayload {
+        ty: TypeId,
+        value: Box<ArtifactValueTemplate>,
+        variant: EnumVariantId,
+    },
     RecordField {
         ty: TypeId,
         record: Box<ArtifactValueTemplate>,
@@ -90,7 +95,7 @@ pub enum ArtifactValueTemplate {
     },
     EnumVariant {
         ty: TypeId,
-        variant: String,
+        variant: EnumVariantId,
         payload: Box<ArtifactValueTemplate>,
     },
     Record {

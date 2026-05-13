@@ -469,6 +469,9 @@ impl ArtifactProcess {
             ArtifactValueTemplate::Literal { .. }
             | ArtifactValueTemplate::ReceivedPayload { .. }
             | ArtifactValueTemplate::CurrentStatePayload { .. } => Ok(()),
+            ArtifactValueTemplate::EnumPayload { value, .. } => {
+                self.validate_template_process_refs(artifact, value, spawned_refs)
+            }
             ArtifactValueTemplate::RecordField { record, .. } => {
                 self.validate_template_process_refs(artifact, record, spawned_refs)
             }

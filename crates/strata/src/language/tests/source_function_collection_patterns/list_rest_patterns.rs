@@ -544,7 +544,7 @@ fn assert_state_worker_done_payload_list_rest(artifact: &MantleArtifact) {
     else {
         panic!("StateWorker should lower Done(tail) to an enum template");
     };
-    assert_eq!(variant, "Done");
+    assert_eq!(*variant, mantle_artifact::EnumVariantId::new(1));
     assert!(
         matches!(
             payload.as_ref(),

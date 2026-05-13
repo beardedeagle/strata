@@ -106,7 +106,7 @@ pub(super) fn validate_process_ref_type_target(
                 target.as_u32()
             )))
         }
-        CheckedTypeKind::Value => {
+        CheckedTypeKind::Value { .. } => {
             let type_name = checked_type_diagnostic(processes, ty)?;
             Err(Error::new(format!(
                 "process reference payload type {type_name} must be a process reference type"
@@ -117,7 +117,7 @@ pub(super) fn validate_process_ref_type_target(
 
 fn checked_type_diagnostic(processes: &[CheckedProcess], ty: &CheckedTypeRef) -> Result<String> {
     match ty.kind() {
-        CheckedTypeKind::Value => Ok(ty.label().to_string()),
+        CheckedTypeKind::Value { .. } => Ok(ty.label().to_string()),
         CheckedTypeKind::ProcessRef { target } => {
             let process = process_by_id(processes, target)?;
             Ok(format!("ProcessRef<{}>", process.debug_name()))

@@ -32,6 +32,7 @@ define_checked_id!(CheckedStateId);
 define_checked_id!(CheckedMessageId);
 define_checked_id!(CheckedOutputId);
 define_checked_id!(CheckedTypeId);
+define_checked_id!(CheckedEnumVariantId);
 
 impl CheckedProcessId {
     pub(in crate::language) fn index(self) -> usize {
@@ -69,9 +70,15 @@ impl CheckedTypeId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl CheckedEnumVariantId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) enum CheckedTypeKind {
-    Value,
+    Value { enum_variants: Vec<Identifier> },
     ProcessRef { target: CheckedProcessId },
 }
 
@@ -100,7 +107,28 @@ impl CheckedTypeRef {
     }
 
     pub(in crate::language) fn kind(&self) -> CheckedTypeKind {
-        self.kind
+        self.kind.clone()
+    }
+
+    pub(in crate::language) fn enum_variant_label(
+        &self,
+        variant: CheckedEnumVariantId,
+    ) -> Result<&Identifier> {
+        match &self.kind {
+            CheckedTypeKind::Value { enum_variants } => {
+                enum_variants.get(variant.index()).ok_or_else(|| {
+                    Error::new(format!(
+                        "checked type {} has no enum variant id {}",
+                        self.label,
+                        variant.as_u32()
+                    ))
+                })
+            }
+            CheckedTypeKind::ProcessRef { .. } => Err(Error::new(format!(
+                "checked type {} is not an enum value type",
+                self.label
+            ))),
+        }
     }
 
     #[cfg(test)]
@@ -108,7 +136,22 @@ impl CheckedTypeRef {
         Self::new(
             test_type_id(label, None),
             label.to_string(),
-            CheckedTypeKind::Value,
+            CheckedTypeKind::Value {
+                enum_variants: Vec::new(),
+            },
+        )
+    }
+
+    #[cfg(test)]
+    pub(in crate::language) fn test_enum_value(label: &str, enum_variants: &[&str]) -> Self {
+        let enum_variants = enum_variants
+            .iter()
+            .map(|variant| Identifier::new(*variant).expect("test enum variant should be valid"))
+            .collect();
+        Self::new(
+            test_type_id(label, None),
+            label.to_string(),
+            CheckedTypeKind::Value { enum_variants },
         )
     }
 
@@ -301,6 +344,11 @@ pub(in crate::language) enum CheckedValueTemplate {
     CurrentStatePayload {
         ty: CheckedTypeRef,
     },
+    EnumPayload {
+        ty: CheckedTypeRef,
+        value: Box<CheckedValueTemplate>,
+        variant: CheckedEnumVariantId,
+    },
     RecordField {
         ty: CheckedTypeRef,
         record: Box<CheckedValueTemplate>,
@@ -342,7 +390,7 @@ pub(in crate::language) enum CheckedValueTemplate {
     },
     EnumVariant {
         ty: CheckedTypeRef,
-        variant: Identifier,
+        variant: CheckedEnumVariantId,
         payload: Box<CheckedValueTemplate>,
     },
     Record {
@@ -365,6 +413,7 @@ impl CheckedValueTemplate {
             Self::Literal(value) => value.ty(),
             Self::ReceivedPayload { ty }
             | Self::CurrentStatePayload { ty }
+            | Self::EnumPayload { ty, .. }
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
             | Self::ListPrefixElement { ty, .. }
@@ -486,7 +535,7 @@ pub(in crate::language) enum CheckedAction {
     Send {
         target: CheckedSendTarget,
         message: CheckedMessageId,
-        payload: Option<CheckedValueTemplate>,
+        payload: Option<Box<CheckedValueTemplate>>,
     },
 }
 

@@ -30,6 +30,26 @@ fn validate_rejects_invalid_source_language_identifier() {
 }
 
 #[test]
+fn validate_rejects_enum_variant_metadata_above_artifact_limit() {
+    let mut artifact = valid_artifact();
+    artifact.types[MAIN_MSG.index()] = ArtifactType::enum_value(
+        "MainMsg",
+        (0..=MAX_ENUM_VARIANTS_PER_TYPE)
+            .map(|index| format!("V{index}"))
+            .collect(),
+    );
+
+    let err = artifact
+        .validate()
+        .expect_err("enum variant metadata above artifact limit should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "type.{}.enum_variant_count must be no greater than {MAX_ENUM_VARIANTS_PER_TYPE}",
+        MAIN_MSG.index()
+    )));
+}
+
+#[test]
 fn validate_accepts_structured_state_value_labels() {
     let mut artifact = valid_artifact();
     artifact.processes[0].state_values = state_values(
@@ -491,6 +511,31 @@ fn validate_rejects_programmatic_invalid_literal_template_shape() {
     assert!(
         err.to_string()
             .contains("next_state_template must be an identifier"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn validate_rejects_programmatic_invalid_enum_payload_template_variant() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::EnumPayload {
+            ty: MAIN_STATE,
+            value: Box::new(ArtifactValueTemplate::Literal {
+                ty: MAIN_STATE,
+                value: artifact_value("Route(MainState)"),
+            }),
+            variant: EnumVariantId::new(99),
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("invalid enum payload projection variant should fail validation");
+
+    assert!(
+        err.to_string().contains(
+            "next_state_template.variant_id artifact type id 0 has no enum variant id 99"
+        ),
         "unexpected error: {err}"
     );
 }

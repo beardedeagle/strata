@@ -92,7 +92,7 @@ pub(super) fn check_step_transition(
                 actions.push(CheckedAction::Send {
                     target: send_target.target,
                     message: message_id.message,
-                    payload: message_id.payload,
+                    payload: message_id.payload.map(Box::new),
                 });
             }
         }
@@ -365,6 +365,8 @@ fn populate_template_state_values(
                 .iter()
                 .map(|binding| {
                     checked_payload_binding(
+                        context.module,
+                        context.semantic_index,
                         payload,
                         &PatternPayloadParam {
                             name: binding.name.clone(),

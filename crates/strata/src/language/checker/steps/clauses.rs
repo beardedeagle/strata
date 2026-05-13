@@ -304,7 +304,7 @@ pub(in crate::language::checker) fn collect_concrete_state_payload_domains(
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
 ) -> Result<Vec<ConcreteStatePayloadDomain>> {
-    let mut local_types = CheckedTypeInterner::new(semantic_index);
+    let mut local_types = CheckedTypeInterner::new(module, semantic_index);
     let mut state_space = StateSpace::new(module, semantic_index, process, &mut local_types)?;
     check_init(
         module,
@@ -590,6 +590,8 @@ fn preadmit_state_match_case_return(
             let mut owned_bindings = Vec::new();
             for binding in payload_bindings {
                 let (label, value) = checked_payload_binding(
+                    module,
+                    semantic_index,
                     payload,
                     &PatternPayloadParam {
                         name: binding.name.clone(),
@@ -759,7 +761,10 @@ fn state_match_arm_cases(
                                 .iter()
                                 .map(|binding| {
                                     let (label, value) = checked_payload_binding(
-                                        &payload, binding,
+                                        module,
+                                        semantic_index,
+                                        &payload,
+                                        binding,
                                     )?
                                     .ok_or_else(|| {
                                         Error::new(format!(

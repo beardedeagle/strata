@@ -124,7 +124,7 @@ fn rejects_constructor_payload_binding_without_type_at_parse_time() {
 
     assert!(
         err.to_string().contains(
-            "constructor payload pattern Assign(job) must bind the payload as job: Type or destructure a record, list, map, or wildcard"
+            "constructor payload pattern Assign(job) must bind the payload as job: Type or destructure a constructor, record, list, map, or wildcard"
         ),
         "unexpected error: {err}"
     );

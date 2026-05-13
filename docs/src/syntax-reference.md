@@ -119,6 +119,7 @@ pattern =
 
 constructor_payload_pattern =
     ident ":" type_ref
+  | ident "(" constructor_payload_pattern ")"
   | ident "{" record_pattern_fields "}"
   | "List" list_type_args? "[" list_pattern_items? "]"
   | "Map" map_type_args? "[" map_pattern_entries? "]"
@@ -148,7 +149,14 @@ map_pattern_entries =
 
 collection_pattern_binding =
     ident
+  | nested_collection_pattern
   | "_"
+
+nested_collection_pattern =
+    ident "(" constructor_payload_pattern ")"
+  | ident "{" record_pattern_fields "}"
+  | "List" list_type_args? "[" list_pattern_items? "]"
+  | "Map" map_type_args? "[" map_pattern_entries? "]"
 
 effect_list =
     "[" (effect ("," effect)* ","?)? "]"
@@ -216,9 +224,10 @@ The first `type_ref` must name the process state type. An `ident` after the
 comma is a message constructor accepted by the process message type. A payload
 pattern such as `Assign(job: Job)` binds the received payload as an immutable
 transition-local value. A constructor payload pattern such as
-`Assign(Job { phase })`, `Assign(List[head, ..tail])`, or
-`Assign(Map[Ready => selected])` destructures an immutable concrete payload and
-binds only the selected values. List rest patterns are suffix-only in this slice:
+`Assign(Job { phase })`, `Envelope(Assign(Job { phase }))`,
+`Assign(List[Job { phase }, ..tail])`, or
+`Assign(Map[Ready => Job { phase }])` destructures an immutable concrete payload
+and binds only the selected values. List rest patterns are suffix-only in this slice:
 `..tail` must follow at least one fixed-position element and binds an immutable
 whole list containing the unmatched suffix. Map payload patterns are exact unless
 they end with `..`, as in `Assign(Map[Ready => selected, ..])`; the subset marker
@@ -239,7 +248,8 @@ match_step_function =
 ```
 
 Each match arm uses constructor or wildcard pattern syntax. Constructor payload
-patterns may bind or destructure record, list, and map payloads. The match
+patterns may bind or destructure nested constructor, record, list, and map
+payloads. The match
 scrutinee must be the typed message parameter in the current buildable step
 subset. Match arms are block-delimited and do not use comma separators. The
 step effect list applies to every generated
@@ -260,7 +270,8 @@ state_match_step_function =
 State-match arms resolve against the declared process state enum. Payload
 variants may bind their whole payload with an explicit type, such as
 `Working(job: Job)`, or destructure a concrete record/list/map payload, such as
-`Working(Job { phase })`. Fieldless variants must not bind or destructure a
+`Working(Job { phase })`. Nested constructor payloads use the same structural
+pattern rules. Fieldless variants must not bind or destructure a
 payload. Bindings are immutable and transition-local. Each generated transition
 is keyed by the message ID and the admitted current state ID; state changes
 still occur only by returning a whole state value through `Continue(...)`,

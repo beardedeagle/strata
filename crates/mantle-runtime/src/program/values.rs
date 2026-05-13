@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use mantle_artifact::{
     ArtifactPayload, ArtifactProcessRefPayload, ArtifactStateValue, ArtifactValue,
-    ArtifactValueTemplate, ArtifactValueTemplateMapEntry, Error, MAX_VALUE_TEMPLATE_FIELDS,
-    MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
+    ArtifactValueTemplate, ArtifactValueTemplateMapEntry, EnumVariantId, Error,
+    MAX_VALUE_TEMPLATE_FIELDS, MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
     validate_state_value_identity_label,
 };
 
@@ -180,6 +180,11 @@ pub(crate) enum LoadedValueTemplate {
     CurrentStatePayload {
         ty: TypeId,
     },
+    EnumPayload {
+        ty: TypeId,
+        value: Box<LoadedValueTemplate>,
+        variant: EnumVariantId,
+    },
     RecordField {
         ty: TypeId,
         record: Box<LoadedValueTemplate>,
@@ -221,7 +226,7 @@ pub(crate) enum LoadedValueTemplate {
     },
     EnumVariant {
         ty: TypeId,
-        variant: String,
+        variant: EnumVariantId,
         payload: Box<LoadedValueTemplate>,
     },
     Record {
@@ -257,6 +262,11 @@ impl LoadedValueTemplate {
             ArtifactValueTemplate::CurrentStatePayload { ty } => {
                 Ok(Self::CurrentStatePayload { ty: *ty })
             }
+            ArtifactValueTemplate::EnumPayload { ty, value, variant } => Ok(Self::EnumPayload {
+                ty: *ty,
+                value: Box::new(Self::from_artifact(value)?),
+                variant: *variant,
+            }),
             ArtifactValueTemplate::RecordField { ty, record, field } => Ok(Self::RecordField {
                 ty: *ty,
                 record: Box::new(Self::from_artifact(record)?),
@@ -342,7 +352,7 @@ impl LoadedValueTemplate {
                 payload,
             } => Ok(Self::EnumVariant {
                 ty: *ty,
-                variant: variant.clone(),
+                variant: *variant,
                 payload: Box::new(Self::from_artifact(payload)?),
             }),
             ArtifactValueTemplate::Record { ty, fields } => Ok(Self::Record {
@@ -374,6 +384,7 @@ impl LoadedValueTemplate {
             Self::Literal { ty, .. }
             | Self::ReceivedPayload { ty }
             | Self::CurrentStatePayload { ty }
+            | Self::EnumPayload { ty, .. }
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
             | Self::ListPrefixElement { ty, .. }

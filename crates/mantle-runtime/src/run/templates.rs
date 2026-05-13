@@ -41,6 +41,12 @@ pub(super) fn evaluate_runtime_template(
             }
             Ok(payload.clone())
         }
+        LoadedValueTemplate::EnumPayload { ty, value, variant } => {
+            let value =
+                evaluate_runtime_template(program, value, received_payload, step, process_refs)?;
+            let variant = program.enum_variant_label(value.ty, *variant)?;
+            RuntimePayload::value(*ty, value.value.project_enum_payload(variant)?)
+        }
         LoadedValueTemplate::RecordField { ty, record, field } => {
             let record =
                 evaluate_runtime_template(program, record, received_payload, step, process_refs)?;
@@ -123,7 +129,7 @@ pub(super) fn evaluate_runtime_template(
             RuntimePayload::value(
                 *ty,
                 RuntimeValue::EnumVariant {
-                    variant: variant.clone(),
+                    variant: program.enum_variant_label(*ty, *variant)?.to_string(),
                     payload: Box::new(payload.value),
                 },
             )

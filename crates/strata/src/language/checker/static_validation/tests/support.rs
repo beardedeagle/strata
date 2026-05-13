@@ -6,11 +6,12 @@ pub(super) use super::super::validate_action_references;
 pub(super) use crate::language::STATIC_RUNTIME_PROCESS_LIMIT;
 pub(super) use crate::language::ast::{Effect, Identifier};
 pub(super) use crate::language::checked::{
-    CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
-    CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts,
-    CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStateValue,
-    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeRef,
-    CheckedValueTemplate, CheckedValueTemplateField, CheckedValueTemplateMapEntry,
+    CheckedAction, CheckedEnumVariantId, CheckedMessageCase, CheckedMessageId,
+    CheckedMessageVariantId, CheckedNextState, CheckedOutputId, CheckedPayloadValue,
+    CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef, CheckedProcessRefId,
+    CheckedSendTarget, CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition,
+    CheckedTransitionParts, CheckedTypeRef, CheckedValueTemplate, CheckedValueTemplateField,
+    CheckedValueTemplateMapEntry,
 };
 pub(super) use mantle_artifact::ArtifactValue;
 
@@ -47,6 +48,10 @@ pub(super) fn value_type(label: &str) -> CheckedTypeRef {
     CheckedTypeRef::test_value(label)
 }
 
+pub(super) fn enum_value_type(label: &str, variants: &[&str]) -> CheckedTypeRef {
+    CheckedTypeRef::test_enum_value(label, variants)
+}
+
 pub(super) fn process_ref_type(target: &str) -> CheckedTypeRef {
     let target_process = match target {
         "Worker" => checked_process_id(1),
@@ -62,6 +67,16 @@ pub(super) fn checked_state_values(ty: &str, values: &[&str]) -> Vec<CheckedStat
     values
         .iter()
         .map(|value| CheckedStateValue::new(value_type(ty), artifact_value(value)))
+        .collect()
+}
+
+pub(super) fn checked_state_values_for_type(
+    ty: CheckedTypeRef,
+    values: &[&str],
+) -> Vec<CheckedStateValue> {
+    values
+        .iter()
+        .map(|value| CheckedStateValue::new(ty.clone(), artifact_value(value)))
         .collect()
 }
 
@@ -83,4 +98,8 @@ pub(super) fn checked_state_id(index: usize) -> CheckedStateId {
 
 pub(super) fn checked_message_id(index: usize) -> CheckedMessageId {
     CheckedMessageId::from_index(index).expect("valid checked message id")
+}
+
+pub(super) fn checked_enum_variant_id(index: usize) -> CheckedEnumVariantId {
+    CheckedEnumVariantId::from_index(index).expect("valid checked enum variant id")
 }

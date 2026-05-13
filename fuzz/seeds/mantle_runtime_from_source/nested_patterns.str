@@ -1,0 +1,78 @@
+module nested_patterns;
+
+record MainState;
+record Job { phase: Phase }
+
+enum Phase {
+    Ready,
+    Done,
+    Other,
+}
+
+enum Routed {
+    Assign(Job),
+    Hold(List<Job,2>),
+    Lookup(Map<Phase,Job,2>),
+}
+
+enum WorkerState {
+    Idle,
+    Seen(Phase),
+    Held(List<Job,1>),
+    Looked(Map<Phase,Job,1>),
+}
+
+enum MainMsg { Start }
+
+enum WorkerMsg {
+    AssignEnvelope(Routed),
+    HoldEnvelope(Routed),
+    LookupEnvelope(Routed),
+    Finish,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker AssignEnvelope(Assign(Job { phase: Ready }));
+        send worker HoldEnvelope(Hold(List<Job,2>[Job { phase: Done }, Job { phase: Other }]));
+        send worker LookupEnvelope(Lookup(Map<Phase,Job,2>[
+            Ready => Job { phase: Done },
+            Other => Job { phase: Ready },
+        ]));
+        send worker Finish;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(4) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, AssignEnvelope(Assign(Job { phase }))) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(Seen(phase));
+    }
+
+    fn step(state: WorkerState, HoldEnvelope(Hold(List[Job { phase }, ..tail]))) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(Held(tail));
+    }
+
+    fn step(state: WorkerState, LookupEnvelope(Lookup(Map[Ready => Job { phase }, ..rest]))) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(Looked(rest));
+    }
+
+    fn step(state: WorkerState, Finish) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

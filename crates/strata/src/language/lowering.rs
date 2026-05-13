@@ -2,16 +2,17 @@ use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
     ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactSendTarget,
     ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, MessageId,
-    NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact,
+    MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
+    source_hash_fnv1a64,
 };
 
 use super::Effect;
 use super::checked::{
-    CheckedAction, CheckedMessageCase, CheckedMessageId, CheckedNextState, CheckedOutputId,
-    CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget,
-    CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId,
-    CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
+    CheckedAction, CheckedEnumVariantId, CheckedMessageCase, CheckedMessageId, CheckedNextState,
+    CheckedOutputId, CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram,
+    CheckedSendTarget, CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition,
+    CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
 };
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
@@ -38,14 +39,25 @@ impl ArtifactTypeMap {
                         ty.id().as_u32()
                     )));
                 }
-                Ok(ArtifactType {
-                    label: ty.label().to_string(),
-                    kind: match ty.kind() {
-                        CheckedTypeKind::Value => ArtifactTypeKind::Value,
-                        CheckedTypeKind::ProcessRef { target } => ArtifactTypeKind::ProcessRef {
+                let (kind, enum_variants) = match ty.kind() {
+                    CheckedTypeKind::Value { enum_variants } => (
+                        ArtifactTypeKind::Value,
+                        enum_variants
+                            .iter()
+                            .map(|variant| variant.to_string())
+                            .collect(),
+                    ),
+                    CheckedTypeKind::ProcessRef { target } => (
+                        ArtifactTypeKind::ProcessRef {
                             target: lower_process_id(target),
                         },
-                    },
+                        Vec::new(),
+                    ),
+                };
+                Ok(ArtifactType {
+                    label: ty.label().to_string(),
+                    kind,
+                    enum_variants,
                 })
             })
             .collect::<mantle_artifact::Result<Vec<_>>>()?;
@@ -258,6 +270,13 @@ fn lower_value_template(
                 ty: types.artifact_id(ty)?,
             })
         }
+        CheckedValueTemplate::EnumPayload { ty, value, variant } => {
+            Ok(ArtifactValueTemplate::EnumPayload {
+                ty: types.artifact_id(ty)?,
+                value: Box::new(lower_value_template(value, types)?),
+                variant: lower_enum_variant_id(*variant),
+            })
+        }
         CheckedValueTemplate::RecordField { ty, record, field } => {
             Ok(ArtifactValueTemplate::RecordField {
                 ty: types.artifact_id(ty)?,
@@ -333,7 +352,7 @@ fn lower_value_template(
             payload,
         } => Ok(ArtifactValueTemplate::EnumVariant {
             ty: types.artifact_id(ty)?,
-            variant: variant.to_string(),
+            variant: lower_enum_variant_id(*variant),
             payload: Box::new(lower_value_template(payload, types)?),
         }),
         CheckedValueTemplate::Record { ty, fields } => Ok(ArtifactValueTemplate::Record {
@@ -413,4 +432,8 @@ fn lower_message_id(id: CheckedMessageId) -> MessageId {
 
 fn lower_output_id(id: CheckedOutputId) -> OutputId {
     OutputId::new(id.as_u32())
+}
+
+fn lower_enum_variant_id(id: CheckedEnumVariantId) -> EnumVariantId {
+    EnumVariantId::new(id.as_u32())
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::super::{ArtifactStateValue, ArtifactTypeKind, MantleArtifact};
+use super::super::{ArtifactStateValue, ArtifactType, ArtifactTypeKind, MantleArtifact};
 use super::model::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue, ArtifactValueTemplate};
 use super::payload::ArtifactPayload;
 use super::projection::{
@@ -15,6 +15,7 @@ impl ArtifactValueTemplate {
             Self::Literal { ty, .. }
             | Self::ReceivedPayload { ty }
             | Self::CurrentStatePayload { ty }
+            | Self::EnumPayload { ty, .. }
             | Self::RecordField { ty, .. }
             | Self::ListElement { ty, .. }
             | Self::ListPrefixElement { ty, .. }
@@ -33,7 +34,7 @@ impl ArtifactValueTemplate {
         &self,
         received_payload: Option<&ArtifactPayload>,
         current_state_payload: Option<&ArtifactPayload>,
-        type_label: &dyn Fn(TypeId) -> Result<String>,
+        type_entry: &dyn Fn(TypeId) -> Result<ArtifactType>,
     ) -> Result<ArtifactStateValue> {
         match self {
             Self::Literal { ty, value } => ArtifactStateValue::from_value(*ty, value.clone()),
@@ -73,11 +74,32 @@ impl ArtifactValueTemplate {
                 }
                 ArtifactStateValue::from_value(payload.ty, payload.value.clone())
             }
+            Self::EnumPayload { ty, value, variant } => {
+                let value = value.evaluate_state_value(
+                    received_payload,
+                    current_state_payload,
+                    type_entry,
+                )?;
+                let variant = type_entry(value.ty)?
+                    .enum_variants
+                    .get(variant.index())
+                    .cloned()
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "type id {} has no enum variant id {}",
+                            value.ty.as_u32(),
+                            variant.as_u32()
+                        ))
+                    })?;
+                let payload = value.value.project_enum_payload(&variant)?;
+                validate_value_label("enum payload projection value", &payload.label())?;
+                ArtifactStateValue::from_value(*ty, payload)
+            }
             Self::RecordField { ty, record, field } => {
                 let record = record.evaluate_state_value(
                     received_payload,
                     current_state_payload,
-                    type_label,
+                    type_entry,
                 )?;
                 let value = record.value.project_record_field(field)?;
                 validate_value_label("record field projection value", &value.label())?;
@@ -90,7 +112,7 @@ impl ArtifactValueTemplate {
                 len,
             } => {
                 let list =
-                    list.evaluate_state_value(received_payload, current_state_payload, type_label)?;
+                    list.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = list.value.project_list_element(*index, *len)?;
                 validate_value_label("list element projection value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
@@ -102,7 +124,7 @@ impl ArtifactValueTemplate {
                 prefix_len,
             } => {
                 let list =
-                    list.evaluate_state_value(received_payload, current_state_payload, type_label)?;
+                    list.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = list
                     .value
                     .project_list_prefix_element(*index, *prefix_len)?;
@@ -115,7 +137,7 @@ impl ArtifactValueTemplate {
                 prefix_len,
             } => {
                 let list =
-                    list.evaluate_state_value(received_payload, current_state_payload, type_label)?;
+                    list.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = list.value.project_list_rest(*prefix_len)?;
                 validate_value_label("list rest projection value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
@@ -128,7 +150,7 @@ impl ArtifactValueTemplate {
                 projection,
             } => {
                 let map =
-                    map.evaluate_state_value(received_payload, current_state_payload, type_label)?;
+                    map.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = map.value.project_map_value(key, keys, *projection)?;
                 validate_value_label("map value projection value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
@@ -139,7 +161,7 @@ impl ArtifactValueTemplate {
                 excluded_keys,
             } => {
                 let map =
-                    map.evaluate_state_value(received_payload, current_state_payload, type_label)?;
+                    map.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = map.value.project_map_rest(excluded_keys)?;
                 validate_value_label("map rest projection value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
@@ -155,24 +177,35 @@ impl ArtifactValueTemplate {
                 let payload = payload.evaluate_state_value(
                     received_payload,
                     current_state_payload,
-                    type_label,
+                    type_entry,
                 )?;
+                let variant = type_entry(*ty)?
+                    .enum_variants
+                    .get(variant.index())
+                    .cloned()
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "type id {} has no enum variant id {}",
+                            ty.as_u32(),
+                            variant.as_u32()
+                        ))
+                    })?;
                 let value = ArtifactValue::EnumVariant {
-                    variant: variant.clone(),
+                    variant,
                     payload: Box::new(payload.value),
                 };
                 validate_value_label("enum variant template value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::Record { ty, fields } => {
-                let ty_label = type_label(*ty)?;
+                let ty_label = type_entry(*ty)?.label;
                 let mut values = Vec::with_capacity(fields.len());
                 let mut seen = BTreeSet::new();
                 for field in fields {
                     let value = field.value.evaluate_state_value(
                         received_payload,
                         current_state_payload,
-                        type_label,
+                        type_entry,
                     )?;
                     if !seen.insert(field.name.as_str()) {
                         return Err(Error::new(format!(
@@ -198,7 +231,7 @@ impl ArtifactValueTemplate {
                     let item_value = item.evaluate_state_value(
                         received_payload,
                         current_state_payload,
-                        type_label,
+                        type_entry,
                     )?;
                     values.push(item_value.value);
                 }
@@ -213,12 +246,12 @@ impl ArtifactValueTemplate {
                     let key = entry.key.evaluate_state_value(
                         received_payload,
                         current_state_payload,
-                        type_label,
+                        type_entry,
                     )?;
                     let value = entry.value.evaluate_state_value(
                         received_payload,
                         current_state_payload,
-                        type_label,
+                        type_entry,
                     )?;
                     if !seen.insert(key.value.clone()) {
                         return Err(Error::new(format!(
@@ -243,6 +276,7 @@ impl ArtifactValueTemplate {
             Self::Literal { .. } => false,
             Self::ReceivedPayload { .. } => true,
             Self::CurrentStatePayload { .. } => false,
+            Self::EnumPayload { value, .. } => value.depends_on_received_payload(),
             Self::RecordField { record, .. } => record.depends_on_received_payload(),
             Self::ListElement { list, .. }
             | Self::ListPrefixElement { list, .. }
@@ -329,6 +363,19 @@ impl ArtifactValueTemplate {
                     )));
                 }
                 Ok(())
+            }
+            Self::EnumPayload { ty, value, variant } => {
+                reject_projected_process_ref_type(artifact, field, *ty)?;
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+                validate_enum_variant_projection(artifact, field, value.result_type(), *variant)?;
+                value.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.value"),
+                    None,
+                    received_payload_type,
+                    current_state_payload_type,
+                    depth + 1,
+                )
             }
             Self::RecordField {
                 ty,
@@ -476,7 +523,7 @@ impl ArtifactValueTemplate {
                 payload,
             } => {
                 artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
-                validate_ident_field(&format!("{field}.variant"), variant)?;
+                validate_enum_variant_projection(artifact, field, *ty, *variant)?;
                 payload.validate_for_received_payload(
                     artifact,
                     &format!("{field}.payload"),
@@ -595,12 +642,25 @@ fn reject_projected_process_ref_type(
     Ok(())
 }
 
+fn validate_enum_variant_projection(
+    artifact: &MantleArtifact,
+    field: &str,
+    enum_ty: TypeId,
+    variant: crate::EnumVariantId,
+) -> Result<()> {
+    artifact.validate_value_type(&format!("{field}.enum_type_id"), enum_ty)?;
+    artifact
+        .enum_variant_label(enum_ty, variant)
+        .map_err(|err| Error::new(format!("{field}.variant_id {}", err)))?;
+    Ok(())
+}
+
 fn static_map_key_template_value(
     artifact: &MantleArtifact,
     template: &ArtifactValueTemplate,
 ) -> Result<ArtifactValue> {
     template
-        .evaluate_state_value(None, None, &|ty| artifact.type_label(ty).map(str::to_owned))
+        .evaluate_state_value(None, None, &|ty| artifact.type_entry(ty).cloned())
         .map(|value| value.value)
 }
 
@@ -609,6 +669,7 @@ fn is_static_map_key_template(template: &ArtifactValueTemplate) -> bool {
         ArtifactValueTemplate::Literal { .. } => true,
         ArtifactValueTemplate::ReceivedPayload { .. }
         | ArtifactValueTemplate::CurrentStatePayload { .. }
+        | ArtifactValueTemplate::EnumPayload { .. }
         | ArtifactValueTemplate::RecordField { .. }
         | ArtifactValueTemplate::ListElement { .. }
         | ArtifactValueTemplate::ListPrefixElement { .. }

@@ -118,6 +118,11 @@ pub(super) fn validate_value_template_binding_types(
             }
             Ok(())
         }
+        CheckedValueTemplate::EnumPayload { value, .. } => validate_value_template_binding_types(
+            value,
+            received_payload_type,
+            current_state_payload_type,
+        ),
         CheckedValueTemplate::RecordField { record, .. } => validate_value_template_binding_types(
             record,
             received_payload_type,
@@ -201,6 +206,9 @@ pub(super) fn validate_value_template_payload_labels(
         CheckedValueTemplate::Literal(value) => validate_checked_payload_value(value),
         CheckedValueTemplate::ReceivedPayload { .. }
         | CheckedValueTemplate::CurrentStatePayload { .. } => Ok(()),
+        CheckedValueTemplate::EnumPayload { value, .. } => {
+            validate_value_template_payload_labels(value)
+        }
         CheckedValueTemplate::RecordField { record, .. } => {
             validate_value_template_payload_labels(record)
         }
@@ -339,6 +347,7 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         CheckedValueTemplate::Literal(value) => value.value().cloned(),
         CheckedValueTemplate::ReceivedPayload { .. }
         | CheckedValueTemplate::CurrentStatePayload { .. }
+        | CheckedValueTemplate::EnumPayload { .. }
         | CheckedValueTemplate::RecordField { .. }
         | CheckedValueTemplate::ListElement { .. }
         | CheckedValueTemplate::ListPrefixElement { .. }
@@ -347,9 +356,11 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. } => None,
         CheckedValueTemplate::EnumVariant {
-            variant, payload, ..
+            ty,
+            variant,
+            payload,
         } => Some(ArtifactValue::EnumVariant {
-            variant: variant.to_string(),
+            variant: ty.enum_variant_label(*variant).ok()?.to_string(),
             payload: Box::new(checked_static_template_value(payload)?),
         }),
         CheckedValueTemplate::Record { ty, fields } => {
@@ -499,21 +510,41 @@ pub(super) fn validate_value_template_process_refs(
     allow_direct_process_ref: bool,
 ) -> Result<()> {
     match template {
-        CheckedValueTemplate::Literal(_)
-        | CheckedValueTemplate::ReceivedPayload { .. }
-        | CheckedValueTemplate::CurrentStatePayload { .. } => Ok(()),
-        CheckedValueTemplate::RecordField { record, .. } => {
+        CheckedValueTemplate::Literal(value) => {
+            if value.process_ref_payload().is_some() {
+                return Err(Error::new(
+                    "process reference payload templates must be direct message payloads",
+                ));
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::ReceivedPayload { ty }
+        | CheckedValueTemplate::CurrentStatePayload { ty } => {
+            if !allow_direct_process_ref {
+                reject_projected_process_ref_payload_type(ty)?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::EnumPayload { ty, value, .. } => {
+            reject_projected_process_ref_payload_type(ty)?;
+            validate_value_template_process_refs(processes, process, value, spawned_refs, false)
+        }
+        CheckedValueTemplate::RecordField { ty, record, .. } => {
+            reject_projected_process_ref_payload_type(ty)?;
             validate_value_template_process_refs(processes, process, record, spawned_refs, false)
         }
-        CheckedValueTemplate::ListElement { list, .. }
-        | CheckedValueTemplate::ListPrefixElement { list, .. }
-        | CheckedValueTemplate::ListRest { list, .. } => {
+        CheckedValueTemplate::ListElement { ty, list, .. }
+        | CheckedValueTemplate::ListPrefixElement { ty, list, .. }
+        | CheckedValueTemplate::ListRest { ty, list, .. } => {
+            reject_projected_process_ref_payload_type(ty)?;
             validate_value_template_process_refs(processes, process, list, spawned_refs, false)
         }
-        CheckedValueTemplate::MapValue { map, .. } => {
+        CheckedValueTemplate::MapValue { ty, map, .. } => {
+            reject_projected_process_ref_payload_type(ty)?;
             validate_value_template_process_refs(processes, process, map, spawned_refs, false)
         }
-        CheckedValueTemplate::MapRest { map, .. } => {
+        CheckedValueTemplate::MapRest { ty, map, .. } => {
+            reject_projected_process_ref_payload_type(ty)?;
             validate_value_template_process_refs(processes, process, map, spawned_refs, false)
         }
         CheckedValueTemplate::ProcessRef {
@@ -596,6 +627,15 @@ pub(super) fn validate_value_template_process_refs(
     }
 }
 
+fn reject_projected_process_ref_payload_type(ty: &CheckedTypeRef) -> Result<()> {
+    if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+        return Err(Error::new(
+            "process reference payload templates must be direct message payloads",
+        ));
+    }
+    Ok(())
+}
+
 fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) -> Result<()> {
     match template {
         CheckedValueTemplate::Literal(value) => {
@@ -615,6 +655,12 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
                 return Err(process_ref_next_state_error());
             }
             Ok(())
+        }
+        CheckedValueTemplate::EnumPayload { ty, value, .. } => {
+            if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(process_ref_next_state_error());
+            }
+            reject_process_ref_template_in_next_state(value)
         }
         CheckedValueTemplate::RecordField { ty, record, .. } => {
             if matches!(ty.kind(), CheckedTypeKind::ProcessRef { .. }) {
@@ -689,6 +735,9 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
         CheckedValueTemplate::Literal(_) => false,
         CheckedValueTemplate::ReceivedPayload { .. } => true,
         CheckedValueTemplate::CurrentStatePayload { .. } => false,
+        CheckedValueTemplate::EnumPayload { value, .. } => {
+            checked_template_depends_on_received_payload(value)
+        }
         CheckedValueTemplate::RecordField { record, .. } => {
             checked_template_depends_on_received_payload(record)
         }
@@ -757,6 +806,14 @@ fn evaluate_checked_template(
                 )));
             }
             Ok(payload.clone())
+        }
+        CheckedValueTemplate::EnumPayload { ty, value, variant } => {
+            let value = evaluate_checked_template(value, received_payload, current_state_payload)?;
+            let variant = value.ty().enum_variant_label(*variant)?;
+            let payload = checked_payload_value(&value)?
+                .project_enum_payload(variant.as_str())
+                .map_err(|err| Error::new(err.to_string()))?;
+            Ok(CheckedPayloadValue::new(ty.clone(), payload))
         }
         CheckedValueTemplate::RecordField { ty, record, field } => {
             let record =
@@ -838,7 +895,7 @@ fn evaluate_checked_template(
             Ok(CheckedPayloadValue::new(
                 ty.clone(),
                 ArtifactValue::EnumVariant {
-                    variant: variant.to_string(),
+                    variant: ty.enum_variant_label(*variant)?.to_string(),
                     payload: Box::new(checked_payload_value(&payload)?),
                 },
             ))

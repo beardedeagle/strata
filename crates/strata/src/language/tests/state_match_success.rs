@@ -40,7 +40,7 @@ fn parses_checks_and_lowers_state_payload_match() {
         CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
             variant, payload, ..
         }) => {
-            assert_eq!(variant.as_str(), "Done");
+            assert_eq!(variant.as_u32(), 2);
             assert_eq!(
                 *payload,
                 CheckedValueTemplate::CurrentStatePayload {
@@ -93,7 +93,7 @@ fn parses_checks_and_lowers_state_payload_match() {
             payload,
             ..
         }) => {
-            assert_eq!(variant, "Done");
+            assert_eq!(*variant, mantle_artifact::EnumVariantId::new(2));
             assert_eq!(
                 **payload,
                 ArtifactValueTemplate::CurrentStatePayload { ty: job_ty }
@@ -208,7 +208,7 @@ proc Worker mailbox bounded(2) {
     else {
         panic!("Working state transition should lower to a Done template");
     };
-    assert_eq!(variant, "Done");
+    assert_eq!(*variant, mantle_artifact::EnumVariantId::new(2));
     let ArtifactValueTemplate::MapValue {
         key,
         keys,
@@ -471,7 +471,7 @@ proc Sink mailbox bounded(1) {
         panic!("expected send action");
     };
     assert!(matches!(
-        payload.as_ref(),
+        payload.as_deref(),
         Some(CheckedValueTemplate::CurrentStatePayload { .. })
     ));
     let sink = checked

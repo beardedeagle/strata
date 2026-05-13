@@ -7,8 +7,8 @@ use std::sync::Once;
 
 use mantle_artifact::{
     ArtifactEffect, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, ProcessId, TypeId,
-    read_artifact,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact,
+    ProcessId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -682,7 +682,7 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
                 name: "work".to_string(),
                 value: ArtifactValueTemplate::EnumVariant {
                     ty: value_type_id(&artifact, "Work"),
-                    variant: "Assigned".to_string(),
+                    variant: EnumVariantId::new(1),
                     payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
                         ty: value_type_id(&artifact, "Job"),
                     }),
@@ -731,6 +731,28 @@ fn function_collection_match_checks_builds_and_runs_on_mantle() {
     assert!(trace.contains(
         r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper collection match selected values""#
     ));
+}
+
+#[test]
+fn nested_patterns_check_build_and_run_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/nested_patterns.str",
+        "target/strata/nested_patterns.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let trace = gate.read_trace("nested_patterns");
+    assert!(trace.contains("\"event\":\"artifact_loaded\""));
+
+    let artifact = gate.read_artifact("target/strata/nested_patterns.mta");
+    let encoded = artifact.encode();
+    assert!(
+        encoded.contains(".kind=enum_payload"),
+        "nested constructor projection should lower as typed enum payload templates"
+    );
 }
 
 #[test]
@@ -857,7 +879,7 @@ fn state_payload_enum_checks_builds_and_runs_on_mantle() {
         worker.transitions[0].next_state,
         mantle_artifact::NextState::Template(ArtifactValueTemplate::EnumVariant {
             ty: value_type_id(&artifact, "WorkerState"),
-            variant: "Working".to_string(),
+            variant: EnumVariantId::new(1),
             payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
                 ty: value_type_id(&artifact, "Job"),
             }),
@@ -1019,7 +1041,7 @@ fn state_payload_match_checks_builds_and_runs_on_mantle() {
         worker.transitions[2].next_state,
         mantle_artifact::NextState::Template(ArtifactValueTemplate::EnumVariant {
             ty: value_type_id(&artifact, "WorkerState"),
-            variant: "Done".to_string(),
+            variant: EnumVariantId::new(2),
             payload: Box::new(ArtifactValueTemplate::CurrentStatePayload { ty: job_type }),
         })
     );

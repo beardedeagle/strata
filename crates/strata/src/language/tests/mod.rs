@@ -6,6 +6,7 @@ mod limits;
 mod message_payload_flow;
 mod message_payload_process_refs;
 mod message_payload_validation;
+mod nested_pattern_destructuring;
 mod payload_limits;
 mod process_refs;
 mod source_function_collection_patterns;

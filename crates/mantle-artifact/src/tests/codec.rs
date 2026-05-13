@@ -29,6 +29,26 @@ fn artifact_round_trips_and_validates_magic() {
 }
 
 #[test]
+fn artifact_round_trips_enum_variant_metadata_above_template_field_limit() {
+    let mut artifact = valid_artifact();
+    let variants = (0..=MAX_VALUE_TEMPLATE_FIELDS)
+        .map(|index| format!("V{index}"))
+        .collect::<Vec<_>>();
+    artifact.types[MAIN_MSG.index()] = ArtifactType::enum_value("MainMsg", variants);
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded)
+        .expect("enum variant metadata above template-field limit should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains(&format!(
+        "type.{}.enum_variant_count={}",
+        MAIN_MSG.index(),
+        MAX_VALUE_TEMPLATE_FIELDS + 1
+    )));
+}
+
+#[test]
 fn artifact_round_trips_panic_step_result() {
     let mut artifact = valid_artifact();
     artifact.processes[1].transitions[0].step_result = StepResult::Panic;

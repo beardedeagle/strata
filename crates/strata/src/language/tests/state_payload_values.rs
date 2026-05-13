@@ -21,7 +21,7 @@ fn checks_payload_state_enum_values() {
             payload,
         }) => {
             assert_eq!(&ty, worker.state_type());
-            assert_eq!(variant.as_str(), "Working");
+            assert_eq!(variant.as_u32(), 1);
             assert_eq!(
                 *payload,
                 CheckedValueTemplate::ReceivedPayload {

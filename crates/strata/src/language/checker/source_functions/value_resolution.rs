@@ -1,5 +1,6 @@
 use super::collection_patterns::{
     collection_pattern_type, resolve_collection_pattern_value_bindings,
+    source_nested_pattern_substitutions,
 };
 use super::record_patterns::{check_record_pattern_bindings, record_pattern_type};
 use super::values::{check_source_value_type, resolve_source_value_expr};
@@ -191,7 +192,7 @@ fn resolve_constructor_payload_pattern_bindings(
             vec![PatternPayloadParam {
                 name: binding.name.clone(),
                 ty: binding.ty.clone(),
-                path: PayloadBindingPath::Whole,
+                path: PayloadBindingPath::whole(),
             }],
         )),
         ConstructorPayloadPattern::Destructure(pattern) => {
@@ -238,10 +239,37 @@ fn resolve_destructured_payload_pattern(
             resolve_collection_payload_pattern(scope, function, payload_type, pattern, payload)
         }
         Pattern::Wildcard => Ok((Vec::new(), Vec::new())),
-        Pattern::Constructor { name, .. } => Err(Error::new(format!(
-            "function {} nested constructor payload pattern {name} is not supported in this source slice",
-            function.name
-        ))),
+        Pattern::Constructor { .. } => {
+            let subject = format!("function {}", function.name);
+            let mut seen_bindings = BTreeSet::new();
+            let mut nested_scope = NestedPatternBindingScope {
+                module: scope.module,
+                semantic_index: scope.semantic_index,
+                binding_context: PatternBindingContext::Source { owner: &subject },
+                context: "signature payload pattern",
+                seen_bindings: &mut seen_bindings,
+            };
+            let bindings = check_nested_pattern_bindings(
+                &mut nested_scope,
+                payload_type,
+                pattern,
+                &PayloadBindingPath::whole(),
+            )?;
+            let Some(substitutions) = source_nested_pattern_substitutions(
+                scope.module,
+                scope.semantic_index,
+                payload_type,
+                pattern,
+                payload,
+            )?
+            else {
+                return Err(Error::new(format!(
+                    "function {} signature nested payload pattern does not match concrete {}",
+                    function.name, payload
+                )));
+            };
+            Ok((substitutions, bindings))
+        }
     }
 }
 

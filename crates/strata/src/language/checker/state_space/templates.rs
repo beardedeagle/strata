@@ -7,13 +7,13 @@ use super::super::super::ast::{
     Identifier, ListValue, MapValue, Module, Record, TypeRef, ValueExpr,
 };
 use super::super::super::checked::{
-    CheckedPayloadValue, CheckedTypeRef, CheckedValueTemplate, CheckedValueTemplateField,
-    CheckedValueTemplateMapEntry,
+    CheckedEnumVariantId, CheckedPayloadValue, CheckedTypeRef, CheckedValueTemplate,
+    CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::CheckedTypeInterner;
-use super::super::PayloadBindingPath;
 use super::super::symbols::{CollectionType, SemanticIndex};
+use super::super::{PayloadBindingPath, PayloadProjectionSegmentKind};
 use super::canonical::{CanonicalValueContext, canonical_value, source_value_uses_binding};
 
 #[derive(Clone, Copy)]
@@ -69,7 +69,7 @@ fn checked_value_template(
     if let ValueExpr::Identifier(name) = value {
         if let Some(binding) = bindings.iter().find(|binding| name == binding.name) {
             if semantic_index.same_type(binding.ty, expected_type) {
-                return Ok(checked_binding_value_template(binding));
+                return checked_binding_value_template(types, binding);
             }
             return Err(Error::new(format!(
                 "value binding {} has type {}, expected {}",
@@ -137,8 +137,11 @@ fn checked_value_template(
     )
 }
 
-fn checked_binding_value_template(binding: &ValueTemplateBinding<'_>) -> CheckedValueTemplate {
-    let root = match binding.source {
+fn checked_binding_value_template(
+    types: &mut CheckedTypeInterner<'_>,
+    binding: &ValueTemplateBinding<'_>,
+) -> Result<CheckedValueTemplate> {
+    let mut template = match binding.source {
         ValueTemplateSource::ReceivedPayload => CheckedValueTemplate::ReceivedPayload {
             ty: binding.root_checked_ty.clone(),
         },
@@ -146,49 +149,67 @@ fn checked_binding_value_template(binding: &ValueTemplateBinding<'_>) -> Checked
             ty: binding.root_checked_ty.clone(),
         },
     };
-    match binding.path {
-        PayloadBindingPath::Whole => root,
-        PayloadBindingPath::RecordField { field } => CheckedValueTemplate::RecordField {
-            ty: binding.checked_ty.clone(),
-            record: Box::new(root),
-            field: field.clone(),
-        },
-        PayloadBindingPath::ListIndex { index, len } => CheckedValueTemplate::ListElement {
-            ty: binding.checked_ty.clone(),
-            list: Box::new(root),
-            index: *index,
-            len: *len,
-        },
-        PayloadBindingPath::ListPrefixIndex { index, prefix_len } => {
-            CheckedValueTemplate::ListPrefixElement {
-                ty: binding.checked_ty.clone(),
-                list: Box::new(root),
-                index: *index,
-                prefix_len: *prefix_len,
+    for segment in binding.path.segments() {
+        let checked_ty = types.intern(&segment.ty)?;
+        template = match &segment.kind {
+            PayloadProjectionSegmentKind::EnumPayload { variant, .. } => {
+                CheckedValueTemplate::EnumPayload {
+                    ty: checked_ty,
+                    value: Box::new(template),
+                    variant: *variant,
+                }
             }
-        }
-        PayloadBindingPath::ListRest { prefix_len } => CheckedValueTemplate::ListRest {
-            ty: binding.checked_ty.clone(),
-            list: Box::new(root),
-            prefix_len: *prefix_len,
-        },
-        PayloadBindingPath::MapValue {
-            key,
-            keys,
-            projection,
-        } => CheckedValueTemplate::MapValue {
-            ty: binding.checked_ty.clone(),
-            map: Box::new(root),
-            key: key.clone(),
-            keys: keys.clone(),
-            projection: *projection,
-        },
-        PayloadBindingPath::MapRest { excluded_keys } => CheckedValueTemplate::MapRest {
-            ty: binding.checked_ty.clone(),
-            map: Box::new(root),
-            excluded_keys: excluded_keys.clone(),
-        },
+            PayloadProjectionSegmentKind::RecordField { field } => {
+                CheckedValueTemplate::RecordField {
+                    ty: checked_ty,
+                    record: Box::new(template),
+                    field: field.clone(),
+                }
+            }
+            PayloadProjectionSegmentKind::ListIndex { index, len } => {
+                CheckedValueTemplate::ListElement {
+                    ty: checked_ty,
+                    list: Box::new(template),
+                    index: *index,
+                    len: *len,
+                }
+            }
+            PayloadProjectionSegmentKind::ListPrefixIndex { index, prefix_len } => {
+                CheckedValueTemplate::ListPrefixElement {
+                    ty: checked_ty,
+                    list: Box::new(template),
+                    index: *index,
+                    prefix_len: *prefix_len,
+                }
+            }
+            PayloadProjectionSegmentKind::ListRest { prefix_len } => {
+                CheckedValueTemplate::ListRest {
+                    ty: checked_ty,
+                    list: Box::new(template),
+                    prefix_len: *prefix_len,
+                }
+            }
+            PayloadProjectionSegmentKind::MapValue {
+                key,
+                keys,
+                projection,
+            } => CheckedValueTemplate::MapValue {
+                ty: checked_ty,
+                map: Box::new(template),
+                key: key.clone(),
+                keys: keys.clone(),
+                projection: *projection,
+            },
+            PayloadProjectionSegmentKind::MapRest { excluded_keys } => {
+                CheckedValueTemplate::MapRest {
+                    ty: checked_ty,
+                    map: Box::new(template),
+                    excluded_keys: excluded_keys.clone(),
+                }
+            }
+        };
     }
+    Ok(template)
 }
 
 fn checked_enum_variant_template(
@@ -206,16 +227,13 @@ fn checked_enum_variant_template(
         )));
     };
     let enum_decl = semantic_index.enum_decl(module, expected_type)?;
-    let variant = enum_decl
-        .variants
-        .iter()
-        .find(|variant| variant.name == *name)
-        .ok_or_else(|| {
-            Error::new(format!(
-                "value {name} is not a variant of enum {}",
-                enum_decl.name
-            ))
-        })?;
+    let variant_index = semantic_index.enum_variant_index(module, expected_type, name)?;
+    let variant = enum_decl.variants.get(variant_index).ok_or_else(|| {
+        Error::new(format!(
+            "value {name} is not a variant of enum {}",
+            enum_decl.name
+        ))
+    })?;
     let Some(payload_type) = &variant.payload_type else {
         return Err(Error::new(format!(
             "enum variant {name} does not accept a payload"
@@ -223,7 +241,7 @@ fn checked_enum_variant_template(
     };
     Ok(CheckedValueTemplate::EnumVariant {
         ty: types.intern(expected_type)?,
-        variant: name.clone(),
+        variant: CheckedEnumVariantId::from_index(variant_index)?,
         payload: Box::new(checked_value_template(
             module,
             semantic_index,
@@ -489,6 +507,7 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         CheckedValueTemplate::Literal(value) => value.value().cloned(),
         CheckedValueTemplate::ReceivedPayload { .. }
         | CheckedValueTemplate::CurrentStatePayload { .. }
+        | CheckedValueTemplate::EnumPayload { .. }
         | CheckedValueTemplate::RecordField { .. }
         | CheckedValueTemplate::ListElement { .. }
         | CheckedValueTemplate::ListPrefixElement { .. }
@@ -497,9 +516,11 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. } => None,
         CheckedValueTemplate::EnumVariant {
-            variant, payload, ..
+            ty,
+            variant,
+            payload,
         } => Some(ArtifactValue::EnumVariant {
-            variant: variant.to_string(),
+            variant: ty.enum_variant_label(*variant).ok()?.to_string(),
             payload: Box::new(checked_static_source_value(payload)?),
         }),
         CheckedValueTemplate::Record { ty, fields } => {

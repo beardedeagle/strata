@@ -190,7 +190,7 @@ fn validate_rejects_current_state_payload_template_outside_state_table() {
             step_result: StepResult::Stop,
             next_state: NextState::Template(ArtifactValueTemplate::EnumVariant {
                 ty: WORKER_STATE,
-                variant: "Done".to_string(),
+                variant: EnumVariantId::new(3),
                 payload: Box::new(ArtifactValueTemplate::CurrentStatePayload { ty: JOB }),
             }),
             effects: Vec::new(),

@@ -249,6 +249,7 @@ pub struct MapPatternEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CollectionPatternBinding {
     Binding(Identifier),
+    Pattern(Box<Pattern>),
     Wildcard,
 }
 

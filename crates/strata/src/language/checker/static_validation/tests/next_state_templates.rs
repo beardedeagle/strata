@@ -188,10 +188,11 @@ fn static_validation_rejects_process_ref_payload_enum_next_state_template() {
             actions: Vec::new(),
         })],
     });
+    let worker_state = enum_value_type("WorkerState", &["Idle", "Routed"]);
     let worker = CheckedProcess::new(CheckedProcessParts {
         debug_name: ident("Worker"),
-        state_type: value_type("WorkerState"),
-        state_values: checked_state_values("WorkerState", &["Idle"]),
+        state_type: worker_state.clone(),
+        state_values: checked_state_values_for_type(worker_state.clone(), &["Idle"]),
         message_type: value_type("WorkerMsg"),
         message_cases: vec![
             CheckedMessageCase::new(
@@ -209,8 +210,8 @@ fn static_validation_rejects_process_ref_payload_enum_next_state_template() {
             message: checked_message_id(0),
             step_result: CheckedStepResult::Stop,
             next_state: CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
-                ty: value_type("WorkerState"),
-                variant: ident("Routed"),
+                ty: worker_state,
+                variant: checked_enum_variant_id(1),
                 payload: Box::new(CheckedValueTemplate::ReceivedPayload {
                     ty: process_ref_type("Worker"),
                 }),
@@ -268,9 +269,11 @@ fn static_validation_rejects_payload_template_next_state_outside_state_table() {
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                     message: checked_message_id(0),
-                    payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-                        value_type("Job"),
-                        artifact_value("Job{phase:Ready}"),
+                    payload: Some(Box::new(CheckedValueTemplate::Literal(
+                        CheckedPayloadValue::new(
+                            value_type("Job"),
+                            artifact_value("Job{phase:Ready}"),
+                        ),
                     ))),
                 },
             ],
@@ -357,18 +360,21 @@ fn static_validation_rejects_payload_enum_template_next_state_outside_state_tabl
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
                     message: checked_message_id(0),
-                    payload: Some(CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-                        value_type("Job"),
-                        artifact_value("Job{phase:Ready}"),
+                    payload: Some(Box::new(CheckedValueTemplate::Literal(
+                        CheckedPayloadValue::new(
+                            value_type("Job"),
+                            artifact_value("Job{phase:Ready}"),
+                        ),
                     ))),
                 },
             ],
         })],
     });
+    let worker_state = enum_value_type("WorkerState", &["Idle", "Working"]);
     let worker = CheckedProcess::new(CheckedProcessParts {
         debug_name: ident("Worker"),
-        state_type: value_type("WorkerState"),
-        state_values: checked_state_values("WorkerState", &["Idle"]),
+        state_type: worker_state.clone(),
+        state_values: checked_state_values_for_type(worker_state.clone(), &["Idle"]),
         message_type: value_type("WorkerMsg"),
         message_cases: vec![
             CheckedMessageCase::new(
@@ -386,8 +392,8 @@ fn static_validation_rejects_payload_enum_template_next_state_outside_state_tabl
             message: checked_message_id(0),
             step_result: CheckedStepResult::Stop,
             next_state: CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
-                ty: value_type("WorkerState"),
-                variant: ident("Working"),
+                ty: worker_state,
+                variant: checked_enum_variant_id(1),
                 payload: Box::new(CheckedValueTemplate::ReceivedPayload {
                     ty: value_type("Job"),
                 }),

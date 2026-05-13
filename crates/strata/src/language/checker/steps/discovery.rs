@@ -167,6 +167,8 @@ pub(in crate::language::checker) fn matching_message_cases<'a>(
 }
 
 pub(in crate::language::checker) fn payload_value_bindings<'a>(
+    module: &Module,
+    semantic_index: &SemanticIndex,
     pattern: &'a StepPattern,
     case: &'a DiscoveredMessageCase,
 ) -> Result<Vec<DiscoveryValueBinding>> {
@@ -174,13 +176,16 @@ pub(in crate::language::checker) fn payload_value_bindings<'a>(
         (StepPattern::Variant { bindings, .. }, Some(payload)) => bindings
             .iter()
             .map(|param| {
-                let (label, value) = checked_payload_binding(payload, param)?.ok_or_else(|| {
-                    Error::new(format!(
-                        "message payload {} does not match pattern binding {}",
-                        payload.label(),
-                        param.name
-                    ))
-                })?;
+                let (label, value) =
+                    checked_payload_binding(module, semantic_index, payload, param)?.ok_or_else(
+                        || {
+                            Error::new(format!(
+                                "message payload {} does not match pattern binding {}",
+                                payload.label(),
+                                param.name
+                            ))
+                        },
+                    )?;
                 Ok(DiscoveryValueBinding {
                     name: param.name.clone(),
                     ty: param.ty.clone(),

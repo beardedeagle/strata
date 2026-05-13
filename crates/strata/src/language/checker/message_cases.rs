@@ -42,11 +42,11 @@ pub(super) struct MessageCaseTable {
 }
 
 impl MessageCaseTable {
-    pub(super) fn build(
-        module: &Module,
+    pub(super) fn build<'a>(
+        module: &'a Module,
         entry_process: CheckedProcessId,
-        semantic_index: &SemanticIndex,
-        types: &mut CheckedTypeInterner<'_>,
+        semantic_index: &'a SemanticIndex,
+        types: &mut CheckedTypeInterner<'a>,
     ) -> Result<Self> {
         reject_payload_entry_message(module, entry_process, semantic_index)?;
         let mut builders = module
@@ -106,7 +106,12 @@ impl MessageCaseTable {
                             &clause.pattern,
                             &explicit_step_variants[process_index],
                         ) {
-                            let bindings = payload_value_bindings(&clause.pattern, sender_case)?;
+                            let bindings = payload_value_bindings(
+                                module,
+                                semantic_index,
+                                &clause.pattern,
+                                sender_case,
+                            )?;
                             for statement in &clause.body.statements {
                                 let Statement::Send {
                                     target,
@@ -141,6 +146,8 @@ impl MessageCaseTable {
                                     sender_cases,
                                     concrete_state_payloads: &concrete_state_payload_domains
                                         [process_index],
+                                    module,
+                                    semantic_index,
                                     process_refs: &process_ref_targets[process_index],
                                     types,
                                 };
@@ -437,15 +444,9 @@ fn add_discovered_send_payload_cases(
     context: &mut SendPayloadDiscoveryContext<'_, '_, '_>,
 ) -> Result<bool> {
     let mut changed = false;
-    for bindings in discovery_value_binding_sets(
-        payload,
-        message_bindings,
-        state_payload_bindings,
-        context.sender_cases,
-        context.concrete_state_payloads,
-        builder.semantic_index,
-        context.types,
-    )? {
+    for bindings in
+        discovery_value_binding_sets(payload, message_bindings, state_payload_bindings, context)?
+    {
         let value_bindings = value_bindings_from_discovery(&bindings);
         changed |= builder.add_payload_case(
             variant_id,
@@ -462,10 +463,7 @@ fn discovery_value_binding_sets(
     payload: Option<&ValueExpr>,
     message_bindings: &[DiscoveryValueBinding],
     state_payload_bindings: &[StatePayloadDiscoveryBinding],
-    sender_cases: &[DiscoveredMessageCase],
-    concrete_state_payloads: &[ConcreteStatePayloadDomain],
-    semantic_index: &SemanticIndex,
-    types: &mut CheckedTypeInterner<'_>,
+    context: &mut SendPayloadDiscoveryContext<'_, '_, '_>,
 ) -> Result<Vec<Vec<DiscoveryValueBinding>>> {
     let Some(payload) = payload else {
         return Ok(vec![message_bindings.to_vec()]);
@@ -477,10 +475,10 @@ fn discovery_value_binding_sets(
         }
         let payloads = state_payload_discovery_values(
             binding,
-            sender_cases,
-            concrete_state_payloads,
-            semantic_index,
-            types,
+            context.sender_cases,
+            context.concrete_state_payloads,
+            context.semantic_index,
+            context.types,
         )?;
         if payloads.is_empty() {
             return Ok(Vec::new());
@@ -490,6 +488,8 @@ fn discovery_value_binding_sets(
             for payload in &payloads {
                 let mut next = base.clone();
                 let (label, value) = checked_payload_binding(
+                    context.module,
+                    context.semantic_index,
                     payload,
                     &PatternPayloadParam {
                         name: binding.name.clone(),

@@ -25,13 +25,13 @@ mod values;
 
 use mantle_artifact::{
     ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactTransition, ArtifactType, ArtifactTypeKind, Error,
-    MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId, validate_message_label,
-    validate_state_value_identity_label,
+    ArtifactSendTarget, ArtifactTransition, ArtifactType, ArtifactTypeKind, EnumVariantId, Error,
+    MAX_ACTIONS_PER_PROCESS, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
+    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
+    validate_message_label, validate_state_value_identity_label,
 };
 
 #[derive(Debug, Clone)]
@@ -146,6 +146,21 @@ impl LoadedProgram {
         Ok(self.type_entry(ty)?.label.as_str())
     }
 
+    pub(crate) fn enum_variant_label(&self, ty: TypeId, variant: EnumVariantId) -> Result<&str> {
+        let type_entry = self.type_entry(ty)?;
+        type_entry
+            .enum_variants
+            .get(variant.index())
+            .map(String::as_str)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "loaded type id {} has no enum variant id {}",
+                    ty.as_u32(),
+                    variant.as_u32()
+                ))
+            })
+    }
+
     pub(crate) fn validate_value_type(&self, field: &str, ty: TypeId) -> Result<()> {
         match self.type_entry(ty)?.kind {
             ArtifactTypeKind::Value => Ok(()),
@@ -216,6 +231,7 @@ impl LoadedProgram {
         }
         for (type_index, ty) in self.types.iter().enumerate() {
             validate_loaded_ident_field(&format!("type.{type_index}.label"), &ty.label)?;
+            self.validate_type_enum_variants(type_index, ty)?;
             if let ArtifactTypeKind::ProcessRef { target } = ty.kind {
                 self.process(target)?;
             }
@@ -252,6 +268,32 @@ impl LoadedProgram {
 
         for (process_index, process) in self.processes.iter().enumerate() {
             process.validate_admission(self, ProcessId::from_index(process_index)?)?;
+        }
+        Ok(())
+    }
+
+    fn validate_type_enum_variants(&self, type_index: usize, ty: &ArtifactType) -> Result<()> {
+        if ty.enum_variants.len() > MAX_ENUM_VARIANTS_PER_TYPE {
+            return Err(Error::new(format!(
+                "type.{type_index}.enum_variant_count must be no greater than {MAX_ENUM_VARIANTS_PER_TYPE}"
+            )));
+        }
+        let mut seen = BTreeSet::new();
+        for (variant_index, variant) in ty.enum_variants.iter().enumerate() {
+            validate_loaded_ident_field(
+                &format!("type.{type_index}.enum_variant.{variant_index}"),
+                variant,
+            )?;
+            if !seen.insert(variant.as_str()) {
+                return Err(Error::new(format!(
+                    "type.{type_index} duplicates enum variant {variant}"
+                )));
+            }
+        }
+        if matches!(ty.kind, ArtifactTypeKind::ProcessRef { .. }) && !ty.enum_variants.is_empty() {
+            return Err(Error::new(format!(
+                "type.{type_index} process reference type must not declare enum variants"
+            )));
         }
         Ok(())
     }

@@ -117,7 +117,7 @@ pub(in crate::language::checker::source_functions) fn check_collection_pattern_b
                 element,
                 capacity,
             )?;
-            check_list_pattern_bindings(semantic_index, subject, element, capacity, pattern)
+            check_list_pattern_bindings(module, semantic_index, subject, element, capacity, pattern)
         }
         Some(CollectionType::Map {
             key,
@@ -227,16 +227,26 @@ pub(in crate::language::checker::source_functions) fn resolve_collection_pattern
                         capacity,
                     )?;
                     let bindings = check_list_pattern_bindings(
+                        module,
                         semantic_index,
                         &subject,
                         element,
                         capacity,
                         pattern,
                     )?;
+                    let Some(substitutions) = list_pattern_substitutions(
+                        module,
+                        semantic_index,
+                        element,
+                        capacity,
+                        pattern,
+                        list,
+                    )?
+                    else {
+                        return Ok(None);
+                    };
                     Ok(Some(CollectionPatternResolution {
-                        substitutions: list_pattern_substitutions(
-                            element, capacity, pattern, list,
-                        )?,
+                        substitutions,
                         bindings,
                     }))
                 }
@@ -532,6 +542,7 @@ fn validate_map_pattern_type(
 }
 
 fn check_list_pattern_bindings(
+    module: &Module,
     semantic_index: &SemanticIndex,
     subject: &str,
     element_type: &TypeRef,
@@ -541,34 +552,58 @@ fn check_list_pattern_bindings(
     let mut seen_bindings = BTreeSet::new();
     let mut bindings = Vec::new();
     for (index, binding) in pattern.elements.iter().enumerate() {
-        let CollectionPatternBinding::Binding(name) = binding else {
-            continue;
-        };
-        if !seen_bindings.insert(name.as_str()) {
-            return Err(Error::new(format!(
-                "{subject} list pattern binding {name} is declared more than once"
-            )));
+        let element_path = PayloadBindingPath::whole().then(list_element_binding_segment(
+            element_type,
+            index,
+            pattern,
+        ));
+        match binding {
+            CollectionPatternBinding::Binding(name) => {
+                if !seen_bindings.insert(name.to_string()) {
+                    return Err(Error::new(format!(
+                        "{subject} list pattern binding {name} is declared more than once"
+                    )));
+                }
+                validate_source_pattern_binding_name(subject, semantic_index, name)?;
+                bindings.push(PatternPayloadParam {
+                    name: name.clone(),
+                    ty: element_type.clone(),
+                    path: element_path,
+                });
+            }
+            CollectionPatternBinding::Pattern(pattern) => {
+                let mut nested_scope = NestedPatternBindingScope {
+                    module,
+                    semantic_index,
+                    binding_context: PatternBindingContext::Source { owner: subject },
+                    context: "pattern",
+                    seen_bindings: &mut seen_bindings,
+                };
+                bindings.extend(check_nested_pattern_bindings(
+                    &mut nested_scope,
+                    element_type,
+                    pattern,
+                    &element_path,
+                )?);
+            }
+            CollectionPatternBinding::Wildcard => {}
         }
-        validate_source_pattern_binding_name(subject, semantic_index, name)?;
-        bindings.push(PatternPayloadParam {
-            name: name.clone(),
-            ty: element_type.clone(),
-            path: list_element_binding_path(index, pattern),
-        });
     }
     if let Some(rest) = &pattern.rest {
-        if !seen_bindings.insert(rest.as_str()) {
+        if !seen_bindings.insert(rest.to_string()) {
             return Err(Error::new(format!(
                 "{subject} list pattern binding {rest} is declared more than once"
             )));
         }
         validate_source_pattern_binding_name(subject, semantic_index, rest)?;
+        let rest_ty = list_rest_type(element_type, capacity, pattern.elements.len())?;
         bindings.push(PatternPayloadParam {
             name: rest.clone(),
-            ty: list_rest_type(element_type, capacity, pattern.elements.len())?,
-            path: PayloadBindingPath::ListRest {
-                prefix_len: pattern.elements.len(),
-            },
+            ty: rest_ty.clone(),
+            path: PayloadBindingPath::whole().then(PayloadProjectionSegment::list_rest(
+                rest_ty,
+                pattern.elements.len(),
+            )),
         });
     }
     Ok(bindings)
@@ -594,38 +629,57 @@ fn check_map_pattern_bindings(
             &entry.key,
             &[],
         )?;
-        let CollectionPatternBinding::Binding(name) = &entry.binding else {
-            continue;
-        };
-        if !seen_bindings.insert(name.as_str()) {
-            return Err(Error::new(format!(
-                "{subject} map pattern binding {name} is declared more than once"
-            )));
+        let value_path = PayloadBindingPath::whole().then(PayloadProjectionSegment::map_value(
+            value_type.clone(),
+            key,
+            keys.clone(),
+            map_pattern_projection(pattern),
+        ));
+        match &entry.binding {
+            CollectionPatternBinding::Binding(name) => {
+                if !seen_bindings.insert(name.to_string()) {
+                    return Err(Error::new(format!(
+                        "{subject} map pattern binding {name} is declared more than once"
+                    )));
+                }
+                validate_source_pattern_binding_name(subject, semantic_index, name)?;
+                bindings.push(PatternPayloadParam {
+                    name: name.clone(),
+                    ty: value_type.clone(),
+                    path: value_path,
+                });
+            }
+            CollectionPatternBinding::Pattern(pattern) => {
+                let mut nested_scope = NestedPatternBindingScope {
+                    module,
+                    semantic_index,
+                    binding_context: PatternBindingContext::Source { owner: subject },
+                    context: "pattern",
+                    seen_bindings: &mut seen_bindings,
+                };
+                bindings.extend(check_nested_pattern_bindings(
+                    &mut nested_scope,
+                    value_type,
+                    pattern,
+                    &value_path,
+                )?);
+            }
+            CollectionPatternBinding::Wildcard => {}
         }
-        validate_source_pattern_binding_name(subject, semantic_index, name)?;
-        bindings.push(PatternPayloadParam {
-            name: name.clone(),
-            ty: value_type.clone(),
-            path: PayloadBindingPath::MapValue {
-                key,
-                keys: keys.clone(),
-                projection: map_pattern_projection(pattern),
-            },
-        });
     }
     if let Some(rest) = &pattern.rest {
-        if !seen_bindings.insert(rest.as_str()) {
+        if !seen_bindings.insert(rest.to_string()) {
             return Err(Error::new(format!(
                 "{subject} map pattern binding {rest} is declared more than once"
             )));
         }
         validate_source_pattern_binding_name(subject, semantic_index, rest)?;
+        let rest_ty = map_rest_type(key_type, value_type, capacity, keys.len())?;
         bindings.push(PatternPayloadParam {
             name: rest.clone(),
-            ty: map_rest_type(key_type, value_type, capacity, keys.len())?,
-            path: PayloadBindingPath::MapRest {
-                excluded_keys: keys,
-            },
+            ty: rest_ty.clone(),
+            path: PayloadBindingPath::whole()
+                .then(PayloadProjectionSegment::map_rest(rest_ty, keys)),
         });
     }
     Ok(bindings)
@@ -657,22 +711,35 @@ fn canonical_map_pattern_keys(
 }
 
 fn list_pattern_substitutions(
+    module: &Module,
+    semantic_index: &SemanticIndex,
     element_type: &TypeRef,
     capacity: usize,
     pattern: &ListPattern,
     value: &ListValue,
-) -> Result<Vec<SourceSubstitution>> {
-    let mut substitutions = pattern
-        .elements
-        .iter()
-        .zip(&value.items)
-        .filter_map(|(binding, value)| match binding {
+) -> Result<Option<Vec<SourceSubstitution>>> {
+    let mut substitutions = Vec::new();
+    for (binding, value) in pattern.elements.iter().zip(&value.items) {
+        match binding {
             CollectionPatternBinding::Binding(name) => {
-                Some(SourceSubstitution::new(name.clone(), value.clone()))
+                substitutions.push(SourceSubstitution::new(name.clone(), value.clone()));
             }
-            CollectionPatternBinding::Wildcard => None,
-        })
-        .collect::<Vec<_>>();
+            CollectionPatternBinding::Pattern(pattern) => {
+                let Some(mut nested) = source_nested_pattern_substitutions(
+                    module,
+                    semantic_index,
+                    element_type,
+                    pattern,
+                    value,
+                )?
+                else {
+                    return Ok(None);
+                };
+                substitutions.append(&mut nested);
+            }
+            CollectionPatternBinding::Wildcard => {}
+        }
+    }
     if let Some(rest) = &pattern.rest {
         let rest_capacity = capacity
             .checked_sub(pattern.elements.len())
@@ -696,7 +763,7 @@ fn list_pattern_substitutions(
             }),
         ));
     }
-    Ok(substitutions)
+    Ok(Some(substitutions))
 }
 
 fn map_pattern_substitutions(
@@ -744,8 +811,24 @@ fn map_pattern_substitutions(
         let Some(value) = value_entries.get(&key).copied() else {
             return Ok(None);
         };
-        if let CollectionPatternBinding::Binding(binding) = &entry.binding {
-            substitutions.push(SourceSubstitution::new(binding.clone(), value.clone()));
+        match &entry.binding {
+            CollectionPatternBinding::Binding(binding) => {
+                substitutions.push(SourceSubstitution::new(binding.clone(), value.clone()));
+            }
+            CollectionPatternBinding::Pattern(pattern) => {
+                let Some(mut nested) = source_nested_pattern_substitutions(
+                    module,
+                    semantic_index,
+                    value_type,
+                    pattern,
+                    value,
+                )?
+                else {
+                    return Ok(None);
+                };
+                substitutions.append(&mut nested);
+            }
+            CollectionPatternBinding::Wildcard => {}
         }
     }
     if pattern.completeness == MapPatternCompleteness::Exact
@@ -784,6 +867,107 @@ fn map_pattern_substitutions(
         ));
     }
     Ok(Some(substitutions))
+}
+
+pub(in crate::language::checker::source_functions) fn source_nested_pattern_substitutions(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    pattern: &Pattern,
+    value: &ValueExpr,
+) -> Result<Option<Vec<SourceSubstitution>>> {
+    match pattern {
+        Pattern::Record { name, fields } => {
+            let record = semantic_index.record_decl(module, expected_type)?;
+            if record.name != *name {
+                return Ok(None);
+            }
+            let ValueExpr::Record(record_value) = value else {
+                return Ok(None);
+            };
+            let mut substitutions = Vec::with_capacity(fields.len());
+            for field in fields {
+                let Some(value_field) = record_value
+                    .fields
+                    .iter()
+                    .find(|candidate| candidate.name == field.field)
+                else {
+                    return Err(Error::new(format!(
+                        "record pattern {} could not resolve field {}",
+                        record.name, field.field
+                    )));
+                };
+                substitutions.push(SourceSubstitution::new(
+                    field.binding.clone(),
+                    value_field.value.clone(),
+                ));
+            }
+            Ok(Some(substitutions))
+        }
+        Pattern::List(pattern) => {
+            let Some(CollectionType::List { element, capacity }) =
+                semantic_index.collection_type(expected_type)?
+            else {
+                return Ok(None);
+            };
+            let ValueExpr::List(list) = value else {
+                return Ok(None);
+            };
+            if !list_pattern_matches(pattern, list) {
+                return Ok(None);
+            }
+            list_pattern_substitutions(module, semantic_index, element, capacity, pattern, list)
+        }
+        Pattern::Map(pattern) => {
+            let Some(CollectionType::Map {
+                key,
+                value: item,
+                capacity,
+            }) = semantic_index.collection_type(expected_type)?
+            else {
+                return Ok(None);
+            };
+            let ValueExpr::Map(map) = value else {
+                return Ok(None);
+            };
+            map_pattern_substitutions(module, semantic_index, key, item, capacity, pattern, map)
+        }
+        Pattern::Constructor { name, payload } => {
+            let enum_decl = semantic_index.enum_decl(module, expected_type)?;
+            let variant_index = semantic_index.enum_variant_index(module, expected_type, name)?;
+            let variant = &enum_decl.variants[variant_index];
+            let ValueExpr::EnumVariant {
+                name: value_name,
+                payload: value_payload,
+            } = value
+            else {
+                return Ok(None);
+            };
+            if value_name != &variant.name {
+                return Ok(None);
+            }
+            match (&variant.payload_type, payload) {
+                (None, None) => Ok(Some(Vec::new())),
+                (Some(_payload_type), Some(ConstructorPayloadPattern::Binding(binding))) => {
+                    Ok(Some(vec![SourceSubstitution::new(
+                        binding.name.clone(),
+                        (**value_payload).clone(),
+                    )]))
+                }
+                (Some(payload_type), Some(ConstructorPayloadPattern::Destructure(pattern))) => {
+                    source_nested_pattern_substitutions(
+                        module,
+                        semantic_index,
+                        payload_type,
+                        pattern,
+                        value_payload,
+                    )
+                }
+                _ => Ok(None),
+            }
+        }
+        Pattern::Wildcard => Ok(Some(Vec::new())),
+    }
 }
 
 pub(in crate::language::checker::source_functions) fn collection_shape_label(

@@ -389,7 +389,7 @@ impl Parser {
                 ConstructorPayloadPattern::Destructure(Box::new(self.parse_pattern(value)?))
             } else {
                 return Err(self.error_previous(format!(
-                    "constructor payload pattern {name}({value}) must bind the payload as {value}: Type or destructure a record, list, map, or wildcard"
+                    "constructor payload pattern {name}({value}) must bind the payload as {value}: Type or destructure a constructor, record, list, map, or wildcard"
                 )));
             };
             self.expect_symbol(')')?;
@@ -403,6 +403,7 @@ impl Parser {
     fn starts_payload_destructuring_pattern(&self, value: &str) -> bool {
         value == "_"
             || self.peek_symbol('{')
+            || self.peek_symbol('(')
             || ((value == LIST_TYPE || value == MAP_TYPE)
                 && (self.peek_symbol('[') || self.peek_symbol('<')))
     }
@@ -576,6 +577,10 @@ impl Parser {
         let binding = self.expect_ident()?;
         if binding == "_" {
             Ok(CollectionPatternBinding::Wildcard)
+        } else if self.starts_payload_destructuring_pattern(&binding) {
+            Ok(CollectionPatternBinding::Pattern(Box::new(
+                self.parse_pattern(binding)?,
+            )))
         } else {
             Ok(CollectionPatternBinding::Binding(Identifier::new(binding)?))
         }

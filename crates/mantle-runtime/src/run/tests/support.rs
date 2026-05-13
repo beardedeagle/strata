@@ -12,7 +12,7 @@ pub(super) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactMessageVariant,
     ArtifactPayload, ArtifactProcess, ArtifactProcessRef, ArtifactProcessRefPayload,
     ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    ArtifactValueTemplateField, EnumVariantId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
     OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
 };
@@ -69,7 +69,16 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
         types: vec![
             ArtifactType::value("MainState"),
             ArtifactType::value("MainMsg"),
-            ArtifactType::value("WorkerState"),
+            ArtifactType::enum_value(
+                "WorkerState",
+                vec![
+                    "Idle".to_string(),
+                    "Handled".to_string(),
+                    "Working".to_string(),
+                    "Done".to_string(),
+                    "Routed".to_string(),
+                ],
+            ),
             ArtifactType::value("WorkerMsg"),
             ArtifactType::value("Job"),
             ArtifactType::value("Box"),

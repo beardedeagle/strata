@@ -227,7 +227,7 @@ fn validate_rejects_process_ref_payload_enum_next_state_template() {
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::EnumVariant {
             ty: WORKER_STATE,
-            variant: "Routed".to_string(),
+            variant: EnumVariantId::new(4),
             payload: Box::new(ArtifactValueTemplate::ReceivedPayload {
                 ty: PROCESS_REF_WORKER,
             }),

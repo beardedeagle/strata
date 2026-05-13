@@ -141,6 +141,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/nested_patterns.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/nested_patterns.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/nested_patterns.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_reply.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_reply.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
