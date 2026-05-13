@@ -85,7 +85,7 @@ fn validate_source_function_return_enum_match(
         payload_context: PatternPayloadContext::SourceValue,
         binding_context: PatternBindingContext::Source { owner: &subject },
     };
-    for arm in check_typed_match_arms(&pattern_context, &match_body.arms)? {
+    for arm in check_payload_sensitive_typed_match_arms(&pattern_context, &match_body.arms)? {
         if !arm.body.statements.is_empty() {
             return Err(Error::new(format!(
                 "function {} return match arms must not perform statements",

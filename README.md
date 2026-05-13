@@ -244,8 +244,9 @@ fn step(state: WorkerState, Holding(List[Job { phase }, ..tail])) -> ProcResult<
 }
 ```
 
-Invalid, duplicate, unreachable, and overlapping patterns are rejected before
-lowering.
+Helper matches may repeat a top-level constructor only when nested typed enum
+predicates are provably disjoint. Invalid, duplicate, unreachable, and
+overlapping patterns are rejected before lowering.
 
 ### Immutable Collections
 
