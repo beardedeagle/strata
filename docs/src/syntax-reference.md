@@ -148,8 +148,8 @@ map_pattern_entries =
     ("," ".." ident? ","? | ","?)
 
 collection_pattern_binding =
-    ident
-  | nested_collection_pattern
+    nested_collection_pattern
+  | ident
   | "_"
 
 nested_collection_pattern =
@@ -170,6 +170,11 @@ ident_list =
 determinism =
     "@det" | "@nondet"
 ```
+
+Collection pattern bindings that begin with an identifier are nested patterns
+only when the identifier is followed by `(` or `{`, or when `List`/`Map` is
+followed by optional type arguments and `[`. Otherwise the identifier is an
+immutable binding name.
 
 Buildable source accepts bodies for `init`, `step`, module helpers, and
 process-local helpers. It requires deterministic functions and empty
