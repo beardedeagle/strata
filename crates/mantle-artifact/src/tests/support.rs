@@ -69,6 +69,7 @@ pub(super) fn valid_artifact() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
                     effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
@@ -97,6 +98,7 @@ pub(super) fn valid_artifact() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Stop,
                     next_state: NextState::Value(StateId::new(1)),
                     effects: vec![ArtifactEffect::Emit],

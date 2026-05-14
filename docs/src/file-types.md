@@ -42,11 +42,17 @@ the admitted schema.
 Executable references, type identity, and state transitions inside `.mta` use
 validated table IDs and typed transition forms. Process transition records are
 encoded by transition index and carry a `message` ID field, an optional
-`current_state` ID guard, and exact effect authority for their actions.
-Validation requires either one unguarded transition for a message or a complete
-set of state-specific transitions over the admitted state table. Runtime
-selection indexes the admitted transition table by typed message ID plus typed
-current state ID when a state guard is present.
+`current_state` ID guard, an optional exact typed payload guard, and exact
+effect authority for their actions.
+Validation requires each message to have either a transition base with no
+current-state guard or one transition base for every admitted current-state ID.
+Within each message/current-state base, validation admits either one
+payload-unguarded transition or a payload-specific set where every transition
+carries an exact typed payload guard. Payload-specific sets enumerate admitted
+concrete payload cases; they do not encode source-payload algebra. Runtime
+selection indexes the admitted transition table by typed message ID, typed
+current state ID when a state guard is present, and exact typed payload identity
+when a payload guard is present.
 
 Artifact type identity is carried by a Mantle type table. Process
 `state_type_id`, `message_type_id`, message `payload_type_id`, payload template
@@ -73,8 +79,9 @@ metadata; runtime delivery uses admitted IDs and runtime process instance IDs.
 Message variants may carry an optional payload type ID. Send actions may carry
 an immutable payload value template, and Mantle delivers the evaluated value in
 a runtime message envelope. Process-reference payloads carry the admitted target
-process ID and runtime process ID. Message dispatch uses admitted typed IDs,
-not payload text or source labels.
+process ID and runtime process ID. Message dispatch uses admitted typed IDs and,
+for payload-specific transitions, admitted typed payload identity, not payload
+text, source strings, or debug labels.
 
 Each transition's `action_count` is bounded during decode before allocation.
 Validation also caps the aggregate action count across all transitions for a

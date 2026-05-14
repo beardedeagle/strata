@@ -158,6 +158,44 @@ fn runtime_rejects_loaded_received_process_ref_send_without_payload_before_artif
 }
 
 #[test]
+fn runtime_rejects_loaded_process_ref_payload_guard_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    program.processes[1].transitions[0].payload_guard = Some(
+        RuntimePayload::from_artifact(
+            &ArtifactPayload::process_ref(PROCESS_REF_WORKER, ProcessId::new(1), 2)
+                .expect("test process-ref payload should construct"),
+        )
+        .expect("test runtime process-ref payload should load"),
+    );
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker message id 0 payload guard cannot be a process reference payload",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_process_ref_type_payload_guard_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    program.processes[1].transitions[0].payload_guard = Some(
+        RuntimePayload::from_artifact(
+            &ArtifactPayload::value(PROCESS_REF_WORKER, artifact_value("Plain"))
+                .expect("test plain process-ref-typed payload should construct"),
+        )
+        .expect("test runtime payload should load"),
+    );
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker message id 0 payload guard type id 8 must be a value type",
+    );
+}
+
+#[test]
 fn runtime_rejects_unspawned_process_ref_payload() {
     let mut artifact = artifact_with_unbound_worker_process_ref();
     artifact.processes[1].message_variants =

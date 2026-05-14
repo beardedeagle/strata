@@ -104,6 +104,7 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
                     effects: Vec::new(),
@@ -122,6 +123,7 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
                     effects: Vec::new(),

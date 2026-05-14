@@ -10,9 +10,9 @@ use mantle_artifact::{
 use super::Effect;
 use super::checked::{
     CheckedAction, CheckedEnumVariantId, CheckedMessageCase, CheckedMessageId, CheckedNextState,
-    CheckedOutputId, CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram,
-    CheckedSendTarget, CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition,
-    CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
+    CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessRefId,
+    CheckedProgram, CheckedSendTarget, CheckedStateId, CheckedStateValue, CheckedStepResult,
+    CheckedTransition, CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
 };
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
@@ -148,6 +148,10 @@ fn lower_transition(
     Ok(ArtifactTransition {
         current_state: transition.current_state().map(lower_state_id),
         message: lower_message_id(transition.message()),
+        payload_guard: transition
+            .payload_guard()
+            .map(|payload| lower_payload_guard(payload, types))
+            .transpose()?,
         step_result: lower_step_result(transition.step_result()),
         next_state: lower_next_state(transition.next_state(), types)?,
         effects: transition
@@ -162,6 +166,18 @@ fn lower_transition(
             .map(|action| lower_action(action, types))
             .collect::<mantle_artifact::Result<Vec<_>>>()?,
     })
+}
+
+fn lower_payload_guard(
+    payload: &CheckedPayloadValue,
+    types: &ArtifactTypeMap,
+) -> mantle_artifact::Result<mantle_artifact::ArtifactPayload> {
+    let value = payload.value().cloned().ok_or_else(|| {
+        mantle_artifact::Error::new(
+            "checked transition payload guard cannot be a process reference payload",
+        )
+    })?;
+    mantle_artifact::ArtifactPayload::value(types.artifact_id(payload.ty())?, value)
 }
 
 fn lower_effect(effect: Effect) -> ArtifactEffect {

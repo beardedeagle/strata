@@ -481,6 +481,7 @@ pub struct ArtifactProcessRef {
 pub struct ArtifactTransition {
     pub current_state: Option<StateId>,
     pub message: MessageId,
+    pub payload_guard: Option<ArtifactPayload>,
     pub step_result: StepResult,
     pub next_state: NextState,
     pub effects: Vec<ArtifactEffect>,

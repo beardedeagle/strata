@@ -317,6 +317,18 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                     &current_state.as_u32().to_string(),
                 )?;
             }
+            if let Some(payload_guard) = &transition.payload_guard {
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{transition_prefix}.payload_guard_type_id"),
+                    &payload_guard.ty.as_u32().to_string(),
+                )?;
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{transition_prefix}.payload_guard_value"),
+                    &payload_guard.value.label(),
+                )?;
+            }
             add_field_bytes(
                 &mut encoded_len,
                 &format!("{transition_prefix}.step_result"),

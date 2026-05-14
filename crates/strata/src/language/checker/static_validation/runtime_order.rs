@@ -479,7 +479,12 @@ pub(super) fn validate_static_runtime_order(
             .state_values()
             .get(current_state.index())
             .and_then(|state| state.payload());
-        let transition = transition_for_message(process, envelope.message, current_state)?;
+        let transition = transition_for_message(
+            process,
+            envelope.message,
+            current_state,
+            envelope.payload.as_ref(),
+        )?;
         let final_state = resolve_checked_next_state(
             process,
             current_state,
@@ -609,21 +614,59 @@ fn next_static_runnable(instances: &[StaticProcessInstance]) -> Option<usize> {
     })
 }
 
-fn transition_for_message(
-    process: &CheckedProcess,
+fn transition_for_message<'a>(
+    process: &'a CheckedProcess,
     message: CheckedMessageId,
     current_state: CheckedStateId,
-) -> Result<&CheckedTransition> {
+    payload: Option<&CheckedPayloadValue>,
+) -> Result<&'a CheckedTransition> {
+    let message_is_state_specific = process
+        .transitions()
+        .iter()
+        .any(|transition| transition.message() == message && transition.current_state().is_some());
+    let expected_state = message_is_state_specific.then_some(current_state);
+    let base_has_payload_guard = process.transitions().iter().any(|transition| {
+        transition.message() == message
+            && transition.current_state() == expected_state
+            && transition.payload_guard().is_some()
+    });
+
+    if base_has_payload_guard {
+        let payload = payload.ok_or_else(|| {
+            Error::new(format!(
+                "process {} has payload-specific transition(s) for message id {}, but the queued message has no payload",
+                process.debug_name(),
+                message.as_u32()
+            ))
+        })?;
+        return process
+            .transitions()
+            .iter()
+            .find(|transition| {
+                transition.message() == message
+                    && transition.current_state() == expected_state
+                    && transition
+                        .payload_guard()
+                        .is_some_and(|guard| payload_guard_matches(guard, payload))
+            })
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} has no transition for message id {} current_state id {} payload {}",
+                    process.debug_name(),
+                    message.as_u32(),
+                    current_state.as_u32(),
+                    payload.label()
+                ))
+            });
+    }
+
     process
         .transitions()
         .iter()
         .find(|transition| {
-            transition.message() == message && transition.current_state() == Some(current_state)
-        })
-        .or_else(|| {
-            process.transitions().iter().find(|transition| {
-                transition.message() == message && transition.current_state().is_none()
-            })
+            transition.message() == message
+                && transition.current_state() == expected_state
+                && transition.payload_guard().is_none()
         })
         .ok_or_else(|| {
             Error::new(format!(
@@ -633,4 +676,12 @@ fn transition_for_message(
                 current_state.as_u32()
             ))
         })
+}
+
+fn payload_guard_matches(guard: &CheckedPayloadValue, payload: &CheckedPayloadValue) -> bool {
+    guard.ty() == payload.ty()
+        && guard
+            .value()
+            .zip(payload.value())
+            .is_some_and(|(guard_value, payload_value)| guard_value == payload_value)
 }

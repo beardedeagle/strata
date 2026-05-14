@@ -34,11 +34,13 @@ Read them in this order:
    bindings in actor step parameter patterns.
 18. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-19. `nested_patterns.str` for nested immutable constructor, record, list, and
+19. `actor_payload_split_match.str` for payload-sensitive same-message
+   splitting inside a whole-body `match msg`.
+20. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-20. `actor_reply.str` for transporting typed process references through message
+21. `actor_reply.str` for transporting typed process references through message
    payloads.
-21. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+22. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -423,6 +425,28 @@ Key source ideas:
   signature patterns.
 - `Assign(job: Job)` binds the received payload immutably inside the match arm.
 - Runtime still dispatches by admitted message IDs and payload type IDs.
+
+## Actor Payload Split Match
+
+`examples/actor_payload_split_match.str` proves that one top-level message
+variant can be split inside a whole-body `match msg` by disjoint nested typed
+payload predicates.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payload_split_match.str
+cargo run -p strata --bin strata -- build examples/actor_payload_split_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_split_match.mta
+```
+
+Key source ideas:
+
+- `Envelope(Assign(Ready))` and `Envelope(Assign(Done))` share the same
+  top-level message constructor and differ only by nested payload identity.
+- The checker admits the split only because the nested typed predicates are
+  provably disjoint over discovered concrete payload cases.
+- Lowering emits exact typed payload guards in Mantle transition records.
+- Runtime dispatch uses admitted message IDs and exact typed payload identity,
+  not source strings or debug labels.
 
 ## Nested Patterns
 

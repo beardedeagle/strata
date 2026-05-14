@@ -10,6 +10,7 @@ fn validate_rejects_aggregate_process_action_count_above_limit() {
     artifact.processes[1].transitions.push(ArtifactTransition {
         current_state: None,
         message: MessageId::new(1),
+        payload_guard: None,
         step_result: StepResult::Stop,
         next_state: NextState::Current,
         effects: vec![ArtifactEffect::Emit],

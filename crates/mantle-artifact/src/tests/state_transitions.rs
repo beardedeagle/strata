@@ -179,6 +179,7 @@ fn validate_rejects_current_state_payload_template_outside_state_table() {
         ArtifactTransition {
             current_state: Some(StateId::new(0)),
             message: MessageId::new(0),
+            payload_guard: None,
             step_result: StepResult::Stop,
             next_state: NextState::Current,
             effects: Vec::new(),
@@ -187,6 +188,7 @@ fn validate_rejects_current_state_payload_template_outside_state_table() {
         ArtifactTransition {
             current_state: Some(StateId::new(1)),
             message: MessageId::new(0),
+            payload_guard: None,
             step_result: StepResult::Stop,
             next_state: NextState::Template(ArtifactValueTemplate::EnumVariant {
                 ty: WORKER_STATE,

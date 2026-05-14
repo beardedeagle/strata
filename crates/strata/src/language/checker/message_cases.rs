@@ -1,7 +1,7 @@
 use super::steps::{
-    collect_concrete_state_payload_domains, collect_explicit_step_variants,
-    collect_message_case_process_refs, matching_message_cases, payload_value_bindings,
-    resolve_send_target_process_for_discovery, step_discovery_clauses,
+    collect_concrete_state_payload_domains, collect_message_case_process_refs,
+    matching_message_cases, payload_value_bindings, resolve_send_target_process_for_discovery,
+    step_discovery_clauses,
 };
 use super::*;
 
@@ -67,13 +67,20 @@ impl MessageCaseTable {
                 collect_message_case_process_refs(process, process_id, semantic_index)
             })
             .collect::<Result<Vec<_>>>()?;
-        let explicit_step_variants = module
+        let discovery_clauses_by_process = module
             .processes
             .iter()
             .enumerate()
             .map(|(process_index, process)| {
                 let process_id = CheckedProcessId::from_index(process_index)?;
-                collect_explicit_step_variants(module, process, process_id, semantic_index)
+                process
+                    .steps
+                    .iter()
+                    .map(|step| {
+                        step_discovery_clauses(module, process, process_id, semantic_index, step)
+                    })
+                    .collect::<Result<Vec<_>>>()
+                    .map(|clauses| clauses.into_iter().flatten().collect::<Vec<_>>())
             })
             .collect::<Result<Vec<_>>>()?;
         let concrete_state_payload_domains = module
@@ -95,73 +102,68 @@ impl MessageCaseTable {
                 .collect::<Result<Vec<_>>>()?;
             let mut changed = false;
             for (process_index, process) in module.processes.iter().enumerate() {
-                let process_id = CheckedProcessId::from_index(process_index)?;
                 let sender_cases = &case_snapshots[process_index];
-                for step in &process.steps {
-                    for clause in
-                        step_discovery_clauses(module, process, process_id, semantic_index, step)?
-                    {
-                        for sender_case in matching_message_cases(
+                let process_clauses = &discovery_clauses_by_process[process_index];
+                for clause in process_clauses {
+                    for sender_case in matching_message_cases(
+                        module,
+                        semantic_index,
+                        sender_cases,
+                        &clause.pattern,
+                        process_clauses,
+                    )? {
+                        let bindings = payload_value_bindings(
                             module,
                             semantic_index,
-                            sender_cases,
                             &clause.pattern,
-                            &explicit_step_variants[process_index],
-                        )? {
-                            let bindings = payload_value_bindings(
+                            sender_case,
+                        )?;
+                        for statement in &clause.body.statements {
+                            let Statement::Send {
+                                target,
+                                message,
+                                payload,
+                            } = statement
+                            else {
+                                continue;
+                            };
+                            let target_process_id = resolve_send_target_process_for_discovery(
+                                process,
+                                semantic_index,
+                                &process_ref_targets[process_index],
+                                &clause.pattern,
+                                target,
+                            )?;
+                            let target_variant = semantic_index.message_id_for_process(
+                                module,
+                                process.name.as_str(),
+                                target_process_id,
+                                message,
+                            )?;
+                            let builder =
+                                builders.get_mut(target_process_id.index()).ok_or_else(|| {
+                                    Error::new(format!(
+                                        "process id {} is not declared",
+                                        target_process_id.as_u32()
+                                    ))
+                                })?;
+                            let mut discovery_context = SendPayloadDiscoveryContext {
+                                sender_cases,
+                                concrete_state_payloads: &concrete_state_payload_domains
+                                    [process_index],
                                 module,
                                 semantic_index,
-                                &clause.pattern,
-                                sender_case,
+                                process_refs: &process_ref_targets[process_index],
+                                types,
+                            };
+                            changed |= add_discovered_send_payload_cases(
+                                builder,
+                                target_variant,
+                                payload.as_ref(),
+                                &bindings,
+                                &clause.state_payload_bindings,
+                                &mut discovery_context,
                             )?;
-                            for statement in &clause.body.statements {
-                                let Statement::Send {
-                                    target,
-                                    message,
-                                    payload,
-                                } = statement
-                                else {
-                                    continue;
-                                };
-                                let target_process_id = resolve_send_target_process_for_discovery(
-                                    process,
-                                    semantic_index,
-                                    &process_ref_targets[process_index],
-                                    &clause.pattern,
-                                    target,
-                                )?;
-                                let target_variant = semantic_index.message_id_for_process(
-                                    module,
-                                    process.name.as_str(),
-                                    target_process_id,
-                                    message,
-                                )?;
-                                let builder = builders
-                                    .get_mut(target_process_id.index())
-                                    .ok_or_else(|| {
-                                        Error::new(format!(
-                                            "process id {} is not declared",
-                                            target_process_id.as_u32()
-                                        ))
-                                    })?;
-                                let mut discovery_context = SendPayloadDiscoveryContext {
-                                    sender_cases,
-                                    concrete_state_payloads: &concrete_state_payload_domains
-                                        [process_index],
-                                    module,
-                                    semantic_index,
-                                    process_refs: &process_ref_targets[process_index],
-                                    types,
-                                };
-                                changed |= add_discovered_send_payload_cases(
-                                    builder,
-                                    target_variant,
-                                    payload.as_ref(),
-                                    &bindings,
-                                    &clause.state_payload_bindings,
-                                    &mut discovery_context,
-                                )?;
-                            }
                         }
                     }
                 }
