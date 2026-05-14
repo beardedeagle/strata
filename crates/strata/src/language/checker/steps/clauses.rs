@@ -53,7 +53,7 @@ pub(super) fn check_step_clauses<'a>(
                         payload_params: Vec::new(),
                         payload_guard: None,
                     },
-                    StepClauseInsertMode::Single,
+                    StepClauseInsertMode::PayloadSensitiveSignature,
                 )?;
             }
             StepDispatchForm::BodyMatch => {
@@ -94,7 +94,7 @@ pub(super) fn check_step_clauses<'a>(
                             payload_params: Vec::new(),
                             payload_guard: None,
                         },
-                        StepClauseInsertMode::PayloadSensitive,
+                        StepClauseInsertMode::PayloadSensitiveMatchBody,
                     )?;
                 }
             }
@@ -241,7 +241,11 @@ pub(super) fn check_step_clauses<'a>(
             )?,
         }
     }
-    if matches!(dispatch_style, Some(StepDispatchStyle::BodyMatch)) {
+    if explicit_clauses
+        .iter()
+        .flatten()
+        .any(|clause| clause.payload_guard.is_some())
+    {
         reject_unreachable_payload_guarded_clauses(
             module,
             semantic_index,
@@ -249,6 +253,10 @@ pub(super) fn check_step_clauses<'a>(
             &msg_enum.variants,
             &explicit_clauses,
             &concrete_message_cases,
+            match dispatch_style {
+                Some(StepDispatchStyle::BodyMatch) => "match msg pattern",
+                Some(StepDispatchStyle::ParameterPattern) | None => "step pattern",
+            },
         )?;
     }
 
@@ -305,6 +313,7 @@ fn reject_unreachable_payload_guarded_clauses(
     message_variants: &[EnumVariant],
     explicit_clauses: &[Vec<StepBodyClause<'_>>],
     concrete_message_cases: &[StepConcreteMessageCase],
+    pattern_label: &str,
 ) -> Result<()> {
     for (variant_index, clauses) in explicit_clauses.iter().enumerate() {
         if !concrete_message_cases
@@ -334,8 +343,9 @@ fn reject_unreachable_payload_guarded_clauses(
             }
             if !has_reachable_case {
                 return Err(Error::new(format!(
-                    "process {} match msg pattern {} has no discovered payload case",
+                    "process {} {} {} has no discovered payload case",
                     process.name,
+                    pattern_label,
                     step_pattern_payload_label(
                         module,
                         semantic_index,
@@ -1184,7 +1194,34 @@ fn state_match_payload_domain(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StepClauseInsertMode {
     Single,
-    PayloadSensitive,
+    PayloadSensitiveMatchBody,
+    PayloadSensitiveSignature,
+}
+
+impl StepClauseInsertMode {
+    fn allows_same_message_payload_split(self) -> bool {
+        matches!(
+            self,
+            StepClauseInsertMode::PayloadSensitiveMatchBody
+                | StepClauseInsertMode::PayloadSensitiveSignature
+        )
+    }
+
+    fn rejects_payload_sensitive_wildcard(self) -> bool {
+        matches!(
+            self,
+            StepClauseInsertMode::Single | StepClauseInsertMode::PayloadSensitiveSignature
+        )
+    }
+
+    fn pattern_label(self) -> &'static str {
+        match self {
+            StepClauseInsertMode::PayloadSensitiveMatchBody => "match msg pattern",
+            StepClauseInsertMode::Single | StepClauseInsertMode::PayloadSensitiveSignature => {
+                "step pattern"
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1208,14 +1245,26 @@ fn insert_step_body_clause<'a>(
             clause.payload_params = bindings;
             clause.payload_guard = payload_guard;
             let clauses = &mut explicit_clauses[message.index()];
-            if mode == StepClauseInsertMode::Single && !clauses.is_empty() {
+            if !mode.allows_same_message_payload_split() && !clauses.is_empty() {
                 return Err(Error::new(format!(
                     "process {} declares duplicate step pattern for message {}",
                     process.name,
                     message_variants[message.index()].name
                 )));
             }
-            if mode == StepClauseInsertMode::Single
+            if mode == StepClauseInsertMode::PayloadSensitiveSignature
+                && clause.payload_guard.is_none()
+                && clauses
+                    .iter()
+                    .any(|existing| existing.payload_guard.is_none())
+            {
+                return Err(Error::new(format!(
+                    "process {} declares duplicate step pattern for message {}",
+                    process.name,
+                    message_variants[message.index()].name
+                )));
+            }
+            if mode.rejects_payload_sensitive_wildcard()
                 && clause.payload_guard.is_some()
                 && wildcard_clause.is_some()
             {
@@ -1232,8 +1281,9 @@ fn insert_step_body_clause<'a>(
                     existing.payload_guard.as_ref(),
                 )? {
                     return Err(Error::new(format!(
-                        "process {} match msg pattern {} overlaps an earlier pattern for message {}",
+                        "process {} {} {} overlaps an earlier pattern for message {}",
                         process.name,
+                        mode.pattern_label(),
                         step_pattern_payload_label(
                             module,
                             semantic_index,
@@ -1247,7 +1297,7 @@ fn insert_step_body_clause<'a>(
             clauses.push(clause);
         }
         StepPattern::Wildcard => {
-            if mode == StepClauseInsertMode::Single
+            if mode.rejects_payload_sensitive_wildcard()
                 && explicit_clauses
                     .iter()
                     .flatten()

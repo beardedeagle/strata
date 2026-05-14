@@ -6,7 +6,7 @@ use std::process::{Command, Output};
 use std::sync::Once;
 
 use mantle_artifact::{
-    ArtifactEffect, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
+    ArtifactEffect, ArtifactProcess, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
     ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact,
     ProcessId, TypeId, read_artifact,
 };
@@ -159,12 +159,16 @@ fn artifact_type_id(artifact: &MantleArtifact, label: &str, kind: ArtifactTypeKi
     TypeId::from_index(index).expect("artifact type index should fit")
 }
 
-fn transition_effects<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a [ArtifactEffect] {
+fn artifact_process<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a ArtifactProcess {
     artifact
         .processes
         .iter()
         .find(|candidate| candidate.debug_name == process)
         .unwrap_or_else(|| panic!("artifact process {process} should exist"))
+}
+
+fn transition_effects<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a [ArtifactEffect] {
+    artifact_process(artifact, process)
         .transitions
         .first()
         .unwrap_or_else(|| panic!("artifact process {process} should have an entry transition"))
@@ -650,6 +654,80 @@ fn actor_payload_split_match_checks_builds_and_runs_on_mantle() {
     let routed_type = value_type_id(&artifact, "Routed");
     let payload_type = format!(r#""payload_type_id":{}"#, routed_type.as_u32());
     let trace = gate.read_trace("actor_payload_split_match");
+    assert!(trace.contains(&format!(
+        r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Ready)""#
+    )));
+    assert!(trace.contains(&format!(
+        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Ready)","result":"Continue","state_id":1,"state":"SawReady""#
+    )));
+    assert!(trace.contains(&format!(
+        r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Done)""#
+    )));
+    assert!(trace.contains(&format!(
+        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Done)","result":"Stop","state_id":2,"state":"Done""#
+    )));
+}
+
+#[test]
+fn actor_payload_split_signature_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/actor_payload_split_signature.str",
+        "target/strata/actor_payload_split_signature.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: delivered Envelope(Assign(Ready)) to Worker"));
+    assert!(stdout.contains("mantle: delivered Envelope(Assign(Done)) to Worker"));
+    assert!(stdout.contains("worker handled Ready assignment"));
+    assert!(stdout.contains("worker handled Done assignment"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+
+    let artifact = gate.read_artifact("target/strata/actor_payload_split_signature.mta");
+    let worker = artifact_process(&artifact, "Worker");
+    assert_eq!(worker.transitions.len(), 2);
+    assert!(
+        worker
+            .transitions
+            .iter()
+            .all(
+                |transition| transition.message == mantle_artifact::MessageId::new(0)
+                    && transition.payload_guard.is_some()
+            ),
+        "same-message signature split should lower exact typed payload guards"
+    );
+    let mut payload_guards = worker
+        .transitions
+        .iter()
+        .map(|transition| {
+            transition
+                .payload_guard
+                .as_ref()
+                .expect("transition should carry a payload guard")
+                .value
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    payload_guards.sort();
+    assert_eq!(
+        payload_guards,
+        [
+            artifact_value("Assign(Done)"),
+            artifact_value("Assign(Ready)")
+        ]
+    );
+    let encoded = artifact.encode();
+    assert!(encoded.contains(".payload_guard_type_id="));
+    assert!(encoded.contains(".payload_guard_value=Assign(Ready)"));
+    assert!(encoded.contains(".payload_guard_value=Assign(Done)"));
+    assert!(
+        !encoded.contains("field_name=Assign"),
+        "payload-specific signature dispatch must not lower constructor names as executable fields"
+    );
+
+    let routed_type = value_type_id(&artifact, "Routed");
+    let payload_type = format!(r#""payload_type_id":{}"#, routed_type.as_u32());
+    let trace = gate.read_trace("actor_payload_split_signature");
     assert!(trace.contains(&format!(
         r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Ready)""#
     )));
