@@ -19,9 +19,9 @@ Mantle artifact internals.
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
-| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers and step/state matches, helper return-match expressions, and `_` wildcards. |
+| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, and state matches, helper return-match expressions, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
-| Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, and whole-body `match state` inside message-specific step clauses. |
+| Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, and whole-body `match state` inside message-specific step clauses. Same-constructor payload-sensitive splits are accepted for helpers, whole-body `match msg`, and step parameter patterns only when nested typed predicates are provably disjoint. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
 The `module` declaration names a source unit. It does not create an import
@@ -525,9 +525,9 @@ Patterns are source-level syntax for typed value decomposition. The current
 runnable subset admits constructor patterns, constructor payload bindings,
 nested constructor and record/list/map payload destructuring, helper return-match
 expressions, and wildcards. Normal source helpers may match concrete enum values
-or destructure concrete record/list/map values, `init` may use one whole-body match over a
-fieldless enum constructor to select the initial state, and actor message
-dispatch may use one whole-body match over the typed message parameter:
+or destructure concrete record/list/map values, `init` may use one whole-body
+match over a fieldless enum constructor to select the initial state, and actor
+message dispatch may use one whole-body match over the typed message parameter:
 
 ```strata
 fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -546,11 +546,15 @@ fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] 
 
 Step `match` is an authoring form for the same semantics as step parameter
 patterns, including typed payload bindings and nested record/list/map payload
-destructuring. Checking resolves each arm into typed message-keyed transitions
-and typed projection templates before lowering. Mantle still dispatches by
-admitted message IDs, payload type IDs, and loaded template structure, not by
-source strings. In this buildable step subset the match
-scrutinee must be the typed message parameter, and match arms are
+destructuring. Whole-body `match msg` arms and step parameter patterns may split
+one top-level message constructor by exact nested typed payload predicates when
+those predicates are provably disjoint over discovered concrete payload cases.
+Checking resolves each arm into typed message-keyed transitions, typed payload
+guards when needed, and typed projection templates before lowering. Mantle still
+dispatches by admitted message IDs, current state IDs when a transition is
+state-specific, payload type IDs, exact typed payload identity, and loaded
+template structure, not by source strings. In this buildable step subset the
+match scrutinee must be the typed message parameter, and match arms are
 block-delimited without comma separators.
 
 A message-specific `step` may instead match the current state parameter when
@@ -676,6 +680,12 @@ accepted as typed shape predicates; they do not introduce bindings.
 Shape-only collection payload patterns such as `Items(List[_])`,
 `Lookup(Map[Ready => _])`, or `Lookup(Map[..])` are not admitted in this slice;
 use the constructor pattern without destructuring when the payload is ignored.
+Multiple parameter-pattern `step` clauses may share one top-level message
+constructor only when exact nested typed payload predicates are provably
+disjoint and cover the discovered concrete payload cases. A wildcard step
+pattern cannot be combined with payload-sensitive step-signature splitting in
+this slice; write explicit disjoint payload cases or use a supported whole-body
+`match msg` form.
 
 If a process accepts more than one message, it can declare explicit clauses for
 specific constructors and one wildcard clause for the remaining variants:
@@ -692,12 +702,16 @@ fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
 }
 ```
 
-Every accepted message variant must resolve to exactly one clause. Explicit
-constructor clauses handle their named variants. One wildcard clause may cover
-variants that do not have explicit clauses. Duplicate explicit clauses,
-duplicate wildcard clauses, missing coverage, and unreachable wildcard clauses
-are rejected. Parameter patterns are compile-time dispatch only: Mantle
-dequeues one message at a time and dispatches by typed message ID.
+Every accepted message variant, or every discovered concrete payload case inside
+a payload-sensitive split, must resolve to exactly one generated transition.
+Explicit constructor clauses handle their named variants. One wildcard clause
+may cover variants that do not have explicit clauses when the process is not
+using payload-sensitive step-signature splitting. Duplicate explicit clauses,
+overlapping payload predicates, missing coverage, duplicate wildcard clauses,
+missing variant coverage, and unreachable wildcard clauses are rejected.
+Parameter patterns are compile-time dispatch only: Mantle dequeues one message
+at a time and dispatches by typed message ID, current state ID when a transition
+is state-specific, and exact typed payload identity when a payload guard exists.
 Payload-bearing variants keep one stable admitted message case, and their
 immutable values travel in runtime message envelopes.
 

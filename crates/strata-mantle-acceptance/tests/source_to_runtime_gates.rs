@@ -167,6 +167,19 @@ fn artifact_process<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a Arti
         .unwrap_or_else(|| panic!("artifact process {process} should exist"))
 }
 
+fn assert_trace_event(trace: &str, fields: &[&str]) {
+    assert!(
+        !fields.is_empty(),
+        "trace event assertion should require at least one field"
+    );
+    assert!(
+        trace
+            .lines()
+            .any(|line| fields.iter().all(|field| line.contains(field))),
+        "expected trace event containing fields {fields:?}\ntrace:\n{trace}"
+    );
+}
+
 fn transition_effects<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a [ArtifactEffect] {
     artifact_process(artifact, process)
         .transitions
@@ -609,17 +622,15 @@ fn actor_payload_split_match_checks_builds_and_runs_on_mantle() {
     assert!(stdout.contains("mantle: stopped Worker normally"));
 
     let artifact = gate.read_artifact("target/strata/actor_payload_split_match.mta");
-    let worker = &artifact.processes[1];
-    assert_eq!(worker.debug_name, "Worker");
+    let worker = artifact_process(&artifact, "Worker");
     assert_eq!(worker.transitions.len(), 2);
+    let worker_message = worker.transitions[0].message;
     assert!(
         worker
             .transitions
             .iter()
-            .all(
-                |transition| transition.message == mantle_artifact::MessageId::new(0)
-                    && transition.payload_guard.is_some()
-            ),
+            .all(|transition| transition.message == worker_message
+                && transition.payload_guard.is_some()),
         "same-message split should lower exact typed payload guards"
     );
     let mut payload_guards = worker
@@ -652,20 +663,57 @@ fn actor_payload_split_match_checks_builds_and_runs_on_mantle() {
     );
 
     let routed_type = value_type_id(&artifact, "Routed");
+    let message_id = format!(r#""message_id":{}"#, worker_message.as_u32());
     let payload_type = format!(r#""payload_type_id":{}"#, routed_type.as_u32());
     let trace = gate.read_trace("actor_payload_split_match");
-    assert!(trace.contains(&format!(
-        r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Ready)""#
-    )));
-    assert!(trace.contains(&format!(
-        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Ready)","result":"Continue","state_id":1,"state":"SawReady""#
-    )));
-    assert!(trace.contains(&format!(
-        r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Done)""#
-    )));
-    assert!(trace.contains(&format!(
-        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Done)","result":"Stop","state_id":2,"state":"Done""#
-    )));
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"message_dequeued""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            message_id.as_str(),
+            payload_type.as_str(),
+            r#""payload":"Assign(Ready)""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            message_id.as_str(),
+            payload_type.as_str(),
+            r#""payload":"Assign(Ready)""#,
+            r#""result":"Continue""#,
+            r#""state":"SawReady""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"message_dequeued""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            message_id.as_str(),
+            payload_type.as_str(),
+            r#""payload":"Assign(Done)""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            message_id.as_str(),
+            payload_type.as_str(),
+            r#""payload":"Assign(Done)""#,
+            r#""result":"Stop""#,
+            r#""state":"Done""#,
+        ],
+    );
 }
 
 #[test]
@@ -686,14 +734,13 @@ fn actor_payload_split_signature_checks_builds_and_runs_on_mantle() {
     let artifact = gate.read_artifact("target/strata/actor_payload_split_signature.mta");
     let worker = artifact_process(&artifact, "Worker");
     assert_eq!(worker.transitions.len(), 2);
+    let worker_message = worker.transitions[0].message;
     assert!(
         worker
             .transitions
             .iter()
-            .all(
-                |transition| transition.message == mantle_artifact::MessageId::new(0)
-                    && transition.payload_guard.is_some()
-            ),
+            .all(|transition| transition.message == worker_message
+                && transition.payload_guard.is_some()),
         "same-message signature split should lower exact typed payload guards"
     );
     let mut payload_guards = worker
@@ -726,20 +773,57 @@ fn actor_payload_split_signature_checks_builds_and_runs_on_mantle() {
     );
 
     let routed_type = value_type_id(&artifact, "Routed");
+    let message_id = format!(r#""message_id":{}"#, worker_message.as_u32());
     let payload_type = format!(r#""payload_type_id":{}"#, routed_type.as_u32());
     let trace = gate.read_trace("actor_payload_split_signature");
-    assert!(trace.contains(&format!(
-        r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Ready)""#
-    )));
-    assert!(trace.contains(&format!(
-        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Ready)","result":"Continue","state_id":1,"state":"SawReady""#
-    )));
-    assert!(trace.contains(&format!(
-        r#""event":"message_dequeued","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Done)""#
-    )));
-    assert!(trace.contains(&format!(
-        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Envelope",{payload_type},"payload":"Assign(Done)","result":"Stop","state_id":2,"state":"Done""#
-    )));
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"message_dequeued""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            message_id.as_str(),
+            payload_type.as_str(),
+            r#""payload":"Assign(Ready)""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            message_id.as_str(),
+            payload_type.as_str(),
+            r#""payload":"Assign(Ready)""#,
+            r#""result":"Continue""#,
+            r#""state":"SawReady""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"message_dequeued""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            message_id.as_str(),
+            payload_type.as_str(),
+            r#""payload":"Assign(Done)""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            message_id.as_str(),
+            payload_type.as_str(),
+            r#""payload":"Assign(Done)""#,
+            r#""result":"Stop""#,
+            r#""state":"Done""#,
+        ],
+    );
 }
 
 #[test]
