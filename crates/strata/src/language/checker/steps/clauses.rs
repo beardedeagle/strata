@@ -142,7 +142,7 @@ pub(super) fn check_step_clauses<'a>(
         &concrete_message_cases,
     )?;
     let mut clauses = Vec::with_capacity(concrete_message_cases.len());
-    for concrete_case in concrete_message_cases {
+    for concrete_case in &concrete_message_cases {
         let variant_id = concrete_case.variant;
         let message_variant = &msg_enum.variants[variant_id.index()];
         let matching_explicit = matching_step_body_clauses(
@@ -165,7 +165,7 @@ pub(super) fn check_step_clauses<'a>(
         }
         let (clause, payload_guard) = if let Some(clause) = matching_explicit.first() {
             let payload_guard =
-                transition_payload_guard_for_case(clause, &explicit_clauses, &concrete_case);
+                transition_payload_guard_for_case(clause, &explicit_clauses, concrete_case);
             (clause.clone(), payload_guard)
         } else if let Some(clause) = wildcard_clause.clone() {
             (
@@ -173,7 +173,7 @@ pub(super) fn check_step_clauses<'a>(
                 wildcard_payload_guard_for_case(
                     process,
                     &explicit_clauses,
-                    &concrete_case,
+                    concrete_case,
                     message_variant,
                 )?,
             )
@@ -241,6 +241,16 @@ pub(super) fn check_step_clauses<'a>(
             )?,
         }
     }
+    if matches!(dispatch_style, Some(StepDispatchStyle::BodyMatch)) {
+        reject_unreachable_payload_guarded_clauses(
+            module,
+            semantic_index,
+            process,
+            &msg_enum.variants,
+            &explicit_clauses,
+            &concrete_message_cases,
+        )?;
+    }
 
     Ok(clauses)
 }
@@ -286,6 +296,57 @@ fn concrete_step_message_cases(
         }
     }
     Ok(concrete_cases)
+}
+
+fn reject_unreachable_payload_guarded_clauses(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    process: &Process,
+    message_variants: &[EnumVariant],
+    explicit_clauses: &[Vec<StepBodyClause<'_>>],
+    concrete_message_cases: &[StepConcreteMessageCase],
+) -> Result<()> {
+    for (variant_index, clauses) in explicit_clauses.iter().enumerate() {
+        if !concrete_message_cases
+            .iter()
+            .any(|case| case.variant.index() == variant_index && case.payload.is_some())
+        {
+            continue;
+        }
+        for clause in clauses {
+            if clause.payload_guard.is_none() {
+                continue;
+            }
+            let mut has_reachable_case = false;
+            for concrete_case in concrete_message_cases
+                .iter()
+                .filter(|case| case.variant.index() == variant_index)
+            {
+                if step_body_clause_matches_case(
+                    module,
+                    semantic_index,
+                    clause,
+                    concrete_case.payload.as_ref(),
+                )? {
+                    has_reachable_case = true;
+                    break;
+                }
+            }
+            if !has_reachable_case {
+                return Err(Error::new(format!(
+                    "process {} match msg pattern {} has no discovered payload case",
+                    process.name,
+                    step_pattern_payload_label(
+                        module,
+                        semantic_index,
+                        &message_variants[variant_index],
+                        clause.payload_guard.as_ref(),
+                    )?
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn reject_unreachable_wildcard(

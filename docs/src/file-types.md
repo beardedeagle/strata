@@ -44,13 +44,15 @@ validated table IDs and typed transition forms. Process transition records are
 encoded by transition index and carry a `message` ID field, an optional
 `current_state` ID guard, an optional exact typed payload guard, and exact
 effect authority for their actions.
-Validation requires either one unguarded transition for a message or a complete
-set of state-specific transitions over the admitted state table. When a
-transition set is payload-specific, every admitted transition for that
-message/state base carries an exact typed payload guard. Runtime selection
-indexes the admitted transition table by typed message ID, typed current state
-ID when a state guard is present, and exact typed payload identity when a payload
-guard is present.
+Validation requires each message to have either a transition base with no
+current-state guard or one transition base for every admitted current-state ID.
+Within each message/current-state base, validation admits either one
+payload-unguarded transition or a payload-specific set where every transition
+carries an exact typed payload guard. Payload-specific sets enumerate admitted
+concrete payload cases; they do not encode source-payload algebra. Runtime
+selection indexes the admitted transition table by typed message ID, typed
+current state ID when a state guard is present, and exact typed payload identity
+when a payload guard is present.
 
 Artifact type identity is carried by a Mantle type table. Process
 `state_type_id`, `message_type_id`, message `payload_type_id`, payload template

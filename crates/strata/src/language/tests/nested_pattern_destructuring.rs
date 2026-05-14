@@ -1121,6 +1121,37 @@ fn rejects_unreachable_wildcard_after_payload_sensitive_match_msg_covers_discove
 }
 
 #[test]
+fn rejects_unreachable_payload_sensitive_match_msg_arm_before_dropping_body() {
+    let source = same_message_step_split_case_with_other(
+        r#"
+    fn step(state: MainState, msg: WorkerMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        match msg {
+            Envelope(Assign(Ready)) => {
+                return Continue(state);
+            }
+            Envelope(Assign(Other)) => {
+                return Stop(state);
+            }
+            Envelope(Assign(Done)) => {
+                emit "unreachable guarded payload arm";
+                return Panic(state);
+            }
+        }
+    }
+"#,
+    );
+
+    let err = check_source(&source)
+        .expect_err("unreachable guarded match msg payload arm should fail closed");
+    assert!(
+        err.to_string().contains(
+            "process Worker match msg pattern Envelope(Assign(Done)) has no discovered payload case"
+        ),
+        "expected unreachable guarded payload arm diagnostic, got {err}"
+    );
+}
+
+#[test]
 fn match_msg_same_message_split_preserves_nested_record_list_and_map_bindings() {
     let source = r#"
 module same_message_match_msg_nested_bindings;
