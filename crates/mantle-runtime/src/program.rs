@@ -352,10 +352,15 @@ impl LoadedProcess {
             .transition_lookup
             .is_state_specific_message(message)
             .then_some(current_state);
+        let payload_specific = self
+            .transition_lookup
+            .is_payload_specific_base(message, lookup_state);
         let transition_index = self
             .transition_lookup
             .for_dispatch(message, current_state, payload)
-            .ok_or_else(|| self.transition_lookup_error(message, lookup_state))?;
+            .ok_or_else(|| {
+                self.transition_lookup_error(message, lookup_state, payload_specific, payload)
+            })?;
         self.transition_by_lookup_index(transition_index)
     }
 
@@ -368,10 +373,33 @@ impl LoadedProcess {
         })
     }
 
-    fn transition_lookup_error(&self, message: MessageId, current_state: Option<StateId>) -> Error {
+    fn transition_lookup_error(
+        &self,
+        message: MessageId,
+        current_state: Option<StateId>,
+        payload_specific: bool,
+        payload: Option<&RuntimePayload>,
+    ) -> Error {
         let state = current_state
             .map(|state| format!(" current_state id {}", state.as_u32()))
             .unwrap_or_default();
+        if payload_specific {
+            return match payload {
+                Some(payload) => Error::new(format!(
+                    "process {} has no transition for message id {}{} payload {}",
+                    self.debug_name,
+                    message.as_u32(),
+                    state,
+                    payload.label()
+                )),
+                None => Error::new(format!(
+                    "process {} has payload-specific transition(s) for message id {}{}, but the queued message has no payload",
+                    self.debug_name,
+                    message.as_u32(),
+                    state
+                )),
+            };
+        }
         Error::new(format!(
             "process {} has no transition for message id {}{}",
             self.debug_name,

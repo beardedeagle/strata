@@ -94,6 +94,15 @@ impl TransitionLookup {
     pub(super) fn is_state_specific_message(&self, message: MessageId) -> bool {
         self.state_specific_messages.contains(&message.as_u32())
     }
+
+    pub(super) fn is_payload_specific_base(
+        &self,
+        message: MessageId,
+        current_state: Option<StateId>,
+    ) -> bool {
+        self.payload_specific_transitions
+            .contains(&(message.as_u32(), current_state.map(StateId::as_u32)))
+    }
 }
 
 pub(super) fn load_transitions(process: &ArtifactProcess) -> Result<Vec<LoadedTransition>> {

@@ -127,22 +127,19 @@ pub(super) fn check_step_clauses<'a>(
         }
     }
 
-    if wildcard_clause.is_some()
-        && explicit_clauses
-            .iter()
-            .all(|clauses| clauses.iter().any(|clause| clause.payload_guard.is_none()))
-    {
-        return Err(Error::new(format!(
-            "process {} wildcard step pattern is unreachable",
-            process.name
-        )));
-    }
-
     let concrete_message_cases = concrete_step_message_cases(
         process_id,
         &msg_enum.variants,
         message_cases,
         &explicit_clauses,
+    )?;
+    reject_unreachable_wildcard(
+        module,
+        semantic_index,
+        process,
+        wildcard_clause.as_ref(),
+        &explicit_clauses,
+        &concrete_message_cases,
     )?;
     let mut clauses = Vec::with_capacity(concrete_message_cases.len());
     for concrete_case in concrete_message_cases {
@@ -289,6 +286,47 @@ fn concrete_step_message_cases(
         }
     }
     Ok(concrete_cases)
+}
+
+fn reject_unreachable_wildcard(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    process: &Process,
+    wildcard_clause: Option<&StepBodyClause<'_>>,
+    explicit_clauses: &[Vec<StepBodyClause<'_>>],
+    concrete_message_cases: &[StepConcreteMessageCase],
+) -> Result<()> {
+    if wildcard_clause.is_none() {
+        return Ok(());
+    }
+    for concrete_case in concrete_message_cases {
+        if !explicit_step_body_clauses_match_case(
+            module,
+            semantic_index,
+            &explicit_clauses[concrete_case.variant.index()],
+            concrete_case.payload.as_ref(),
+        )? {
+            return Ok(());
+        }
+    }
+    Err(Error::new(format!(
+        "process {} wildcard step pattern is unreachable",
+        process.name
+    )))
+}
+
+fn explicit_step_body_clauses_match_case(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    clauses: &[StepBodyClause<'_>],
+    payload: Option<&CheckedPayloadValue>,
+) -> Result<bool> {
+    for clause in clauses {
+        if step_body_clause_matches_case(module, semantic_index, clause, payload)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn matching_step_body_clauses<'a>(

@@ -621,8 +621,112 @@ fn loaded_program_selects_payload_guarded_transitions_by_exact_payload_identity(
     assert!(
         worker
             .transition_for_dispatch(MessageId::new(0), StateId::new(0), None)
-            .is_err(),
-        "payload-specific transitions must not dispatch without an exact payload"
+            .expect_err("payload-specific transitions must not dispatch without a payload")
+            .to_string()
+            .contains(
+                "process Worker has payload-specific transition(s) for message id 0, but the queued message has no payload"
+            )
+    );
+    let other_payload = RuntimePayload::from_artifact(&artifact_payload(JOB, "Job{phase:Other}"))
+        .expect("runtime payload should load");
+    assert!(
+        worker
+            .transition_for_dispatch(MessageId::new(0), StateId::new(0), Some(&other_payload))
+            .expect_err("payload-specific transitions must reject unmatched payload identity")
+            .to_string()
+            .contains("process Worker has no transition for message id 0 payload Job{phase:Other}")
+    );
+}
+
+#[test]
+fn loaded_program_selects_state_specific_payload_guarded_transitions_by_exact_payload_identity() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("Job{phase:Ready}"),
+        }),
+    };
+    artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Working"]);
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
+    artifact.processes[1].transitions = vec![
+        ArtifactTransition {
+            current_state: Some(StateId::new(0)),
+            message: MessageId::new(0),
+            payload_guard: Some(artifact_payload(JOB, "Job{phase:Ready}")),
+            step_result: StepResult::Continue,
+            next_state: NextState::Value(StateId::new(1)),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+        ArtifactTransition {
+            current_state: Some(StateId::new(0)),
+            message: MessageId::new(0),
+            payload_guard: Some(artifact_payload(JOB, "Job{phase:Done}")),
+            step_result: StepResult::Stop,
+            next_state: NextState::Value(StateId::new(0)),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+        ArtifactTransition {
+            current_state: Some(StateId::new(1)),
+            message: MessageId::new(0),
+            payload_guard: Some(artifact_payload(JOB, "Job{phase:Ready}")),
+            step_result: StepResult::Stop,
+            next_state: NextState::Value(StateId::new(1)),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+        ArtifactTransition {
+            current_state: Some(StateId::new(1)),
+            message: MessageId::new(0),
+            payload_guard: Some(artifact_payload(JOB, "Job{phase:Done}")),
+            step_result: StepResult::Continue,
+            next_state: NextState::Value(StateId::new(0)),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+    ];
+
+    let program = LoadedProgram::from_artifact(&artifact)
+        .expect("state-specific payload transitions should load");
+    let worker = program
+        .process(ProcessId::new(1))
+        .expect("worker process should be loaded");
+    let ready_payload = RuntimePayload::from_artifact(&artifact_payload(JOB, "Job{phase:Ready}"))
+        .expect("runtime payload should load");
+    let done_payload = RuntimePayload::from_artifact(&artifact_payload(JOB, "Job{phase:Done}"))
+        .expect("runtime payload should load");
+
+    assert_eq!(
+        worker
+            .transition_for_dispatch(MessageId::new(0), StateId::new(0), Some(&ready_payload))
+            .expect("state 0 Ready payload transition should dispatch")
+            .step_result,
+        StepResult::Continue
+    );
+    assert_eq!(
+        worker
+            .transition_for_dispatch(MessageId::new(0), StateId::new(0), Some(&done_payload))
+            .expect("state 0 Done payload transition should dispatch")
+            .step_result,
+        StepResult::Stop
+    );
+    assert_eq!(
+        worker
+            .transition_for_dispatch(MessageId::new(0), StateId::new(1), Some(&ready_payload))
+            .expect("state 1 Ready payload transition should dispatch")
+            .step_result,
+        StepResult::Stop
+    );
+    assert_eq!(
+        worker
+            .transition_for_dispatch(MessageId::new(0), StateId::new(1), Some(&done_payload))
+            .expect("state 1 Done payload transition should dispatch")
+            .step_result,
+        StepResult::Continue
     );
 }
 

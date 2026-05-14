@@ -1092,6 +1092,35 @@ fn match_msg_same_message_payload_split_uses_wildcard_for_uncovered_discovered_p
 }
 
 #[test]
+fn rejects_unreachable_wildcard_after_payload_sensitive_match_msg_covers_discovered_payloads() {
+    let source = same_message_step_split_case(
+        r#"
+    fn step(state: MainState, msg: WorkerMsg) -> ProcResult<MainState> ! [] ~ [] @det {
+        match msg {
+            Envelope(Assign(Ready)) => {
+                return Continue(state);
+            }
+            Envelope(Assign(Done)) => {
+                return Stop(state);
+            }
+            _ => {
+                return Panic(state);
+            }
+        }
+    }
+"#,
+    );
+
+    let err = check_source(&source)
+        .expect_err("wildcard after complete payload-sensitive coverage should fail");
+    assert!(
+        err.to_string()
+            .contains("process Worker wildcard step pattern is unreachable"),
+        "expected payload-sensitive wildcard reachability diagnostic, got {err}"
+    );
+}
+
+#[test]
 fn match_msg_same_message_split_preserves_nested_record_list_and_map_bindings() {
     let source = r#"
 module same_message_match_msg_nested_bindings;
