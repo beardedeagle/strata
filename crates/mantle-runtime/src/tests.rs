@@ -10,7 +10,7 @@ use mantle_artifact::{
     NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, write_artifact,
 };
 
-use super::program::LoadedProgram;
+use super::program::{LoadedProgram, RuntimePayload};
 use super::*;
 
 const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
@@ -546,17 +546,83 @@ fn loaded_program_selects_transitions_by_message_id() {
 
     assert_eq!(
         worker
-            .transition_for_dispatch(MessageId::new(0), StateId::new(0))
+            .transition_for_dispatch(MessageId::new(0), StateId::new(0), None)
             .expect("First transition should be loaded")
             .step_result,
         StepResult::Continue
     );
     assert_eq!(
         worker
-            .transition_for_dispatch(MessageId::new(1), StateId::new(0))
+            .transition_for_dispatch(MessageId::new(1), StateId::new(0), None)
             .expect("Second transition should be loaded")
             .step_result,
         StepResult::Stop
+    );
+}
+
+#[test]
+fn loaded_program_selects_payload_guarded_transitions_by_exact_payload_identity() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("Job{phase:Ready}"),
+        }),
+    };
+    artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Ready", "Done"]);
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
+    artifact.processes[1].transitions = vec![
+        ArtifactTransition {
+            current_state: None,
+            message: MessageId::new(0),
+            payload_guard: Some(artifact_payload(JOB, "Job{phase:Done}")),
+            step_result: StepResult::Stop,
+            next_state: NextState::Value(StateId::new(2)),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+        ArtifactTransition {
+            current_state: None,
+            message: MessageId::new(0),
+            payload_guard: Some(artifact_payload(JOB, "Job{phase:Ready}")),
+            step_result: StepResult::Continue,
+            next_state: NextState::Value(StateId::new(1)),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        },
+    ];
+
+    let program = LoadedProgram::from_artifact(&artifact)
+        .expect("payload-specific artifact transitions should load");
+    let worker = program
+        .process(ProcessId::new(1))
+        .expect("worker process should be loaded");
+    let ready_payload = RuntimePayload::from_artifact(&artifact_payload(JOB, "Job{phase:Ready}"))
+        .expect("runtime payload should load");
+    let done_payload = RuntimePayload::from_artifact(&artifact_payload(JOB, "Job{phase:Done}"))
+        .expect("runtime payload should load");
+
+    assert_eq!(
+        worker
+            .transition_for_dispatch(MessageId::new(0), StateId::new(0), Some(&ready_payload))
+            .expect("Ready payload transition should dispatch")
+            .step_result,
+        StepResult::Continue
+    );
+    assert_eq!(
+        worker
+            .transition_for_dispatch(MessageId::new(0), StateId::new(0), Some(&done_payload))
+            .expect("Done payload transition should dispatch")
+            .step_result,
+        StepResult::Stop
+    );
+    assert!(
+        worker
+            .transition_for_dispatch(MessageId::new(0), StateId::new(0), None)
+            .is_err(),
+        "payload-specific transitions must not dispatch without an exact payload"
     );
 }
 
@@ -584,6 +650,7 @@ fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
         ArtifactTransition {
             current_state: Some(StateId::new(0)),
             message: MessageId::new(0),
+            payload_guard: None,
             step_result: StepResult::Stop,
             next_state: NextState::Current,
             effects: Vec::new(),
@@ -592,6 +659,7 @@ fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
         ArtifactTransition {
             current_state: Some(StateId::new(1)),
             message: MessageId::new(0),
+            payload_guard: None,
             step_result: StepResult::Stop,
             next_state: NextState::Template(ArtifactValueTemplate::EnumVariant {
                 ty: WORKER_STATE,
@@ -628,6 +696,7 @@ fn in_memory_host_preserves_current_next_state() {
         transitions: vec![ArtifactTransition {
             current_state: None,
             message: MessageId::new(0),
+            payload_guard: None,
             step_result: StepResult::Stop,
             next_state: NextState::Current,
             effects: vec![ArtifactEffect::Emit],
@@ -717,6 +786,7 @@ fn valid_artifact() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
                     effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
@@ -745,6 +815,7 @@ fn valid_artifact() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Stop,
                     next_state: NextState::Value(StateId::new(1)),
                     effects: vec![ArtifactEffect::Emit],
@@ -773,6 +844,7 @@ fn panic_artifact() -> MantleArtifact {
     artifact.processes[1].transitions[0] = ArtifactTransition {
         current_state: None,
         message: MessageId::new(0),
+        payload_guard: None,
         step_result: StepResult::Panic,
         next_state: NextState::Value(StateId::new(1)),
         effects: Vec::new(),
@@ -806,6 +878,7 @@ fn payload_artifact() -> MantleArtifact {
     artifact.processes[1].transitions[0] = ArtifactTransition {
         current_state: None,
         message: MessageId::new(0),
+        payload_guard: None,
         step_result: StepResult::Stop,
         next_state: NextState::Template(ArtifactValueTemplate::Record {
             ty: WORKER_STATE,
@@ -848,6 +921,7 @@ fn looping_artifact() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
                     effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
@@ -879,6 +953,7 @@ fn looping_artifact() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Continue,
                     next_state: NextState::Current,
                     effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
@@ -910,6 +985,7 @@ fn looping_artifact() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Continue,
                     next_state: NextState::Current,
                     effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
@@ -960,6 +1036,7 @@ fn sequence_artifact() -> MantleArtifact {
                 transitions: vec![ArtifactTransition {
                     current_state: None,
                     message: MessageId::new(0),
+                    payload_guard: None,
                     step_result: StepResult::Stop,
                     next_state: NextState::Current,
                     effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
@@ -997,6 +1074,7 @@ fn sequence_artifact() -> MantleArtifact {
                     ArtifactTransition {
                         current_state: None,
                         message: MessageId::new(0),
+                        payload_guard: None,
                         step_result: StepResult::Continue,
                         next_state: NextState::Value(StateId::new(1)),
                         effects: vec![ArtifactEffect::Emit],
@@ -1007,6 +1085,7 @@ fn sequence_artifact() -> MantleArtifact {
                     ArtifactTransition {
                         current_state: None,
                         message: MessageId::new(1),
+                        payload_guard: None,
                         step_result: StepResult::Stop,
                         next_state: NextState::Value(StateId::new(2)),
                         effects: vec![ArtifactEffect::Emit],

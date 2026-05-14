@@ -145,6 +145,7 @@ pub(super) fn check_step_transition(
             state_space,
             types,
             input.variant,
+            input.payload_guard,
             &state_arg,
             input.payload_bindings,
             input.state_payload_bindings,
@@ -158,14 +159,18 @@ pub(super) fn check_step_transition(
         )?)
     };
 
-    Ok(CheckedTransition::new(CheckedTransitionParts {
+    let transition = CheckedTransition::new(CheckedTransitionParts {
         current_state: input.current_state,
         message: input.message,
         step_result,
         next_state,
         effects: input.declared_effects.to_vec(),
         actions,
-    }))
+    });
+    Ok(match input.payload_guard {
+        Some(payload_guard) => transition.with_payload_guard(payload_guard.clone()),
+        None => transition,
+    })
 }
 
 struct ResolvedCheckedSendTarget {
@@ -347,20 +352,27 @@ fn checked_send_payload_template(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn populate_template_state_values(
     context: &StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     types: &mut CheckedTypeInterner<'_>,
     variant: CheckedMessageVariantId,
+    payload_guard: Option<&CheckedPayloadValue>,
     state_arg: &ValueExpr,
     payload_bindings: &[StepPayloadBinding],
     state_payload_bindings: &[StepStatePayloadBinding],
 ) -> Result<()> {
     if !payload_bindings.is_empty() {
-        for payload in context
-            .message_cases
-            .payload_values(context.process_id, variant)?
-        {
+        let payloads = match payload_guard {
+            Some(payload) => vec![payload],
+            None => context
+                .message_cases
+                .payload_values(context.process_id, variant)?
+                .iter()
+                .collect::<Vec<_>>(),
+        };
+        for payload in payloads {
             let payload_values = payload_bindings
                 .iter()
                 .map(|binding| {

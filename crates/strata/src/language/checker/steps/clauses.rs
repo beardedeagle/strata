@@ -11,7 +11,7 @@ pub(super) fn check_step_clauses<'a>(
     types: &mut CheckedTypeInterner<'_>,
 ) -> Result<Vec<StepClause<'a>>> {
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
-    let mut explicit_clauses = vec![None; msg_enum.variants.len()];
+    let mut explicit_clauses = vec![Vec::new(); msg_enum.variants.len()];
     let mut wildcard_clause = None;
     let mut dispatch_style = None;
     let mut match_body_seen = false;
@@ -40,6 +40,8 @@ pub(super) fn check_step_clauses<'a>(
                     return Err(Error::new("step parameter pattern must use a block body"));
                 };
                 insert_step_body_clause(
+                    module,
+                    semantic_index,
                     process,
                     &msg_enum.variants,
                     &mut explicit_clauses,
@@ -51,6 +53,7 @@ pub(super) fn check_step_clauses<'a>(
                         payload_params: Vec::new(),
                         payload_guard: None,
                     },
+                    StepClauseInsertMode::Single,
                 )?;
             }
             StepDispatchForm::BodyMatch => {
@@ -78,6 +81,8 @@ pub(super) fn check_step_clauses<'a>(
                         &arm.pattern,
                     )?;
                     insert_step_body_clause(
+                        module,
+                        semantic_index,
                         process,
                         &msg_enum.variants,
                         &mut explicit_clauses,
@@ -89,6 +94,7 @@ pub(super) fn check_step_clauses<'a>(
                             payload_params: Vec::new(),
                             payload_guard: None,
                         },
+                        StepClauseInsertMode::PayloadSensitive,
                     )?;
                 }
             }
@@ -102,6 +108,8 @@ pub(super) fn check_step_clauses<'a>(
                     return Err(Error::new("state match step must use a match body"));
                 };
                 insert_step_body_clause(
+                    module,
+                    semantic_index,
                     process,
                     &msg_enum.variants,
                     &mut explicit_clauses,
@@ -113,40 +121,77 @@ pub(super) fn check_step_clauses<'a>(
                         payload_params: Vec::new(),
                         payload_guard: None,
                     },
+                    StepClauseInsertMode::Single,
                 )?;
             }
         }
     }
 
-    if wildcard_clause.is_some() && explicit_clauses.iter().all(Option::is_some) {
+    if wildcard_clause.is_some()
+        && explicit_clauses
+            .iter()
+            .all(|clauses| clauses.iter().any(|clause| clause.payload_guard.is_none()))
+    {
         return Err(Error::new(format!(
             "process {} wildcard step pattern is unreachable",
             process.name
         )));
     }
 
-    let message_cases_for_process = message_cases.cases_for(process_id)?;
-    let mut clauses = Vec::with_capacity(message_cases_for_process.len());
-    for (index, message_variant) in msg_enum.variants.iter().enumerate() {
-        let Some(clause) = explicit_clauses[index]
-            .as_ref()
-            .or(wildcard_clause.as_ref())
-        else {
+    let concrete_message_cases = concrete_step_message_cases(
+        process_id,
+        &msg_enum.variants,
+        message_cases,
+        &explicit_clauses,
+    )?;
+    let mut clauses = Vec::with_capacity(concrete_message_cases.len());
+    for concrete_case in concrete_message_cases {
+        let variant_id = concrete_case.variant;
+        let message_variant = &msg_enum.variants[variant_id.index()];
+        let matching_explicit = matching_step_body_clauses(
+            module,
+            semantic_index,
+            &explicit_clauses[variant_id.index()],
+            concrete_case.payload.as_ref(),
+        )?;
+        if matching_explicit.len() > 1 {
             return Err(Error::new(format!(
-                "process {} must declare step pattern for message {}",
-                process.name, message_variant.name
+                "process {} has overlapping step patterns for message {} payload {}",
+                process.name,
+                message_variant.name,
+                concrete_case
+                    .payload
+                    .as_ref()
+                    .map(CheckedPayloadValue::label)
+                    .unwrap_or("<unknown>")
+            )));
+        }
+        let (clause, payload_guard) = if let Some(clause) = matching_explicit.first() {
+            let payload_guard =
+                transition_payload_guard_for_case(clause, &explicit_clauses, &concrete_case);
+            (clause.clone(), payload_guard)
+        } else if let Some(clause) = wildcard_clause.clone() {
+            (
+                clause,
+                wildcard_payload_guard_for_case(
+                    process,
+                    &explicit_clauses,
+                    &concrete_case,
+                    message_variant,
+                )?,
+            )
+        } else {
+            return Err(Error::new(format!(
+                "process {} must declare step pattern for message {}{}",
+                process.name,
+                message_variant.name,
+                concrete_case
+                    .payload
+                    .as_ref()
+                    .map(|payload| format!(" payload {}", payload.label()))
+                    .unwrap_or_default()
             )));
         };
-        let variant_id = CheckedMessageVariantId::from_index(index)?;
-        let _case = message_cases_for_process
-            .iter()
-            .find(|case| case.variant() == variant_id)
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "process {} has no checked message case for message {}",
-                    process.name, message_variant.name
-                ))
-            })?;
         let payload_bindings = clause
             .payload_params
             .iter()
@@ -167,16 +212,6 @@ pub(super) fn check_step_clauses<'a>(
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        validate_message_payload_guard_coverage(
-            module,
-            process,
-            process_id,
-            semantic_index,
-            message_cases,
-            variant_id,
-            message_variant,
-            clause.payload_guard.as_ref(),
-        )?;
         let message = message_cases.message_id(process_id, variant_id)?;
         match &clause.body {
             StepBodySource::Block(body) => {
@@ -184,6 +219,7 @@ pub(super) fn check_step_clauses<'a>(
                     step: clause.step,
                     variant: variant_id,
                     message,
+                    payload_guard,
                     payload_bindings,
                     current_state: None,
                     state_payload_bindings: Vec::new(),
@@ -201,6 +237,7 @@ pub(super) fn check_step_clauses<'a>(
                 clause.step,
                 variant_id,
                 message,
+                payload_guard,
                 payload_bindings,
                 match_body,
                 &mut clauses,
@@ -209,6 +246,116 @@ pub(super) fn check_step_clauses<'a>(
     }
 
     Ok(clauses)
+}
+
+#[derive(Debug, Clone)]
+struct StepConcreteMessageCase {
+    variant: CheckedMessageVariantId,
+    payload: Option<CheckedPayloadValue>,
+}
+
+fn concrete_step_message_cases(
+    process_id: CheckedProcessId,
+    message_variants: &[EnumVariant],
+    message_cases: &MessageCaseTable,
+    explicit_clauses: &[Vec<StepBodyClause<'_>>],
+) -> Result<Vec<StepConcreteMessageCase>> {
+    let mut concrete_cases = Vec::new();
+    for (variant_index, message_variant) in message_variants.iter().enumerate() {
+        let variant = CheckedMessageVariantId::from_index(variant_index)?;
+        let needs_payload_sensitive_cases = explicit_clauses[variant_index]
+            .iter()
+            .any(|clause| clause.payload_guard.is_some());
+        if message_variant.payload_type.is_some() && needs_payload_sensitive_cases {
+            let payload_values = message_cases.payload_values(process_id, variant)?;
+            if payload_values.is_empty() {
+                concrete_cases.push(StepConcreteMessageCase {
+                    variant,
+                    payload: None,
+                });
+            } else {
+                concrete_cases.extend(payload_values.iter().cloned().map(|payload| {
+                    StepConcreteMessageCase {
+                        variant,
+                        payload: Some(payload),
+                    }
+                }));
+            }
+        } else {
+            concrete_cases.push(StepConcreteMessageCase {
+                variant,
+                payload: None,
+            });
+        }
+    }
+    Ok(concrete_cases)
+}
+
+fn matching_step_body_clauses<'a>(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    clauses: &[StepBodyClause<'a>],
+    payload: Option<&CheckedPayloadValue>,
+) -> Result<Vec<StepBodyClause<'a>>> {
+    let mut matches = Vec::new();
+    for clause in clauses {
+        if step_body_clause_matches_case(module, semantic_index, clause, payload)? {
+            matches.push(clause.clone());
+        }
+    }
+    Ok(matches)
+}
+
+fn step_body_clause_matches_case(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    clause: &StepBodyClause<'_>,
+    payload: Option<&CheckedPayloadValue>,
+) -> Result<bool> {
+    let Some(payload_guard) = &clause.payload_guard else {
+        return Ok(true);
+    };
+    let Some(payload) = payload else {
+        return Ok(false);
+    };
+    payload_matches_guard(module, semantic_index, payload, payload_guard)
+}
+
+fn transition_payload_guard_for_case(
+    clause: &StepBodyClause<'_>,
+    explicit_clauses: &[Vec<StepBodyClause<'_>>],
+    concrete_case: &StepConcreteMessageCase,
+) -> Option<CheckedPayloadValue> {
+    (clause.payload_guard.is_some()
+        || has_payload_sensitive_clause(explicit_clauses, concrete_case.variant))
+    .then(|| concrete_case.payload.clone())
+    .flatten()
+}
+
+fn wildcard_payload_guard_for_case(
+    process: &Process,
+    explicit_clauses: &[Vec<StepBodyClause<'_>>],
+    concrete_case: &StepConcreteMessageCase,
+    message_variant: &EnumVariant,
+) -> Result<Option<CheckedPayloadValue>> {
+    if !has_payload_sensitive_clause(explicit_clauses, concrete_case.variant) {
+        return Ok(None);
+    }
+    concrete_case.payload.clone().map(Some).ok_or_else(|| {
+        Error::new(format!(
+            "process {} payload-sensitive match msg pattern for message {} has no discovered payload case for wildcard fallback",
+            process.name, message_variant.name
+        ))
+    })
+}
+
+fn has_payload_sensitive_clause(
+    explicit_clauses: &[Vec<StepBodyClause<'_>>],
+    variant: CheckedMessageVariantId,
+) -> bool {
+    explicit_clauses[variant.index()]
+        .iter()
+        .any(|clause| clause.payload_guard.is_some())
 }
 
 fn preadmit_concrete_step_state_values(
@@ -439,6 +586,7 @@ fn expand_state_match_step_clauses<'a>(
     step: &'a Function,
     variant: CheckedMessageVariantId,
     message: CheckedMessageId,
+    payload_guard: Option<CheckedPayloadValue>,
     payload_bindings: Vec<StepPayloadBinding>,
     match_body: &'a crate::language::ast::Match,
     clauses: &mut Vec<StepClause<'a>>,
@@ -499,6 +647,7 @@ fn expand_state_match_step_clauses<'a>(
                     types,
                     variant,
                     arm.body,
+                    payload_guard.as_ref(),
                     &payload_bindings,
                     &state_payload_bindings,
                 )?;
@@ -507,6 +656,7 @@ fn expand_state_match_step_clauses<'a>(
                         step,
                         variant,
                         message,
+                        payload_guard: payload_guard.clone(),
                         payload_bindings: payload_bindings.clone(),
                         current_state: Some(current_state),
                         state_payload_bindings,
@@ -543,6 +693,7 @@ fn preadmit_state_match_case_return(
     types: &mut CheckedTypeInterner<'_>,
     variant: CheckedMessageVariantId,
     body: &FunctionBlock,
+    payload_guard: Option<&CheckedPayloadValue>,
     payload_bindings: &[StepPayloadBinding],
     state_payload_bindings: &[StepStatePayloadBinding],
 ) -> Result<()> {
@@ -603,7 +754,14 @@ fn preadmit_state_match_case_return(
     }
 
     if uses_payload && !payload_bindings.is_empty() {
-        for payload in message_cases.payload_values(process_id, variant)? {
+        let payloads = match payload_guard {
+            Some(payload) => vec![payload],
+            None => message_cases
+                .payload_values(process_id, variant)?
+                .iter()
+                .collect::<Vec<_>>(),
+        };
+        for payload in payloads {
             let mut owned_bindings = Vec::new();
             for binding in payload_bindings {
                 let (label, value) = checked_payload_binding(
@@ -698,33 +856,6 @@ fn validate_state_payload_binding_name(
             return Err(Error::new(format!(
                 "process {} state payload binding {} conflicts with message payload binding",
                 process.name, state_payload_binding.name
-            )));
-        }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn validate_message_payload_guard_coverage(
-    module: &Module,
-    process: &Process,
-    process_id: CheckedProcessId,
-    semantic_index: &SemanticIndex,
-    message_cases: &MessageCaseTable,
-    variant: CheckedMessageVariantId,
-    message_variant: &EnumVariant,
-    payload_guard: Option<&PatternPayloadGuard>,
-) -> Result<()> {
-    let Some(payload_guard) = payload_guard else {
-        return Ok(());
-    };
-    for payload in message_cases.payload_values(process_id, variant)? {
-        if !payload_matches_guard(module, semantic_index, payload, payload_guard)? {
-            return Err(Error::new(format!(
-                "process {} step pattern for message {} does not match discovered payload {}",
-                process.name,
-                message_variant.name,
-                payload.label()
             )));
         }
     }
@@ -951,13 +1082,23 @@ fn state_match_payload_domain(
     Ok(payloads.into_values().collect())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepClauseInsertMode {
+    Single,
+    PayloadSensitive,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn insert_step_body_clause<'a>(
+    module: &Module,
+    semantic_index: &SemanticIndex,
     process: &Process,
     message_variants: &[EnumVariant],
-    explicit_clauses: &mut [Option<StepBodyClause<'a>>],
+    explicit_clauses: &mut [Vec<StepBodyClause<'a>>],
     wildcard_clause: &mut Option<StepBodyClause<'a>>,
     pattern: StepPattern,
     mut clause: StepBodyClause<'a>,
+    mode: StepClauseInsertMode,
 ) -> Result<()> {
     match pattern {
         StepPattern::Variant {
@@ -967,15 +1108,57 @@ fn insert_step_body_clause<'a>(
         } => {
             clause.payload_params = bindings;
             clause.payload_guard = payload_guard;
-            if explicit_clauses[message.index()].replace(clause).is_some() {
+            let clauses = &mut explicit_clauses[message.index()];
+            if mode == StepClauseInsertMode::Single && !clauses.is_empty() {
                 return Err(Error::new(format!(
                     "process {} declares duplicate step pattern for message {}",
                     process.name,
                     message_variants[message.index()].name
                 )));
             }
+            if mode == StepClauseInsertMode::Single
+                && clause.payload_guard.is_some()
+                && wildcard_clause.is_some()
+            {
+                return Err(Error::new(format!(
+                    "process {} declares payload-sensitive step pattern for message {} with a wildcard step pattern",
+                    process.name,
+                    message_variants[message.index()].name
+                )));
+            }
+            for existing in clauses.iter() {
+                if payload_patterns_overlap(
+                    semantic_index,
+                    clause.payload_guard.as_ref(),
+                    existing.payload_guard.as_ref(),
+                )? {
+                    return Err(Error::new(format!(
+                        "process {} match msg pattern {} overlaps an earlier pattern for message {}",
+                        process.name,
+                        step_pattern_payload_label(
+                            module,
+                            semantic_index,
+                            &message_variants[message.index()],
+                            clause.payload_guard.as_ref(),
+                        )?,
+                        message_variants[message.index()].name
+                    )));
+                }
+            }
+            clauses.push(clause);
         }
         StepPattern::Wildcard => {
+            if mode == StepClauseInsertMode::Single
+                && explicit_clauses
+                    .iter()
+                    .flatten()
+                    .any(|clause| clause.payload_guard.is_some())
+            {
+                return Err(Error::new(format!(
+                    "process {} declares a wildcard step pattern with a payload-sensitive step pattern",
+                    process.name
+                )));
+            }
             if wildcard_clause.replace(clause).is_some() {
                 return Err(Error::new(format!(
                     "process {} declares duplicate wildcard step pattern",
@@ -985,6 +1168,22 @@ fn insert_step_body_clause<'a>(
         }
     }
     Ok(())
+}
+
+fn step_pattern_payload_label(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    message_variant: &EnumVariant,
+    payload_guard: Option<&PatternPayloadGuard>,
+) -> Result<String> {
+    match payload_guard {
+        Some(payload_guard) => Ok(format!(
+            "{}({})",
+            message_variant.name,
+            payload_guard_label(module, semantic_index, payload_guard)?
+        )),
+        None => Ok(message_variant.name.to_string()),
+    }
 }
 
 fn set_step_dispatch_style(

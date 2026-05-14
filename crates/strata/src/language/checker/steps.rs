@@ -8,9 +8,9 @@ mod transition;
 
 pub(in crate::language::checker) use clauses::collect_concrete_state_payload_domains;
 pub(in crate::language::checker) use discovery::{
-    check_step_shape, collect_explicit_step_variants, matching_message_cases,
-    pattern_binding_subject, payload_value_bindings, resolve_send_target_process_for_discovery,
-    step_discovery_clauses, validate_pattern_binding_name,
+    check_step_shape, matching_message_cases, pattern_binding_subject, payload_value_bindings,
+    resolve_send_target_process_for_discovery, step_discovery_clauses,
+    validate_pattern_binding_name,
 };
 pub(in crate::language::checker) use process_refs::collect_message_case_process_refs;
 
@@ -60,6 +60,7 @@ pub(in crate::language::checker) fn check_step(
                 current_state: clause.current_state,
                 variant: clause.variant,
                 message: clause.message,
+                payload_guard: clause.payload_guard.as_ref(),
                 payload_bindings: &clause.payload_bindings,
                 state_payload_bindings: &clause.state_payload_bindings,
                 body: clause.body,

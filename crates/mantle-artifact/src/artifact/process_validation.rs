@@ -1,5 +1,8 @@
 use super::*;
 
+type TransitionPayloadGuardKey = Option<(u32, ArtifactValue)>;
+type TransitionCoverageKey = (u32, Option<u32>, TransitionPayloadGuardKey);
+
 impl ArtifactProcess {
     pub(super) fn validate_identity(&self, artifact: &MantleArtifact) -> Result<()> {
         validate_ident_field("process debug_name", &self.debug_name)?;
@@ -80,19 +83,22 @@ impl ArtifactProcess {
                 self.init_state.as_u32()
             )));
         }
-        let mut transition_keys = BTreeSet::new();
+        let mut transition_keys: BTreeSet<TransitionCoverageKey> = BTreeSet::new();
         let mut action_count = 0usize;
         for transition in &self.transitions {
+            self.validate_transition_payload_guard(artifact, transition)?;
             let transition_key = (
                 transition.message.as_u32(),
                 transition.current_state.map(StateId::as_u32),
+                transition_payload_guard_key(&transition.payload_guard),
             );
             if !transition_keys.insert(transition_key) {
                 return Err(Error::new(format!(
-                    "process {} declares duplicate transition for message id {} current_state {:?}",
+                    "process {} declares duplicate transition for message id {} current_state {:?} payload_guard {}",
                     self.debug_name,
                     transition.message.as_u32(),
-                    transition.current_state.map(StateId::as_u32)
+                    transition.current_state.map(StateId::as_u32),
+                    transition_payload_guard_label(&transition.payload_guard)
                 )));
             }
             if transition.message.index() >= self.message_variants.len() {
@@ -147,13 +153,40 @@ impl ArtifactProcess {
 
     fn validate_transition_coverage(
         &self,
-        transition_keys: &BTreeSet<(u32, Option<u32>)>,
+        transition_keys: &BTreeSet<TransitionCoverageKey>,
     ) -> Result<()> {
+        for (message, current_state, _) in transition_keys {
+            let has_unguarded_payload = transition_keys.contains(&(*message, *current_state, None));
+            let has_guarded_payload = transition_keys.iter().any(
+                |(transition_message, transition_state, payload_guard)| {
+                    transition_message == message
+                        && transition_state == current_state
+                        && payload_guard.is_some()
+                },
+            );
+            if has_unguarded_payload && has_guarded_payload {
+                return Err(Error::new(format!(
+                    "process {} mixes payload-guarded and unguarded transitions for message id {} current_state {:?}",
+                    self.debug_name, message, current_state
+                )));
+            }
+        }
+
         for message_index in 0..self.message_variants.len() {
             let message = message_index as u32;
-            let has_unguarded = transition_keys.contains(&(message, None));
-            let has_guarded = (0..self.state_values.len())
-                .any(|state_index| transition_keys.contains(&(message, Some(state_index as u32))));
+            let has_unguarded =
+                transition_keys
+                    .iter()
+                    .any(|(transition_message, current_state, _)| {
+                        *transition_message == message && current_state.is_none()
+                    });
+            let has_guarded = (0..self.state_values.len()).any(|state_index| {
+                transition_keys
+                    .iter()
+                    .any(|(transition_message, current_state, _)| {
+                        *transition_message == message && *current_state == Some(state_index as u32)
+                    })
+            });
             if has_unguarded {
                 if has_guarded {
                     return Err(Error::new(format!(
@@ -170,7 +203,12 @@ impl ArtifactProcess {
                 )));
             }
             for state_index in 0..self.state_values.len() {
-                if !transition_keys.contains(&(message, Some(state_index as u32))) {
+                if !transition_keys
+                    .iter()
+                    .any(|(transition_message, current_state, _)| {
+                        *transition_message == message && *current_state == Some(state_index as u32)
+                    })
+                {
                     return Err(Error::new(format!(
                         "process {} has no transition for message id {} current_state id {}",
                         self.debug_name, message, state_index
@@ -179,6 +217,53 @@ impl ArtifactProcess {
             }
         }
         Ok(())
+    }
+
+    fn validate_transition_payload_guard(
+        &self,
+        artifact: &MantleArtifact,
+        transition: &ArtifactTransition,
+    ) -> Result<()> {
+        let Some(payload_guard) = &transition.payload_guard else {
+            return Ok(());
+        };
+        if payload_guard.process_ref.is_some() {
+            return Err(Error::new(format!(
+                "process {} transition message id {} payload guard cannot be a process reference payload",
+                self.debug_name,
+                transition.message.as_u32()
+            )));
+        }
+        payload_guard
+            .value
+            .validate_without_process_ref("transition payload guard")?;
+        let message = self
+            .message_variants
+            .get(transition.message.index())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} transition message id {} is not accepted",
+                    self.debug_name,
+                    transition.message.as_u32()
+                ))
+            })?;
+        let Some(expected_type) = message.payload_type else {
+            return Err(Error::new(format!(
+                "process {} transition message id {} has a payload guard but the message does not accept a payload",
+                self.debug_name,
+                transition.message.as_u32()
+            )));
+        };
+        if payload_guard.ty != expected_type {
+            return Err(Error::new(format!(
+                "process {} transition message id {} payload guard has type id {}, expected {}",
+                self.debug_name,
+                transition.message.as_u32(),
+                payload_guard.ty.as_u32(),
+                expected_type.as_u32()
+            )));
+        }
+        artifact.validate_value_type("transition payload guard type", payload_guard.ty)
     }
 
     fn validate_static_next_state_template_value(
@@ -552,4 +637,19 @@ impl ArtifactProcess {
                 ))
             })
     }
+}
+
+fn transition_payload_guard_key(
+    payload_guard: &Option<ArtifactPayload>,
+) -> TransitionPayloadGuardKey {
+    payload_guard
+        .as_ref()
+        .map(|payload| (payload.ty.as_u32(), payload.value.clone()))
+}
+
+fn transition_payload_guard_label(payload_guard: &Option<ArtifactPayload>) -> String {
+    payload_guard
+        .as_ref()
+        .map(ArtifactPayload::label)
+        .unwrap_or_else(|| "<none>".to_string())
 }

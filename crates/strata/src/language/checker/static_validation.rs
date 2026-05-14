@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 
 use super::super::checked::{
-    CheckedAction, CheckedMessageId, CheckedProcess, CheckedProcessId, CheckedProcessRefId,
-    CheckedStateId, CheckedTransition, CheckedValueTemplate,
+    CheckedAction, CheckedMessageId, CheckedPayloadValue, CheckedProcess, CheckedProcessId,
+    CheckedProcessRefId, CheckedStateId, CheckedTransition, CheckedTypeId, CheckedValueTemplate,
 };
 use super::super::diagnostic::{Error, Result};
+use mantle_artifact::ArtifactValue;
 
 mod process_refs;
 mod runtime_order;
@@ -18,6 +19,13 @@ use templates::{
     current_state_payload_type, validate_next_state, validate_value_template_binding_types,
     validate_value_template_payload_labels, validate_value_template_process_refs,
 };
+
+type TransitionPayloadGuardKey = Option<(CheckedTypeId, ArtifactValue)>;
+type TransitionCoverageKey = (
+    CheckedMessageId,
+    Option<CheckedStateId>,
+    TransitionPayloadGuardKey,
+);
 
 pub(super) fn validate_action_references(
     processes: &[CheckedProcess],
@@ -131,6 +139,7 @@ fn validate_transition(
         transition.current_state(),
         transition.next_state(),
     )?;
+    validate_transition_payload_guard(process, transition)?;
     validate_transition_effects(process, transition)?;
     let mut spawned_refs = BTreeSet::new();
 
@@ -256,6 +265,56 @@ fn validate_transition_effects(
     Ok(())
 }
 
+fn validate_transition_payload_guard(
+    process: &CheckedProcess,
+    transition: &CheckedTransition,
+) -> Result<()> {
+    let Some(payload_guard) = transition.payload_guard() else {
+        return Ok(());
+    };
+    if payload_guard.process_ref_payload().is_some() || payload_guard.value().is_none() {
+        return Err(Error::new(format!(
+            "process {} transition message id {} payload guard cannot be a process reference payload",
+            process.debug_name(),
+            transition.message().as_u32()
+        )));
+    }
+    let Some(expected_type) = message_payload_type(process, transition.message())? else {
+        return Err(Error::new(format!(
+            "process {} transition message id {} has a payload guard, but the message accepts no payload",
+            process.debug_name(),
+            transition.message().as_u32()
+        )));
+    };
+    if payload_guard.ty() != expected_type {
+        return Err(Error::new(format!(
+            "process {} transition message id {} payload guard has type {}, expected {}",
+            process.debug_name(),
+            transition.message().as_u32(),
+            payload_guard.ty(),
+            expected_type
+        )));
+    }
+    let value = payload_guard.value().ok_or_else(|| {
+        Error::new(format!(
+            "process {} transition message id {} payload guard cannot be a process reference payload",
+            process.debug_name(),
+            transition.message().as_u32()
+        ))
+    })?;
+    value
+        .validate("transition payload guard")
+        .map_err(|err| Error::new(err.to_string()))?;
+    if value.contains_process_ref() {
+        return Err(Error::new(format!(
+            "process {} transition message id {} payload guard contains a process reference value",
+            process.debug_name(),
+            transition.message().as_u32()
+        )));
+    }
+    Ok(())
+}
+
 fn validate_send_payload_shape(
     process: &CheckedProcess,
     transition: &CheckedTransition,
@@ -320,15 +379,39 @@ fn validate_transition_current_state(
 }
 
 fn validate_transition_coverage(process: &CheckedProcess) -> Result<()> {
-    let mut declared = BTreeSet::new();
+    let mut declared: BTreeSet<TransitionCoverageKey> = BTreeSet::new();
     for transition in process.transitions() {
-        let key = (transition.message(), transition.current_state());
+        let key = (
+            transition.message(),
+            transition.current_state(),
+            transition_payload_guard_key(transition.payload_guard())?,
+        );
         if !declared.insert(key) {
             return Err(Error::new(format!(
-                "process {} declares duplicate transition for message id {} current_state {:?}",
+                "process {} declares duplicate transition for message id {} current_state {:?} payload_guard {}",
                 process.debug_name(),
                 transition.message().as_u32(),
-                transition.current_state().map(CheckedStateId::as_u32)
+                transition.current_state().map(CheckedStateId::as_u32),
+                transition_payload_guard_label(transition.payload_guard())
+            )));
+        }
+    }
+
+    for (message, current_state, payload_guard) in &declared {
+        let base_has_payload_guard =
+            declared
+                .iter()
+                .any(|(other_message, other_state, other_payload_guard)| {
+                    other_message == message
+                        && other_state == current_state
+                        && other_payload_guard.is_some()
+                });
+        if base_has_payload_guard && payload_guard.is_none() {
+            return Err(Error::new(format!(
+                "process {} mixes payload-guarded and unguarded transitions for message id {} current_state {:?}",
+                process.debug_name(),
+                message.as_u32(),
+                current_state.map(CheckedStateId::as_u32)
             )));
         }
     }
@@ -338,14 +421,13 @@ fn validate_transition_coverage(process: &CheckedProcess) -> Result<()> {
         let mut has_unguarded = false;
         let mut guarded_states = BTreeSet::new();
 
-        for transition in process
-            .transitions()
+        for (_, current_state, _) in declared
             .iter()
-            .filter(|transition| transition.message() == message)
+            .filter(|(transition_message, _, _)| *transition_message == message)
         {
-            match transition.current_state() {
+            match current_state {
                 Some(current_state) => {
-                    guarded_states.insert(current_state);
+                    guarded_states.insert(*current_state);
                 }
                 None => {
                     has_unguarded = true;
@@ -386,6 +468,28 @@ fn validate_transition_coverage(process: &CheckedProcess) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn transition_payload_guard_key(
+    payload_guard: Option<&CheckedPayloadValue>,
+) -> Result<TransitionPayloadGuardKey> {
+    payload_guard
+        .map(|payload_guard| {
+            payload_guard
+                .value()
+                .cloned()
+                .map(|value| (payload_guard.ty().id(), value))
+                .ok_or_else(|| {
+                    Error::new("transition payload guard cannot be a process reference payload")
+                })
+        })
+        .transpose()
+}
+
+fn transition_payload_guard_label(payload_guard: Option<&CheckedPayloadValue>) -> String {
+    payload_guard
+        .map(|payload_guard| payload_guard.label().to_string())
+        .unwrap_or_else(|| "<none>".to_string())
 }
 
 #[cfg(test)]

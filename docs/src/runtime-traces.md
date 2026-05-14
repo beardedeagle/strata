@@ -104,8 +104,10 @@ Payload-bearing messages keep the stable admitted message label and add
 ```
 
 Runtime dispatch uses the numeric `message_id`; labels and payload values are
-trace metadata. Payload type identity is the numeric ID from the admitted
-artifact type table, not a source type string.
+trace metadata. Payload-sensitive dispatch, when present, uses the admitted
+payload type ID and exact typed payload value identity, not source strings or
+debug labels. Payload type identity is the numeric ID from the admitted artifact
+type table, not a source type string.
 
 For state-specific transitions produced by `match state`, runtime dispatch
 uses the current admitted `state_id` together with the admitted `message_id`.

@@ -346,6 +346,7 @@ impl LoadedProcess {
         &self,
         message: MessageId,
         current_state: StateId,
+        payload: Option<&RuntimePayload>,
     ) -> Result<&LoadedTransition> {
         let lookup_state = self
             .transition_lookup
@@ -353,7 +354,7 @@ impl LoadedProcess {
             .then_some(current_state);
         let transition_index = self
             .transition_lookup
-            .for_dispatch(message, current_state)
+            .for_dispatch(message, current_state, payload)
             .ok_or_else(|| self.transition_lookup_error(message, lookup_state))?;
         self.transition_by_lookup_index(transition_index)
     }
@@ -615,6 +616,7 @@ impl LoadedProcessRef {
 pub(crate) struct LoadedTransition {
     pub(crate) current_state: Option<StateId>,
     pub(crate) message: MessageId,
+    pub(crate) payload_guard: Option<RuntimePayload>,
     pub(crate) step_result: StepResult,
     pub(crate) next_state: LoadedNextState,
     pub(crate) effect_authority: LoadedEffectAuthority,
@@ -626,6 +628,11 @@ impl LoadedTransition {
         Ok(Self {
             current_state: transition.current_state,
             message: transition.message,
+            payload_guard: transition
+                .payload_guard
+                .as_ref()
+                .map(RuntimePayload::from_artifact)
+                .transpose()?,
             step_result: transition.step_result,
             next_state: LoadedNextState::from_artifact(&transition.next_state)?,
             effect_authority: LoadedEffectAuthority::from_artifact(&transition.effects),
@@ -644,6 +651,7 @@ impl LoadedTransition {
         message: MessageId,
     ) -> Result<()> {
         self.validate_next_state(program, process, message)?;
+        self.validate_payload_guard(process, message)?;
 
         let current_state_payload_type = transition_current_state_payload_type(process, self)?;
         let mut spawned_refs = vec![false; process.process_refs.len()];
@@ -655,6 +663,48 @@ impl LoadedTransition {
                 current_state_payload_type,
                 &mut spawned_refs,
             )?;
+        }
+        Ok(())
+    }
+
+    fn validate_payload_guard(&self, process: &LoadedProcess, message: MessageId) -> Result<()> {
+        let Some(payload_guard) = &self.payload_guard else {
+            return Ok(());
+        };
+        if payload_guard.process_ref.is_some() || payload_guard.value.contains_process_ref() {
+            return Err(Error::new(format!(
+                "process {} message id {} payload guard cannot be a process reference payload",
+                process.debug_name,
+                message.as_u32()
+            )));
+        }
+        let message_variant = process
+            .message_variants
+            .get(message.index())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} message id {} is not loaded",
+                    process.debug_name,
+                    message.as_u32()
+                ))
+            })?;
+        let payload_type = message_variant
+            .payload_type
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} message id {} has a payload guard but the message does not accept a payload",
+                    process.debug_name,
+                    message.as_u32()
+                ))
+            })?;
+        if payload_guard.ty != payload_type {
+            return Err(Error::new(format!(
+                "process {} message id {} payload guard has type id {}, expected {}",
+                process.debug_name,
+                message.as_u32(),
+                payload_guard.ty.as_u32(),
+                payload_type.as_u32()
+            )));
         }
         Ok(())
     }

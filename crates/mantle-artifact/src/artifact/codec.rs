@@ -85,6 +85,13 @@ impl MantleArtifact {
                         current_state.as_u32()
                     ));
                 }
+                if let Some(payload_guard) = &transition.payload_guard {
+                    encoded.push_str(&format!(
+                        "{transition_prefix}.payload_guard_type_id={}\n{transition_prefix}.payload_guard_value={}\n",
+                        payload_guard.ty.as_u32(),
+                        payload_guard.value.label()
+                    ));
+                }
                 if let NextState::Value(state) = &transition.next_state {
                     encoded.push_str(&format!(
                         "{transition_prefix}.next_state_value={}\n",
@@ -228,6 +235,10 @@ impl MantleArtifact {
                     current_state: fields
                         .take_optional_state_id(&format!("{transition_prefix}.current_state"))?,
                     message: fields.take_message_id(&format!("{transition_prefix}.message"))?,
+                    payload_guard: decode_transition_payload_guard(
+                        &mut fields,
+                        &transition_prefix,
+                    )?,
                     step_result: fields
                         .take_step_result(&format!("{transition_prefix}.step_result"))?,
                     next_state: decode_next_state(&mut fields, &transition_prefix)?,
@@ -269,6 +280,29 @@ impl MantleArtifact {
         fields.finish()?;
         artifact.validate()?;
         Ok(artifact)
+    }
+}
+
+fn decode_transition_payload_guard(
+    fields: &mut ArtifactFields,
+    prefix: &str,
+) -> Result<Option<ArtifactPayload>> {
+    let payload_type_key = format!("{prefix}.payload_guard_type_id");
+    let payload_value_key = format!("{prefix}.payload_guard_value");
+    let payload_type = fields.take_optional_type_id(&payload_type_key)?;
+    let payload_value = fields.take_optional(&payload_value_key);
+    match (payload_type, payload_value) {
+        (None, None) => Ok(None),
+        (Some(ty), Some(value)) => Ok(Some(ArtifactPayload::value(
+            ty,
+            ArtifactValue::parse_field(&payload_value_key, &value)?,
+        )?)),
+        (Some(_), None) => Err(Error::new(format!(
+            "{prefix}.payload_guard_type_id requires {prefix}.payload_guard_value"
+        ))),
+        (None, Some(_)) => Err(Error::new(format!(
+            "{prefix}.payload_guard_value requires {prefix}.payload_guard_type_id"
+        ))),
     }
 }
 

@@ -1,0 +1,59 @@
+module actor_payload_split_match;
+
+record MainState;
+enum Phase {
+    Ready,
+    Done,
+}
+enum Routed {
+    Assign(Phase),
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Waiting,
+    SawReady,
+    Done,
+}
+enum WorkerMsg {
+    Envelope(Routed),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Ready));
+        send worker Envelope(Assign(Done));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Waiting;
+    }
+
+    fn step(state: WorkerState, msg: WorkerMsg) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match msg {
+            Envelope(Assign(Ready)) => {
+                emit "worker handled Ready assignment";
+                return Continue(SawReady);
+            }
+            Envelope(Assign(Done)) => {
+                emit "worker handled Done assignment";
+                return Stop(Done);
+            }
+        }
+    }
+}

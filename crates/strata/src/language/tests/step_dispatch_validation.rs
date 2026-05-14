@@ -238,10 +238,9 @@ fn rejects_duplicate_match_arm() {
 
     let err = check_source(&source).expect_err("duplicate match arm should fail");
 
-    assert!(
-        err.to_string()
-            .contains("process Worker declares duplicate step pattern for message First")
-    );
+    assert!(err.to_string().contains(
+        "process Worker match msg pattern First overlaps an earlier pattern for message First"
+    ));
 }
 
 #[test]

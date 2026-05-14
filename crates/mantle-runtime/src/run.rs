@@ -318,7 +318,11 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
         let step = ActiveStep::new(self.program, &self.processes[process_index], envelope)?;
         let definition = self.program.process(step.process_id)?;
-        let transition = definition.transition_for_dispatch(step.message, step.current_state)?;
+        let transition = definition.transition_for_dispatch(
+            step.message,
+            step.current_state,
+            step.payload.as_ref(),
+        )?;
         let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
         let final_state = self.resolve_next_state(process_index, &step, &next_state)?;

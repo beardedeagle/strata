@@ -562,6 +562,7 @@ pub(in crate::language) enum CheckedSendTarget {
 pub(in crate::language) struct CheckedTransition {
     current_state: Option<CheckedStateId>,
     message: CheckedMessageId,
+    payload_guard: Option<CheckedPayloadValue>,
     step_result: CheckedStepResult,
     next_state: CheckedNextState,
     effects: Vec<Effect>,
@@ -573,11 +574,17 @@ impl CheckedTransition {
         Self {
             current_state: parts.current_state,
             message: parts.message,
+            payload_guard: None,
             step_result: parts.step_result,
             next_state: parts.next_state,
             effects: parts.effects,
             actions: parts.actions,
         }
+    }
+
+    pub(in crate::language) fn with_payload_guard(mut self, guard: CheckedPayloadValue) -> Self {
+        self.payload_guard = Some(guard);
+        self
     }
 
     pub(in crate::language) fn current_state(&self) -> Option<CheckedStateId> {
@@ -586,6 +593,10 @@ impl CheckedTransition {
 
     pub(in crate::language) fn message(&self) -> CheckedMessageId {
         self.message
+    }
+
+    pub(in crate::language) fn payload_guard(&self) -> Option<&CheckedPayloadValue> {
+        self.payload_guard.as_ref()
     }
 
     pub(in crate::language) fn step_result(&self) -> CheckedStepResult {

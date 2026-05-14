@@ -137,59 +137,64 @@ fn check_step_match_scrutinee_parameter<'a>(
     Ok(message_param)
 }
 
-pub(in crate::language::checker) fn collect_explicit_step_variants(
-    module: &Module,
-    process: &Process,
-    process_id: CheckedProcessId,
-    semantic_index: &SemanticIndex,
-) -> Result<BTreeSet<CheckedMessageVariantId>> {
-    let mut variants = BTreeSet::new();
-    for step in &process.steps {
-        for clause in step_discovery_clauses(module, process, process_id, semantic_index, step)? {
-            if let StepPattern::Variant { message, .. } = clause.pattern {
-                variants.insert(message);
-            }
-        }
-    }
-    Ok(variants)
-}
-
 pub(in crate::language::checker) fn matching_message_cases<'a>(
     module: &Module,
     semantic_index: &SemanticIndex,
     cases: &'a [DiscoveredMessageCase],
     pattern: &StepPattern,
-    explicit_variants: &BTreeSet<CheckedMessageVariantId>,
+    process_clauses: &[StepDiscoveryClause<'_>],
 ) -> Result<Vec<&'a DiscoveredMessageCase>> {
     let mut matches = Vec::new();
     for case in cases {
         let is_match = match pattern {
-            StepPattern::Variant {
-                message,
-                payload_guard,
-                ..
-            } => {
-                case.variant() == *message
-                    && payload_guard
-                        .as_ref()
-                        .map(|guard| {
-                            case.payload()
-                                .map(|payload| {
-                                    payload_matches_guard(module, semantic_index, payload, guard)
-                                })
-                                .transpose()
-                                .map(|matched| matched.unwrap_or(false))
-                        })
-                        .transpose()?
-                        .unwrap_or(true)
+            StepPattern::Variant { .. } => {
+                step_pattern_matches_case(module, semantic_index, case, pattern)?
             }
-            StepPattern::Wildcard => !explicit_variants.contains(&case.variant()),
+            StepPattern::Wildcard => {
+                let mut matched_explicit = false;
+                for clause in process_clauses {
+                    if matches!(clause.pattern, StepPattern::Wildcard) {
+                        continue;
+                    }
+                    if step_pattern_matches_case(module, semantic_index, case, &clause.pattern)? {
+                        matched_explicit = true;
+                        break;
+                    }
+                }
+                !matched_explicit
+            }
         };
         if is_match {
             matches.push(case);
         }
     }
     Ok(matches)
+}
+
+fn step_pattern_matches_case(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    case: &DiscoveredMessageCase,
+    pattern: &StepPattern,
+) -> Result<bool> {
+    let StepPattern::Variant {
+        message,
+        payload_guard,
+        ..
+    } = pattern
+    else {
+        return Ok(false);
+    };
+    if case.variant() != *message {
+        return Ok(false);
+    }
+    let Some(payload_guard) = payload_guard else {
+        return Ok(true);
+    };
+    let Some(payload) = case.payload() else {
+        return Ok(false);
+    };
+    payload_matches_guard(module, semantic_index, payload, payload_guard)
 }
 
 pub(in crate::language::checker) fn payload_value_bindings<'a>(
