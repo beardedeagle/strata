@@ -6,7 +6,7 @@ use std::process::{Command, Output};
 use std::sync::Once;
 
 use mantle_artifact::{
-    ArtifactEffect, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
+    ArtifactEffect, ArtifactProcess, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
     ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact,
     ProcessId, TypeId, read_artifact,
 };
@@ -159,12 +159,16 @@ fn artifact_type_id(artifact: &MantleArtifact, label: &str, kind: ArtifactTypeKi
     TypeId::from_index(index).expect("artifact type index should fit")
 }
 
-fn transition_effects<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a [ArtifactEffect] {
+fn artifact_process<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a ArtifactProcess {
     artifact
         .processes
         .iter()
         .find(|candidate| candidate.debug_name == process)
         .unwrap_or_else(|| panic!("artifact process {process} should exist"))
+}
+
+fn transition_effects<'a>(artifact: &'a MantleArtifact, process: &str) -> &'a [ArtifactEffect] {
+    artifact_process(artifact, process)
         .transitions
         .first()
         .unwrap_or_else(|| panic!("artifact process {process} should have an entry transition"))
@@ -680,8 +684,7 @@ fn actor_payload_split_signature_checks_builds_and_runs_on_mantle() {
     assert!(stdout.contains("mantle: stopped Worker normally"));
 
     let artifact = gate.read_artifact("target/strata/actor_payload_split_signature.mta");
-    let worker = &artifact.processes[1];
-    assert_eq!(worker.debug_name, "Worker");
+    let worker = artifact_process(&artifact, "Worker");
     assert_eq!(worker.transitions.len(), 2);
     assert!(
         worker
