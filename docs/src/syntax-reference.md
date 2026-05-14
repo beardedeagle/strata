@@ -83,11 +83,15 @@ message_alias =
 
 The aliases and functions may appear in any order. `State`, `Msg`, and `init`
 must each appear exactly once. Non-`init`/`step` functions are process-local
-source helpers. Each message variant must resolve to exactly one `step` clause,
-either through an explicit constructor pattern, through one wildcard pattern,
-through one `match msg` step body, or through a state-match step for a specific
-message pattern. A process cannot mix parameter-pattern/state-match step forms
-with a `match msg` step body in this slice. Other process members are rejected.
+source helpers. Each concrete message case must resolve to exactly one generated
+transition, either through an explicit constructor pattern, through one wildcard
+pattern, through one `match msg` step body, or through a state-match step for a
+specific message pattern. In parameter-pattern and whole-body `match msg`
+dispatch, same top-level message constructor clauses may split by exact typed
+payload guard when their nested predicates are provably disjoint over discovered
+concrete payload cases. A process cannot mix parameter-pattern/state-match step
+forms with a `match msg` step body in this slice. Other process members are
+rejected.
 
 ## Functions
 
@@ -209,11 +213,12 @@ signatures and match bodies, helper return-match expressions, fieldless enum
 `match state` step bodies. Record/list/map destructuring patterns are accepted
 in normal source helper signatures, helper match bodies, helper return-match
 expressions, message constructor payloads, and current-state enum payloads when
-the payload has the matching type. Helper match bodies and helper return-match
-expressions may split a top-level constructor by disjoint nested enum predicates.
-Source helper calls still expand before lowering; enum pattern dispatch requires
-a concrete enum constructor value and record/list/map destructuring requires a
-concrete value.
+the payload has the matching type. Helper signatures, helper match bodies,
+helper return-match expressions, whole-body `match msg` arms, and step
+parameter patterns may split a top-level constructor by disjoint exact nested
+typed payload predicates. Source helper calls still expand before lowering; enum
+pattern dispatch requires a concrete enum constructor value and record/list/map
+destructuring requires a concrete value.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message
@@ -246,6 +251,11 @@ additionally binds an immutable map containing entries except the listed static
 keys. `_` is a wildcard pattern that covers accepted variants without explicit
 clauses.
 
+Multiple parameter-pattern `step` clauses may share one top-level message
+constructor only when exact nested typed payload predicates are provably
+disjoint and cover the discovered concrete payload cases. Wildcard fallback for
+payload-sensitive step-signature splitting remains rejected in this slice.
+
 A match `step` uses a typed message parameter and a whole-body
 `match` over that parameter:
 
@@ -259,11 +269,12 @@ match_step_function =
 
 Each match arm uses constructor or wildcard pattern syntax. Constructor payload
 patterns may bind or destructure nested constructor, record, list, and map
-payloads. The match
-scrutinee must be the typed message parameter in the current buildable step
-subset. Match arms are block-delimited and do not use comma separators. The
-step effect list applies to every generated
-transition, so each arm must use exactly the declared effects.
+payloads. Arms that share one top-level message constructor may split by exact
+typed payload guard when their nested predicates are provably disjoint. The
+match scrutinee must be the typed message parameter in the current buildable
+step subset. Match arms are block-delimited and do not use comma separators.
+The step effect list applies to every generated transition, so each arm must use
+exactly the declared effects.
 
 A state-match `step` uses the normal state parameter plus a message constructor
 or wildcard pattern, then uses a whole-body `match state`:

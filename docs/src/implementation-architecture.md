@@ -131,6 +131,7 @@ The runnable examples are:
 - `examples/actor_payloads.str`;
 - `examples/actor_payload_match.str`;
 - `examples/actor_payload_split_match.str`;
+- `examples/actor_payload_split_signature.str`;
 - `examples/actor_reply.str`;
 - `examples/actor_emit_spawn_send.str`;
 - `examples/actor_panic_no_replay.str`.

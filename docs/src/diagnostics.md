@@ -93,6 +93,10 @@ result of the first invalid shape.
 | `duplicate wildcard step pattern` | More than one `step` clause uses `_`. | Keep one wildcard clause. |
 | `wildcard step pattern is unreachable` | Explicit clauses already cover every accepted message variant. | Remove the wildcard clause or remove an explicit clause that it should cover. |
 | `must declare step pattern for message` | A message variant is not covered by an explicit or wildcard `step` clause. | Add a `step` clause for the missing message or add one `_` clause. |
+| `declares a wildcard step pattern with a payload-sensitive step pattern` / `declares payload-sensitive step pattern ... with a wildcard step pattern` | A process combines step-signature payload splitting with a wildcard fallback. | Use explicit disjoint payload cases or a supported whole-body `match msg` form. |
+| `step pattern ... overlaps an earlier pattern` | Two step-signature patterns can match the same message payload shape. | Keep one unguarded clause or make the nested payload predicates exact and disjoint. |
+| `must declare step pattern for message ... payload ...` | A payload-sensitive step split omits a discovered concrete payload case. | Add a step clause for the missing payload case or remove the split. |
+| `step pattern ... has no discovered payload case` | A step-signature payload predicate does not correspond to a discovered concrete payload case. | Use a concrete payload case that the checker can discover from sends and constructors. |
 | `match body must be the whole function body` | A `match msg` appears after another statement or has trailing body statements. | Use one whole-body `match msg` form or step parameter patterns. |
 | `match step must declare a typed message parameter` | A match `step` uses a parameter pattern instead of `msg: MsgType`. | Use `fn step(state: StateType, msg: MsgType)`. |
 | `match scrutinee ... must be the step message parameter` | The `match` scrutinee is not the typed message parameter. | Match the declared message parameter, usually `match msg`. |

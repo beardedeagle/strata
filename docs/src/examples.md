@@ -36,11 +36,13 @@ Read them in this order:
    `match msg`.
 19. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-20. `nested_patterns.str` for nested immutable constructor, record, list, and
+20. `actor_payload_split_signature.str` for payload-sensitive same-message
+   splitting across step parameter patterns.
+21. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-21. `actor_reply.str` for transporting typed process references through message
+22. `actor_reply.str` for transporting typed process references through message
    payloads.
-22. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+23. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -445,8 +447,32 @@ Key source ideas:
 - The checker admits the split only because the nested typed predicates are
   provably disjoint over discovered concrete payload cases.
 - Lowering emits exact typed payload guards in Mantle transition records.
-- Runtime dispatch uses admitted message IDs and exact typed payload identity,
-  not source strings or debug labels.
+- Runtime dispatch uses admitted message IDs, current state IDs when applicable,
+  and exact typed payload identity, not source strings or debug labels.
+
+## Actor Payload Split Signature
+
+`examples/actor_payload_split_signature.str` proves the same payload-sensitive
+same-message split through step parameter patterns rather than a whole-body
+`match msg`.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payload_split_signature.str
+cargo run -p strata --bin strata -- build examples/actor_payload_split_signature.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_split_signature.mta
+```
+
+Key source ideas:
+
+- Multiple `fn step(state, Envelope(Assign(...)))` clauses can share one
+  top-level message constructor when the nested typed predicates are provably
+  disjoint.
+- `Envelope(Assign(Ready))` and `Envelope(Assign(Done))` lower to two typed
+  payload-guarded Mantle transitions for the same admitted message ID.
+- Mantle selects the transition by admitted message ID, current state ID when
+  applicable, and exact typed payload identity.
+- `actor_payload_split_match.str` exercises the equivalent whole-body
+  `match msg` authoring form.
 
 ## Nested Patterns
 
