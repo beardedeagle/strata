@@ -679,7 +679,7 @@ impl LoadedTransition {
         message: MessageId,
     ) -> Result<()> {
         self.validate_next_state(program, process, message)?;
-        self.validate_payload_guard(process, message)?;
+        self.validate_payload_guard(program, process, message)?;
 
         let current_state_payload_type = transition_current_state_payload_type(process, self)?;
         let mut spawned_refs = vec![false; process.process_refs.len()];
@@ -695,7 +695,12 @@ impl LoadedTransition {
         Ok(())
     }
 
-    fn validate_payload_guard(&self, process: &LoadedProcess, message: MessageId) -> Result<()> {
+    fn validate_payload_guard(
+        &self,
+        program: &LoadedProgram,
+        process: &LoadedProcess,
+        message: MessageId,
+    ) -> Result<()> {
         let Some(payload_guard) = &self.payload_guard else {
             return Ok(());
         };
@@ -734,6 +739,14 @@ impl LoadedTransition {
                 payload_type.as_u32()
             )));
         }
+        program.validate_value_type(
+            &format!(
+                "process {} message id {} payload guard",
+                process.debug_name,
+                message.as_u32()
+            ),
+            payload_guard.ty,
+        )?;
         Ok(())
     }
 

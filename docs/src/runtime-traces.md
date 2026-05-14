@@ -103,8 +103,9 @@ Payload-bearing messages keep the stable admitted message label and add
 {"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type_id":2,"payload":"Job{phase:Ready}","queue_depth":1,"sender_pid":1}
 ```
 
-Runtime dispatch uses the numeric `message_id`; labels and payload values are
-trace metadata. Payload-sensitive dispatch, when present, uses the admitted
+Runtime dispatch always uses the numeric `message_id`; labels are trace
+metadata. For transitions without payload guards, payload values are recorded
+only as trace data. Payload-sensitive dispatch, when present, uses the admitted
 payload type ID and exact typed payload value identity, not source strings or
 debug labels. Payload type identity is the numeric ID from the admitted artifact
 type table, not a source type string.
