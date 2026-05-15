@@ -6,9 +6,9 @@ use std::process::{Command, Output};
 use std::sync::Once;
 
 use mantle_artifact::{
-    ArtifactEffect, ArtifactProcess, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact,
-    ProcessId, TypeId, read_artifact,
+    ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactTypeKind, ArtifactValue,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
+    EnumVariantId, MantleArtifact, ProcessId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -1493,6 +1493,12 @@ fn process_return_match_checks_builds_and_runs_on_mantle() {
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(stdout.contains("mantle: stopped Main normally"));
     assert!(stdout.contains("mantle: stopped Worker normally"));
+    assert_eq!(
+        stdout
+            .matches("process return match uniform prefix")
+            .count(),
+        2
+    );
 
     let artifact = gate.read_artifact("target/strata/process_return_match.mta");
     let worker = artifact_process(&artifact, "Worker");
@@ -1517,6 +1523,13 @@ fn process_return_match_checks_builds_and_runs_on_mantle() {
         .collect::<Vec<_>>();
     payload_guards.sort();
     assert_eq!(payload_guards, ["Assign(Done)", "Assign(Ready)"]);
+    for transition in &worker.transitions {
+        assert_eq!(transition.effects, [ArtifactEffect::Emit]);
+        assert!(
+            matches!(transition.actions.as_slice(), [ArtifactAction::Emit { .. }]),
+            "process return-match prefix must lower as one typed emit action"
+        );
+    }
     let encoded = artifact.encode();
     assert!(
         !encoded.contains("field_name=Assign"),
@@ -1533,6 +1546,12 @@ fn process_return_match_checks_builds_and_runs_on_mantle() {
             r#""result":"Continue""#,
             r#""state":"SawReady""#,
         ],
+    );
+    assert_eq!(
+        trace
+            .matches(r#""text":"process return match uniform prefix""#)
+            .count(),
+        2
     );
     assert_trace_event(
         &trace,

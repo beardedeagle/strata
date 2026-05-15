@@ -829,6 +829,11 @@ impl Parser {
                 "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
             )));
         }
+        if self.peek_keyword("match") {
+            return Err(self.error_here(
+                "match expressions are only admitted as whole function bodies or return match expressions in this source slice",
+            ));
+        }
         let name = self.expect_identifier()?;
         if name.as_str() == LIST_TYPE {
             let type_args = self.parse_optional_collection_type_args(&name, 1)?;

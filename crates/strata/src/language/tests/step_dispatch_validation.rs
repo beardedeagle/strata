@@ -443,6 +443,88 @@ proc Main mailbox bounded(2) {
 }
 
 #[test]
+fn rejects_shape_only_subset_map_payload_step_pattern() {
+    let source = r#"
+module shape_only_subset_map_payload_step_pattern;
+
+enum Phase {
+    Ready,
+    Done,
+}
+record MainState;
+enum MainMsg {
+    Start,
+    Lookup(Map<Phase,Phase,1>),
+}
+
+proc Main mailbox bounded(2) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [send] ~ [] @det {
+        send Main Lookup(Map<Phase,Phase,1>[Ready => Done]);
+        return Continue(state);
+    }
+
+    fn step(state: MainState, Lookup(Map[..])) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("shape-only subset map pattern should fail");
+
+    assert!(
+        err.to_string().contains(
+            "process Main step pattern subset map payload pattern must declare at least one key"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_dynamic_key_map_payload_step_pattern() {
+    let source = r#"
+module dynamic_key_map_payload_step_pattern;
+
+enum Phase {
+    Ready,
+    Done,
+}
+record MainState;
+enum MainMsg {
+    Lookup(Map<Phase,Phase,1>),
+}
+
+proc Main mailbox bounded(1) {
+    type State = Phase;
+    type Msg = MainMsg;
+
+    fn init() -> Phase ! [] ~ [] @det {
+        return Ready;
+    }
+
+    fn step(state: Phase, Lookup(Map[state => phase])) -> ProcResult<Phase> ! [] ~ [] @det {
+        return Stop(phase);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("dynamic map pattern key should fail");
+
+    assert!(
+        err.to_string().contains(
+            "process Main step pattern map payload pattern keys must be static source values of type Phase in this source slice"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_list_payload_step_pattern_length_mismatch() {
     let source = r#"
 module list_payload_step_pattern_length_mismatch;

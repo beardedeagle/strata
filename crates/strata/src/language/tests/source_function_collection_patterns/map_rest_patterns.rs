@@ -313,8 +313,9 @@ proc Main mailbox bounded(1) {
     let err = check_source(source).expect_err("runtime-bound map rest key should fail");
 
     assert!(
-        err.to_string()
-            .contains("value state is not a variant of enum Phase"),
+        err.to_string().contains(
+            "process Main step pattern map payload pattern keys must be static source values of type Phase in this source slice"
+        ),
         "unexpected error: {err}"
     );
 }

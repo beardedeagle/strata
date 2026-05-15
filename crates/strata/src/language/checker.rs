@@ -1725,13 +1725,7 @@ fn check_map_payload_pattern_bindings(
     let mut seen_keys = BTreeSet::new();
     let mut entry_keys = Vec::with_capacity(pattern.entries.len());
     for entry in &pattern.entries {
-        let key = canonical_source_value_with_bindings(
-            scope.module,
-            scope.semantic_index,
-            map_type.key,
-            &entry.key,
-            &[],
-        )?;
+        let key = canonical_map_payload_pattern_key(scope, map_type.key, &entry.key)?;
         if !seen_keys.insert(key.clone()) {
             return Err(Error::new(format!(
                 "map pattern duplicates key {}",
@@ -1809,6 +1803,21 @@ fn check_map_payload_pattern_bindings(
         )));
     }
     Ok(bindings)
+}
+
+fn canonical_map_payload_pattern_key(
+    scope: &NestedPatternBindingScope<'_, '_>,
+    key_type: &TypeRef,
+    key: &ValueExpr,
+) -> Result<ArtifactValue> {
+    canonical_source_value_with_bindings(scope.module, scope.semantic_index, key_type, key, &[])
+        .map_err(|_| {
+            let subject = scope.subject();
+            Error::new(format!(
+                "{subject} {} map payload pattern keys must be static source values of type {key_type} in this source slice",
+                scope.context
+            ))
+        })
 }
 
 fn validate_map_payload_pattern_capacity(

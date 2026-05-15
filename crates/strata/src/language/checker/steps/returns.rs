@@ -142,13 +142,6 @@ fn resolve_step_return_match(
     input: &StepReturnInput<'_>,
     match_body: &Match,
 ) -> Result<ResolvedStepReturn> {
-    if !input.body.statements.is_empty() {
-        return Err(Error::new(format!(
-            "process {} step return match must not follow runtime effect statements in this source slice",
-            process.name
-        )));
-    }
-
     let scrutinee_binding = source_bindings
         .iter()
         .find(|binding| *binding.name == match_body.scrutinee)

@@ -31,7 +31,8 @@ proc Worker mailbox bounded(2) {
         return Idle;
     }
 
-    fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [] ~ [] @det {
+    fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "process return match uniform prefix";
         return match phase {
             Ready => {
                 return Continue(SawReady);

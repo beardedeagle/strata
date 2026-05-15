@@ -458,6 +458,20 @@ fn rejects_step_return_match_over_non_concrete_payload_binding() {
 }
 
 #[test]
+fn rejects_step_return_match_over_direct_state() {
+    let source = STEP_RETURN_MATCH.replace("return match phase", "return match state");
+
+    let err = check_source(&source).expect_err("direct state return match should fail");
+
+    assert!(
+        err.to_string().contains(
+            "process Worker step return match scrutinee state must be a concrete enum source value binding"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_non_exhaustive_step_return_match() {
     let source = STEP_RETURN_MATCH.replace(
         r#"            Done => {
@@ -563,20 +577,110 @@ fn rejects_step_return_match_arm_statement() {
 }
 
 #[test]
-fn rejects_step_return_match_after_runtime_effect_statement() {
-    let source = STEP_RETURN_MATCH
-        .replace(
-            "fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [] ~ [] @det {",
-            "fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {",
-        )
-        .replace(
-            "        return match phase {",
-            "        emit \"return-match effect ordering is unsupported\";\n        return match phase {",
+fn checks_step_return_match_after_uniform_effect_prefix() {
+    let source = r#"
+module process_return_match_effect_prefix;
+
+record MainState;
+enum MainMsg { Start }
+enum Phase { Ready, Done }
+enum Route { Assign(Phase) }
+enum WorkerState { Idle, SawReady, Done }
+enum WorkerMsg { Envelope(Route) }
+record SinkState;
+enum SinkMsg { Tick }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Ready));
+        send worker Envelope(Assign(Done));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [emit, spawn, send] ~ [] @det {
+        emit "return-match uniform prefix";
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send sink Tick;
+        return match phase {
+            Ready => {
+                return Continue(SawReady);
+            }
+            Done => {
+                return Stop(Done);
+            }
+        };
+    }
+}
+
+proc Sink mailbox bounded(2) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Tick) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("uniform effect prefix should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+
+    assert_eq!(worker.transitions().len(), 2);
+    for transition in worker.transitions() {
+        assert!(
+            matches!(
+                transition.payload_guard().map(|payload| payload.label()),
+                Some("Assign(Ready)" | "Assign(Done)")
+            ),
+            "unexpected payload guard: {:?}",
+            transition.payload_guard()
         );
+        assert_eq!(
+            transition.effects(),
+            &[Effect::Emit, Effect::Spawn, Effect::Send]
+        );
+        assert_eq!(transition.actions().len(), 3);
+        assert_eq!(
+            transition.actions()[0],
+            CheckedAction::Emit {
+                output: checked_output_id(0)
+            }
+        );
+        assert!(matches!(
+            transition.actions()[1],
+            CheckedAction::Spawn { .. }
+        ));
+        assert!(matches!(
+            transition.actions()[2],
+            CheckedAction::Send { .. }
+        ));
+    }
 
-    let err = check_source(&source).expect_err("effect before return match should fail");
-
-    assert!(err.to_string().contains(
-        "process Worker step return match must not follow runtime effect statements in this source slice"
-    ));
+    lower_to_artifact(&checked, source)
+        .expect("uniform effect prefix should lower onto each typed transition");
 }

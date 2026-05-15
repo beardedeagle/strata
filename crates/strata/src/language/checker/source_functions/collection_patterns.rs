@@ -24,6 +24,13 @@ pub(in crate::language::checker::source_functions) struct CollectionPatternResol
     pub(in crate::language::checker::source_functions) bindings: Vec<PatternPayloadParam>,
 }
 
+#[derive(Clone, Copy)]
+struct MapPatternType<'a> {
+    key: &'a TypeRef,
+    value: &'a TypeRef,
+    capacity: usize,
+}
+
 pub(in crate::language::checker::source_functions) fn validate_list_pattern_source_function_group(
     module: &Module,
     semantic_index: &SemanticIndex,
@@ -180,7 +187,13 @@ pub(in crate::language::checker::source_functions) fn collection_pattern_shape(
                     expected_type,
                 ));
             };
-            let keys = canonical_map_pattern_keys(module, semantic_index, key, pattern)?;
+            let keys = canonical_map_pattern_keys(
+                module,
+                semantic_index,
+                "collection pattern",
+                key,
+                pattern,
+            )?;
             Ok(CollectionPatternShape::Map {
                 keys,
                 completeness: pattern.completeness,
@@ -286,9 +299,12 @@ pub(in crate::language::checker::source_functions) fn resolve_collection_pattern
                     let Some(substitutions) = map_pattern_substitutions(
                         module,
                         semantic_index,
-                        key,
-                        item,
-                        capacity,
+                        &subject,
+                        MapPatternType {
+                            key,
+                            value: item,
+                            capacity,
+                        },
                         pattern,
                         map,
                     )?
@@ -625,17 +641,11 @@ fn check_map_pattern_bindings(
     capacity: usize,
     pattern: &MapPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
-    let keys = canonical_map_pattern_keys(module, semantic_index, key_type, pattern)?;
+    let keys = canonical_map_pattern_keys(module, semantic_index, subject, key_type, pattern)?;
     let mut seen_bindings = BTreeSet::new();
     let mut bindings = Vec::new();
     for entry in &pattern.entries {
-        let key = canonical_source_value_with_bindings(
-            module,
-            semantic_index,
-            key_type,
-            &entry.key,
-            &[],
-        )?;
+        let key = canonical_map_pattern_key(module, semantic_index, subject, key_type, &entry.key)?;
         let value_path = PayloadBindingPath::whole().then(PayloadProjectionSegment::map_value(
             value_type.clone(),
             key,
@@ -702,18 +712,13 @@ fn check_map_pattern_bindings(
 fn canonical_map_pattern_keys(
     module: &Module,
     semantic_index: &SemanticIndex,
+    subject: &str,
     key_type: &TypeRef,
     pattern: &MapPattern,
 ) -> Result<Vec<ArtifactValue>> {
     let mut keys = BTreeSet::new();
     for entry in &pattern.entries {
-        let key = canonical_source_value_with_bindings(
-            module,
-            semantic_index,
-            key_type,
-            &entry.key,
-            &[],
-        )?;
+        let key = canonical_map_pattern_key(module, semantic_index, subject, key_type, &entry.key)?;
         if !keys.insert(key.clone()) {
             return Err(Error::new(format!(
                 "map pattern duplicates key {}",
@@ -722,6 +727,20 @@ fn canonical_map_pattern_keys(
         }
     }
     Ok(keys.into_iter().collect())
+}
+
+fn canonical_map_pattern_key(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    subject: &str,
+    key_type: &TypeRef,
+    key: &ValueExpr,
+) -> Result<ArtifactValue> {
+    canonical_source_value_with_bindings(module, semantic_index, key_type, key, &[]).map_err(|_| {
+        Error::new(format!(
+            "{subject} map pattern keys must be static source values of type {key_type} in this source slice"
+        ))
+    })
 }
 
 fn list_pattern_substitutions(
@@ -783,9 +802,8 @@ fn list_pattern_substitutions(
 fn map_pattern_substitutions(
     module: &Module,
     semantic_index: &SemanticIndex,
-    key_type: &TypeRef,
-    value_type: &TypeRef,
-    capacity: usize,
+    subject: &str,
+    map_type: MapPatternType<'_>,
     pattern: &MapPattern,
     value: &MapValue,
 ) -> Result<Option<Vec<SourceSubstitution>>> {
@@ -794,7 +812,7 @@ fn map_pattern_substitutions(
         let key = canonical_source_value_with_bindings(
             module,
             semantic_index,
-            key_type,
+            map_type.key,
             &entry.key,
             &[],
         )?;
@@ -809,13 +827,8 @@ fn map_pattern_substitutions(
     let mut substitutions = Vec::new();
     let mut pattern_keys = BTreeSet::new();
     for entry in &pattern.entries {
-        let key = canonical_source_value_with_bindings(
-            module,
-            semantic_index,
-            key_type,
-            &entry.key,
-            &[],
-        )?;
+        let key =
+            canonical_map_pattern_key(module, semantic_index, subject, map_type.key, &entry.key)?;
         if !pattern_keys.insert(key.clone()) {
             return Err(Error::new(format!(
                 "map pattern duplicates key {}",
@@ -833,7 +846,7 @@ fn map_pattern_substitutions(
                 let Some(mut nested) = source_nested_pattern_substitutions(
                     module,
                     semantic_index,
-                    value_type,
+                    map_type.value,
                     pattern,
                     value,
                 )?
@@ -858,7 +871,7 @@ fn map_pattern_substitutions(
                 let key = canonical_source_value_with_bindings(
                     module,
                     semantic_index,
-                    key_type,
+                    map_type.key,
                     &entry.key,
                     &[],
                 )?;
@@ -873,9 +886,9 @@ fn map_pattern_substitutions(
         substitutions.push(SourceSubstitution::new(
             rest.clone(),
             ValueExpr::Map(MapValue {
-                key_type: Some(key_type.clone()),
-                value_type: Some(value_type.clone()),
-                capacity: Some(capacity - pattern_keys.len()),
+                key_type: Some(map_type.key.clone()),
+                value_type: Some(map_type.value.clone()),
+                capacity: Some(map_type.capacity - pattern_keys.len()),
                 entries: rest_entries,
             }),
         ));
@@ -944,7 +957,18 @@ pub(in crate::language::checker::source_functions) fn source_nested_pattern_subs
             let ValueExpr::Map(map) = value else {
                 return Ok(None);
             };
-            map_pattern_substitutions(module, semantic_index, key, item, capacity, pattern, map)
+            map_pattern_substitutions(
+                module,
+                semantic_index,
+                "nested map pattern",
+                MapPatternType {
+                    key,
+                    value: item,
+                    capacity,
+                },
+                pattern,
+                map,
+            )
         }
         Pattern::Constructor { name, payload } => {
             let enum_decl = semantic_index.enum_decl(module, expected_type)?;

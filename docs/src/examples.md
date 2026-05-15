@@ -18,7 +18,8 @@ Read them in this order:
 9. `function_collection_match.str` for immutable list/map source values and
    collection patterns in normal source helpers.
 10. `function_return_match.str` for helper return-match expressions.
-11. `process_return_match.str` for pure process step return-match expressions.
+11. `process_return_match.str` for process step return-match expressions with
+    uniform effect prefixes.
 12. `function_record_pattern.str` for source helper record destructuring
    patterns.
 13. `function_record_return_match.str` for helper return-match record
@@ -271,8 +272,8 @@ Key source ideas:
 
 ## Process Return Match
 
-`examples/process_return_match.str` uses a pure process `step return match`
-over a concrete enum payload binding.
+`examples/process_return_match.str` uses a process `step return match` over a
+concrete enum payload binding after a uniform `emit` prefix.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/process_return_match.str
@@ -284,6 +285,8 @@ Key source ideas:
 
 - `Envelope(Assign(phase: Phase))` binds an immutable enum payload whose
   concrete value is already proven by payload-sensitive dispatch.
+- `emit "process return match uniform prefix";` lowers as the same typed action
+  prefix on every selected transition.
 - `return match phase { ... };` is checked and reduced to a typed
   `Continue(...)` or `Stop(...)` transition before lowering.
 - Mantle executes the emitted typed transition IDs and payload guards; it does
