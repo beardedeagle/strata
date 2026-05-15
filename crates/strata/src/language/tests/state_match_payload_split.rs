@@ -84,6 +84,48 @@ proc Worker mailbox bounded(2) {{
     )
 }
 
+fn state_match_payload_split_payload_derived_state_case(worker_steps: &str) -> String {
+    format!(
+        r#"
+module state_match_payload_split_payload_derived_state_case;
+
+record MainState;
+enum Phase {{ Ready, Done }}
+enum Routed {{ Assign(Phase), Cancel(Phase) }}
+enum MainMsg {{ Start }}
+enum WorkerState {{ Idle, Saw(Phase) }}
+enum WorkerMsg {{ Envelope(Routed) }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {{
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Ready));
+        send worker Envelope(Cancel(Done));
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(2) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return Idle;
+    }}
+
+{worker_steps}
+}}
+"#
+    )
+}
+
 fn state_match_body_for(result: &str) -> String {
     format!(
         r#"{{
@@ -100,6 +142,20 @@ fn state_match_body_for(result: &str) -> String {
         }}
     }}"#
     )
+}
+
+fn payload_derived_state_match_body() -> String {
+    r#"{
+        match state {
+            Idle => {
+                return Continue(Saw(phase));
+            }
+            Saw(current: Phase) => {
+                return Continue(Saw(phase));
+            }
+        }
+    }"#
+    .to_string()
 }
 
 #[test]
@@ -196,6 +252,68 @@ fn state_match_dispatches_same_message_by_disjoint_fieldless_nested_predicates()
     assert!(
         !encoded.contains("field_name=Assign"),
         "payload-specific state-match dispatch must not lower constructor labels as executable fields"
+    );
+}
+
+#[test]
+fn state_match_payload_split_revisits_guards_for_payload_derived_states() {
+    let body = payload_derived_state_match_body();
+    let source = state_match_payload_split_payload_derived_state_case(&format!(
+        r#"
+    fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [] ~ [] @det {body}
+
+    fn step(state: WorkerState, Envelope(Cancel(phase: Phase))) -> ProcResult<WorkerState> ! [] ~ [] @det {body}
+"#
+    ));
+
+    let checked = check_source(&source)
+        .expect("state-match payload split should revisit guards for payload-derived states");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker process should be checked");
+
+    assert_eq!(
+        checked_state_labels(worker),
+        ["Idle", "Saw(Ready)", "Saw(Done)"]
+    );
+    assert_eq!(worker.transitions().len(), 6);
+
+    let artifact = lower_to_artifact(&checked, &source)
+        .expect("payload-derived state-match split should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker process should lower");
+    let mut keys = worker
+        .transitions
+        .iter()
+        .map(|transition| {
+            let current_state = transition
+                .current_state
+                .expect("state-match transition should carry current state");
+            let state_label = worker.state_values[current_state.index()].label.clone();
+            let guard = transition
+                .payload_guard
+                .as_ref()
+                .expect("state-match transition should carry payload guard");
+            (state_label, guard.label())
+        })
+        .collect::<Vec<_>>();
+    keys.sort();
+
+    assert_eq!(
+        keys,
+        [
+            ("Idle".to_string(), "Assign(Ready)".to_string()),
+            ("Idle".to_string(), "Cancel(Done)".to_string()),
+            ("Saw(Done)".to_string(), "Assign(Ready)".to_string()),
+            ("Saw(Done)".to_string(), "Cancel(Done)".to_string()),
+            ("Saw(Ready)".to_string(), "Assign(Ready)".to_string()),
+            ("Saw(Ready)".to_string(), "Cancel(Done)".to_string()),
+        ]
     );
 }
 
@@ -306,6 +424,29 @@ fn rejects_state_match_payload_split_wildcard_fallback() {
             "process Worker declares a wildcard step pattern with a payload-sensitive step pattern"
         ),
         "expected state-match wildcard fallback diagnostic, got {err}"
+    );
+}
+
+#[test]
+fn rejects_state_match_wildcard_before_payload_sensitive_signature_clause() {
+    let wildcard_body = state_match_body_for("Stop(Done)");
+    let source = state_match_payload_split_case(&format!(
+        r#"
+    fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [] ~ [] @det {wildcard_body}
+
+    fn step(state: WorkerState, Envelope(Assign(Ready))) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Continue(SawReady);
+    }}
+"#
+    ));
+
+    let err = check_source(&source)
+        .expect_err("state-match wildcard before payload-sensitive signature should fail");
+    assert!(
+        err.to_string().contains(
+            "process Worker declares payload-sensitive step pattern for message Envelope with a state match wildcard step pattern"
+        ),
+        "expected order-independent state-match wildcard diagnostic, got {err}"
     );
 }
 

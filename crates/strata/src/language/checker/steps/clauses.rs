@@ -143,6 +143,7 @@ pub(super) fn check_step_clauses<'a>(
     )?;
     let pattern_label = step_dispatch_pattern_label(dispatch_style);
     let mut clauses = Vec::with_capacity(concrete_message_cases.len());
+    let mut state_match_cases = Vec::new();
     for concrete_case in &concrete_message_cases {
         let variant_id = concrete_case.variant;
         let message_variant = &msg_enum.variants[variant_id.index()];
@@ -169,16 +170,15 @@ pub(super) fn check_step_clauses<'a>(
                 transition_payload_guard_for_case(clause, &explicit_clauses, concrete_case);
             (clause.clone(), payload_guard)
         } else if let Some(clause) = wildcard_clause.clone() {
-            (
-                clause,
-                wildcard_payload_guard_for_case(
-                    process,
-                    &explicit_clauses,
-                    concrete_case,
-                    message_variant,
-                    pattern_label,
-                )?,
-            )
+            let payload_guard = wildcard_payload_guard_for_case(
+                process,
+                &explicit_clauses,
+                &clause,
+                concrete_case,
+                message_variant,
+                pattern_label,
+            )?;
+            (clause, payload_guard)
         } else {
             return Err(Error::new(format!(
                 "process {} must declare step pattern for message {}{}",
@@ -225,24 +225,29 @@ pub(super) fn check_step_clauses<'a>(
                     body,
                 });
             }
-            StepBodySource::StateMatch(match_body) => expand_state_match_step_clauses(
-                module,
-                process,
-                process_id,
-                semantic_index,
-                message_cases,
-                state_space,
-                types,
-                clause.step,
-                variant_id,
-                message,
-                payload_guard,
-                payload_bindings,
-                match_body,
-                &mut clauses,
-            )?,
+            StepBodySource::StateMatch(match_body) => {
+                state_match_cases.push(StateMatchStepExpansion {
+                    step: clause.step,
+                    variant: variant_id,
+                    message,
+                    payload_guard,
+                    payload_bindings,
+                    match_body,
+                })
+            }
         }
     }
+    expand_state_match_step_clause_group(
+        module,
+        process,
+        process_id,
+        semantic_index,
+        message_cases,
+        state_space,
+        types,
+        &state_match_cases,
+        &mut clauses,
+    )?;
     if explicit_clauses
         .iter()
         .flatten()
@@ -260,6 +265,101 @@ pub(super) fn check_step_clauses<'a>(
     }
 
     Ok(clauses)
+}
+
+#[derive(Debug, Clone)]
+struct StateMatchStepExpansion<'a> {
+    step: &'a Function,
+    variant: CheckedMessageVariantId,
+    message: CheckedMessageId,
+    payload_guard: Option<CheckedPayloadValue>,
+    payload_bindings: Vec<StepPayloadBinding>,
+    match_body: &'a crate::language::ast::Match,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct StateMatchTransitionKey {
+    message: CheckedMessageId,
+    current_state: CheckedStateId,
+    payload_guard: Option<CheckedPayloadGuardKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CheckedPayloadGuardKey {
+    ty: CheckedTypeId,
+    payload: PayloadDomainKey,
+}
+
+impl CheckedPayloadGuardKey {
+    fn from_payload(payload: &CheckedPayloadValue) -> Self {
+        Self {
+            ty: payload.ty().id(),
+            payload: PayloadDomainKey::from_payload(payload),
+        }
+    }
+}
+
+fn state_match_transition_key(
+    message: CheckedMessageId,
+    current_state: CheckedStateId,
+    payload_guard: Option<&CheckedPayloadValue>,
+) -> StateMatchTransitionKey {
+    StateMatchTransitionKey {
+        message,
+        current_state,
+        payload_guard: payload_guard.map(CheckedPayloadGuardKey::from_payload),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn expand_state_match_step_clause_group<'a>(
+    module: &Module,
+    process: &Process,
+    process_id: CheckedProcessId,
+    semantic_index: &SemanticIndex,
+    message_cases: &MessageCaseTable,
+    state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    state_match_cases: &[StateMatchStepExpansion<'a>],
+    clauses: &mut Vec<StepClause<'a>>,
+) -> Result<()> {
+    if state_match_cases.is_empty() {
+        return Ok(());
+    }
+
+    let mut seen_transitions = BTreeSet::new();
+    let mut iteration_count = 0usize;
+    loop {
+        let state_count = state_space.values().len();
+        let transition_count = seen_transitions.len();
+        for case in state_match_cases {
+            expand_state_match_step_clause_once(
+                module,
+                process,
+                process_id,
+                semantic_index,
+                message_cases,
+                state_space,
+                types,
+                case,
+                &mut seen_transitions,
+                clauses,
+            )?;
+        }
+        if state_space.values().len() == state_count && seen_transitions.len() == transition_count {
+            break;
+        }
+        iteration_count = iteration_count
+            .checked_add(1)
+            .ok_or_else(|| Error::new("state match expansion iteration count overflowed"))?;
+        if iteration_count > MAX_STATE_VALUES_PER_PROCESS.saturating_add(state_match_cases.len()) {
+            return Err(Error::new(format!(
+                "process {} state match expansion did not converge within the state value limit",
+                process.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -443,6 +543,7 @@ fn transition_payload_guard_for_case(
 fn wildcard_payload_guard_for_case(
     process: &Process,
     explicit_clauses: &[Vec<StepBodyClause<'_>>],
+    wildcard_clause: &StepBodyClause<'_>,
     concrete_case: &StepConcreteMessageCase,
     message_variant: &EnumVariant,
     pattern_label: &str,
@@ -450,7 +551,9 @@ fn wildcard_payload_guard_for_case(
     if !has_payload_sensitive_clause(explicit_clauses, concrete_case.variant) {
         return Ok(None);
     }
-    if has_payload_sensitive_state_match_clause(explicit_clauses, concrete_case.variant) {
+    if matches!(&wildcard_clause.body, StepBodySource::StateMatch(_))
+        || has_payload_sensitive_state_match_clause(explicit_clauses, concrete_case.variant)
+    {
         return Err(Error::new(format!(
             "process {} declares a wildcard step pattern with a payload-sensitive state match step pattern for message {}",
             process.name, message_variant.name
@@ -706,7 +809,7 @@ fn preadmit_concrete_step_return(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn expand_state_match_step_clauses<'a>(
+fn expand_state_match_step_clause_once<'a>(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
@@ -714,12 +817,8 @@ fn expand_state_match_step_clauses<'a>(
     message_cases: &MessageCaseTable,
     state_space: &mut StateSpace<'_>,
     types: &mut CheckedTypeInterner<'_>,
-    step: &'a Function,
-    variant: CheckedMessageVariantId,
-    message: CheckedMessageId,
-    payload_guard: Option<CheckedPayloadValue>,
-    payload_bindings: Vec<StepPayloadBinding>,
-    match_body: &'a crate::language::ast::Match,
+    case: &StateMatchStepExpansion<'a>,
+    seen_transitions: &mut BTreeSet<StateMatchTransitionKey>,
     clauses: &mut Vec<StepClause<'a>>,
 ) -> Result<()> {
     let state_enum = semantic_index.enum_decl(module, &process.state_type)?;
@@ -734,7 +833,7 @@ fn expand_state_match_step_clauses<'a>(
         payload_context: PatternPayloadContext::SourceValue,
         binding_context: PatternBindingContext::Source { owner: &subject },
     };
-    let arms = check_typed_match_arms(&pattern_context, &match_body.arms)?;
+    let arms = check_typed_match_arms(&pattern_context, &case.match_body.arms)?;
     let explicit_variants = arms
         .iter()
         .filter_map(|arm| match arm.pattern {
@@ -742,15 +841,26 @@ fn expand_state_match_step_clauses<'a>(
             TypedMatchPattern::Wildcard => None,
         })
         .collect::<BTreeSet<_>>();
-    let mut seen_current_states = BTreeSet::new();
-    let mut expanded_clauses = Vec::new();
-    let mut iteration_count = 0usize;
-
-    loop {
-        let state_count = state_space.values().len();
-        let clause_count = expanded_clauses.len();
-        for arm in &arms {
-            let cases = state_match_arm_cases(
+    for arm in &arms {
+        let cases = state_match_arm_cases(
+            module,
+            process,
+            process_id,
+            semantic_index,
+            message_cases,
+            state_space,
+            types,
+            state_enum,
+            &explicit_variants,
+            &arm.pattern,
+        )?;
+        for (current_state, state_payload_bindings) in cases {
+            validate_state_payload_binding_name(
+                process,
+                &case.payload_bindings,
+                &state_payload_bindings,
+            )?;
+            preadmit_state_match_case_return(
                 module,
                 process,
                 process_id,
@@ -758,58 +868,31 @@ fn expand_state_match_step_clauses<'a>(
                 message_cases,
                 state_space,
                 types,
-                state_enum,
-                &explicit_variants,
-                &arm.pattern,
+                case.variant,
+                arm.body,
+                case.payload_guard.as_ref(),
+                &case.payload_bindings,
+                &state_payload_bindings,
             )?;
-            for (current_state, state_payload_bindings) in cases {
-                validate_state_payload_binding_name(
-                    process,
-                    &payload_bindings,
-                    &state_payload_bindings,
-                )?;
-                preadmit_state_match_case_return(
-                    module,
-                    process,
-                    process_id,
-                    semantic_index,
-                    message_cases,
-                    state_space,
-                    types,
-                    variant,
-                    arm.body,
-                    payload_guard.as_ref(),
-                    &payload_bindings,
-                    &state_payload_bindings,
-                )?;
-                if seen_current_states.insert(current_state.as_u32()) {
-                    expanded_clauses.push(StepClause {
-                        step,
-                        variant,
-                        message,
-                        payload_guard: payload_guard.clone(),
-                        payload_bindings: payload_bindings.clone(),
-                        current_state: Some(current_state),
-                        state_payload_bindings,
-                        body: arm.body,
-                    });
-                }
+            let key = state_match_transition_key(
+                case.message,
+                current_state,
+                case.payload_guard.as_ref(),
+            );
+            if seen_transitions.insert(key) {
+                clauses.push(StepClause {
+                    step: case.step,
+                    variant: case.variant,
+                    message: case.message,
+                    payload_guard: case.payload_guard.clone(),
+                    payload_bindings: case.payload_bindings.clone(),
+                    current_state: Some(current_state),
+                    state_payload_bindings,
+                    body: arm.body,
+                });
             }
         }
-        if state_space.values().len() == state_count && expanded_clauses.len() == clause_count {
-            break;
-        }
-        iteration_count = iteration_count
-            .checked_add(1)
-            .ok_or_else(|| Error::new("state match expansion iteration count overflowed"))?;
-        if iteration_count > MAX_STATE_VALUES_PER_PROCESS {
-            return Err(Error::new(format!(
-                "process {} state match expansion did not converge within the state value limit",
-                process.name
-            )));
-        }
     }
-    clauses.extend(expanded_clauses);
     Ok(())
 }
 
@@ -1274,6 +1357,18 @@ fn insert_step_body_clause<'a>(
                 return Err(Error::new(format!(
                     "process {} declares payload-sensitive step pattern for message {} with a wildcard step pattern",
                     process.name,
+                    message_variants[message.index()].name
+                )));
+            }
+            if clause.payload_guard.is_some()
+                && wildcard_clause
+                    .as_ref()
+                    .is_some_and(|clause| matches!(&clause.body, StepBodySource::StateMatch(_)))
+            {
+                return Err(Error::new(format!(
+                    "process {} declares payload-sensitive {} for message {} with a state match wildcard step pattern",
+                    process.name,
+                    mode.pattern_label(),
                     message_variants[message.index()].name
                 )));
             }
