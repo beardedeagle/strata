@@ -127,6 +127,12 @@ pub(super) fn check_step_clauses<'a>(
         }
     }
 
+    validate_process_wildcard_compatibility(
+        process,
+        &msg_enum.variants,
+        &explicit_clauses,
+        wildcard_clause.as_ref(),
+    )?;
     let concrete_message_cases = concrete_step_message_cases(
         process_id,
         &msg_enum.variants,
@@ -552,22 +558,6 @@ fn wildcard_payload_guard_for_case(
         return Ok(None);
     }
     let wildcard_is_state_match = is_state_match_clause(wildcard_clause);
-    if has_payload_sensitive_state_match_clause(explicit_clauses, concrete_case.variant)
-        && !wildcard_is_state_match
-    {
-        return Err(Error::new(format!(
-            "process {} declares a wildcard step pattern with a payload-sensitive state match step pattern for message {}",
-            process.name, message_variant.name
-        )));
-    }
-    if wildcard_is_state_match
-        && has_payload_sensitive_non_state_match_clause(explicit_clauses, concrete_case.variant)
-    {
-        return Err(Error::new(format!(
-            "process {} declares payload-sensitive step pattern for message {} with a state match wildcard step pattern",
-            process.name, message_variant.name
-        )));
-    }
     concrete_case.payload.clone().map(Some).ok_or_else(|| {
         Error::new(format!(
             "process {} payload-sensitive {} for message {} has no discovered payload case for wildcard fallback",
@@ -598,42 +588,63 @@ fn has_payload_sensitive_clause(
         .any(|clause| clause.payload_guard.is_some())
 }
 
-fn has_payload_sensitive_state_match_clause(
+fn first_payload_sensitive_message_matching<'a>(
+    message_variants: &'a [EnumVariant],
     explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    variant: CheckedMessageVariantId,
-) -> bool {
-    explicit_clauses[variant.index()]
+    predicate: impl Fn(&StepBodyClause<'_>) -> bool,
+) -> Result<Option<&'a EnumVariant>> {
+    if message_variants.len() != explicit_clauses.len() {
+        return Err(Error::new(format!(
+            "internal error: step wildcard validation expected {} message variants, found {} clause buckets",
+            message_variants.len(),
+            explicit_clauses.len()
+        )));
+    }
+
+    Ok(message_variants
         .iter()
-        .any(|clause| clause.payload_guard.is_some() && is_state_match_clause(clause))
+        .zip(explicit_clauses.iter())
+        .find_map(|(message_variant, clauses)| {
+            clauses
+                .iter()
+                .any(|clause| clause.payload_guard.is_some() && predicate(clause))
+                .then_some(message_variant)
+        }))
 }
 
-fn has_payload_sensitive_non_state_match_clause(
+fn validate_process_wildcard_compatibility(
+    process: &Process,
+    message_variants: &[EnumVariant],
     explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    variant: CheckedMessageVariantId,
-) -> bool {
-    explicit_clauses[variant.index()]
-        .iter()
-        .any(|clause| clause.payload_guard.is_some() && !is_state_match_clause(clause))
-}
+    wildcard_clause: Option<&StepBodyClause<'_>>,
+) -> Result<()> {
+    let Some(wildcard_clause) = wildcard_clause else {
+        return Ok(());
+    };
 
-fn first_payload_sensitive_non_state_match_clause(
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-) -> Option<usize> {
-    explicit_clauses.iter().position(|clauses| {
-        clauses
-            .iter()
-            .any(|clause| clause.payload_guard.is_some() && !is_state_match_clause(clause))
-    })
-}
+    if is_state_match_clause(wildcard_clause) {
+        if let Some(message_variant) = first_payload_sensitive_message_matching(
+            message_variants,
+            explicit_clauses,
+            |clause| !is_state_match_clause(clause),
+        )? {
+            return Err(Error::new(format!(
+                "process {} declares payload-sensitive step pattern for message {} with a state match wildcard step pattern",
+                process.name, message_variant.name
+            )));
+        }
+    } else if let Some(message_variant) = first_payload_sensitive_message_matching(
+        message_variants,
+        explicit_clauses,
+        is_state_match_clause,
+    )? {
+        return Err(Error::new(format!(
+            "process {} declares a wildcard step pattern with a payload-sensitive state match step pattern for message {}",
+            process.name, message_variant.name
+        )));
+    }
 
-fn first_payload_sensitive_state_match_clause(
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-) -> Option<usize> {
-    explicit_clauses.iter().position(|clauses| {
-        clauses
-            .iter()
-            .any(|clause| clause.payload_guard.is_some() && is_state_match_clause(clause))
-    })
+    Ok(())
 }
 
 fn is_state_match_clause(clause: &StepBodyClause<'_>) -> bool {
@@ -1382,7 +1393,6 @@ fn insert_step_body_clause<'a>(
             clause.payload_params = bindings;
             clause.payload_guard = payload_guard;
             let clauses = &mut explicit_clauses[message.index()];
-            let clause_is_state_match = is_state_match_clause(&clause);
             if mode == StepClauseInsertMode::Signature
                 && clause.payload_guard.is_none()
                 && clauses
@@ -1392,31 +1402,6 @@ fn insert_step_body_clause<'a>(
                 return Err(Error::new(format!(
                     "process {} declares duplicate step pattern for message {}",
                     process.name,
-                    message_variants[message.index()].name
-                )));
-            }
-            if mode == StepClauseInsertMode::StateMatch
-                && clause.payload_guard.is_some()
-                && wildcard_clause
-                    .as_ref()
-                    .is_some_and(|wildcard| !is_state_match_clause(wildcard))
-            {
-                return Err(Error::new(format!(
-                    "process {} declares payload-sensitive step pattern for message {} with a wildcard step pattern",
-                    process.name,
-                    message_variants[message.index()].name
-                )));
-            }
-            if clause.payload_guard.is_some()
-                && wildcard_clause
-                    .as_ref()
-                    .is_some_and(|wildcard| is_state_match_clause(wildcard))
-                && !clause_is_state_match
-            {
-                return Err(Error::new(format!(
-                    "process {} declares payload-sensitive {} for message {} with a state match wildcard step pattern",
-                    process.name,
-                    mode.pattern_label(),
                     message_variants[message.index()].name
                 )));
             }
@@ -1443,28 +1428,6 @@ fn insert_step_body_clause<'a>(
             clauses.push(clause);
         }
         StepPattern::Wildcard => {
-            match mode {
-                StepClauseInsertMode::StateMatch => {
-                    if let Some(variant_index) =
-                        first_payload_sensitive_non_state_match_clause(explicit_clauses)
-                    {
-                        return Err(Error::new(format!(
-                            "process {} declares payload-sensitive step pattern for message {} with a state match wildcard step pattern",
-                            process.name, message_variants[variant_index].name
-                        )));
-                    }
-                }
-                StepClauseInsertMode::MatchBody | StepClauseInsertMode::Signature => {
-                    if let Some(variant_index) =
-                        first_payload_sensitive_state_match_clause(explicit_clauses)
-                    {
-                        return Err(Error::new(format!(
-                            "process {} declares a wildcard step pattern with a payload-sensitive state match step pattern for message {}",
-                            process.name, message_variants[variant_index].name
-                        )));
-                    }
-                }
-            }
             if wildcard_clause.replace(clause).is_some() {
                 return Err(Error::new(format!(
                     "process {} declares duplicate wildcard step pattern",

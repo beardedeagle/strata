@@ -607,6 +607,29 @@ fn rejects_state_match_wildcard_before_payload_sensitive_signature_clause() {
 }
 
 #[test]
+fn rejects_state_match_wildcard_after_payload_sensitive_signature_clause() {
+    let wildcard_body = state_match_body_for("Stop(Done)");
+    let source = state_match_payload_split_case(&format!(
+        r#"
+    fn step(state: WorkerState, Envelope(Assign(Ready))) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Continue(SawReady);
+    }}
+
+    fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [] ~ [] @det {wildcard_body}
+"#
+    ));
+
+    let err = check_source(&source)
+        .expect_err("state-match wildcard after payload-sensitive signature should fail");
+    assert!(
+        err.to_string().contains(
+            "process Worker declares payload-sensitive step pattern for message Envelope with a state match wildcard step pattern"
+        ),
+        "expected order-independent state-match wildcard diagnostic, got {err}"
+    );
+}
+
+#[test]
 fn state_match_payload_wildcard_does_not_create_dynamic_catch_all() {
     let ready_body = state_match_body_for("Continue(SawReady)");
     let fallback_body = state_match_body_for("Stop(Done)");
@@ -696,6 +719,32 @@ fn rejects_non_state_match_wildcard_after_fully_covered_state_match_payload_spli
 
     let err = check_source(&source)
         .expect_err("non-state-match wildcard after state-match payload split should fail");
+    assert!(
+        err.to_string().contains(
+            "process Worker declares a wildcard step pattern with a payload-sensitive state match step pattern for message Envelope"
+        ),
+        "expected mixed state-match/non-state-match wildcard diagnostic, got {err}"
+    );
+}
+
+#[test]
+fn rejects_non_state_match_wildcard_before_fully_covered_state_match_payload_split() {
+    let ready_body = state_match_body_for("Continue(SawReady)");
+    let done_body = state_match_body_for("Stop(Done)");
+    let source = state_match_payload_split_with_unit_message(&format!(
+        r#"
+    fn step(state: WorkerState, _) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Stop(Done);
+    }}
+
+    fn step(state: WorkerState, Envelope(Assign(Ready))) -> ProcResult<WorkerState> ! [] ~ [] @det {ready_body}
+
+    fn step(state: WorkerState, Envelope(Assign(Done))) -> ProcResult<WorkerState> ! [] ~ [] @det {done_body}
+"#
+    ));
+
+    let err = check_source(&source)
+        .expect_err("non-state-match wildcard before state-match payload split should fail");
     assert!(
         err.to_string().contains(
             "process Worker declares a wildcard step pattern with a payload-sensitive state match step pattern for message Envelope"
