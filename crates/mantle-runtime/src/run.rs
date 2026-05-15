@@ -203,19 +203,21 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     ) -> Result<()> {
         let process_index = self.process_index_for_pid(target)?;
         let process = &self.processes[process_index];
-        let target_process = self.program.process(process.process_id)?;
-        envelope.validate_for_process(self.program, process.process_id)?;
-        self.validate_envelope_process_ref(&envelope)?;
-        let message_label = self
-            .program
-            .message_label(process.process_id, envelope.message)?
-            .to_string();
-        let process_label = target_process.debug_name.clone();
-        if process.status != ProcessStatus::Running {
-            return Err(Error::new(format!(
-                "send to process {} failed because it is not running",
-                process_label
-            )));
+        let process_id = process.process_id;
+        let target_process = self.program.process(process_id)?;
+        let process_label = target_process.debug_name.as_str();
+        match process.status {
+            ProcessStatus::Running => {}
+            ProcessStatus::Stopped => {
+                return Err(Error::new(format!(
+                    "send to process {process_label} failed because it is stopped"
+                )));
+            }
+            ProcessStatus::Failed => {
+                return Err(Error::new(format!(
+                    "send to process {process_label} failed because it has failed"
+                )));
+            }
         }
         if process.mailbox.len() >= process.mailbox_bound {
             return Err(Error::new(format!(
@@ -223,12 +225,19 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 process_label
             )));
         }
+        envelope.validate_for_process(self.program, process_id)?;
+        self.validate_envelope_process_ref(&envelope)?;
         let pid = process.pid;
         let queue_depth = process.mailbox.len() + 1;
+        let message_label = self
+            .program
+            .message_label(process_id, envelope.message)?
+            .to_string();
+        let process_label = process_label.to_string();
 
         self.record_event(RuntimeEvent::MessageAccepted {
             pid,
-            process_id: process.process_id,
+            process_id,
             process: process_label.clone(),
             message_id: envelope.message,
             message: message_label.clone(),
@@ -236,13 +245,12 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             queue_depth,
             sender_pid,
         })?;
-        self.processes[process_index]
-            .mailbox
-            .push_back(envelope.clone());
+        let delivered_message = envelope.display_label(&message_label);
+        self.processes[process_index].mailbox.push_back(envelope);
         self.delivered_messages.push(MessageDelivery {
             pid,
             process: process_label,
-            message: envelope.display_label(&message_label),
+            message: delivered_message,
         });
         Ok(())
     }
