@@ -256,6 +256,29 @@ explicit constructor pattern, by one wildcard pattern, or by one whole-body
 state with a whole-body `match state`. A process cannot mix parameter-pattern
 or state-match step clauses with a `match msg` step body in this slice.
 
+An `init` function returns one immutable whole state value. It may use a
+whole-body `match` or a pure `return match` over one fieldless enum constructor
+when the checker can select one arm before lowering:
+
+```strata
+fn init() -> MainState ! [] ~ [] @det {
+    return match Warm {
+        Cold => {
+            return MainState { readiness: ColdReady };
+        }
+        Warm => {
+            return MainState { readiness: WarmReady };
+        }
+    };
+}
+```
+
+This is not runtime dispatch. The checker proves the fieldless enum scrutinee,
+checks exhaustiveness and arm shapes, and emits the selected initial state as the
+existing typed state ID. `init return match` arms must be statement-free and must
+return whole state values; nested return matches and payload-binding
+materialization into the initial state are rejected in this source slice.
+
 ## Function Signatures
 
 The accepted function signature shape is:

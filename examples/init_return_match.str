@@ -1,0 +1,37 @@
+module init_return_match;
+
+enum StartupMode {
+    Cold,
+    Warm,
+}
+enum Readiness {
+    ColdReady,
+    WarmReady,
+}
+record MainState {
+    readiness: Readiness,
+}
+enum MainMsg {
+    Start,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return match Warm {
+            Cold => {
+                return MainState { readiness: ColdReady };
+            }
+            Warm => {
+                return MainState { readiness: WarmReady };
+            }
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "init return match selected WarmReady";
+        return Stop(state);
+    }
+}

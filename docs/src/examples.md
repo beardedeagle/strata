@@ -10,46 +10,47 @@ Read them in this order:
 4. `actor_match.str` for whole-body match authoring that checks
    into typed message-keyed transitions.
 5. `init_match.str` for whole-body match authoring in `init`.
-6. `function_match.str` for module functions, process-local helpers, and
+6. `init_return_match.str` for pure init return-match expressions.
+7. `function_match.str` for module functions, process-local helpers, and
    pattern matching outside actor dispatch.
-7. `function_payload_match.str` for payload-bearing enum construction and
+8. `function_payload_match.str` for payload-bearing enum construction and
    matching in normal source helpers.
-8. `function_collection_match.str` for immutable list/map source values and
+9. `function_collection_match.str` for immutable list/map source values and
    collection patterns in normal source helpers.
-9. `function_return_match.str` for helper return-match expressions.
-10. `process_return_match.str` for pure process step return-match expressions.
-11. `function_record_pattern.str` for source helper record destructuring
+10. `function_return_match.str` for helper return-match expressions.
+11. `process_return_match.str` for pure process step return-match expressions.
+12. `function_record_pattern.str` for source helper record destructuring
    patterns.
-12. `function_record_return_match.str` for helper return-match record
+13. `function_record_return_match.str` for helper return-match record
    destructuring.
-13. `function_record_body_match.str` for whole-body helper match record
+14. `function_record_body_match.str` for whole-body helper match record
    destructuring.
-14. `state_payload_enum.str` for payload-bearing process state enum transitions.
-15. `collection_state.str` for immutable collection state and payload-dependent
+15. `state_payload_enum.str` for payload-bearing process state enum transitions.
+16. `collection_state.str` for immutable collection state and payload-dependent
    collection next-state templates.
-16. `state_payload_match.str` for matching immutable current process state
+17. `state_payload_match.str` for matching immutable current process state
    payloads.
-17. `actor_instances.str` for multiple runtime instances of one process
+18. `actor_instances.str` for multiple runtime instances of one process
    definition.
-18. `actor_payloads.str` for typed message payloads and immutable payload
+19. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-19. `actor_payload_match.str` for the same payload binding through a whole-body
+20. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-20. `actor_payload_split_match.str` for payload-sensitive same-message
+21. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-21. `actor_payload_split_signature.str` for payload-sensitive same-message
+22. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-22. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+23. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-23. `actor_payload_state_match_split.str` for payload-sensitive same-message
+24. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-24. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+25. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-25. `nested_patterns.str` for nested immutable constructor, record, list, and
+26. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-26. `actor_reply.str` for transporting typed process references through message
+27. `actor_reply.str` for transporting typed process references through message
    payloads.
-27. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+28. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -155,6 +156,27 @@ Key source ideas:
 - Both `Cold` and `Warm` arms return immutable whole `MainState` record values.
 - The Mantle trace starts `Main` in `MainState{readiness:WarmReady}`, proving
   the selected initial state reached runtime admission.
+
+## Init Return Match
+
+`examples/init_return_match.str` exercises a pure `return match` expression in
+`init`. The checker resolves the fieldless enum scrutinee, proves the arms are
+exhaustive, selects one whole initial state value, and lowers that state through
+the existing typed artifact state table.
+
+```sh
+cargo run -p strata --bin strata -- check examples/init_return_match.str
+cargo run -p strata --bin strata -- build examples/init_return_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/init_return_match.mta
+```
+
+Key source ideas:
+
+- `return match Warm { ... };` is accepted only because `Warm` is a fieldless
+  enum constructor.
+- Each arm is statement-free and returns one immutable whole `MainState` value.
+- Mantle receives the selected typed initial state ID; it does not dispatch on
+  the source match arm names.
 
 ## Function Match
 
