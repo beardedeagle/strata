@@ -686,11 +686,12 @@ are provably disjoint. For state-match clauses, each accepted payload case
 expands across the admitted current-state cases from the `match state` body, and
 lowering emits typed transitions keyed by message ID, current state ID, and exact
 typed payload guard. A wildcard step pattern may cover discovered concrete
-payload cases not matched by explicit payload-sensitive step-signature clauses,
-but payload-sensitive state-match wildcard fallback is not admitted in this
-slice. The step-signature wildcard fallback lowers to exact typed
-payload-guarded transitions for those discovered cases; it is not an open-ended
-runtime catch-all for future payload values.
+payload cases not matched by explicit payload-sensitive step-signature or
+state-match clauses. The fallback lowers to exact typed payload-guarded
+transitions for those discovered cases; it is not an open-ended runtime
+catch-all for future payload values. State-match fallback cases additionally
+expand across the admitted current-state cases from the fallback `match state`
+body before lowering.
 
 If a process accepts more than one message, it can declare explicit clauses for
 specific constructors and one wildcard clause for the remaining variants:
@@ -711,12 +712,11 @@ Every accepted message variant, or every discovered concrete payload case inside
 a payload-sensitive split, must resolve to exactly one generated transition.
 Explicit constructor clauses handle their named variants. One wildcard clause
 may cover variants that do not have explicit clauses. When payload-sensitive
-step-signature splitting is active for a variant, the same wildcard may cover
-only discovered concrete payload cases not matched by explicit payload
-predicates. State-match payload-sensitive splits require explicit discovered
-payload cases. Duplicate explicit clauses, overlapping payload predicates,
-missing coverage, duplicate wildcard clauses, missing variant coverage, and
-unreachable wildcard clauses are rejected.
+step-signature or state-match splitting is active for a variant, the same
+wildcard may cover only discovered concrete payload cases not matched by
+explicit payload predicates. Duplicate explicit clauses, overlapping payload
+predicates, missing coverage, duplicate wildcard clauses, missing variant
+coverage, and unreachable wildcard clauses are rejected.
 Parameter patterns are compile-time dispatch only: Mantle dequeues one message
 at a time and dispatches by typed message ID, current state ID when a transition
 is state-specific, and exact typed payload identity when a payload guard exists.

@@ -42,11 +42,13 @@ Read them in this order:
    step-signature wildcard fallback over discovered concrete payload cases.
 22. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-23. `nested_patterns.str` for nested immutable constructor, record, list, and
+23. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+   wildcard fallback over discovered concrete payload cases.
+24. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-24. `actor_reply.str` for transporting typed process references through message
+25. `actor_reply.str` for transporting typed process references through message
    payloads.
-25. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+26. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -522,7 +524,29 @@ Key source ideas:
   and exact typed payload guard.
 - State changes remain immutable whole-value returns through `Continue(...)` or
   `Stop(...)`; runtime dispatch does not use source strings or debug labels.
-- Payload-sensitive state-match wildcard fallback remains deferred.
+
+## Actor Payload State-Match Wildcard
+
+`examples/actor_payload_state_match_wildcard.str` proves that a
+payload-sensitive state-match split can use `_` as fallback for discovered
+concrete payload cases not handled by explicit state-match clauses.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payload_state_match_wildcard.str
+cargo run -p strata --bin strata -- build examples/actor_payload_state_match_wildcard.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_state_match_wildcard.mta
+```
+
+Key source ideas:
+
+- `Envelope(Assign(Ready))` handles the explicitly guarded payload case.
+- The wildcard state-match step handles the discovered `Envelope(Assign(Done))`
+  case; lowering emits `Assign(Done)` as an exact typed payload guard rather
+  than an unguarded payload catch-all.
+- Each explicit and fallback payload case expands across the admitted `Idle`,
+  `SawReady`, and `Done` current-state cases from its `match state` body.
+- State changes remain immutable whole-value returns through `Continue(...)` or
+  `Stop(...)`; runtime dispatch does not use source strings or debug labels.
 
 ## Nested Patterns
 
