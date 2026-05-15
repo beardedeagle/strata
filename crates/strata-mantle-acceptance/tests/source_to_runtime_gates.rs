@@ -1446,6 +1446,70 @@ fn function_return_match_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn process_return_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/process_return_match.str",
+        "target/strata/process_return_match.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: stopped Main normally"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+
+    let artifact = gate.read_artifact("target/strata/process_return_match.mta");
+    let worker = artifact_process(&artifact, "Worker");
+    assert_eq!(
+        worker
+            .state_values
+            .iter()
+            .map(|state| state.label.as_str())
+            .collect::<Vec<_>>(),
+        ["Idle", "SawReady", "Done"]
+    );
+    let mut payload_guards = worker
+        .transitions
+        .iter()
+        .map(|transition| {
+            transition
+                .payload_guard
+                .as_ref()
+                .map(|payload| payload.value.label())
+                .expect("process return-match transition should have a payload guard")
+        })
+        .collect::<Vec<_>>();
+    payload_guards.sort();
+    assert_eq!(payload_guards, ["Assign(Done)", "Assign(Ready)"]);
+    let encoded = artifact.encode();
+    assert!(
+        !encoded.contains("field_name=Assign"),
+        "process return-match must not lower constructor names as executable fields"
+    );
+
+    let trace = gate.read_trace("process_return_match");
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""payload":"Assign(Ready)""#,
+            r#""result":"Continue""#,
+            r#""state":"SawReady""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""payload":"Assign(Done)""#,
+            r#""result":"Stop""#,
+            r#""state":"Done""#,
+        ],
+    );
+}
+
+#[test]
 fn function_record_pattern_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(

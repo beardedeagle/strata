@@ -4,6 +4,7 @@ use super::*;
 mod clauses;
 mod discovery;
 mod process_refs;
+mod returns;
 mod transition;
 
 pub(in crate::language::checker) use clauses::collect_concrete_state_payload_domains;
@@ -18,11 +19,11 @@ use clauses::check_step_clauses;
 use process_refs::collect_process_refs;
 use transition::check_step_transition;
 
-pub(in crate::language::checker) fn check_step(
+pub(in crate::language::checker) fn check_step<'state>(
     context: &ProcessCheckContext<'_>,
-    state_space: &mut StateSpace<'_>,
+    state_space: &mut StateSpace<'state>,
     outputs: &mut OutputPool,
-    types: &mut CheckedTypeInterner<'_>,
+    types: &mut CheckedTypeInterner<'state>,
 ) -> Result<(Vec<CheckedProcessRef>, Vec<CheckedTransition>)> {
     let step_clauses = check_step_clauses(
         context.module,

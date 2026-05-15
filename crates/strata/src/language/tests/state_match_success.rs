@@ -481,3 +481,86 @@ proc Sink mailbox bounded(1) {
         .expect("Sink process should be checked");
     assert_eq!(sink.transitions().len(), 2);
 }
+
+#[test]
+fn state_match_message_payload_template_does_not_require_discovered_payload_case() {
+    let source = r#"
+module state_match_undiscovered_payload_template;
+
+record MainState;
+record Job { phase: Phase }
+enum Phase { Ready }
+enum MainMsg { Start }
+enum WorkerState { Idle, Working(Job) }
+enum WorkerMsg { Work(Job) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Work(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        match state {
+            Idle => {
+                return Continue(Working(job));
+            }
+            Working(existing: Job) => {
+                return Continue(Working(existing));
+            }
+        }
+    }
+}
+"#;
+
+    let checked =
+        check_source(source).expect("state match should keep typed payload templates buildable");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker process should be checked");
+
+    assert_eq!(checked_state_labels(worker), ["Idle"]);
+    assert_eq!(worker.transitions().len(), 1);
+    assert_eq!(
+        worker.transitions()[0].current_state(),
+        Some(checked_state_id(0))
+    );
+    assert!(worker.transitions()[0].payload_guard().is_none());
+    match worker.transitions()[0].next_state() {
+        CheckedNextState::Template(CheckedValueTemplate::EnumVariant {
+            variant, payload, ..
+        }) => {
+            assert_eq!(variant.as_u32(), 1);
+            assert_eq!(
+                *payload,
+                CheckedValueTemplate::ReceivedPayload {
+                    ty: worker.message_cases()[0]
+                        .payload_type()
+                        .expect("Work should carry Job")
+                        .clone(),
+                }
+            );
+        }
+        next_state => panic!("expected received-payload state template, got {next_state:?}"),
+    }
+
+    lower_to_artifact(&checked, source)
+        .expect("undiscovered payload template state match should lower");
+}

@@ -763,11 +763,11 @@ fn validate_process_declarations_before_message_cases(
     Ok(())
 }
 
-fn check_process(
-    context: &ModuleCheckContext<'_>,
-    process: &Process,
+fn check_process<'a>(
+    context: &ModuleCheckContext<'a>,
+    process: &'a Process,
     process_id: CheckedProcessId,
-    types: &mut CheckedTypeInterner<'_>,
+    types: &mut CheckedTypeInterner<'a>,
     outputs: &mut OutputPool,
 ) -> Result<CheckedProcess> {
     validate_count(

@@ -1,14 +1,25 @@
 use super::discovery::{check_step_pattern, check_step_shape};
+use super::returns::{
+    StepReturnInput, StepReturnPreadmitContext, preadmit_step_return_state_value,
+};
 use super::*;
 
-pub(super) fn check_step_clauses<'a>(
+mod policy;
+
+use policy::{
+    matching_step_body_clauses, reject_unreachable_payload_guarded_clauses,
+    reject_unreachable_wildcard, step_dispatch_pattern_label, transition_payload_guard_for_case,
+    validate_process_wildcard_compatibility, wildcard_payload_guard_for_case,
+};
+
+pub(super) fn check_step_clauses<'a, 'state>(
     module: &Module,
     process: &'a Process,
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     message_cases: &MessageCaseTable,
-    state_space: &mut StateSpace<'_>,
-    types: &mut CheckedTypeInterner<'_>,
+    state_space: &mut StateSpace<'state>,
+    types: &mut CheckedTypeInterner<'state>,
 ) -> Result<Vec<StepClause<'a>>> {
     let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
     let mut explicit_clauses = vec![Vec::new(); msg_enum.variants.len()];
@@ -159,7 +170,7 @@ pub(super) fn check_step_clauses<'a>(
             &explicit_clauses[variant_id.index()],
             concrete_case.payload.as_ref(),
         )?;
-        if matching_explicit.len() > 1 {
+        if matching_explicit.count > 1 {
             return Err(Error::new(format!(
                 "process {} has overlapping step patterns for message {} payload {}",
                 process.name,
@@ -171,15 +182,15 @@ pub(super) fn check_step_clauses<'a>(
                     .unwrap_or("<unknown>")
             )));
         }
-        let (clause, payload_guard) = if let Some(clause) = matching_explicit.first() {
+        let (clause, payload_guard) = if let Some(clause) = matching_explicit.first {
             let payload_guard =
                 transition_payload_guard_for_case(clause, &explicit_clauses, concrete_case);
-            (clause.clone(), payload_guard)
-        } else if let Some(clause) = wildcard_clause.clone() {
+            (clause, payload_guard)
+        } else if let Some(clause) = wildcard_clause.as_ref() {
             let payload_guard = wildcard_payload_guard_for_case(
                 process,
                 &explicit_clauses,
-                &clause,
+                clause,
                 concrete_case,
                 message_variant,
                 pattern_label,
@@ -220,6 +231,25 @@ pub(super) fn check_step_clauses<'a>(
         let message = message_cases.message_id(process_id, variant_id)?;
         match &clause.body {
             StepBodySource::Block(body) => {
+                let mut preadmit_context = StepReturnPreadmitContext {
+                    module,
+                    process,
+                    process_id,
+                    semantic_index,
+                    message_cases,
+                    state_space,
+                    types,
+                };
+                preadmit_step_return_state_value(
+                    &mut preadmit_context,
+                    &StepReturnInput {
+                        variant: variant_id,
+                        payload_guard: payload_guard.as_ref(),
+                        payload_bindings: &payload_bindings,
+                        state_payload_bindings: &[],
+                        body,
+                    },
+                )?;
                 clauses.push(StepClause {
                     step: clause.step,
                     variant: variant_id,
@@ -318,14 +348,14 @@ fn state_match_transition_key(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn expand_state_match_step_clause_group<'a>(
+fn expand_state_match_step_clause_group<'a, 'state>(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     message_cases: &MessageCaseTable,
-    state_space: &mut StateSpace<'_>,
-    types: &mut CheckedTypeInterner<'_>,
+    state_space: &mut StateSpace<'state>,
+    types: &mut CheckedTypeInterner<'state>,
     state_match_cases: &[StateMatchStepExpansion<'a>],
     clauses: &mut Vec<StepClause<'a>>,
 ) -> Result<()> {
@@ -409,246 +439,6 @@ fn concrete_step_message_cases(
         }
     }
     Ok(concrete_cases)
-}
-
-fn reject_unreachable_payload_guarded_clauses(
-    module: &Module,
-    semantic_index: &SemanticIndex,
-    process: &Process,
-    message_variants: &[EnumVariant],
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    concrete_message_cases: &[StepConcreteMessageCase],
-    pattern_label: &str,
-) -> Result<()> {
-    for (variant_index, clauses) in explicit_clauses.iter().enumerate() {
-        if !concrete_message_cases
-            .iter()
-            .any(|case| case.variant.index() == variant_index && case.payload.is_some())
-        {
-            continue;
-        }
-        for clause in clauses {
-            if clause.payload_guard.is_none() {
-                continue;
-            }
-            let mut has_reachable_case = false;
-            for concrete_case in concrete_message_cases
-                .iter()
-                .filter(|case| case.variant.index() == variant_index)
-            {
-                if step_body_clause_matches_case(
-                    module,
-                    semantic_index,
-                    clause,
-                    concrete_case.payload.as_ref(),
-                )? {
-                    has_reachable_case = true;
-                    break;
-                }
-            }
-            if !has_reachable_case {
-                return Err(Error::new(format!(
-                    "process {} {} {} has no discovered payload case",
-                    process.name,
-                    pattern_label,
-                    step_pattern_payload_label(
-                        module,
-                        semantic_index,
-                        &message_variants[variant_index],
-                        clause.payload_guard.as_ref(),
-                    )?
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn reject_unreachable_wildcard(
-    module: &Module,
-    semantic_index: &SemanticIndex,
-    process: &Process,
-    wildcard_clause: Option<&StepBodyClause<'_>>,
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    concrete_message_cases: &[StepConcreteMessageCase],
-) -> Result<()> {
-    if wildcard_clause.is_none() {
-        return Ok(());
-    }
-    for concrete_case in concrete_message_cases {
-        if !explicit_step_body_clauses_match_case(
-            module,
-            semantic_index,
-            &explicit_clauses[concrete_case.variant.index()],
-            concrete_case.payload.as_ref(),
-        )? {
-            return Ok(());
-        }
-    }
-    Err(Error::new(format!(
-        "process {} wildcard step pattern is unreachable",
-        process.name
-    )))
-}
-
-fn explicit_step_body_clauses_match_case(
-    module: &Module,
-    semantic_index: &SemanticIndex,
-    clauses: &[StepBodyClause<'_>],
-    payload: Option<&CheckedPayloadValue>,
-) -> Result<bool> {
-    for clause in clauses {
-        if step_body_clause_matches_case(module, semantic_index, clause, payload)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn matching_step_body_clauses<'a>(
-    module: &Module,
-    semantic_index: &SemanticIndex,
-    clauses: &[StepBodyClause<'a>],
-    payload: Option<&CheckedPayloadValue>,
-) -> Result<Vec<StepBodyClause<'a>>> {
-    let mut matches = Vec::new();
-    for clause in clauses {
-        if step_body_clause_matches_case(module, semantic_index, clause, payload)? {
-            matches.push(clause.clone());
-        }
-    }
-    Ok(matches)
-}
-
-fn step_body_clause_matches_case(
-    module: &Module,
-    semantic_index: &SemanticIndex,
-    clause: &StepBodyClause<'_>,
-    payload: Option<&CheckedPayloadValue>,
-) -> Result<bool> {
-    let Some(payload_guard) = &clause.payload_guard else {
-        return Ok(true);
-    };
-    let Some(payload) = payload else {
-        return Ok(false);
-    };
-    payload_matches_guard(module, semantic_index, payload, payload_guard)
-}
-
-fn transition_payload_guard_for_case(
-    clause: &StepBodyClause<'_>,
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    concrete_case: &StepConcreteMessageCase,
-) -> Option<CheckedPayloadValue> {
-    (clause.payload_guard.is_some()
-        || has_payload_sensitive_clause(explicit_clauses, concrete_case.variant))
-    .then(|| concrete_case.payload.clone())
-    .flatten()
-}
-
-fn wildcard_payload_guard_for_case(
-    process: &Process,
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    wildcard_clause: &StepBodyClause<'_>,
-    concrete_case: &StepConcreteMessageCase,
-    message_variant: &EnumVariant,
-    pattern_label: &str,
-) -> Result<Option<CheckedPayloadValue>> {
-    if !has_payload_sensitive_clause(explicit_clauses, concrete_case.variant) {
-        return Ok(None);
-    }
-    let wildcard_is_state_match = is_state_match_clause(wildcard_clause);
-    concrete_case.payload.clone().map(Some).ok_or_else(|| {
-        Error::new(format!(
-            "process {} payload-sensitive {} for message {} has no discovered payload case for wildcard fallback",
-            process.name,
-            if wildcard_is_state_match {
-                "state match step pattern"
-            } else {
-                pattern_label
-            },
-            message_variant.name
-        ))
-    })
-}
-
-fn step_dispatch_pattern_label(dispatch_style: Option<StepDispatchStyle>) -> &'static str {
-    match dispatch_style {
-        Some(StepDispatchStyle::BodyMatch) => "match msg pattern",
-        Some(StepDispatchStyle::ParameterPattern) | None => "step pattern",
-    }
-}
-
-fn has_payload_sensitive_clause(
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    variant: CheckedMessageVariantId,
-) -> bool {
-    explicit_clauses[variant.index()]
-        .iter()
-        .any(|clause| clause.payload_guard.is_some())
-}
-
-fn first_payload_sensitive_message_matching<'a>(
-    message_variants: &'a [EnumVariant],
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    predicate: impl Fn(&StepBodyClause<'_>) -> bool,
-) -> Result<Option<&'a EnumVariant>> {
-    if message_variants.len() != explicit_clauses.len() {
-        return Err(Error::new(format!(
-            "internal error: step wildcard validation expected {} message variants, found {} clause buckets",
-            message_variants.len(),
-            explicit_clauses.len()
-        )));
-    }
-
-    Ok(message_variants
-        .iter()
-        .zip(explicit_clauses.iter())
-        .find_map(|(message_variant, clauses)| {
-            clauses
-                .iter()
-                .any(|clause| clause.payload_guard.is_some() && predicate(clause))
-                .then_some(message_variant)
-        }))
-}
-
-fn validate_process_wildcard_compatibility(
-    process: &Process,
-    message_variants: &[EnumVariant],
-    explicit_clauses: &[Vec<StepBodyClause<'_>>],
-    wildcard_clause: Option<&StepBodyClause<'_>>,
-) -> Result<()> {
-    let Some(wildcard_clause) = wildcard_clause else {
-        return Ok(());
-    };
-
-    if is_state_match_clause(wildcard_clause) {
-        if let Some(message_variant) = first_payload_sensitive_message_matching(
-            message_variants,
-            explicit_clauses,
-            |clause| !is_state_match_clause(clause),
-        )? {
-            return Err(Error::new(format!(
-                "process {} declares payload-sensitive step pattern for message {} with a state match wildcard step pattern",
-                process.name, message_variant.name
-            )));
-        }
-    } else if let Some(message_variant) = first_payload_sensitive_message_matching(
-        message_variants,
-        explicit_clauses,
-        is_state_match_clause,
-    )? {
-        return Err(Error::new(format!(
-            "process {} declares a wildcard step pattern with a payload-sensitive state match step pattern for message {}",
-            process.name, message_variant.name
-        )));
-    }
-
-    Ok(())
-}
-
-fn is_state_match_clause(clause: &StepBodyClause<'_>) -> bool {
-    matches!(&clause.body, StepBodySource::StateMatch(_))
 }
 
 fn preadmit_concrete_step_state_values(
@@ -868,14 +658,14 @@ fn preadmit_concrete_step_return(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn expand_state_match_step_clause_once<'a>(
+fn expand_state_match_step_clause_once<'a, 'state>(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     message_cases: &MessageCaseTable,
-    state_space: &mut StateSpace<'_>,
-    types: &mut CheckedTypeInterner<'_>,
+    state_space: &mut StateSpace<'state>,
+    types: &mut CheckedTypeInterner<'state>,
     case: &StateMatchStepExpansion<'a>,
     seen_transitions: &mut BTreeSet<StateMatchTransitionKey>,
     clauses: &mut Vec<StepClause<'a>>,
@@ -956,164 +746,39 @@ fn expand_state_match_step_clause_once<'a>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn preadmit_state_match_case_return(
+fn preadmit_state_match_case_return<'state>(
     module: &Module,
     process: &Process,
     process_id: CheckedProcessId,
     semantic_index: &SemanticIndex,
     message_cases: &MessageCaseTable,
-    state_space: &mut StateSpace<'_>,
-    types: &mut CheckedTypeInterner<'_>,
+    state_space: &mut StateSpace<'state>,
+    types: &mut CheckedTypeInterner<'state>,
     variant: CheckedMessageVariantId,
     body: &FunctionBlock,
     payload_guard: Option<&CheckedPayloadValue>,
     payload_bindings: &[StepPayloadBinding],
     state_payload_bindings: &[StepStatePayloadBinding],
 ) -> Result<()> {
-    let state_arg = match &body.returns {
-        ReturnExpr::Call { name, arg }
-            if name.as_str() == "Stop"
-                || name.as_str() == "Continue"
-                || name.as_str() == "Panic" =>
-        {
-            arg
-        }
-        _ => return Ok(()),
-    };
-    if matches!(state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
-    {
-        return Ok(());
-    }
-
-    let mut source_bindings = Vec::with_capacity(
-        payload_bindings
-            .len()
-            .saturating_add(state_payload_bindings.len()),
-    );
-    for binding in payload_bindings {
-        source_bindings.push(SourceValueBinding {
-            name: &binding.name,
-            ty: &binding.ty,
-        });
-    }
-    for binding in state_payload_bindings {
-        source_bindings.push(SourceValueBinding {
-            name: &binding.name,
-            ty: &binding.ty,
-        });
-    }
-    let function_scope = SourceFunctionScope {
+    let mut context = StepReturnPreadmitContext {
         module,
-        process_name: Some(&process.name),
-        process_functions: &process.functions,
+        process,
+        process_id,
         semantic_index,
-    };
-    let state_arg = resolve_source_value_expr(
-        &function_scope,
-        &process.state_type,
-        state_arg,
-        &source_bindings,
-        0,
-    )?;
-    let uses_payload = payload_bindings
-        .iter()
-        .any(|binding| source_value_uses_binding(&state_arg, &binding.name));
-    let uses_state = state_payload_bindings
-        .iter()
-        .any(|binding| source_value_uses_binding(&state_arg, &binding.name));
-    if !uses_payload && !uses_state {
-        state_space.resolve_state_value(semantic_index, types, &state_arg)?;
-        return Ok(());
-    }
-
-    if uses_payload && !payload_bindings.is_empty() {
-        let payloads = match payload_guard {
-            Some(payload) => vec![payload],
-            None => message_cases
-                .payload_values(process_id, variant)?
-                .iter()
-                .collect::<Vec<_>>(),
-        };
-        for payload in payloads {
-            let mut owned_bindings = Vec::new();
-            for binding in payload_bindings {
-                let (label, value) = checked_payload_binding(
-                    module,
-                    semantic_index,
-                    payload,
-                    &PatternPayloadParam {
-                        name: binding.name.clone(),
-                        ty: binding.ty.clone(),
-                        path: binding.path.clone(),
-                    },
-                )?
-                .ok_or_else(|| {
-                    Error::new(format!(
-                        "process {} message payload {} does not match state match binding {}",
-                        process.name,
-                        payload.label(),
-                        binding.name
-                    ))
-                })?;
-                owned_bindings.push(DiscoveryValueBinding {
-                    name: binding.name.clone(),
-                    ty: binding.ty.clone(),
-                    label,
-                    value,
-                });
-            }
-            for binding in state_payload_bindings {
-                owned_bindings.push(DiscoveryValueBinding {
-                    name: binding.name.clone(),
-                    ty: binding.ty.clone(),
-                    label: binding.label.clone(),
-                    value: Some(binding.value.clone()),
-                });
-            }
-            let value_bindings = owned_bindings
-                .iter()
-                .map(|binding| ValueBinding {
-                    name: &binding.name,
-                    ty: &binding.ty,
-                    label: binding.label.clone(),
-                    value: binding.value.clone(),
-                })
-                .collect::<Vec<_>>();
-            state_space.resolve_state_value_with_bindings(
-                semantic_index,
-                types,
-                &state_arg,
-                &value_bindings,
-            )?;
-        }
-        return Ok(());
-    }
-
-    let owned_bindings = state_payload_bindings
-        .iter()
-        .map(|binding| DiscoveryValueBinding {
-            name: binding.name.clone(),
-            ty: binding.ty.clone(),
-            label: binding.label.clone(),
-            value: Some(binding.value.clone()),
-        })
-        .collect::<Vec<_>>();
-    let value_bindings = owned_bindings
-        .iter()
-        .map(|binding| ValueBinding {
-            name: &binding.name,
-            ty: &binding.ty,
-            label: binding.label.clone(),
-            value: binding.value.clone(),
-        })
-        .collect::<Vec<_>>();
-    state_space.resolve_state_value_with_bindings(
-        semantic_index,
+        message_cases,
+        state_space,
         types,
-        &state_arg,
-        &value_bindings,
-    )?;
-    Ok(())
+    };
+    preadmit_step_return_state_value(
+        &mut context,
+        &StepReturnInput {
+            variant,
+            payload_guard,
+            payload_bindings,
+            state_payload_bindings,
+            body,
+        },
+    )
 }
 
 fn validate_state_payload_binding_name(

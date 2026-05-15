@@ -367,10 +367,16 @@ fn rejects_bare_concrete_state_return_with_accurate_message() {
 }
 
 #[test]
-fn rejects_return_match_expression_in_step_body() {
-    let source = ACTOR_PING.replace(
-        "return Stop(Handled);",
-        r#"return match state {
+fn rejects_step_return_match_over_state_parameter() {
+    let source = ACTOR_PING
+        .replace(
+            "fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [emit] ~ [] @det {",
+            "fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [] ~ [] @det {",
+        )
+        .replace("        emit \"worker handled Ping\";\n", "")
+        .replace(
+            "return Stop(Handled);",
+            r#"return match state {
             Idle => {
                 return Stop(Handled);
             }
@@ -378,13 +384,13 @@ fn rejects_return_match_expression_in_step_body() {
                 return Stop(Handled);
             }
         };"#,
-    );
+        );
 
-    let err = check_source(&source).expect_err("step return match should be rejected");
+    let err = check_source(&source).expect_err("step return match over state should be rejected");
 
     assert!(
         err.to_string()
-            .contains("process Worker step return match is not supported in this source slice")
+            .contains("process Worker step return match scrutinee state must be a concrete enum source value binding")
     );
 }
 

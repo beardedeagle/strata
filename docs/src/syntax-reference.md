@@ -212,16 +212,18 @@ admits constructor patterns, constructor payload bindings, constructor payload
 destructuring, record destructuring patterns, list/map collection patterns, and
 `_` wildcards. Buildable semantic consumers are normal source function
 signatures and match bodies, helper return-match expressions, fieldless enum
-`init` matches, actor `step` message dispatch, and message-specific
-`match state` step bodies. Record/list/map destructuring patterns are accepted
+`init` matches, actor `step` message dispatch, message-specific `match state`
+step bodies, and pure step return-match expressions. Record/list/map
+destructuring patterns are accepted
 in normal source helper signatures, helper match bodies, helper return-match
 expressions, message constructor payloads, and current-state enum payloads when
 the payload has the matching type. Helper signatures, helper match bodies,
 helper return-match expressions, whole-body `match msg` arms, step parameter
-patterns, and state-match step clauses may split a top-level constructor by
-disjoint exact nested typed payload predicates. Source helper calls still expand
-before lowering; enum pattern dispatch requires a concrete enum constructor
-value and record/list/map destructuring requires a concrete value.
+patterns, state-match step clauses, and step return-match expressions may split
+a top-level constructor by disjoint exact nested typed payload predicates.
+Source helper calls still expand before lowering; enum pattern dispatch
+requires a concrete enum constructor value and record/list/map destructuring
+requires a concrete value.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message
@@ -307,6 +309,21 @@ payload cases for the same message that no explicit state-match clause handles;
 each fallback case still expands across admitted current-state cases and lowers
 with an exact typed payload guard. State changes still occur only by returning a
 whole state value through `Continue(...)`, `Stop(...)`, or `Panic(...)`.
+
+In a pure block-bodied `step`, the return expression may be a match over a
+transition-local enum source binding whose concrete value is already proven by
+step clause or state-match expansion:
+
+```text
+step_return_match =
+    "return" "match" ident "{" match_arm+ "}" ";"
+```
+
+Every arm body must be statement-free and must return `Continue(value)`,
+`Stop(value)`, or `Panic(value)`. The checker selects the concrete arm before
+lowering and emits the same typed transition metadata as a direct step return.
+This syntax does not admit dynamic payload catch-all dispatch, source-string
+selectors, or effect statements before the return match.
 
 A normal source helper is a module-level function or a process-local function
 whose name is not `init` or `step`:
@@ -424,7 +441,8 @@ admitted for readability; the checker still validates each value against the
 expected bounded source value type.
 
 `init` returns a state value. `step` returns `Continue(value)`, `Stop(value)`,
-or `Panic(value)`.
+`Panic(value)`, or a pure `return match` that the checker reduces to one of
+those result forms before lowering.
 
 ## Literals
 

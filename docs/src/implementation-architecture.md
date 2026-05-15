@@ -121,6 +121,7 @@ The runnable examples are:
 - `examples/function_payload_match.str`;
 - `examples/function_collection_match.str`;
 - `examples/function_return_match.str`;
+- `examples/process_return_match.str`;
 - `examples/function_record_pattern.str`;
 - `examples/function_record_return_match.str`;
 - `examples/function_record_body_match.str`;
