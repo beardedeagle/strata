@@ -40,11 +40,13 @@ Read them in this order:
    splitting across step parameter patterns.
 21. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-22. `nested_patterns.str` for nested immutable constructor, record, list, and
+22. `actor_payload_state_match_split.str` for payload-sensitive same-message
+   splitting across state-match step clauses.
+23. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-23. `actor_reply.str` for transporting typed process references through message
+24. `actor_reply.str` for transporting typed process references through message
    payloads.
-24. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+25. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -497,6 +499,30 @@ Key source ideas:
   checking.
 - Runtime dispatch still uses admitted message IDs and exact typed payload
   identity, not source strings or debug labels.
+
+## Actor Payload State-Match Split
+
+`examples/actor_payload_state_match_split.str` proves that state-match step
+clauses can share one top-level message constructor by disjoint nested typed
+payload predicates.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payload_state_match_split.str
+cargo run -p strata --bin strata -- build examples/actor_payload_state_match_split.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_state_match_split.mta
+```
+
+Key source ideas:
+
+- `Envelope(Assign(Ready))` and `Envelope(Assign(Done))` are explicit,
+  discovered payload cases for the same admitted message constructor.
+- Each payload case expands across the admitted `Idle`, `SawReady`, and `Done`
+  current-state cases from `match state`.
+- Lowering emits typed Mantle transitions keyed by message ID, current state ID,
+  and exact typed payload guard.
+- State changes remain immutable whole-value returns through `Continue(...)` or
+  `Stop(...)`; runtime dispatch does not use source strings or debug labels.
+- Payload-sensitive state-match wildcard fallback remains deferred.
 
 ## Nested Patterns
 

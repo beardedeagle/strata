@@ -53,7 +53,7 @@ pub(super) fn check_step_clauses<'a>(
                         payload_params: Vec::new(),
                         payload_guard: None,
                     },
-                    StepClauseInsertMode::PayloadSensitiveSignature,
+                    StepClauseInsertMode::Signature,
                 )?;
             }
             StepDispatchForm::BodyMatch => {
@@ -94,7 +94,7 @@ pub(super) fn check_step_clauses<'a>(
                             payload_params: Vec::new(),
                             payload_guard: None,
                         },
-                        StepClauseInsertMode::PayloadSensitiveMatchBody,
+                        StepClauseInsertMode::MatchBody,
                     )?;
                 }
             }
@@ -121,7 +121,7 @@ pub(super) fn check_step_clauses<'a>(
                         payload_params: Vec::new(),
                         payload_guard: None,
                     },
-                    StepClauseInsertMode::Single,
+                    StepClauseInsertMode::StateMatch,
                 )?;
             }
         }
@@ -450,6 +450,12 @@ fn wildcard_payload_guard_for_case(
     if !has_payload_sensitive_clause(explicit_clauses, concrete_case.variant) {
         return Ok(None);
     }
+    if has_payload_sensitive_state_match_clause(explicit_clauses, concrete_case.variant) {
+        return Err(Error::new(format!(
+            "process {} declares a wildcard step pattern with a payload-sensitive state match step pattern for message {}",
+            process.name, message_variant.name
+        )));
+    }
     concrete_case.payload.clone().map(Some).ok_or_else(|| {
         Error::new(format!(
             "process {} payload-sensitive {} for message {} has no discovered payload case for wildcard fallback",
@@ -472,6 +478,15 @@ fn has_payload_sensitive_clause(
     explicit_clauses[variant.index()]
         .iter()
         .any(|clause| clause.payload_guard.is_some())
+}
+
+fn has_payload_sensitive_state_match_clause(
+    explicit_clauses: &[Vec<StepBodyClause<'_>>],
+    variant: CheckedMessageVariantId,
+) -> bool {
+    explicit_clauses[variant.index()].iter().any(|clause| {
+        clause.payload_guard.is_some() && matches!(&clause.body, StepBodySource::StateMatch(_))
+    })
 }
 
 fn preadmit_concrete_step_state_values(
@@ -1200,30 +1215,21 @@ fn state_match_payload_domain(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StepClauseInsertMode {
-    Single,
-    PayloadSensitiveMatchBody,
-    PayloadSensitiveSignature,
+    MatchBody,
+    StateMatch,
+    Signature,
 }
 
 impl StepClauseInsertMode {
-    fn allows_same_message_payload_split(self) -> bool {
-        matches!(
-            self,
-            StepClauseInsertMode::PayloadSensitiveMatchBody
-                | StepClauseInsertMode::PayloadSensitiveSignature
-        )
-    }
-
     fn rejects_payload_sensitive_wildcard(self) -> bool {
-        matches!(self, StepClauseInsertMode::Single)
+        matches!(self, StepClauseInsertMode::StateMatch)
     }
 
     fn pattern_label(self) -> &'static str {
         match self {
-            StepClauseInsertMode::PayloadSensitiveMatchBody => "match msg pattern",
-            StepClauseInsertMode::Single | StepClauseInsertMode::PayloadSensitiveSignature => {
-                "step pattern"
-            }
+            StepClauseInsertMode::MatchBody => "match msg pattern",
+            StepClauseInsertMode::StateMatch => "state match step pattern",
+            StepClauseInsertMode::Signature => "step pattern",
         }
     }
 }
@@ -1249,14 +1255,7 @@ fn insert_step_body_clause<'a>(
             clause.payload_params = bindings;
             clause.payload_guard = payload_guard;
             let clauses = &mut explicit_clauses[message.index()];
-            if !mode.allows_same_message_payload_split() && !clauses.is_empty() {
-                return Err(Error::new(format!(
-                    "process {} declares duplicate step pattern for message {}",
-                    process.name,
-                    message_variants[message.index()].name
-                )));
-            }
-            if mode == StepClauseInsertMode::PayloadSensitiveSignature
+            if mode == StepClauseInsertMode::Signature
                 && clause.payload_guard.is_none()
                 && clauses
                     .iter()
