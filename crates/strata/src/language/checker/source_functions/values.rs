@@ -65,7 +65,7 @@ fn validate_source_function_return_expr(
     }
 }
 
-fn validate_source_function_value_expr(
+pub(in crate::language::checker) fn validate_source_function_value_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     value: &ValueExpr,

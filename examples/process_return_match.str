@@ -1,0 +1,44 @@
+module process_return_match;
+
+record MainState;
+enum MainMsg { Start }
+enum Phase { Ready, Done }
+enum Route { Assign(Phase) }
+enum WorkerState { Idle, SawReady, Done }
+enum WorkerMsg { Envelope(Route) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Ready));
+        send worker Envelope(Assign(Done));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return match phase {
+            Ready => {
+                return Continue(SawReady);
+            }
+            Done => {
+                return Stop(Done);
+            }
+        };
+    }
+}

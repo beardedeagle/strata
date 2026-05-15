@@ -17,38 +17,39 @@ Read them in this order:
 8. `function_collection_match.str` for immutable list/map source values and
    collection patterns in normal source helpers.
 9. `function_return_match.str` for helper return-match expressions.
-10. `function_record_pattern.str` for source helper record destructuring
+10. `process_return_match.str` for pure process step return-match expressions.
+11. `function_record_pattern.str` for source helper record destructuring
    patterns.
-11. `function_record_return_match.str` for helper return-match record
+12. `function_record_return_match.str` for helper return-match record
    destructuring.
-12. `function_record_body_match.str` for whole-body helper match record
+13. `function_record_body_match.str` for whole-body helper match record
    destructuring.
-13. `state_payload_enum.str` for payload-bearing process state enum transitions.
-14. `collection_state.str` for immutable collection state and payload-dependent
+14. `state_payload_enum.str` for payload-bearing process state enum transitions.
+15. `collection_state.str` for immutable collection state and payload-dependent
    collection next-state templates.
-15. `state_payload_match.str` for matching immutable current process state
+16. `state_payload_match.str` for matching immutable current process state
    payloads.
-16. `actor_instances.str` for multiple runtime instances of one process
+17. `actor_instances.str` for multiple runtime instances of one process
    definition.
-17. `actor_payloads.str` for typed message payloads and immutable payload
+18. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-18. `actor_payload_match.str` for the same payload binding through a whole-body
+19. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-19. `actor_payload_split_match.str` for payload-sensitive same-message
+20. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-20. `actor_payload_split_signature.str` for payload-sensitive same-message
+21. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-21. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+22. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-22. `actor_payload_state_match_split.str` for payload-sensitive same-message
+23. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-23. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+24. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-24. `nested_patterns.str` for nested immutable constructor, record, list, and
+25. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-25. `actor_reply.str` for transporting typed process references through message
+26. `actor_reply.str` for transporting typed process references through message
    payloads.
-26. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+27. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -245,6 +246,26 @@ Key source ideas:
 - The selected arm binds enum payloads immutably before helper expansion.
 - Mantle receives the resolved `MainState{status:Active(Job{phase:Ready})}`
   state value, not source helper dispatch.
+
+## Process Return Match
+
+`examples/process_return_match.str` uses a pure process `step return match`
+over a concrete enum payload binding.
+
+```sh
+cargo run -p strata --bin strata -- check examples/process_return_match.str
+cargo run -p strata --bin strata -- build examples/process_return_match.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match.mta
+```
+
+Key source ideas:
+
+- `Envelope(Assign(phase: Phase))` binds an immutable enum payload whose
+  concrete value is already proven by payload-sensitive dispatch.
+- `return match phase { ... };` is checked and reduced to a typed
+  `Continue(...)` or `Stop(...)` transition before lowering.
+- Mantle executes the emitted typed transition IDs and payload guards; it does
+  not dispatch on source strings or helper names.
 
 ## Function Record Pattern
 

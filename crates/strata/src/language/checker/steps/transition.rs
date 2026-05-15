@@ -1,3 +1,4 @@
+use super::returns::{StepReturnInput, resolve_step_return, step_source_bindings};
 use super::*;
 
 pub(super) fn check_step_transition(
@@ -40,19 +41,8 @@ pub(super) fn check_step_transition(
         process_functions: &context.process.functions,
         semantic_index: context.semantic_index,
     };
-    let mut source_bindings = Vec::new();
-    for binding in input.payload_bindings {
-        source_bindings.push(SourceValueBinding {
-            name: &binding.name,
-            ty: &binding.ty,
-        });
-    }
-    for binding in input.state_payload_bindings {
-        source_bindings.push(SourceValueBinding {
-            name: &binding.name,
-            ty: &binding.ty,
-        });
-    }
+    let source_bindings =
+        step_source_bindings(input.payload_bindings, input.state_payload_bindings);
     let mut actions = Vec::with_capacity(input.body.statements.len());
     for statement in &input.body.statements {
         match statement {
@@ -98,30 +88,24 @@ pub(super) fn check_step_transition(
         }
     }
 
-    let (step_result, state_arg) = match &input.body.returns {
-        ReturnExpr::Call { name, arg } if name.as_str() == "Stop" => (CheckedStepResult::Stop, arg),
-        ReturnExpr::Call { name, arg } if name.as_str() == "Continue" => {
-            (CheckedStepResult::Continue, arg)
-        }
-        ReturnExpr::Call { name, arg } if name.as_str() == "Panic" => {
-            (CheckedStepResult::Panic, arg)
-        }
-        ReturnExpr::Match(_) => {
-            return Err(Error::new(format!(
-                "process {} step return match is not supported in this source slice",
-                context.process.name
-            )));
-        }
-        _ => {
-            return Err(Error::new(
-                "step body must return Stop(<state value>), Continue(<state value>), or Panic(<state value>)",
-            ));
-        }
-    };
+    let step_return = resolve_step_return(
+        context.module,
+        context.process,
+        context.semantic_index,
+        &function_scope,
+        &source_bindings,
+        &StepReturnInput {
+            variant: input.variant,
+            payload_guard: input.payload_guard,
+            payload_bindings: input.payload_bindings,
+            state_payload_bindings: input.state_payload_bindings,
+            body: input.body,
+        },
+    )?;
     let state_arg = resolve_source_value_expr(
         &function_scope,
         &context.process.state_type,
-        state_arg,
+        &step_return.state_arg,
         &source_bindings,
         0,
     )?;
@@ -162,7 +146,7 @@ pub(super) fn check_step_transition(
     let transition = CheckedTransition::new(CheckedTransitionParts {
         current_state: input.current_state,
         message: input.message,
-        step_result,
+        step_result: step_return.step_result,
         next_state,
         effects: input.declared_effects.to_vec(),
         actions,

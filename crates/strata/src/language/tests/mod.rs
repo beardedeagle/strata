@@ -9,6 +9,7 @@ mod message_payload_validation;
 mod nested_pattern_destructuring;
 mod payload_limits;
 mod process_refs;
+mod process_return_match;
 mod source_function_collection_patterns;
 mod source_function_core;
 mod source_function_patterns;

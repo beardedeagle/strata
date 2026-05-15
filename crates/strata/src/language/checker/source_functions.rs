@@ -12,7 +12,9 @@ use collection_patterns::{
 use match_bodies::validate_binding_source_function_match_body;
 use record_patterns::validate_record_pattern_source_function_group;
 use values::validate_source_function_body_values;
-pub(super) use values::{check_source_value_type, resolve_source_value_expr};
+pub(super) use values::{
+    check_source_value_type, resolve_source_value_expr, validate_source_function_value_expr,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language::checker::source_functions) struct SourceSubstitution {
