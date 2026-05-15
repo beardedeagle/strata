@@ -117,6 +117,7 @@ The runnable examples are:
 - `examples/actor_sequence.str`;
 - `examples/actor_match.str`;
 - `examples/init_match.str`;
+- `examples/init_return_match.str`;
 - `examples/function_match.str`;
 - `examples/function_payload_match.str`;
 - `examples/function_collection_match.str`;

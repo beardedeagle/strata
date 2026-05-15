@@ -114,6 +114,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/init_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/init_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/init_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/init_return_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/init_return_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/init_return_match.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_match.mta

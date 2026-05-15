@@ -27,7 +27,9 @@ result of the first invalid shape.
 | `process ... must declare type Msg` | A process is missing its message alias. | Add `type Msg = MessageEnum;`. |
 | `init must declare no parameters` | `init` has parameters. | Use `fn init() -> StateType ...`. |
 | `init body must not perform statements` | `init` uses `emit`, `spawn`, or `send`. | Return only the initial state. |
-| `init body return match is not supported` | An `init` body tries to use helper-only `return match` syntax. | Use a whole-body `match` for the supported init match form, or return one state value. |
+| `match scrutinee ... fieldless enum variant` | An `init` whole-body match or `init return match` tries to match a non-constructor name or a payload-bearing constructor. | Match one fieldless enum constructor in this init slice. |
+| `init return match ...` | An `init return match` is non-exhaustive, overlaps an earlier arm, has an unreachable wildcard, or nests another return match in an arm. | Cover each variant once or use one reachable `_`, and return one whole state value from each arm. |
+| `init return match arm cannot use payload binding ... in returned state` | An `init return match` arm tries to materialize an arm payload binding into the initial state. | Return a whole state value that does not depend on match-arm payload bindings in this init slice. |
 | `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageConstructor` or `state: StateType, _`. |
 | `step second parameter must be a message constructor pattern or wildcard pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with a message constructor or `_`, or use a whole-body `match msg`. |
 | `step returns ..., expected ProcResult<...>` | `step` return type is wrong. | Return `ProcResult<StateType>`. |

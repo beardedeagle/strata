@@ -212,8 +212,9 @@ admits constructor patterns, constructor payload bindings, constructor payload
 destructuring, record destructuring patterns, list/map collection patterns, and
 `_` wildcards. Buildable semantic consumers are normal source function
 signatures and match bodies, helper return-match expressions, fieldless enum
-`init` matches, actor `step` message dispatch, message-specific `match state`
-step bodies, and pure step return-match expressions. Record/list/map
+`init` whole-body matches and return-match expressions, actor `step` message
+dispatch, message-specific `match state` step bodies, and pure step return-match
+expressions. Record/list/map
 destructuring patterns are accepted
 in normal source helper signatures, helper match bodies, helper return-match
 expressions, message constructor payloads, and current-state enum payloads when
@@ -324,6 +325,20 @@ Every arm body must be statement-free and must return `Continue(value)`,
 lowering and emits the same typed transition metadata as a direct step return.
 This syntax does not admit dynamic payload catch-all dispatch, source-string
 selectors, or effect statements before the return match.
+
+In a pure block-bodied `init`, the return expression may be a match over one
+fieldless enum constructor:
+
+```text
+init_return_match =
+    "return" "match" ident "{" match_arm+ "}" ";"
+```
+
+Every arm body must be statement-free and must return one whole state value. The
+checker selects the concrete arm before lowering and emits the selected initial
+state as the existing typed state ID. This syntax does not admit effect
+statements before the return match, nested return matches in arms, dynamic
+dispatch, or source-string selectors.
 
 A normal source helper is a module-level function or a process-local function
 whose name is not `init` or `step`:
@@ -440,9 +455,10 @@ List and map constructors are explicit. Optional type and capacity arguments are
 admitted for readability; the checker still validates each value against the
 expected bounded source value type.
 
-`init` returns a state value. `step` returns `Continue(value)`, `Stop(value)`,
-`Panic(value)`, or a pure `return match` that the checker reduces to one of
-those result forms before lowering.
+`init` returns a state value or a pure `return match` that the checker reduces
+to one state value before lowering. `step` returns `Continue(value)`,
+`Stop(value)`, `Panic(value)`, or a pure `return match` that the checker reduces
+to one of those result forms before lowering.
 
 ## Literals
 

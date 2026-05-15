@@ -533,6 +533,43 @@ fn init_match_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn init_return_match_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/init_return_match.str",
+        "target/strata/init_return_match.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: spawned Main pid=1"));
+    assert!(stdout.contains("init return match selected WarmReady"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let artifact = gate.read_artifact("target/strata/init_return_match.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.debug_name, "Main");
+    assert_eq!(main.init_state, mantle_artifact::StateId::new(0));
+    assert_eq!(main.state_values.len(), 1);
+    assert_eq!(main.state_values[0].label, "MainState{readiness:WarmReady}");
+    assert_eq!(main.transitions.len(), 1);
+    assert_eq!(
+        main.transitions[0].next_state,
+        mantle_artifact::NextState::Current
+    );
+
+    let trace = gate.read_trace("init_return_match");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{readiness:WarmReady}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"init return match selected WarmReady""#
+    ));
+    assert!(trace.contains(
+        r#""event":"process_stepped","pid":1,"process_id":0,"process":"Main","message_id":0,"message":"Start","result":"Stop","state_id":0,"state":"MainState{readiness:WarmReady}""#
+    ));
+}
+
+#[test]
 fn actor_instances_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(

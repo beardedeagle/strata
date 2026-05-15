@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InitReturnMatchPolicy {
+    AllowTopLevel,
+    RejectNested,
+}
+
 pub(super) fn check_init(
     module: &Module,
     semantic_index: &SemanticIndex,
@@ -36,15 +42,17 @@ pub(super) fn check_init(
         return Err(Error::new("init must have a body for buildable source"));
     };
     match body {
-        FunctionBody::Block(body) => check_init_return_block(
-            process,
-            &function_scope,
-            state_space,
-            types,
-            body,
-            &[],
-            "init body",
-        ),
+        FunctionBody::Block(body) => {
+            let value = resolve_init_return_block_value(
+                process,
+                &function_scope,
+                body,
+                &[],
+                "init body",
+                InitReturnMatchPolicy::AllowTopLevel,
+            )?;
+            state_space.resolve_state_value(semantic_index, types, &value)
+        }
         FunctionBody::Match(match_body) => {
             check_init_match(process, &function_scope, state_space, types, match_body)
         }
@@ -58,6 +66,18 @@ fn check_init_match(
     types: &mut CheckedTypeInterner<'_>,
     match_body: &super::super::ast::Match,
 ) -> Result<CheckedStateId> {
+    let state =
+        resolve_init_match_value(process, scope, match_body, "init match", "init match arm")?;
+    state_space.resolve_state_value(scope.semantic_index, types, &state)
+}
+
+fn resolve_init_match_value(
+    process: &Process,
+    scope: &SourceFunctionScope<'_>,
+    match_body: &super::super::ast::Match,
+    label: &'static str,
+    arm_context: &'static str,
+) -> Result<ValueExpr> {
     let scrutinee_type = scope
         .semantic_index
         .fieldless_enum_variant_type(scope.module, &match_body.scrutinee)?;
@@ -76,7 +96,7 @@ fn check_init_match(
         enum_decl,
         enum_type: &scrutinee_type,
         subject: &subject,
-        label: "init match",
+        label,
         payload_context: PatternPayloadContext::SourceValue,
         binding_context: PatternBindingContext::Source { owner: &subject },
     };
@@ -94,7 +114,8 @@ fn check_init_match(
             scope,
             arm.body,
             payload_bindings,
-            "init match arm",
+            arm_context,
+            InitReturnMatchPolicy::RejectNested,
         )?;
         match arm.pattern {
             TypedMatchPattern::Variant { variant, .. } if variant == selected_variant => {
@@ -109,24 +130,11 @@ fn check_init_match(
 
     let state = selected_state.or(wildcard_state).ok_or_else(|| {
         Error::new(format!(
-            "process {} init match has no arm for scrutinee {}",
-            process.name, match_body.scrutinee
+            "process {} {label} has no arm for scrutinee {}",
+            process.name, match_body.scrutinee,
         ))
     })?;
-    state_space.resolve_state_value(scope.semantic_index, types, &state)
-}
-
-fn check_init_return_block(
-    process: &Process,
-    scope: &SourceFunctionScope<'_>,
-    state_space: &mut StateSpace<'_>,
-    types: &mut CheckedTypeInterner<'_>,
-    body: &FunctionBlock,
-    payload_bindings: &[PatternPayloadParam],
-    context: &str,
-) -> Result<CheckedStateId> {
-    let value = resolve_init_return_block_value(process, scope, body, payload_bindings, context)?;
-    state_space.resolve_state_value(scope.semantic_index, types, &value)
+    Ok(state)
 }
 
 fn resolve_init_return_block_value(
@@ -135,6 +143,7 @@ fn resolve_init_return_block_value(
     body: &FunctionBlock,
     payload_bindings: &[PatternPayloadParam],
     context: &str,
+    return_match_policy: InitReturnMatchPolicy,
 ) -> Result<ValueExpr> {
     if !body.statements.is_empty() {
         return Err(Error::new(format!(
@@ -147,21 +156,38 @@ fn resolve_init_return_block_value(
             name: name.clone(),
             arg: Box::new(arg.clone()),
         },
+        ReturnExpr::Match(match_body)
+            if return_match_policy == InitReturnMatchPolicy::AllowTopLevel =>
+        {
+            return resolve_init_match_value(
+                process,
+                scope,
+                match_body,
+                "init return match",
+                "init return match arm",
+            );
+        }
         ReturnExpr::Match(_) => {
             return Err(Error::new(format!(
-                "process {} {context} return match is not supported in init in this source slice",
+                "process {} {context} nested return match is not supported in init in this source slice",
                 process.name
             )));
         }
     };
-    let bindings = payload_bindings
-        .iter()
-        .map(|binding| SourceValueBinding {
-            name: &binding.name,
-            ty: &binding.ty,
-        })
-        .collect::<Vec<_>>();
-    let value = resolve_source_value_expr(scope, &process.state_type, &value, &bindings, 0)?;
+    let binding_storage;
+    let bindings: &[SourceValueBinding<'_>] = if payload_bindings.is_empty() {
+        &[]
+    } else {
+        binding_storage = payload_bindings
+            .iter()
+            .map(|binding| SourceValueBinding {
+                name: &binding.name,
+                ty: &binding.ty,
+            })
+            .collect::<Vec<_>>();
+        binding_storage.as_slice()
+    };
+    let value = resolve_source_value_expr(scope, &process.state_type, &value, bindings, 0)?;
     for binding in payload_bindings {
         if source_value_uses_binding(&value, &binding.name) {
             return Err(Error::new(format!(
@@ -170,6 +196,6 @@ fn resolve_init_return_block_value(
             )));
         }
     }
-    check_source_value_type(scope, &process.state_type, &value, &bindings)?;
+    check_source_value_type(scope, &process.state_type, &value, bindings)?;
     Ok(value)
 }
