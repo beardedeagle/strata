@@ -253,8 +253,10 @@ clauses.
 
 Multiple parameter-pattern `step` clauses may share one top-level message
 constructor only when exact nested typed payload predicates are provably
-disjoint and cover the discovered concrete payload cases. Wildcard fallback for
-payload-sensitive step-signature splitting remains rejected in this slice.
+disjoint. A wildcard fallback may cover only discovered concrete payload cases
+not matched by explicit payload-sensitive clauses. The fallback lowers to exact
+typed payload-guarded transitions for those discovered cases; it is not a
+runtime catch-all for future payload values.
 
 A match `step` uses a typed message parameter and a whole-body
 `match` over that parameter:
