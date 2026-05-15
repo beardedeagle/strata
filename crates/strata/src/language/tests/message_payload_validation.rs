@@ -399,6 +399,130 @@ proc Sink mailbox bounded(1) {
 }
 
 #[test]
+fn rejects_map_key_message_payload_containing_process_ref_type() {
+    let source = r#"
+module map_key_process_ref_payload;
+
+record MainState;
+record WorkerState;
+record SinkState;
+enum MainMsg { Start }
+enum WorkerMsg { Work(Map<ProcessRef<Sink>,MainState,1>) }
+enum SinkMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work(refs: Map<ProcessRef<Sink>,MainState,1>)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("map key process ref payload should fail");
+
+    assert!(
+        err.to_string().contains(
+            "enum WorkerMsg variant Work payload type Map<ProcessRef<Sink>,MainState,1> contains a process reference; process references must be direct message payloads"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_map_value_message_payload_containing_process_ref_type() {
+    let source = r#"
+module map_value_process_ref_payload;
+
+record MainState;
+record WorkerState;
+record SinkState;
+enum MainMsg { Start }
+enum WorkerMsg { Work(Map<MainState,ProcessRef<Sink>,1>) }
+enum SinkMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work(refs: Map<MainState,ProcessRef<Sink>,1>)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("map value process ref payload should fail");
+
+    assert!(
+        err.to_string().contains(
+            "enum WorkerMsg variant Work payload type Map<MainState,ProcessRef<Sink>,1> contains a process reference; process references must be direct message payloads"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_malformed_collection_process_ref_payload_with_collection_diagnostic() {
     let source = ACTOR_REPLY
         .replace("Work(ProcessRef<Sink>)", "Work(List<ProcessRef<Sink>>)")
