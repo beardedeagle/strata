@@ -154,7 +154,13 @@ fn validate_message_payload_type(
     payload_type: &TypeRef,
 ) -> Result<()> {
     match payload_type {
-        TypeRef::Named(_) => {
+        TypeRef::Named(name) => {
+            if is_process_ref_name(context.symbols, context.process_ref_type, name) {
+                return Err(Error::new(format!(
+                    "enum {} variant {} payload type {} must declare exactly one target process",
+                    enum_decl.name, variant.name, payload_type
+                )));
+            }
             validate_source_value_type(
                 context.symbols,
                 context.types,
@@ -258,7 +264,12 @@ fn validate_source_value_type(
     ty: &TypeRef,
 ) -> Result<()> {
     match ty {
-        TypeRef::Named(_) => {
+        TypeRef::Named(name) => {
+            if is_process_ref_name(symbols, process_ref_type, name) {
+                return Err(Error::new(format!(
+                    "type {ty} is not a source value type; process references must be direct message payloads"
+                )));
+            }
             type_decl_from_tables(symbols, types, ty)?;
             Ok(())
         }
@@ -325,18 +336,25 @@ fn type_contains_process_ref(
     process_ref_type: Symbol,
     ty: &TypeRef,
 ) -> bool {
-    let TypeRef::Applied {
-        constructor, args, ..
-    } = ty
-    else {
-        return false;
-    };
+    match ty {
+        TypeRef::Named(name) => is_process_ref_name(symbols, process_ref_type, name),
+        TypeRef::Applied {
+            constructor, args, ..
+        } => {
+            symbols
+                .resolve(constructor.as_str())
+                .is_some_and(|symbol| symbol == process_ref_type)
+                || args
+                    .iter()
+                    .any(|arg| type_contains_process_ref(symbols, process_ref_type, arg))
+        }
+    }
+}
+
+fn is_process_ref_name(symbols: &SymbolTable, process_ref_type: Symbol, name: &Identifier) -> bool {
     symbols
-        .resolve(constructor.as_str())
+        .resolve(name.as_str())
         .is_some_and(|symbol| symbol == process_ref_type)
-        || args
-            .iter()
-            .any(|arg| type_contains_process_ref(symbols, process_ref_type, arg))
 }
 
 fn collection_type_signature_error(

@@ -207,6 +207,25 @@ fn rejects_process_ref_payload_with_wrong_type_arity() {
 }
 
 #[test]
+fn rejects_bare_process_ref_payload_with_arity_diagnostic() {
+    let source = ACTOR_REPLY
+        .replace("Work(ProcessRef<Sink>)", "Work(ProcessRef)")
+        .replace(
+            "Work(reply_to: ProcessRef<Sink>)",
+            "Work(reply_to: ProcessRef)",
+        );
+
+    let err = check_source(&source).expect_err("bare process ref payload should fail");
+
+    assert!(
+        err.to_string().contains(
+            "enum WorkerMsg variant Work payload type ProcessRef must declare exactly one target process"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_record_field_containing_process_ref_type() {
     let source = r#"
 module record_process_ref_payload;
@@ -264,6 +283,54 @@ proc Sink mailbox bounded(1) {
     assert!(
         err.to_string().contains(
             "record Route field reply_to type ProcessRef<Sink> contains a process reference; process references must be direct message payloads"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_record_field_containing_bare_process_ref_type() {
+    let source = r#"
+module record_bare_process_ref_payload;
+
+record MainState;
+record WorkerState;
+record Route { reply_to: ProcessRef }
+enum MainMsg { Start }
+enum WorkerMsg { Work(Route) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work(route: Route)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("bare record process ref field should fail");
+
+    assert!(
+        err.to_string().contains(
+            "record Route field reply_to type ProcessRef contains a process reference; process references must be direct message payloads"
         ),
         "unexpected error: {err}"
     );
