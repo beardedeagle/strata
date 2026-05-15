@@ -945,7 +945,7 @@ fn step_signature_dispatches_same_message_by_disjoint_fieldless_nested_predicate
 }
 
 #[test]
-fn step_signature_payload_predicate_with_wildcard_fallback_remains_rejected() {
+fn step_signature_payload_predicate_uses_wildcard_for_uncovered_discovered_payload() {
     let source = same_message_step_split_case(
         r#"
     fn step(state: MainState, Envelope(Assign(Ready))) -> ProcResult<MainState> ! [] ~ [] @det {
@@ -958,13 +958,139 @@ fn step_signature_payload_predicate_with_wildcard_fallback_remains_rejected() {
 "#,
     );
 
-    let err = check_source(&source)
-        .expect_err("step signature payload predicate plus wildcard should remain rejected");
+    let checked = check_source(&source)
+        .expect("step signature wildcard should cover discovered same-message guarded misses");
+    let artifact = lower_to_artifact(&checked, &source)
+        .expect("payload-specific signature wildcard should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker process should lower");
+    let routed_type = artifact_type_id(&artifact, "Routed");
+    let mut labels = worker
+        .transitions
+        .iter()
+        .map(|transition| {
+            let guard = transition
+                .payload_guard
+                .as_ref()
+                .expect("transition should carry a payload guard");
+            assert_eq!(guard.ty, routed_type);
+            guard.label()
+        })
+        .collect::<Vec<_>>();
+    labels.sort();
+
+    assert_eq!(labels, ["Assign(Done)", "Assign(Ready)"]);
+    let step_result_for = |label: &str| {
+        worker
+            .transitions
+            .iter()
+            .find(|transition| {
+                transition
+                    .payload_guard
+                    .as_ref()
+                    .is_some_and(|guard| guard.label() == label)
+            })
+            .expect("payload guard transition should exist")
+            .step_result
+    };
+    assert_eq!(step_result_for("Assign(Ready)"), StepResult::Continue);
+    assert_eq!(step_result_for("Assign(Done)"), StepResult::Stop);
+
+    let encoded = artifact.encode();
+    assert!(encoded.contains(".payload_guard_type_id="));
+    assert!(encoded.contains(".payload_guard_value=Assign(Ready)"));
+    assert!(encoded.contains(".payload_guard_value=Assign(Done)"));
     assert!(
-        err.to_string().contains(
-            "process Worker declares a wildcard step pattern with a payload-sensitive step pattern"
-        ),
-        "expected step signature wildcard payload-splitting diagnostic, got {err}"
+        !encoded.contains("field_name=Assign"),
+        "payload-specific signature wildcard must not lower constructor names as executable fields"
+    );
+}
+
+#[test]
+fn step_signature_payload_wildcard_keeps_ordinary_variant_fallback_unguarded() {
+    let source = r#"
+module step_signature_payload_wildcard_mixed_fallback;
+
+record MainState;
+enum Phase { Ready, Done }
+enum Routed { Assign(Phase) }
+enum MainMsg { Start }
+enum WorkerMsg { Envelope(Routed), Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Ready));
+        send worker Ping;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = MainState;
+    type Msg = WorkerMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Envelope(Assign(Ready))) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+
+    fn step(state: MainState, _) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source)
+        .expect("signature wildcard should still cover non-payload-sensitive variants");
+    let artifact = lower_to_artifact(&checked, source)
+        .expect("mixed signature wildcard fallback should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker process should lower");
+    let routed_type = artifact_type_id(&artifact, "Routed");
+
+    assert_eq!(worker.transitions.len(), 2);
+    assert!(
+        worker.transitions.iter().any(|transition| {
+            transition.message == MessageId::new(0)
+                && transition.payload_guard.as_ref().is_some_and(|guard| {
+                    guard.ty == routed_type && guard.label() == "Assign(Ready)"
+                })
+        }),
+        "discovered Envelope(Assign(Ready)) should lower as an exact typed payload guard"
+    );
+    assert!(
+        worker
+            .transitions
+            .iter()
+            .any(|transition| transition.message == MessageId::new(1)
+                && transition.payload_guard.is_none()),
+        "wildcard should remain an ordinary unguarded fallback for Ping"
+    );
+    assert!(
+        worker.transitions.iter().all(|transition| {
+            transition.payload_guard.is_none()
+                || transition.payload_guard.as_ref().is_some_and(|guard| {
+                    guard.ty == routed_type && guard.label() == "Assign(Ready)"
+                })
+        }),
+        "wildcard must not create an open-ended payload catch-all transition"
     );
 }
 
@@ -1158,6 +1284,33 @@ fn rejects_step_signature_same_message_split_with_missing_discovered_payload_cov
             "process Worker must declare step pattern for message Envelope payload Assign(Other)"
         ),
         "expected uncovered same-message step signature diagnostic, got {err}"
+    );
+}
+
+#[test]
+fn rejects_unreachable_step_signature_payload_wildcard() {
+    let source = same_message_step_split_case(
+        r#"
+    fn step(state: MainState, Envelope(Assign(Ready))) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+
+    fn step(state: MainState, Envelope(Assign(Done))) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+
+    fn step(state: MainState, _) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Panic(state);
+    }
+"#,
+    );
+
+    let err = check_source(&source)
+        .expect_err("wildcard after complete step-signature payload coverage should fail");
+    assert!(
+        err.to_string()
+            .contains("process Worker wildcard step pattern is unreachable"),
+        "expected step-signature wildcard reachability diagnostic, got {err}"
     );
 }
 
@@ -1650,6 +1803,29 @@ fn rejects_match_msg_payload_split_without_discovered_payload_case() {
         err.to_string()
             .contains("process Worker must declare step pattern for message Envelope"),
         "expected missing concrete payload coverage diagnostic, got {err}"
+    );
+}
+
+#[test]
+fn rejects_step_signature_payload_split_wildcard_without_discovered_payload_case() {
+    let source = same_message_step_split_without_discovered_payload_case(
+        r#"
+    fn step(state: MainState, Envelope(Assign(Ready))) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+
+    fn step(state: MainState, _) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+"#,
+    );
+
+    let err = check_source(&source).expect_err(
+        "step-signature payload split wildcard without a discovered payload should fail closed",
+    );
+    assert!(
+        err.to_string().contains("process Worker payload-sensitive step pattern for message Envelope has no discovered payload case for wildcard fallback"),
+        "expected missing concrete payload step wildcard diagnostic, got {err}"
     );
 }
 

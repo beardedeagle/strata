@@ -141,6 +141,7 @@ pub(super) fn check_step_clauses<'a>(
         &explicit_clauses,
         &concrete_message_cases,
     )?;
+    let pattern_label = step_dispatch_pattern_label(dispatch_style);
     let mut clauses = Vec::with_capacity(concrete_message_cases.len());
     for concrete_case in &concrete_message_cases {
         let variant_id = concrete_case.variant;
@@ -175,6 +176,7 @@ pub(super) fn check_step_clauses<'a>(
                     &explicit_clauses,
                     concrete_case,
                     message_variant,
+                    pattern_label,
                 )?,
             )
         } else {
@@ -253,10 +255,7 @@ pub(super) fn check_step_clauses<'a>(
             &msg_enum.variants,
             &explicit_clauses,
             &concrete_message_cases,
-            match dispatch_style {
-                Some(StepDispatchStyle::BodyMatch) => "match msg pattern",
-                Some(StepDispatchStyle::ParameterPattern) | None => "step pattern",
-            },
+            pattern_label,
         )?;
     }
 
@@ -446,16 +445,24 @@ fn wildcard_payload_guard_for_case(
     explicit_clauses: &[Vec<StepBodyClause<'_>>],
     concrete_case: &StepConcreteMessageCase,
     message_variant: &EnumVariant,
+    pattern_label: &str,
 ) -> Result<Option<CheckedPayloadValue>> {
     if !has_payload_sensitive_clause(explicit_clauses, concrete_case.variant) {
         return Ok(None);
     }
     concrete_case.payload.clone().map(Some).ok_or_else(|| {
         Error::new(format!(
-            "process {} payload-sensitive match msg pattern for message {} has no discovered payload case for wildcard fallback",
-            process.name, message_variant.name
+            "process {} payload-sensitive {} for message {} has no discovered payload case for wildcard fallback",
+            process.name, pattern_label, message_variant.name
         ))
     })
+}
+
+fn step_dispatch_pattern_label(dispatch_style: Option<StepDispatchStyle>) -> &'static str {
+    match dispatch_style {
+        Some(StepDispatchStyle::BodyMatch) => "match msg pattern",
+        Some(StepDispatchStyle::ParameterPattern) | None => "step pattern",
+    }
 }
 
 fn has_payload_sensitive_clause(
@@ -1208,10 +1215,7 @@ impl StepClauseInsertMode {
     }
 
     fn rejects_payload_sensitive_wildcard(self) -> bool {
-        matches!(
-            self,
-            StepClauseInsertMode::Single | StepClauseInsertMode::PayloadSensitiveSignature
-        )
+        matches!(self, StepClauseInsertMode::Single)
     }
 
     fn pattern_label(self) -> &'static str {

@@ -38,11 +38,13 @@ Read them in this order:
    splitting inside a whole-body `match msg`.
 20. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-21. `nested_patterns.str` for nested immutable constructor, record, list, and
+21. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+   step-signature wildcard fallback over discovered concrete payload cases.
+22. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-22. `actor_reply.str` for transporting typed process references through message
+23. `actor_reply.str` for transporting typed process references through message
    payloads.
-23. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+24. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -473,6 +475,28 @@ Key source ideas:
   applicable, and exact typed payload identity.
 - `actor_payload_split_match.str` exercises the equivalent whole-body
   `match msg` authoring form.
+
+## Actor Payload Split Signature Wildcard
+
+`examples/actor_payload_split_signature_wildcard.str` proves that a
+payload-sensitive step-signature split can use `_` as fallback for discovered
+concrete payload cases not handled by explicit nested predicates.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_payload_split_signature_wildcard.str
+cargo run -p strata --bin strata -- build examples/actor_payload_split_signature_wildcard.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_split_signature_wildcard.mta
+```
+
+Key source ideas:
+
+- `Envelope(Assign(Ready))` handles the explicitly guarded payload case.
+- `_` handles the discovered `Envelope(Assign(Done))` case, and lowering emits
+  a typed payload guard for `Assign(Done)` rather than an open runtime catch-all.
+- The fallback remains bounded to discovered concrete payload cases admitted by
+  checking.
+- Runtime dispatch still uses admitted message IDs and exact typed payload
+  identity, not source strings or debug labels.
 
 ## Nested Patterns
 
