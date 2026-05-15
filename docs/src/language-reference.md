@@ -544,6 +544,20 @@ fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<Work
 Runtime dispatch uses the transported runtime process ID and admitted target
 process ID. Source names remain diagnostics and trace metadata.
 
+Current process-reference boundaries:
+
+| Surface | Current status |
+| --- | --- |
+| `let worker: ProcessRef<Worker> = spawn Worker;` | Admitted as an immutable transition-local binding. The checker resolves the target process before lowering. |
+| `send worker Ping;` | Admitted for a process reference spawned earlier in the same transition. Lowering emits a process-reference table ID. |
+| `enum WorkerMsg { Work(ProcessRef<Sink>) }` | Admitted only as a direct message payload type. |
+| `send worker Work(sink);` and `send reply_to Done;` | Admitted for direct process-reference payload forwarding. Mantle routes by admitted target process ID and runtime process ID. |
+| Multiple `ProcessRef<Worker>` bindings to one process definition | Admitted. Each spawn creates a separate runtime process instance. |
+| Process references directly in record fields or collection element/key/value types | Rejected. Process references are runtime authority, not general immutable data values in this slice. |
+| Process references nested inside record, enum, list, map, or next-state payload templates | Rejected. A process reference must be the direct payload of a message that declares `ProcessRef<T>`. |
+| Process references in process state values or next-state templates | Rejected. Process states remain immutable source values without embedded runtime authority. |
+| Sending by process definition names, source strings, registries, dynamic worker pools, supervisor child sets, stale-reference semantics, restart semantics | Future actor-topology semantics. They require separate authority, lifetime, failure, and observability rules. |
+
 Patterns are source-level syntax for typed value decomposition. The current
 runnable subset admits constructor patterns, constructor payload bindings,
 nested constructor and record/list/map payload destructuring, helper return-match

@@ -6,9 +6,10 @@ use std::process::{Command, Output};
 use std::sync::Once;
 
 use mantle_artifact::{
-    ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactTypeKind, ArtifactValue,
-    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
-    EnumVariantId, MantleArtifact, ProcessId, TypeId, read_artifact,
+    ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactSendTarget, ArtifactTypeKind,
+    ArtifactValue, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact, MessageId, ProcessId, TypeId,
+    read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -1854,6 +1855,18 @@ fn actor_reply_checks_builds_and_runs_on_mantle() {
     let stdout = String::from_utf8_lossy(&run.stdout);
     let artifact = gate.read_artifact("target/strata/actor_reply.mta");
     let sink_ref_type = process_ref_type_id(&artifact, ProcessId::new(2));
+    let worker = artifact_process(&artifact, "Worker");
+    assert_eq!(
+        worker.transitions[0].actions[1],
+        ArtifactAction::Send {
+            target: ArtifactSendTarget::ReceivedPayload {
+                ty: sink_ref_type,
+                target_process: ProcessId::new(2),
+            },
+            message: MessageId::new(0),
+            payload: None,
+        }
+    );
     let process_ref_payload = format!("type{}#3", sink_ref_type.as_u32());
     assert!(stdout.contains(&format!(
         "mantle: delivered Work({process_ref_payload}) to Worker"
