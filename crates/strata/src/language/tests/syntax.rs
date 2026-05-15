@@ -395,6 +395,30 @@ fn rejects_step_return_match_over_state_parameter() {
 }
 
 #[test]
+fn rejects_general_match_expression_in_step_return_value() {
+    let source = ACTOR_PING.replace(
+        "return Stop(Handled);",
+        r#"return Continue(match state {
+            Idle => {
+                return Handled;
+            }
+            Handled => {
+                return Handled;
+            }
+        });"#,
+    );
+
+    let err = parse_source(&source).expect_err("general match expression should fail");
+
+    assert!(
+        err.to_string().contains(
+            "match expressions are only admitted as whole function bodies or return match expressions in this source slice"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn rejects_panic_step_result_with_wrong_state_value() {
     let source = ACTOR_PING.replace("return Stop(Handled);", "return Panic(MainState);");
 

@@ -19,9 +19,9 @@ Mantle artifact internals.
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
-| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, pure step return-match expressions, and `_` wildcards. |
+| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, step return-match expressions with optional uniform action prefixes, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
-| Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and pure step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for helpers, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
+| Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for helpers, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
 The `module` declaration names a source unit. It does not create an import
@@ -620,9 +620,11 @@ the returned state because the initial state lowers to one static state ID.
 
 The `! [...]` effect list is source-level authority for the runtime effects used
 by each `step` clause. It must exactly match the clause actions. For a
-`match msg` or `match state` step, the one effect list applies to every
-generated transition, so each arm must use exactly those effects. Missing,
-duplicate, and unused declared effects are rejected before lowering.
+`match msg`, `match state`, or `step return match` step, the one effect list
+applies to every generated transition. Match-body arms must use exactly those
+effects, and a return-match uniform prefix must lower the same actions onto each
+selected transition. Missing, duplicate, and unused declared effects are
+rejected before lowering.
 
 | Effect | Statement |
 | --- | --- |
@@ -780,12 +782,14 @@ return Stop(Handled);
 return Panic(Failed);
 ```
 
-A pure `step` body may also use `return match` over a concrete enum source
-value binding when the checker can reduce the match to one typed transition
-before lowering:
+A `step` body may also use `return match` over a concrete enum source value
+binding when the checker can reduce the match to one typed transition before
+lowering. Statements before the `return match` are a uniform action prefix; the
+checker lowers that same typed action list onto every generated transition:
 
 ```strata
-fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [] ~ [] @det {
+fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    emit "return-match prefix";
     return match phase {
         Ready => {
             return Continue(SawReady);
@@ -800,10 +804,24 @@ fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<Worker
 This form is not runtime dispatch. The checker requires an immutable enum source
 binding with a concrete value proven during step clause or state-match expansion,
 checks every arm as a `ProcResult<StateType>`, selects the matching arm, and
-lowers the selected arm to the existing typed transition shape. Runtime-effect
-statements before `return match` are rejected in this slice. Matching `state`,
-matching non-enum values, and dynamic payload catch-all dispatch are not
-admitted.
+lowers the selected arm to the existing typed transition shape. Uniform prefix
+effects occur before the return selection in source program order and remain
+committed runtime actions. Return-match arms remain statement-free, so per-arm
+effects are not admitted. Matching `state`, matching non-enum values, and
+dynamic payload catch-all dispatch are not admitted.
+
+Current pattern-matching closure boundaries:
+
+| Surface | Current status |
+| --- | --- |
+| `step return match` after uniform pre-return effects | Admitted. Prefix actions lower identically onto each selected typed transition. |
+| `step return match state` | Rejected. Use whole-body `match state`, then match a concrete state-payload binding when one is proven. |
+| `init match` over payload-bearing arm constructors | Admitted only when every arm returns a state value that does not materialize payload bindings. |
+| `init return match` over payload-bearing constructors | Rejected in this slice. `init return match` selects a static initial state from a fieldless enum scrutinee. |
+| Init arms materializing payload bindings in the initial state | Rejected. The initial state lowers to one static typed state ID. |
+| Shape-only collection predicates such as `Items(List[_])`, `Lookup(Map[Ready => _])`, or `Lookup(Map[..])` | Rejected. Bind at least one immutable projected value, or match only the enclosing constructor when the payload is ignored. |
+| Dynamic-key map matching | Rejected. Map pattern keys are static source values in this slice. |
+| Arbitrary/general match expressions outside admitted helper, `init`, `step`, `match msg`, and `match state` forms | Future language semantics, not part of the current buildable surface. |
 
 State changes are immutable whole-value transitions. There is no assignment
 statement and no source-visible field mutation.

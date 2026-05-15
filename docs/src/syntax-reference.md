@@ -213,8 +213,8 @@ destructuring, record destructuring patterns, list/map collection patterns, and
 `_` wildcards. Buildable semantic consumers are normal source function
 signatures and match bodies, helper return-match expressions, fieldless enum
 `init` whole-body matches and return-match expressions, actor `step` message
-dispatch, message-specific `match state` step bodies, and pure step return-match
-expressions. Record/list/map
+dispatch, message-specific `match state` step bodies, and step return-match
+expressions with optional uniform action prefixes. Record/list/map
 destructuring patterns are accepted
 in normal source helper signatures, helper match bodies, helper return-match
 expressions, message constructor payloads, and current-state enum payloads when
@@ -311,9 +311,10 @@ each fallback case still expands across admitted current-state cases and lowers
 with an exact typed payload guard. State changes still occur only by returning a
 whole state value through `Continue(...)`, `Stop(...)`, or `Panic(...)`.
 
-In a pure block-bodied `step`, the return expression may be a match over a
+In a block-bodied `step`, the return expression may be a match over a
 transition-local enum source binding whose concrete value is already proven by
-step clause or state-match expansion:
+step clause or state-match expansion. Any statements before the return match are
+a uniform action prefix for every selected lowered transition:
 
 ```text
 step_return_match =
@@ -322,9 +323,10 @@ step_return_match =
 
 Every arm body must be statement-free and must return `Continue(value)`,
 `Stop(value)`, or `Panic(value)`. The checker selects the concrete arm before
-lowering and emits the same typed transition metadata as a direct step return.
+lowering and emits the same typed transition metadata as a direct step return,
+including the same prefix actions and effect list on every generated transition.
 This syntax does not admit dynamic payload catch-all dispatch, source-string
-selectors, or effect statements before the return match.
+selectors, or branch-local arm statements.
 
 In a pure block-bodied `init`, the return expression may be a match over one
 fieldless enum constructor:
@@ -457,8 +459,9 @@ expected bounded source value type.
 
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,
-`Stop(value)`, `Panic(value)`, or a pure `return match` that the checker reduces
-to one of those result forms before lowering.
+`Stop(value)`, `Panic(value)`, or a `return match` that the checker reduces to
+one of those result forms before lowering while preserving any uniform action
+prefix as typed transition actions.
 
 ## Literals
 
