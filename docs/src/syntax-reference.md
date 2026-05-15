@@ -86,12 +86,13 @@ must each appear exactly once. Non-`init`/`step` functions are process-local
 source helpers. Each concrete message case must resolve to exactly one generated
 transition, either through an explicit constructor pattern, through one wildcard
 pattern, through one `match msg` step body, or through a state-match step for a
-specific message pattern. In parameter-pattern, state-match, and whole-body
-`match msg` dispatch, same top-level message constructor clauses may split by
-exact typed payload guard when their nested predicates are provably disjoint
-over discovered concrete payload cases. Payload-sensitive state-match splitting
-requires explicit payload cases; payload-sensitive state-match wildcard fallback
-is rejected in this slice. A process cannot mix parameter-pattern/state-match
+constructor or wildcard message pattern. Parameter-pattern, state-match, and
+whole-body `match msg` dispatch may split same top-level message constructor
+clauses by exact typed payload guard when their nested predicates are provably
+disjoint over discovered concrete payload cases. A payload-sensitive state-match
+wildcard fallback may cover discovered concrete payload cases not matched by an
+explicit same-message state-match clause; it lowers exact typed payload guards,
+not an open runtime catch-all. A process cannot mix parameter-pattern/state-match
 step forms with a `match msg` step body in this slice. Other process members are
 rejected.
 
@@ -301,9 +302,11 @@ payload. Bindings are immutable and transition-local. Each generated transition
 is keyed by the message ID and the admitted current state ID. State-match clauses
 may share one top-level message constructor by exact disjoint nested typed
 payload predicates; each generated transition is additionally keyed by the exact
-typed payload guard. Payload-sensitive state-match wildcard fallback is rejected
-in this slice. State changes still occur only by returning a whole state value
-through `Continue(...)`, `Stop(...)`, or `Panic(...)`.
+typed payload guard. A wildcard state-match step may cover discovered concrete
+payload cases for the same message that no explicit state-match clause handles;
+each fallback case still expands across admitted current-state cases and lowers
+with an exact typed payload guard. State changes still occur only by returning a
+whole state value through `Continue(...)`, `Stop(...)`, or `Panic(...)`.
 
 A normal source helper is a module-level function or a process-local function
 whose name is not `init` or `step`:
