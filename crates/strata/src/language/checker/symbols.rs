@@ -95,6 +95,7 @@ fn reject_internal_type_label_prefix(name: &str) -> Result<()> {
 fn validate_record_fields(
     symbols: &SymbolTable,
     types: &BTreeMap<Symbol, TypeDecl>,
+    process_ref_type: Symbol,
     list_type: Symbol,
     map_type: Symbol,
     record: &Record,
@@ -110,10 +111,22 @@ fn validate_record_fields(
                 record.name, field.name
             )));
         }
-        if let Err(err) = validate_source_value_type(symbols, types, list_type, map_type, &field.ty)
-        {
+        if let Err(err) = validate_source_value_type(
+            symbols,
+            types,
+            process_ref_type,
+            list_type,
+            map_type,
+            &field.ty,
+        ) {
             if collection_type_signature_error(symbols, list_type, map_type, &field.ty) {
                 return Err(err);
+            }
+            if type_contains_process_ref(symbols, process_ref_type, &field.ty) {
+                return Err(Error::new(format!(
+                    "record {} field {} type {} contains a process reference; process references must be direct message payloads",
+                    record.name, field.name, field.ty
+                )));
             }
             return Err(Error::new(format!(
                 "record {} field {} uses undeclared type {}",
@@ -145,6 +158,7 @@ fn validate_message_payload_type(
             validate_source_value_type(
                 context.symbols,
                 context.types,
+                context.process_ref_type,
                 context.list_type,
                 context.map_type,
                 payload_type,
@@ -191,9 +205,16 @@ fn validate_message_payload_type(
                     enum_decl.name, variant.name, payload_type, target
                 )));
             }
+            if constructor_symbol == context.process_ref_type {
+                return Err(Error::new(format!(
+                    "enum {} variant {} payload type {} must declare exactly one target process",
+                    enum_decl.name, variant.name, payload_type
+                )));
+            }
             if let Err(err) = validate_source_value_type(
                 context.symbols,
                 context.types,
+                context.process_ref_type,
                 context.list_type,
                 context.map_type,
                 payload_type,
@@ -205,6 +226,16 @@ fn validate_message_payload_type(
                     payload_type,
                 ) {
                     return Err(err);
+                }
+                if type_contains_process_ref(
+                    context.symbols,
+                    context.process_ref_type,
+                    payload_type,
+                ) {
+                    return Err(Error::new(format!(
+                        "enum {} variant {} payload type {} contains a process reference; process references must be direct message payloads",
+                        enum_decl.name, variant.name, payload_type
+                    )));
                 }
             } else {
                 return Ok(());
@@ -221,6 +252,7 @@ fn validate_message_payload_type(
 fn validate_source_value_type(
     symbols: &SymbolTable,
     types: &BTreeMap<Symbol, TypeDecl>,
+    process_ref_type: Symbol,
     list_type: Symbol,
     map_type: Symbol,
     ty: &TypeRef,
@@ -238,9 +270,21 @@ fn validate_source_value_type(
             let constructor_symbol = symbols
                 .resolve(constructor.as_str())
                 .ok_or_else(|| Error::new(format!("type {ty} is not declared")))?;
+            if constructor_symbol == process_ref_type {
+                return Err(Error::new(format!(
+                    "type {ty} is not a source value type; process references must be direct message payloads"
+                )));
+            }
             if constructor_symbol == list_type && args.len() == 1 && const_args.len() == 1 {
                 validate_collection_capacity(ty, const_args[0])?;
-                return validate_source_value_type(symbols, types, list_type, map_type, &args[0]);
+                return validate_source_value_type(
+                    symbols,
+                    types,
+                    process_ref_type,
+                    list_type,
+                    map_type,
+                    &args[0],
+                );
             }
             if constructor_symbol == list_type {
                 return Err(Error::new(format!(
@@ -249,8 +293,22 @@ fn validate_source_value_type(
             }
             if constructor_symbol == map_type && args.len() == 2 && const_args.len() == 1 {
                 validate_collection_capacity(ty, const_args[0])?;
-                validate_source_value_type(symbols, types, list_type, map_type, &args[0])?;
-                return validate_source_value_type(symbols, types, list_type, map_type, &args[1]);
+                validate_source_value_type(
+                    symbols,
+                    types,
+                    process_ref_type,
+                    list_type,
+                    map_type,
+                    &args[0],
+                )?;
+                return validate_source_value_type(
+                    symbols,
+                    types,
+                    process_ref_type,
+                    list_type,
+                    map_type,
+                    &args[1],
+                );
             }
             if constructor_symbol == map_type {
                 return Err(Error::new(format!(
@@ -260,6 +318,25 @@ fn validate_source_value_type(
             Err(Error::new(format!("type {ty} is not declared")))
         }
     }
+}
+
+fn type_contains_process_ref(
+    symbols: &SymbolTable,
+    process_ref_type: Symbol,
+    ty: &TypeRef,
+) -> bool {
+    let TypeRef::Applied {
+        constructor, args, ..
+    } = ty
+    else {
+        return false;
+    };
+    symbols
+        .resolve(constructor.as_str())
+        .is_some_and(|symbol| symbol == process_ref_type)
+        || args
+            .iter()
+            .any(|arg| type_contains_process_ref(symbols, process_ref_type, arg))
 }
 
 fn collection_type_signature_error(
@@ -429,7 +506,14 @@ impl SemanticIndex {
         }
 
         for record in &module.records {
-            validate_record_fields(&symbols, &types, list_type, map_type, record)?;
+            validate_record_fields(
+                &symbols,
+                &types,
+                process_ref_type,
+                list_type,
+                map_type,
+                record,
+            )?;
         }
 
         Ok(Self {
@@ -615,6 +699,7 @@ impl SemanticIndex {
             || validate_source_value_type(
                 &self.symbols,
                 &self.types,
+                self.process_ref_type,
                 self.list_type,
                 self.map_type,
                 ty,

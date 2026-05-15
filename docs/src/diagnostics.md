@@ -119,11 +119,13 @@ result of the first invalid shape.
 | `message ... requires a payload` | A send omits the payload for a payload variant. | Pass one value with `send worker Variant(value);`. |
 | `message ... does not accept a payload` | A send passes a payload to a unit variant. | Remove the payload argument or send a payload variant. |
 | `payload type ... must be a named record, enum, list, map, or process reference type` | A payload variant uses an unsupported applied/generic type. | Declare a named record or enum type, use `List<T,N>` / `Map<K,V,N>` over source values, or use `ProcessRef<TargetProcess>`. |
+| `payload type ... must declare exactly one target process` | A direct `ProcessRef` payload declaration has the wrong arity or a const argument. | Declare process-reference payloads as `ProcessRef<TargetProcess>`. |
 | `step pattern payload ... has type ... expected ...` | A step payload binding annotation does not match the variant payload type. | Use the declared payload type in the parameter pattern. |
 | `payload binding ... conflicts` / `process reference ... conflicts with payload binding` | A local immutable binding shadows `state`, a process, a type, a value constructor, or another local binding in the same transition. | Use distinct immutable binding names. |
 | `payload has type ..., expected ...` | A runtime envelope or artifact payload template carries the wrong value type. | Match the payload value type to the target message variant. |
 | `payload ... exceeds maximum length` | A payload value label is too large for the artifact or runtime trace boundary. | Use a smaller payload value or split the payload into smaller fields/messages. |
 | `payload ... is not a bound process reference` | A `ProcessRef<T>` payload send uses a value that is not a process reference. | Pass an immutable process reference binding or received `ProcessRef<T>` payload. |
+| `contains a process reference; process references must be direct message payloads` | A record field or collection type tries to make process references general source values. | Keep `ProcessRef<T>` as the direct payload type of a message variant, then forward that received reference directly. |
 | `process references must be direct message payloads` / `process reference template must be a direct message payload` | A process reference payload is nested inside a record, enum, collection, or next-state template. | Send `ProcessRef<T>` only as the direct payload of a message that declares `ProcessRef<T>`. |
 
 ## Match Errors
