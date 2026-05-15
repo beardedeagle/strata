@@ -1,0 +1,80 @@
+module actor_payload_state_match_split;
+
+record MainState;
+enum Phase {
+    Ready,
+    Done,
+}
+enum Routed {
+    Assign(Phase),
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Idle,
+    SawReady,
+    Done,
+}
+enum WorkerMsg {
+    Envelope(Routed),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Ready));
+        send worker Envelope(Assign(Done));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(Ready))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match state {
+            Idle => {
+                emit "worker handled Ready assignment";
+                return Continue(SawReady);
+            }
+            SawReady => {
+                emit "worker kept Ready assignment";
+                return Continue(SawReady);
+            }
+            Done => {
+                emit "worker ignored Ready after Done";
+                return Stop(Done);
+            }
+        }
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(Done))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match state {
+            Idle => {
+                emit "worker handled Done assignment from Idle";
+                return Stop(Done);
+            }
+            SawReady => {
+                emit "worker handled Done assignment";
+                return Stop(Done);
+            }
+            Done => {
+                emit "worker kept Done assignment";
+                return Stop(Done);
+            }
+        }
+    }
+}

@@ -86,11 +86,13 @@ must each appear exactly once. Non-`init`/`step` functions are process-local
 source helpers. Each concrete message case must resolve to exactly one generated
 transition, either through an explicit constructor pattern, through one wildcard
 pattern, through one `match msg` step body, or through a state-match step for a
-specific message pattern. In parameter-pattern and whole-body `match msg`
-dispatch, same top-level message constructor clauses may split by exact typed
-payload guard when their nested predicates are provably disjoint over discovered
-concrete payload cases. A process cannot mix parameter-pattern/state-match step
-forms with a `match msg` step body in this slice. Other process members are
+specific message pattern. In parameter-pattern, state-match, and whole-body
+`match msg` dispatch, same top-level message constructor clauses may split by
+exact typed payload guard when their nested predicates are provably disjoint
+over discovered concrete payload cases. Payload-sensitive state-match splitting
+requires explicit payload cases; payload-sensitive state-match wildcard fallback
+is rejected in this slice. A process cannot mix parameter-pattern/state-match
+step forms with a `match msg` step body in this slice. Other process members are
 rejected.
 
 ## Functions
@@ -214,11 +216,11 @@ signatures and match bodies, helper return-match expressions, fieldless enum
 in normal source helper signatures, helper match bodies, helper return-match
 expressions, message constructor payloads, and current-state enum payloads when
 the payload has the matching type. Helper signatures, helper match bodies,
-helper return-match expressions, whole-body `match msg` arms, and step
-parameter patterns may split a top-level constructor by disjoint exact nested
-typed payload predicates. Source helper calls still expand before lowering; enum
-pattern dispatch requires a concrete enum constructor value and record/list/map
-destructuring requires a concrete value.
+helper return-match expressions, whole-body `match msg` arms, step parameter
+patterns, and state-match step clauses may split a top-level constructor by
+disjoint exact nested typed payload predicates. Source helper calls still expand
+before lowering; enum pattern dispatch requires a concrete enum constructor
+value and record/list/map destructuring requires a concrete value.
 
 Buildable source requires bodies. `init` uses no parameters. Each
 parameter-pattern `step` uses `state: StateType` followed by one message
@@ -296,9 +298,12 @@ variants may bind their whole payload with an explicit type, such as
 `Working(Job { phase })`. Nested constructor payloads use the same structural
 pattern rules. Fieldless variants must not bind or destructure a
 payload. Bindings are immutable and transition-local. Each generated transition
-is keyed by the message ID and the admitted current state ID; state changes
-still occur only by returning a whole state value through `Continue(...)`,
-`Stop(...)`, or `Panic(...)`.
+is keyed by the message ID and the admitted current state ID. State-match clauses
+may share one top-level message constructor by exact disjoint nested typed
+payload predicates; each generated transition is additionally keyed by the exact
+typed payload guard. Payload-sensitive state-match wildcard fallback is rejected
+in this slice. State changes still occur only by returning a whole state value
+through `Continue(...)`, `Stop(...)`, or `Panic(...)`.
 
 A normal source helper is a module-level function or a process-local function
 whose name is not `init` or `step`:
