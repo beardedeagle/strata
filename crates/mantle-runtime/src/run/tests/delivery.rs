@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::support::*;
 use crate::{ProcessStatus, RuntimeEvent, RuntimeProcessId};
 
@@ -216,6 +218,114 @@ fn runtime_rejects_unhandled_messages_after_stopped_process_drain() {
 }
 
 #[test]
+fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluation() {
+    let artifact = artifact_with_worker_job_payload();
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = {
+        let mut run = new_test_run(&program, &mut host);
+        let main_pid = run
+            .spawn_process(MAIN_PROCESS, None)
+            .expect("entry process should spawn");
+        let worker_pid = run
+            .spawn_process(WORKER_PROCESS, Some(main_pid))
+            .expect("worker process should spawn");
+        let worker_index = process_index_for_pid(&run, worker_pid);
+        run.processes[worker_index].status = ProcessStatus::Stopped;
+
+        let mut process_refs = worker_ref_binding(worker_pid);
+        let step = main_step(main_pid);
+        let action = failing_current_state_payload_send();
+        let err = run
+            .execute_action(&mut process_refs, &step, &action)
+            .expect_err("stopped target should reject before payload template evaluation");
+
+        assert_eq!(run.processes[worker_index].mailbox.len(), 0);
+        assert!(run.delivered_messages.is_empty());
+        err.to_string()
+    };
+
+    assert_eq!(err, "send to process Worker failed because it is stopped");
+    assert_no_worker_ping_accepted_event(host.events());
+}
+
+#[test]
+fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation() {
+    let artifact = artifact_with_worker_job_payload();
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = {
+        let mut run = new_test_run(&program, &mut host);
+        let main_pid = run
+            .spawn_process(MAIN_PROCESS, None)
+            .expect("entry process should spawn");
+        let worker_pid = run
+            .spawn_process(WORKER_PROCESS, Some(main_pid))
+            .expect("worker process should spawn");
+        let worker_index = process_index_for_pid(&run, worker_pid);
+        run.processes[worker_index].status = ProcessStatus::Failed;
+
+        let mut process_refs = worker_ref_binding(worker_pid);
+        let step = main_step(main_pid);
+        let action = failing_current_state_payload_send();
+        let err = run
+            .execute_action(&mut process_refs, &step, &action)
+            .expect_err("failed target should reject before payload template evaluation");
+
+        assert_eq!(run.processes[worker_index].mailbox.len(), 0);
+        assert!(run.delivered_messages.is_empty());
+        err.to_string()
+    };
+
+    assert_eq!(err, "send to process Worker failed because it has failed");
+    assert_no_worker_ping_accepted_event(host.events());
+}
+
+#[test]
+fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation() {
+    let artifact = artifact_with_worker_job_payload();
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = {
+        let mut run = new_test_run(&program, &mut host);
+        let main_pid = run
+            .spawn_process(MAIN_PROCESS, None)
+            .expect("entry process should spawn");
+        let worker_pid = run
+            .spawn_process(WORKER_PROCESS, Some(main_pid))
+            .expect("worker process should spawn");
+        let worker_index = process_index_for_pid(&run, worker_pid);
+
+        run.send_message(
+            worker_pid,
+            RuntimeMessageEnvelope::new(PING_MESSAGE, Some(job_payload())),
+            Some(main_pid),
+        )
+        .expect("first send should fill worker mailbox");
+
+        let mut process_refs = worker_ref_binding(worker_pid);
+        let step = main_step(main_pid);
+        let action = failing_current_state_payload_send();
+        let err = run
+            .execute_action(&mut process_refs, &step, &action)
+            .expect_err("full mailbox should reject before payload template evaluation");
+
+        assert_eq!(run.processes[worker_index].mailbox.len(), 1);
+        assert_eq!(run.delivered_messages.len(), 1);
+        err.to_string()
+    };
+
+    assert_eq!(
+        err,
+        "mailbox for process Worker is full; message was not accepted"
+    );
+    assert_eq!(worker_ping_accepted_count(host.events()), 1);
+}
+
+#[test]
 fn runtime_rejects_unspawned_process_ref_payload_before_acceptance() {
     let artifact = artifact_with_worker_process_ref_payload();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
@@ -258,6 +368,12 @@ fn artifact_with_worker_process_ref_payload() -> MantleArtifact {
     artifact
 }
 
+fn artifact_with_worker_job_payload() -> MantleArtifact {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Ping", JOB)];
+    artifact
+}
+
 fn worker_process_ref_payload(pid: u64) -> RuntimePayload {
     runtime_payload(ArtifactPayload {
         ty: PROCESS_REF_WORKER,
@@ -267,6 +383,39 @@ fn worker_process_ref_payload(pid: u64) -> RuntimePayload {
             pid,
         }),
     })
+}
+
+fn job_payload() -> RuntimePayload {
+    runtime_payload(
+        ArtifactPayload::value(JOB, artifact_value("Job{phase:Ready}"))
+            .expect("test job payload should construct"),
+    )
+}
+
+fn failing_current_state_payload_send() -> LoadedAction {
+    LoadedAction::Send {
+        target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: PING_MESSAGE,
+        payload: Some(loaded_template(
+            ArtifactValueTemplate::CurrentStatePayload { ty: JOB },
+        )),
+    }
+}
+
+fn worker_ref_binding(worker_pid: RuntimeProcessId) -> BTreeMap<ProcessRefId, RuntimeProcessId> {
+    BTreeMap::from([(ProcessRefId::new(0), worker_pid)])
+}
+
+fn main_step(main_pid: RuntimeProcessId) -> ActiveStep {
+    ActiveStep {
+        pid: main_pid,
+        process_id: MAIN_PROCESS,
+        process_name: "Main".to_string(),
+        current_state: StateId::new(0),
+        message: PING_MESSAGE,
+        message_label: "Start".to_string(),
+        payload: None,
+    }
 }
 
 fn new_test_run<'program, 'host>(
