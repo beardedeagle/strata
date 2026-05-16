@@ -23,7 +23,7 @@ pub(super) fn validate_loaded_bool_condition(
     field: &str,
     condition: &LoadedValueTemplate,
     received_payload_type: Option<TypeId>,
-    current_state_payload_type: Option<TypeId>,
+    current_state_payload: Option<&RuntimePayload>,
 ) -> Result<()> {
     let bool_type = condition.result_type();
     let ty = program.type_entry(bool_type)?;
@@ -39,39 +39,28 @@ pub(super) fn validate_loaded_bool_condition(
     LoadedTemplateAdmission {
         expected_type: Some(bool_type),
         received_payload_type,
-        current_state_payload_type,
+        current_state_payload_type: current_state_payload.map(|payload| payload.ty),
         allow_direct_process_ref: false,
         program,
         process,
         spawned_refs: &[],
     }
     .validate(field, condition)?;
-    validate_loaded_static_bool_condition_value(field, condition)
+    validate_loaded_static_bool_condition_value(program, field, condition, current_state_payload)
 }
 
 fn validate_loaded_static_bool_condition_value(
+    program: &LoadedProgram,
     field: &str,
     condition: &LoadedValueTemplate,
+    current_state_payload: Option<&RuntimePayload>,
 ) -> Result<()> {
-    match condition {
-        LoadedValueTemplate::Literal { value, .. } => validate_loaded_bool_atom_value(field, value),
-        LoadedValueTemplate::EnumVariant { .. }
-        | LoadedValueTemplate::Record { .. }
-        | LoadedValueTemplate::List { .. }
-        | LoadedValueTemplate::Map { .. } => Err(Error::new(format!(
-            "{field} must evaluate to unit Bool value False or True"
-        ))),
-        LoadedValueTemplate::ReceivedPayload { .. }
-        | LoadedValueTemplate::CurrentStatePayload { .. }
-        | LoadedValueTemplate::EnumPayload { .. }
-        | LoadedValueTemplate::RecordField { .. }
-        | LoadedValueTemplate::ListElement { .. }
-        | LoadedValueTemplate::ListPrefixElement { .. }
-        | LoadedValueTemplate::ListRest { .. }
-        | LoadedValueTemplate::MapValue { .. }
-        | LoadedValueTemplate::MapRest { .. }
-        | LoadedValueTemplate::ProcessRef { .. } => Ok(()),
+    if loaded_template_depends_on_received_payload(condition) {
+        return Ok(());
     }
+
+    let value = evaluate_loaded_payload_value(program, condition, None, current_state_payload)?;
+    validate_loaded_bool_atom_value(field, &value.value)
 }
 
 fn validate_loaded_bool_atom_value(field: &str, value: &RuntimeValue) -> Result<()> {

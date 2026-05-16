@@ -4,9 +4,15 @@ type TransitionPayloadGuardKey = Option<(u32, ArtifactValue)>;
 type TransitionCoverageKey = (u32, Option<u32>, TransitionPayloadGuardKey);
 
 #[derive(Clone, Copy)]
-struct TransitionValueTypes {
+struct TransitionValueTypes<'a> {
     received_payload: Option<TypeId>,
-    current_state_payload: Option<TypeId>,
+    current_state_payload: Option<&'a ArtifactPayload>,
+}
+
+impl TransitionValueTypes<'_> {
+    fn current_state_payload_type(self) -> Option<TypeId> {
+        self.current_state_payload.map(|payload| payload.ty)
+    }
 }
 
 impl ArtifactProcess {
@@ -114,15 +120,14 @@ impl ArtifactProcess {
                     transition.message.as_u32()
                 )));
             }
-            let current_state_payload_type =
-                self.transition_current_state_payload_type(transition)?;
+            let current_state_payload = self.transition_current_state_payload(transition)?;
             let transition_context = transition.transition_context();
             let value_types = TransitionValueTypes {
                 received_payload: self
                     .message_variants
                     .get(transition.message.index())
                     .and_then(|message| message.payload_type),
-                current_state_payload: current_state_payload_type,
+                current_state_payload,
             };
             self.validate_next_state(
                 artifact,
@@ -326,7 +331,7 @@ impl ArtifactProcess {
                     ),
                     Some(self.state_type),
                     value_types.received_payload,
-                    value_types.current_state_payload,
+                    value_types.current_state_payload_type(),
                     0,
                 )?;
                 self.validate_static_next_state_template_value(artifact, transition, template)
@@ -366,10 +371,10 @@ impl ArtifactProcess {
         }
     }
 
-    fn transition_current_state_payload_type(
+    fn transition_current_state_payload(
         &self,
         transition: &ArtifactTransition,
-    ) -> Result<Option<TypeId>> {
+    ) -> Result<Option<&ArtifactPayload>> {
         let Some(current_state) = transition.current_state else {
             return Ok(None);
         };
@@ -384,7 +389,7 @@ impl ArtifactProcess {
                     current_state.as_u32()
                 ))
             })?;
-        Ok(state_value.payload.as_ref().map(|payload| payload.ty))
+        Ok(state_value.payload.as_ref())
     }
 
     pub(super) fn validate_references(
@@ -542,8 +547,8 @@ impl ArtifactProcess {
                             .message_variants
                             .get(transition.message.index())
                             .and_then(|message| message.payload_type);
-                        let current_state_payload_type =
-                            self.transition_current_state_payload_type(transition)?;
+                        let current_state_payload =
+                            self.transition_current_state_payload(transition)?;
                         payload.validate_for_received_payload(
                             artifact,
                             &format!(
@@ -553,7 +558,7 @@ impl ArtifactProcess {
                             ),
                             Some(*payload_type),
                             received_payload_type,
-                            current_state_payload_type,
+                            current_state_payload.map(|payload| payload.ty),
                             0,
                         )?;
                     }
@@ -568,8 +573,7 @@ impl ArtifactProcess {
                     .message_variants
                     .get(transition.message.index())
                     .and_then(|message| message.payload_type);
-                let current_state_payload_type =
-                    self.transition_current_state_payload_type(transition)?;
+                let current_state_payload = self.transition_current_state_payload(transition)?;
                 validate_bool_condition_template(
                     artifact,
                     &format!(
@@ -579,7 +583,7 @@ impl ArtifactProcess {
                     ),
                     condition,
                     received_payload_type,
-                    current_state_payload_type,
+                    current_state_payload,
                 )?;
                 let mut then_refs = spawned_refs.clone();
                 for action in then_actions {
@@ -747,7 +751,7 @@ fn validate_bool_condition_template(
     field: &str,
     condition: &ArtifactValueTemplate,
     received_payload_type: Option<TypeId>,
-    current_state_payload_type: Option<TypeId>,
+    current_state_payload: Option<&ArtifactPayload>,
 ) -> Result<()> {
     let bool_type = condition.result_type();
     let ty = artifact.type_entry(bool_type)?;
@@ -765,35 +769,25 @@ fn validate_bool_condition_template(
         field,
         Some(bool_type),
         received_payload_type,
-        current_state_payload_type,
+        current_state_payload.map(|payload| payload.ty),
         0,
     )?;
-    validate_static_bool_condition_value(field, condition)
+    validate_static_bool_condition_value(artifact, field, condition, current_state_payload)
 }
 
 fn validate_static_bool_condition_value(
+    artifact: &MantleArtifact,
     field: &str,
     condition: &ArtifactValueTemplate,
+    current_state_payload: Option<&ArtifactPayload>,
 ) -> Result<()> {
-    match condition {
-        ArtifactValueTemplate::Literal { value, .. } => validate_bool_atom_value(field, value),
-        ArtifactValueTemplate::EnumVariant { .. }
-        | ArtifactValueTemplate::Record { .. }
-        | ArtifactValueTemplate::List { .. }
-        | ArtifactValueTemplate::Map { .. } => Err(Error::new(format!(
-            "{field} must evaluate to unit Bool value False or True"
-        ))),
-        ArtifactValueTemplate::ReceivedPayload { .. }
-        | ArtifactValueTemplate::CurrentStatePayload { .. }
-        | ArtifactValueTemplate::EnumPayload { .. }
-        | ArtifactValueTemplate::RecordField { .. }
-        | ArtifactValueTemplate::ListElement { .. }
-        | ArtifactValueTemplate::ListPrefixElement { .. }
-        | ArtifactValueTemplate::ListRest { .. }
-        | ArtifactValueTemplate::MapValue { .. }
-        | ArtifactValueTemplate::MapRest { .. }
-        | ArtifactValueTemplate::ProcessRef { .. } => Ok(()),
+    if condition.depends_on_received_payload() {
+        return Ok(());
     }
+
+    let value =
+        artifact.evaluate_state_value_with_current_state(condition, None, current_state_payload)?;
+    validate_bool_atom_value(field, &value.value)
 }
 
 fn validate_bool_atom_value(field: &str, value: &ArtifactValue) -> Result<()> {

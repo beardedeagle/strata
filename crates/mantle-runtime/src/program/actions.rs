@@ -130,9 +130,10 @@ impl LoadedAction {
         program: &LoadedProgram,
         process: &LoadedProcess,
         message: MessageId,
-        current_state_payload_type: Option<TypeId>,
+        current_state_payload: Option<&RuntimePayload>,
         spawned_refs: &mut [bool],
     ) -> Result<()> {
+        let current_state_payload_type = current_state_payload.map(|payload| payload.ty);
         match self {
             Self::Emit { output } => {
                 program.output(*output)?;
@@ -241,7 +242,7 @@ impl LoadedAction {
                     ),
                     condition,
                     process.message_variants[message.index()].payload_type,
-                    current_state_payload_type,
+                    current_state_payload,
                 )?;
                 let mut then_refs = spawned_refs.to_vec();
                 for action in then_actions {
@@ -249,7 +250,7 @@ impl LoadedAction {
                         program,
                         process,
                         message,
-                        current_state_payload_type,
+                        current_state_payload,
                         &mut then_refs,
                     )?;
                 }
@@ -259,7 +260,7 @@ impl LoadedAction {
                         program,
                         process,
                         message,
-                        current_state_payload_type,
+                        current_state_payload,
                         &mut else_refs,
                     )?;
                 }

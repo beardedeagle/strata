@@ -145,6 +145,32 @@ fn validate_rejects_if_else_next_state_literal_that_is_not_bool_value() {
 }
 
 #[test]
+fn validate_rejects_if_else_next_state_static_projection_that_is_not_bool_value() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::RecordField {
+            ty: bool_type,
+            record: Box::new(ArtifactValueTemplate::Literal {
+                ty: BOX,
+                value: artifact_value("Box{flag:Maybe}"),
+            }),
+            field: "flag".to_string(),
+        },
+        then_state: Box::new(NextState::Value(StateId::new(1))),
+        else_state: Box::new(NextState::Current),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("invalid static projection Bool branch condition should fail admission");
+
+    assert!(err.to_string().contains(
+        "process Worker message id 0 next_state_condition must evaluate to unit Bool value False or True"
+    ));
+}
+
+#[test]
 fn validate_rejects_payload_dependent_map_template_key() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants[0] = ArtifactMessageVariant::payload("Ping", JOB);
