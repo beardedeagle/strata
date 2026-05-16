@@ -63,7 +63,7 @@ The action set covers:
 
 - emitting declared output;
 - spawning a declared process through a process reference;
-- sending a declared message through a bound process reference.
+- sending a declared message through a bound process reference;
 - selecting a typed runtime branch over admitted action blocks.
 
 The runtime fails closed on invalid sends, unbound process references, duplicate
