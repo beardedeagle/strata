@@ -56,6 +56,11 @@ result of the first invalid shape.
 | `function ... is not declared` | A value expression calls an unknown function. | Declare a module function or process-local helper with that name. |
 | `function ... returns ..., expected ...` | The function return type does not match the value position where it is called. | Call a function returning the expected type or change the annotation. |
 | `source function call cycle ... is not supported` | Source helper calls are recursive, but helpers are expanded before lowering and have no recursion model. | Remove the cycle; pass whole values through non-recursive helpers. |
+| `if condition requires enum Bool { False, True }` | A source conditional is used without the explicit fieldless Bool contract. | Declare `enum Bool { False, True }`. |
+| `if condition must have type Bool` | A source conditional condition resolves to a non-Bool source value. | Return or pass `True` or `False` from the declared `Bool` enum. |
+| `if then branch must produce ...` / `if else branch must produce ...` | A conditional branch does not match the expected source value type. | Return the same source value type from both branches. |
+| `if condition requires a concrete Bool value` | A conditional condition remains runtime-bound after helper expansion. | Use a concrete Bool value before lowering; this slice does not lower runtime conditionals. |
+| `if branches are pure value expressions and must not perform statements` | A conditional branch contains `emit`, `let`, `send`, or `return`. | Keep branch bodies to one source value expression and move effects to admitted `step` forms. |
 | `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
 | `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |
 | `function ... wildcard pattern is unreachable` | Explicit source function clauses already cover every variant. | Remove the wildcard clause or remove the explicit clauses it should cover. |

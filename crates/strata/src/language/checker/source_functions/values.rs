@@ -154,7 +154,67 @@ pub(in crate::language::checker) fn validate_source_function_value_expr(
             }
             Ok(())
         }
+        ValueExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => validate_source_function_if_else(
+            scope,
+            expected_type,
+            condition,
+            then_branch,
+            else_branch,
+            bindings,
+        ),
     }
+}
+
+fn validate_source_function_if_else(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    condition: &ValueExpr,
+    then_branch: &ValueExpr,
+    else_branch: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    validate_source_function_if_else_with_bool_type(
+        scope,
+        expected_type,
+        &bool_type,
+        condition,
+        then_branch,
+        else_branch,
+        bindings,
+    )
+}
+
+fn validate_source_function_if_else_with_bool_type(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    bool_type: &TypeRef,
+    condition: &ValueExpr,
+    then_branch: &ValueExpr,
+    else_branch: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    validate_source_function_value_expr(scope, bool_type, condition, bindings)
+        .map_err(|err| Error::new(format!("if condition must have type {bool_type}: {err}")))?;
+    validate_source_function_value_expr(scope, expected_type, then_branch, bindings).map_err(
+        |err| {
+            Error::new(format!(
+                "if then branch must produce {expected_type}: {err}"
+            ))
+        },
+    )?;
+    validate_source_function_value_expr(scope, expected_type, else_branch, bindings).map_err(
+        |err| {
+            Error::new(format!(
+                "if else branch must produce {expected_type}: {err}"
+            ))
+        },
+    )?;
+    Ok(())
 }
 
 fn validate_list_value_type(
@@ -233,7 +293,7 @@ fn validate_concrete_map_value_keys(
 ) -> Result<()> {
     let mut seen = BTreeSet::new();
     for entry in &map.entries {
-        if source_value_contains_call(&entry.key)
+        if source_value_requires_resolution(&entry.key)
             || source_value_uses_any_binding(&entry.key, bindings)
         {
             continue;
@@ -261,19 +321,21 @@ fn source_value_uses_any_binding(value: &ValueExpr, bindings: &[SourceValueBindi
         .any(|binding| source_value_uses_binding(value, binding.name))
 }
 
-fn source_value_contains_call(value: &ValueExpr) -> bool {
+fn source_value_requires_resolution(value: &ValueExpr) -> bool {
     match value {
         ValueExpr::Identifier(_) => false,
         ValueExpr::Call { .. } => true,
-        ValueExpr::EnumVariant { payload, .. } => source_value_contains_call(payload),
+        ValueExpr::EnumVariant { payload, .. } => source_value_requires_resolution(payload),
         ValueExpr::Record(record) => record
             .fields
             .iter()
-            .any(|field| source_value_contains_call(&field.value)),
-        ValueExpr::List(list) => list.items.iter().any(source_value_contains_call),
+            .any(|field| source_value_requires_resolution(&field.value)),
+        ValueExpr::List(list) => list.items.iter().any(source_value_requires_resolution),
         ValueExpr::Map(map) => map.entries.iter().any(|entry| {
-            source_value_contains_call(&entry.key) || source_value_contains_call(&entry.value)
+            source_value_requires_resolution(&entry.key)
+                || source_value_requires_resolution(&entry.value)
         }),
+        ValueExpr::IfElse { .. } => true,
     }
 }
 
@@ -419,6 +481,66 @@ pub(in crate::language::checker) fn resolve_source_value_expr(
         ValueExpr::Map(map) => {
             resolve_map_source_value_expr(scope, expected_type, map, bindings, depth + 1)
         }
+        ValueExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => resolve_if_else_source_value_expr(
+            scope,
+            expected_type,
+            condition,
+            then_branch,
+            else_branch,
+            bindings,
+            depth + 1,
+        ),
+    }
+}
+
+fn resolve_if_else_source_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    condition: &ValueExpr,
+    then_branch: &ValueExpr,
+    else_branch: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    validate_source_function_if_else_with_bool_type(
+        scope,
+        expected_type,
+        &bool_type,
+        condition,
+        then_branch,
+        else_branch,
+        bindings,
+    )?;
+    let condition = resolve_source_value_expr(scope, &bool_type, condition, bindings, depth + 1)?;
+    let selected = if concrete_source_bool_value(scope, &bool_type, &condition)? {
+        then_branch
+    } else {
+        else_branch
+    };
+    resolve_source_value_expr(scope, expected_type, selected, bindings, depth + 1)
+}
+
+fn concrete_source_bool_value(
+    scope: &SourceFunctionScope<'_>,
+    bool_type: &TypeRef,
+    value: &ValueExpr,
+) -> Result<bool> {
+    let ValueExpr::Identifier(name) = value else {
+        return Err(Error::new("if condition requires a concrete Bool value"));
+    };
+    let variant = scope
+        .semantic_index
+        .enum_variant_index(scope.module, bool_type, name)
+        .map_err(|_| Error::new("if condition requires a concrete Bool value"))?;
+    match variant {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(Error::new("if condition requires a concrete Bool value")),
     }
 }
 
@@ -752,6 +874,21 @@ fn check_source_value_type_inner(
             "process references must be direct message payloads",
         ));
     }
+    if let ValueExpr::IfElse {
+        condition,
+        then_branch,
+        else_branch,
+    } = value
+    {
+        return validate_source_function_if_else(
+            scope,
+            expected_type,
+            condition,
+            then_branch,
+            else_branch,
+            bindings,
+        );
+    }
     if !source_value_uses_any_binding(value, bindings) {
         canonical_source_value_with_bindings(
             scope.module,
@@ -962,11 +1099,13 @@ fn check_enum_source_value_type(
             };
             check_source_value_type_inner(scope, payload_type, payload, bindings, depth + 1)
         }
-        ValueExpr::Call { .. } | ValueExpr::Record(_) | ValueExpr::List(_) | ValueExpr::Map(_) => {
-            Err(Error::new(format!(
-                "expected enum variant value for enum {}",
-                enum_decl.name
-            )))
-        }
+        ValueExpr::Call { .. }
+        | ValueExpr::Record(_)
+        | ValueExpr::List(_)
+        | ValueExpr::Map(_)
+        | ValueExpr::IfElse { .. } => Err(Error::new(format!(
+            "expected enum variant value for enum {}",
+            enum_decl.name
+        ))),
     }
 }

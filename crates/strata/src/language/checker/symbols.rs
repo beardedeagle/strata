@@ -5,7 +5,9 @@ use mantle_artifact::MAX_VALUE_TEMPLATE_FIELDS;
 use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, TypeRef};
 use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
-use super::super::{LIST_TYPE, MAP_TYPE, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
+use super::super::{
+    BOOL_FALSE, BOOL_TRUE, BOOL_TYPE, LIST_TYPE, MAP_TYPE, PROC_RESULT_TYPE, PROCESS_REF_TYPE,
+};
 use super::CHECKED_TYPE_LABEL_PREFIX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -725,6 +727,31 @@ impl SemanticIndex {
             .is_ok()
     }
 
+    pub(super) fn bool_type(&self, module: &Module) -> Result<TypeRef> {
+        let symbol = self
+            .symbols
+            .resolve(BOOL_TYPE)
+            .ok_or_else(bool_contract_error)?;
+        let Some(TypeDecl::Enum(index)) = self.types.get(&symbol).copied() else {
+            return Err(bool_contract_error());
+        };
+        let enum_decl = module
+            .enums
+            .get(index)
+            .ok_or_else(|| Error::new(format!("enum index {index} is not declared")))?;
+        let [false_variant, true_variant] = enum_decl.variants.as_slice() else {
+            return Err(bool_contract_error());
+        };
+        if false_variant.name.as_str() != BOOL_FALSE
+            || false_variant.payload_type.is_some()
+            || true_variant.name.as_str() != BOOL_TRUE
+            || true_variant.payload_type.is_some()
+        {
+            return Err(bool_contract_error());
+        }
+        Ok(TypeRef::Named(enum_decl.name.clone()))
+    }
+
     pub(super) fn enum_variant_index(
         &self,
         module: &Module,
@@ -928,6 +955,10 @@ impl SemanticIndex {
                 .iter()
                 .any(|variants| variants.contains_key(&symbol))
     }
+}
+
+fn bool_contract_error() -> Error {
+    Error::new("if condition requires enum Bool { False, True }")
 }
 
 #[derive(Debug, Clone, Copy)]

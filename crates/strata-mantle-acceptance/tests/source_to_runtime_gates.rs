@@ -1406,6 +1406,43 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn function_if_else_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/function_if_else.str",
+        "target/strata/function_if_else.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("pure conditional selected source values"));
+    assert!(stdout.contains("mantle: stopped Main normally"));
+
+    let artifact = gate.read_artifact("target/strata/function_if_else.mta");
+    let main = &artifact.processes[0];
+    assert_eq!(main.state_values.len(), 2);
+    assert_eq!(
+        main.state_values[0].label,
+        "MainState{init:WarmReady,step:ColdReady}"
+    );
+    assert_eq!(
+        main.state_values[1].label,
+        "MainState{init:ColdReady,step:WarmReady}"
+    );
+    let encoded = artifact.encode();
+    assert!(!encoded.contains("is_warm"));
+    assert!(!encoded.contains("choose"));
+    assert!(!encoded.contains("readiness"));
+
+    let trace = gate.read_trace("function_if_else");
+    assert!(trace.contains(
+        r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{init:WarmReady,step:ColdReady}""#
+    ));
+    assert!(trace.contains(
+        r#""event":"state_updated","pid":1,"process_id":0,"process":"Main","from_state_id":0,"from":"MainState{init:WarmReady,step:ColdReady}","to_state_id":1,"to":"MainState{init:ColdReady,step:WarmReady}""#
+    ));
+}
+
+#[test]
 fn function_collection_match_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(

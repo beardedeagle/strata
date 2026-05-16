@@ -12,6 +12,7 @@ mod process_refs;
 mod process_return_match;
 mod source_function_collection_patterns;
 mod source_function_core;
+mod source_function_if_else;
 mod source_function_patterns;
 mod source_function_record_patterns;
 mod state_match_payload_split;

@@ -19,6 +19,7 @@ Mantle artifact internals.
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
+| Pure conditionals | Expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`. |
 | Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, step return-match expressions with optional uniform action prefixes, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
 | Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for helpers, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
@@ -88,7 +89,8 @@ worker-name
 _
 ```
 
-`as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
+`as`, `else`, `if`, `let`, `mut`, and `var` are reserved everywhere
+identifiers are accepted.
 `ProcResult`, `ProcessRef`, `List`, and `Map` are reserved type names because
 they name built-in transition, process-reference, and collection types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
@@ -483,6 +485,33 @@ enum constructor value for signature-pattern, whole-body match, or enum helper
 return-match dispatch. Record and collection destructuring helpers require a
 concrete value argument after source helper expansion. Helpers are still
 expanded before lowering and do not become runtime dispatch entries.
+
+## Pure Conditionals
+
+The accepted ordinary control-flow expression is a pure value-level
+conditional:
+
+```strata
+enum Bool { False, True }
+
+fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
+    return if (flag) { WarmReady } else { ColdReady };
+}
+```
+
+The condition type is exactly the declared fieldless enum
+`Bool { False, True }`. Both branches are source value expressions checked
+against the same expected return, field, state, or payload type. Branches cannot
+perform statements or effects.
+
+Conditionals are selected during source checking and helper expansion. The
+selected branch is what lowering sees; Mantle does not receive a conditional
+runtime dispatch entry, a source function name, or a source-string branch key.
+If the condition is not a concrete `True` or `False` value after source helper
+expansion, checking fails closed.
+
+This slice does not add comparison operators, arithmetic, loops, imports, or a
+standard library.
 
 ## Statements
 

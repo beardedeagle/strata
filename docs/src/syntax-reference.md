@@ -437,6 +437,7 @@ value_expr =
   | ident "{" record_value_field ("," record_value_field)* ","? "}"
   | "List" list_type_args? "[" value_expr_list? "]"
   | "Map" map_type_args? "[" map_value_entries? "]"
+  | "if" "(" value_expr ")" "{" value_expr "}" "else" "{" value_expr "}"
 
 record_value_field =
     ident ":" value_expr
@@ -456,6 +457,11 @@ when `ident` names a visible source helper and a payload-bearing enum value when
 List and map constructors are explicit. Optional type and capacity arguments are
 admitted for readability; the checker still validates each value against the
 expected bounded source value type.
+
+Pure conditionals require the exact fieldless source contract
+`enum Bool { False, True }`. Both branches are value expressions checked against
+the same expected type, and the checker selects a concrete branch before
+lowering. Branch bodies cannot contain statements or effects.
 
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,
@@ -480,7 +486,7 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`as`, `let`, `mut`, and `var` are reserved everywhere identifiers are accepted.
-The single `_` token is reserved for wildcard patterns. `ProcResult`,
-`ProcessRef`, `List`, and `Map` are reserved type names because they name
-built-in transition, process-reference, and collection types.
+`as`, `else`, `if`, `let`, `mut`, and `var` are reserved everywhere identifiers
+are accepted. The single `_` token is reserved for wildcard patterns.
+`ProcResult`, `ProcessRef`, `List`, and `Map` are reserved type names because
+they name built-in transition, process-reference, and collection types.

@@ -74,6 +74,15 @@ pub(in crate::language::checker) fn source_value_uses_binding(
             source_value_uses_binding(&entry.key, binding)
                 || source_value_uses_binding(&entry.value, binding)
         }),
+        ValueExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            source_value_uses_binding(condition, binding)
+                || source_value_uses_binding(then_branch, binding)
+                || source_value_uses_binding(else_branch, binding)
+        }
     }
 }
 
@@ -114,6 +123,11 @@ pub(super) fn canonical_value(
     if let ValueExpr::Call { name, .. } = value {
         return Err(Error::new(format!(
             "function call {name} must be resolved before checking value of type {expected_type}"
+        )));
+    }
+    if matches!(value, ValueExpr::IfElse { .. }) {
+        return Err(Error::new(format!(
+            "if expression must be resolved before checking value of type {expected_type}"
         )));
     }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
@@ -212,12 +226,14 @@ fn canonical_enum_value(
             validate_state_value_metadata_label(&value)?;
             Ok(value)
         }
-        ValueExpr::Call { .. } | ValueExpr::Record(_) | ValueExpr::List(_) | ValueExpr::Map(_) => {
-            Err(Error::new(format!(
-                "expected enum variant value for enum {}",
-                enum_decl.name
-            )))
-        }
+        ValueExpr::Call { .. }
+        | ValueExpr::Record(_)
+        | ValueExpr::List(_)
+        | ValueExpr::Map(_)
+        | ValueExpr::IfElse { .. } => Err(Error::new(format!(
+            "expected enum variant value for enum {}",
+            enum_decl.name
+        ))),
     }
 }
 

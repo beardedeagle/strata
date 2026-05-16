@@ -32,6 +32,9 @@ const PROC_RESULT_TYPE: &str = "ProcResult";
 const PROCESS_REF_TYPE: &str = "ProcessRef";
 const LIST_TYPE: &str = "List";
 const MAP_TYPE: &str = "Map";
+const BOOL_TYPE: &str = "Bool";
+const BOOL_FALSE: &str = "False";
+const BOOL_TRUE: &str = "True";
 
 pub fn check_source(source: &str) -> Result<CheckedProgram> {
     let module = parse_source(source)?;

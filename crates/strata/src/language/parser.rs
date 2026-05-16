@@ -834,6 +834,9 @@ impl Parser {
                 "match expressions are only admitted as whole function bodies or return match expressions in this source slice",
             ));
         }
+        if self.peek_keyword("if") {
+            return self.parse_if_else_value_expr(depth);
+        }
         let name = self.expect_identifier()?;
         if name.as_str() == LIST_TYPE {
             let type_args = self.parse_optional_collection_type_args(&name, 1)?;
@@ -887,6 +890,47 @@ impl Parser {
         }
         let fields = self.parse_record_value_fields(&name, depth)?;
         Ok(ValueExpr::Record(RecordValue { name, fields }))
+    }
+
+    fn parse_if_else_value_expr(&mut self, depth: usize) -> Result<ValueExpr> {
+        self.expect_keyword("if")?;
+        self.expect_symbol('(')?;
+        let condition = self.parse_value_expr_with_depth(depth + 1)?;
+        self.expect_symbol(')')?;
+        let then_branch = self.parse_if_else_branch_value(depth)?;
+        self.expect_keyword("else")?;
+        let else_branch = self.parse_if_else_branch_value(depth)?;
+        Ok(ValueExpr::IfElse {
+            condition: Box::new(condition),
+            then_branch: Box::new(then_branch),
+            else_branch: Box::new(else_branch),
+        })
+    }
+
+    fn parse_if_else_branch_value(&mut self, depth: usize) -> Result<ValueExpr> {
+        self.expect_symbol('{')?;
+        if self.peek_keyword("emit")
+            || self.peek_keyword("let")
+            || self.peek_keyword("return")
+            || self.peek_keyword("send")
+        {
+            return Err(self.error_here(
+                "if branches are pure value expressions and must not perform statements",
+            ));
+        }
+        let value = self.parse_value_expr_with_depth(depth + 1)?;
+        if self.consume_symbol(';')
+            || self.peek_keyword("emit")
+            || self.peek_keyword("let")
+            || self.peek_keyword("return")
+            || self.peek_keyword("send")
+        {
+            return Err(self.error_here(
+                "if branches are pure value expressions and must not perform statements",
+            ));
+        }
+        self.expect_symbol('}')?;
+        Ok(value)
     }
 
     fn parse_list_value_items(&mut self, depth: usize) -> Result<Vec<ValueExpr>> {

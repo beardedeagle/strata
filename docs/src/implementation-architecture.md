@@ -120,6 +120,7 @@ The runnable examples are:
 - `examples/init_return_match.str`;
 - `examples/function_match.str`;
 - `examples/function_payload_match.str`;
+- `examples/function_if_else.str`;
 - `examples/function_collection_match.str`;
 - `examples/function_return_match.str`;
 - `examples/process_return_match.str`;
