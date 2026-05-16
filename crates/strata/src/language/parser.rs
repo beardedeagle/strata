@@ -659,12 +659,17 @@ impl Parser {
 
     fn parse_function_block(&mut self) -> Result<FunctionBlock> {
         let mut statements = Vec::new();
-        while !self.peek_keyword("return") {
+        while !self.peek_keyword("return") && !self.peek_keyword("if") {
             statements.push(self.parse_function_statement()?);
         }
-        self.expect_keyword("return")?;
-        let returns = self.parse_return_expr()?;
-        self.expect_symbol(';')?;
+        let returns = if self.peek_keyword("if") {
+            self.parse_return_if_else_expr()?
+        } else {
+            self.expect_keyword("return")?;
+            let returns = self.parse_return_expr()?;
+            self.expect_symbol(';')?;
+            returns
+        };
         Ok(FunctionBlock {
             statements,
             returns,
@@ -713,6 +718,25 @@ impl Parser {
             });
         }
         Err(self.error_here("expected emit, let, send, or return statement"))
+    }
+
+    fn parse_return_if_else_expr(&mut self) -> Result<ReturnExpr> {
+        self.expect_keyword("if")?;
+        self.expect_symbol('(')?;
+        let condition = self.parse_value_expr()?;
+        self.expect_symbol(')')?;
+        self.expect_symbol('{')?;
+        let then_branch = self.parse_function_block()?;
+        self.expect_symbol('}')?;
+        self.expect_keyword("else")?;
+        self.expect_symbol('{')?;
+        let else_branch = self.parse_function_block()?;
+        self.expect_symbol('}')?;
+        Ok(ReturnExpr::IfElse {
+            condition,
+            then_branch: Box::new(then_branch),
+            else_branch: Box::new(else_branch),
+        })
     }
 
     fn parse_type(&mut self) -> Result<TypeRef> {

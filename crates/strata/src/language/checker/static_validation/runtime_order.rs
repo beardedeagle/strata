@@ -488,97 +488,22 @@ pub(super) fn validate_static_runtime_order(
         let final_state = resolve_checked_next_state(
             process,
             current_state,
-            transition.next_state(),
+            transition.next_state_ref(),
             envelope.payload.as_ref(),
         )?;
         let mut local_process_refs = BTreeMap::new();
 
         for action in transition.actions() {
-            match action {
-                CheckedAction::Emit { .. } => {}
-                CheckedAction::Spawn {
-                    target,
-                    process_ref,
-                } => {
-                    let target_process = process_by_id(processes, *target)?;
-                    ensure_static_process_capacity(instances.len())?;
-                    let spawned_pid = next_pid;
-                    next_pid = next_pid.checked_next()?;
-                    bind_static_process_ref(
-                        process,
-                        &mut local_process_refs,
-                        *process_ref,
-                        spawned_pid,
-                    )
-                    .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
-                    instances.push(StaticProcessInstance {
-                        pid: spawned_pid,
-                        process_id: *target,
-                        state: target_process.init_state(),
-                        status: StaticProcessStatus::Running,
-                        mailbox: VecDeque::new(),
-                    });
-                }
-                CheckedAction::Send {
-                    target,
-                    message,
-                    payload,
-                } => {
-                    let target_pid = resolve_static_send_target(
-                        process,
-                        &local_process_refs,
-                        target,
-                        envelope.payload.as_ref(),
-                    )
-                    .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
-                    let target_index = static_process_index_for_pid(&instances, target_pid)
-                        .map_err(|err| {
-                            Error::new(format!(
-                                "process {} sends through process reference to {err}",
-                                process.debug_name()
-                            ))
-                        })?;
-                    let target_process =
-                        process_by_id(processes, instances[target_index].process_id)?;
-                    if message.index() >= target_process.message_cases().len() {
-                        return Err(Error::new(format!(
-                            "process {} sends message id {} not accepted by {}",
-                            process.debug_name(),
-                            message.as_u32(),
-                            target_process.debug_name()
-                        )));
-                    }
-
-                    if instances[target_index].status != StaticProcessStatus::Running {
-                        return Err(Error::new(format!(
-                            "process {} sends to {}, which is not running",
-                            process.debug_name(),
-                            target_process.debug_name()
-                        )));
-                    }
-                    if instances[target_index].mailbox.len() >= target_process.mailbox_bound() {
-                        return Err(Error::new(format!(
-                            "process {} sends to {}, but its mailbox would exceed bound {}",
-                            process.debug_name(),
-                            target_process.debug_name(),
-                            target_process.mailbox_bound()
-                        )));
-                    }
-                    let payload = match payload {
-                        Some(payload) => Some(evaluate_checked_runtime_template(
-                            payload,
-                            envelope.payload.as_ref(),
-                            current_state_payload,
-                            process,
-                            &local_process_refs,
-                        )?),
-                        None => None,
-                    };
-                    instances[target_index]
-                        .mailbox
-                        .push_back(StaticMessageEnvelope::new(*message, payload));
-                }
-            }
+            execute_static_action(
+                processes,
+                &mut instances,
+                &mut next_pid,
+                process,
+                &mut local_process_refs,
+                &envelope,
+                current_state_payload,
+                action,
+            )?;
         }
 
         instances[process_index].state = final_state;
@@ -606,6 +531,168 @@ pub(super) fn validate_static_runtime_order(
     }
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_static_action(
+    processes: &[CheckedProcess],
+    instances: &mut Vec<StaticProcessInstance>,
+    next_pid: &mut StaticProcessId,
+    process: &CheckedProcess,
+    local_process_refs: &mut BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    envelope: &StaticMessageEnvelope,
+    current_state_payload: Option<&CheckedPayloadValue>,
+    action: &CheckedAction,
+) -> Result<()> {
+    match action {
+        CheckedAction::Emit { .. } => Ok(()),
+        CheckedAction::Spawn {
+            target,
+            process_ref,
+        } => {
+            let target_process = process_by_id(processes, *target)?;
+            ensure_static_process_capacity(instances.len())?;
+            let spawned_pid = *next_pid;
+            *next_pid = next_pid.checked_next()?;
+            bind_static_process_ref(process, local_process_refs, *process_ref, spawned_pid)
+                .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
+            instances.push(StaticProcessInstance {
+                pid: spawned_pid,
+                process_id: *target,
+                state: target_process.init_state(),
+                status: StaticProcessStatus::Running,
+                mailbox: VecDeque::new(),
+            });
+            Ok(())
+        }
+        CheckedAction::Send {
+            target,
+            message,
+            payload,
+        } => {
+            let target_pid = resolve_static_send_target(
+                process,
+                local_process_refs,
+                target,
+                envelope.payload.as_ref(),
+            )
+            .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
+            let target_index =
+                static_process_index_for_pid(instances, target_pid).map_err(|err| {
+                    Error::new(format!(
+                        "process {} sends through process reference to {err}",
+                        process.debug_name()
+                    ))
+                })?;
+            let target_process = process_by_id(processes, instances[target_index].process_id)?;
+            if message.index() >= target_process.message_cases().len() {
+                return Err(Error::new(format!(
+                    "process {} sends message id {} not accepted by {}",
+                    process.debug_name(),
+                    message.as_u32(),
+                    target_process.debug_name()
+                )));
+            }
+
+            if instances[target_index].status != StaticProcessStatus::Running {
+                return Err(Error::new(format!(
+                    "process {} sends to {}, which is not running",
+                    process.debug_name(),
+                    target_process.debug_name()
+                )));
+            }
+            if instances[target_index].mailbox.len() >= target_process.mailbox_bound() {
+                return Err(Error::new(format!(
+                    "process {} sends to {}, but its mailbox would exceed bound {}",
+                    process.debug_name(),
+                    target_process.debug_name(),
+                    target_process.mailbox_bound()
+                )));
+            }
+            let payload = match payload {
+                Some(payload) => Some(evaluate_checked_runtime_template(
+                    payload,
+                    envelope.payload.as_ref(),
+                    current_state_payload,
+                    process,
+                    local_process_refs,
+                )?),
+                None => None,
+            };
+            instances[target_index]
+                .mailbox
+                .push_back(StaticMessageEnvelope::new(*message, payload));
+            Ok(())
+        }
+        CheckedAction::IfElse {
+            condition,
+            then_actions,
+            else_actions,
+        } => {
+            let selected_actions = if evaluate_checked_bool_condition(
+                condition,
+                envelope.payload.as_ref(),
+                current_state_payload,
+                process,
+                local_process_refs,
+            )? {
+                then_actions
+            } else {
+                else_actions
+            };
+            for action in selected_actions {
+                execute_static_action(
+                    processes,
+                    instances,
+                    next_pid,
+                    process,
+                    local_process_refs,
+                    envelope,
+                    current_state_payload,
+                    action,
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn evaluate_checked_bool_condition(
+    condition: &CheckedValueTemplate,
+    received_payload: Option<&CheckedPayloadValue>,
+    current_state_payload: Option<&CheckedPayloadValue>,
+    process: &CheckedProcess,
+    process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
+) -> Result<bool> {
+    let value = evaluate_checked_runtime_template(
+        condition,
+        received_payload,
+        current_state_payload,
+        process,
+        process_refs,
+    )?;
+    let value = value.value().ok_or_else(|| {
+        Error::new(format!(
+            "process {} if condition produced a process reference payload",
+            process.debug_name()
+        ))
+    })?;
+    let ArtifactValue::Atom(label) = value else {
+        return Err(Error::new(format!(
+            "process {} if condition produced non-Bool value {}",
+            process.debug_name(),
+            value.label()
+        )));
+    };
+    match label.as_str() {
+        "True" => Ok(true),
+        "False" => Ok(false),
+        _ => Err(Error::new(format!(
+            "process {} if condition produced invalid Bool value {}",
+            process.debug_name(),
+            label
+        ))),
+    }
 }
 
 fn next_static_runnable(instances: &[StaticProcessInstance]) -> Option<usize> {

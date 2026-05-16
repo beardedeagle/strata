@@ -53,12 +53,18 @@ display label text.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect authority, and must exactly match the action effects that execute.
+Runtime `if` conditions are admitted as typed `Bool` value templates. Mantle
+validates both branch bodies before execution, executes only the selected
+branch, keeps branch-local process references unavailable after the branch
+unless both branches bind them, and records branch selection in the runtime
+trace.
 
 The action set covers:
 
 - emitting declared output;
 - spawning a declared process through a process reference;
 - sending a declared message through a bound process reference.
+- selecting a typed runtime branch over admitted action blocks.
 
 The runtime fails closed on invalid sends, unbound process references, duplicate
 process-reference bindings, mailbox exhaustion, runtime process instance budget

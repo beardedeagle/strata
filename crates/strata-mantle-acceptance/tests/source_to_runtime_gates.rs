@@ -8,8 +8,8 @@ use std::sync::Once;
 use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactSendTarget, ArtifactTypeKind,
     ArtifactValue, ArtifactValueTemplate, ArtifactValueTemplateField,
-    ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact, MessageId, ProcessId, TypeId,
-    read_artifact,
+    ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId,
+    TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -616,6 +616,106 @@ fn actor_payloads_checks_builds_and_runs_on_mantle() {
     assert!(trace.contains(&format!(
         r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign",{payload_type},"payload":"Job{{phase:Ready}}","result":"Stop","state_id":1,"state":"WorkerState{{job:Job{{phase:Ready}}}}""#
     )));
+}
+
+#[test]
+fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
+    let gate = GateHarness::new();
+    gate.remove_trace("runtime_if_else");
+    gate.check_build_run(
+        "examples/runtime_if_else.str",
+        "target/strata/runtime_if_else.mta",
+    );
+
+    let artifact = gate.read_artifact("target/strata/runtime_if_else.mta");
+    let bool_type = value_type_id(&artifact, "Bool");
+    let worker = artifact_process(&artifact, "Worker");
+    let transition = worker
+        .transitions
+        .first()
+        .expect("Worker should have a Branch transition");
+    assert!(matches!(
+        &transition.next_state,
+        NextState::IfElse {
+            condition: ArtifactValueTemplate::ReceivedPayload { ty },
+            ..
+        } if *ty == bool_type
+    ));
+    assert!(matches!(
+        transition.actions.as_slice(),
+        [ArtifactAction::IfElse {
+            condition: ArtifactValueTemplate::ReceivedPayload { ty },
+            then_actions,
+            else_actions,
+        }] if *ty == bool_type
+            && matches!(then_actions.as_slice(), [ArtifactAction::Emit { .. }])
+            && matches!(else_actions.as_slice(), [ArtifactAction::Emit { .. }])
+    ));
+
+    let trace = gate.read_trace("runtime_if_else");
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":2"#,
+            r#""process":"Worker""#,
+            r#""branch":"then""#,
+            r#""condition":"True""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":3"#,
+            r#""process":"Worker""#,
+            r#""branch":"else""#,
+            r#""condition":"False""#,
+        ],
+    );
+    assert!(trace.contains(
+        r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":0,"text":"worker took warm branch""#
+    ));
+    assert!(trace.contains(
+        r#""event":"program_output","pid":3,"process_id":1,"process":"Worker","stream":"stdout","output_id":1,"text":"worker took cold branch""#
+    ));
+    assert!(trace.contains(
+        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","payload_type_id":"#
+    ));
+    assert!(trace.contains(r#""result":"Stop","state_id":1,"state":"WarmReady""#));
+    assert!(trace.contains(r#""result":"Stop","state_id":2,"state":"ColdReady""#));
+
+    let warm_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker""#,
+    );
+    let warm_output = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":2,"process_id":1,"process":"Worker""#,
+    );
+    let cold_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker""#,
+    );
+    let cold_output = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":3,"process_id":1,"process":"Worker""#,
+    );
+    assert!(
+        warm_branch < warm_output,
+        "then branch trace must precede its effect"
+    );
+    assert!(
+        cold_branch < cold_output,
+        "else branch trace must precede its effect"
+    );
+}
+
+fn trace_line_index(trace: &str, needle: &str) -> usize {
+    trace
+        .lines()
+        .position(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("trace should contain {needle:?}\n{trace}"))
 }
 
 #[test]

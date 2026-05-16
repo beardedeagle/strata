@@ -1,3 +1,4 @@
+use super::super::source_functions::validate_source_function_value_expr;
 use super::returns::{StepReturnInput, resolve_step_return, step_source_bindings};
 use super::*;
 
@@ -43,8 +44,85 @@ pub(super) fn check_step_transition(
     };
     let source_bindings =
         step_source_bindings(input.payload_bindings, input.state_payload_bindings);
-    let mut actions = Vec::with_capacity(input.body.statements.len());
-    for statement in &input.body.statements {
+    let outcome = check_step_block_outcome(
+        context,
+        state_space,
+        outputs,
+        types,
+        &function_scope,
+        &source_bindings,
+        &template_bindings,
+        &input,
+        input.body,
+    )?;
+    let transition = CheckedTransition::new(CheckedTransitionParts {
+        current_state: input.current_state,
+        message: input.message,
+        step_result: outcome.step_result,
+        next_state: outcome.next_state,
+        effects: input.declared_effects.to_vec(),
+        actions: outcome.actions,
+    });
+    Ok(match input.payload_guard {
+        Some(payload_guard) => transition.with_payload_guard(payload_guard.clone()),
+        None => transition,
+    })
+}
+
+struct CheckedBlockOutcome {
+    step_result: CheckedStepResult,
+    next_state: CheckedNextState,
+    actions: Vec<CheckedAction>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_step_block_outcome(
+    context: &mut StepCheckContext<'_>,
+    state_space: &mut StateSpace<'_>,
+    outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    input: &StepTransitionInput<'_>,
+    body: &FunctionBlock,
+) -> Result<CheckedBlockOutcome> {
+    let mut actions = checked_actions_for_statements(
+        context,
+        outputs,
+        types,
+        source_bindings,
+        template_bindings,
+        input.payload_bindings,
+        &body.statements,
+    )?;
+    let outcome = checked_return_outcome(
+        context,
+        state_space,
+        outputs,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        input,
+        body,
+    )?;
+    actions.extend(outcome.actions);
+    Ok(CheckedBlockOutcome { actions, ..outcome })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checked_actions_for_statements(
+    context: &mut StepCheckContext<'_>,
+    outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    payload_bindings: &[StepPayloadBinding],
+    statements: &[Statement],
+) -> Result<Vec<CheckedAction>> {
+    let mut actions = Vec::with_capacity(statements.len());
+    for statement in statements {
         match statement {
             Statement::Emit(text) => {
                 actions.push(CheckedAction::Emit {
@@ -68,16 +146,15 @@ pub(super) fn check_step_transition(
                 message,
                 payload,
             } => {
-                let send_target =
-                    resolve_checked_send_target(context, input.payload_bindings, target)?;
+                let send_target = resolve_checked_send_target(context, payload_bindings, target)?;
                 let message_id = resolve_send_message_case(
                     context,
                     types,
                     send_target.target_process,
                     message,
                     payload.as_ref(),
-                    &source_bindings,
-                    &template_bindings,
+                    source_bindings,
+                    template_bindings,
                 )?;
                 actions.push(CheckedAction::Send {
                     target: send_target.target,
@@ -87,32 +164,230 @@ pub(super) fn check_step_transition(
             }
         }
     }
+    Ok(actions)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checked_return_outcome(
+    context: &mut StepCheckContext<'_>,
+    state_space: &mut StateSpace<'_>,
+    outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    input: &StepTransitionInput<'_>,
+    body: &FunctionBlock,
+) -> Result<CheckedBlockOutcome> {
+    if let ReturnExpr::IfElse {
+        condition,
+        then_branch,
+        else_branch,
+    } = &body.returns
+    {
+        return checked_if_else_return_outcome(
+            context,
+            state_space,
+            outputs,
+            types,
+            function_scope,
+            source_bindings,
+            template_bindings,
+            input,
+            condition,
+            then_branch,
+            else_branch,
+        );
+    }
 
     let step_return = resolve_step_return(
         context.module,
         context.process,
         context.semantic_index,
-        &function_scope,
-        &source_bindings,
+        function_scope,
+        source_bindings,
         &StepReturnInput {
             variant: input.variant,
             payload_guard: input.payload_guard,
             payload_bindings: input.payload_bindings,
             state_payload_bindings: input.state_payload_bindings,
-            body: input.body,
+            body,
         },
     )?;
-    let state_arg = resolve_source_value_expr(
-        &function_scope,
-        &context.process.state_type,
+    let next_state = checked_next_state_for_arg(
+        context,
+        state_space,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        input,
         &step_return.state_arg,
-        &source_bindings,
+    )?;
+    Ok(CheckedBlockOutcome {
+        step_result: step_return.step_result,
+        next_state,
+        actions: Vec::new(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checked_if_else_return_outcome(
+    context: &mut StepCheckContext<'_>,
+    state_space: &mut StateSpace<'_>,
+    outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    input: &StepTransitionInput<'_>,
+    condition: &ValueExpr,
+    then_branch: &FunctionBlock,
+    else_branch: &FunctionBlock,
+) -> Result<CheckedBlockOutcome> {
+    let condition = checked_runtime_bool_condition(
+        context,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        condition,
+    )?;
+    let then_outcome = check_step_block_outcome(
+        context,
+        state_space,
+        outputs,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        input,
+        then_branch,
+    )?;
+    let else_outcome = check_step_block_outcome(
+        context,
+        state_space,
+        outputs,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        input,
+        else_branch,
+    )?;
+    if then_outcome.step_result != else_outcome.step_result {
+        return Err(Error::new(format!(
+            "process {} runtime if branches must return the same step result",
+            context.process.name
+        )));
+    }
+    let actions = if then_outcome.actions.is_empty() && else_outcome.actions.is_empty() {
+        Vec::new()
+    } else {
+        vec![CheckedAction::IfElse {
+            condition: condition.clone(),
+            then_actions: then_outcome.actions,
+            else_actions: else_outcome.actions,
+        }]
+    };
+    Ok(CheckedBlockOutcome {
+        step_result: then_outcome.step_result,
+        next_state: CheckedNextState::IfElse {
+            condition,
+            then_state: Box::new(then_outcome.next_state),
+            else_state: Box::new(else_outcome.next_state),
+        },
+        actions,
+    })
+}
+
+fn checked_runtime_bool_condition(
+    context: &StepCheckContext<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    condition: &ValueExpr,
+) -> Result<CheckedValueTemplate> {
+    let bool_type = context.semantic_index.bool_type(context.module)?;
+    validate_source_function_value_expr(function_scope, &bool_type, condition, source_bindings)
+        .map_err(|err| Error::new(format!("if condition must have type {bool_type}: {err}")))?;
+    let resolved =
+        resolve_source_value_expr(function_scope, &bool_type, condition, source_bindings, 0)?;
+    checked_value_template_with_binding(
+        context.module,
+        context.semantic_index,
+        types,
+        &bool_type,
+        &resolved,
+        template_bindings,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checked_next_state_for_arg(
+    context: &StepCheckContext<'_>,
+    state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    input: &StepTransitionInput<'_>,
+    state_arg: &ValueExpr,
+) -> Result<CheckedNextState> {
+    if let ValueExpr::IfElse {
+        condition,
+        then_branch,
+        else_branch,
+    } = state_arg
+    {
+        let condition = checked_runtime_bool_condition(
+            context,
+            types,
+            function_scope,
+            source_bindings,
+            template_bindings,
+            condition,
+        )?;
+        let then_state = checked_next_state_for_arg(
+            context,
+            state_space,
+            types,
+            function_scope,
+            source_bindings,
+            template_bindings,
+            input,
+            then_branch,
+        )?;
+        let else_state = checked_next_state_for_arg(
+            context,
+            state_space,
+            types,
+            function_scope,
+            source_bindings,
+            template_bindings,
+            input,
+            else_branch,
+        )?;
+        return Ok(CheckedNextState::IfElse {
+            condition,
+            then_state: Box::new(then_state),
+            else_state: Box::new(else_state),
+        });
+    }
+
+    let state_arg = resolve_source_value_expr(
+        function_scope,
+        &context.process.state_type,
+        state_arg,
+        source_bindings,
         0,
     )?;
-    let next_state = if matches!(&state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
+    if matches!(&state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
     {
-        CheckedNextState::Current
-    } else if template_bindings
+        return Ok(CheckedNextState::Current);
+    }
+    if template_bindings
         .iter()
         .any(|binding| source_value_uses_binding(&state_arg, binding.name))
     {
@@ -122,7 +397,7 @@ pub(super) fn check_step_transition(
             types,
             &context.process.state_type,
             &state_arg,
-            &template_bindings,
+            template_bindings,
         )?;
         populate_template_state_values(
             context,
@@ -134,27 +409,13 @@ pub(super) fn check_step_transition(
             input.payload_bindings,
             input.state_payload_bindings,
         )?;
-        CheckedNextState::Template(template)
-    } else {
-        CheckedNextState::Value(state_space.resolve_state_value(
-            context.semantic_index,
-            types,
-            &state_arg,
-        )?)
-    };
-
-    let transition = CheckedTransition::new(CheckedTransitionParts {
-        current_state: input.current_state,
-        message: input.message,
-        step_result: step_return.step_result,
-        next_state,
-        effects: input.declared_effects.to_vec(),
-        actions,
-    });
-    Ok(match input.payload_guard {
-        Some(payload_guard) => transition.with_payload_guard(payload_guard.clone()),
-        None => transition,
-    })
+        return Ok(CheckedNextState::Template(template));
+    }
+    Ok(CheckedNextState::Value(state_space.resolve_state_value(
+        context.semantic_index,
+        types,
+        &state_arg,
+    )?))
 }
 
 struct ResolvedCheckedSendTarget {

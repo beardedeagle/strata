@@ -73,6 +73,7 @@ pub(super) fn resolve_step_return(
             input,
             match_body,
         ),
+        ReturnExpr::IfElse { .. } => Err(step_return_shape_error("step body")),
         ReturnExpr::Value(_) => Err(step_return_shape_error("step body")),
     }
 }
@@ -81,6 +82,30 @@ pub(super) fn preadmit_step_return_state_value(
     context: &mut StepReturnPreadmitContext<'_, '_>,
     input: &StepReturnInput<'_>,
 ) -> Result<()> {
+    if let ReturnExpr::IfElse {
+        then_branch,
+        else_branch,
+        ..
+    } = &input.body.returns
+    {
+        let then_input = StepReturnInput {
+            variant: input.variant,
+            payload_guard: input.payload_guard,
+            payload_bindings: input.payload_bindings,
+            state_payload_bindings: input.state_payload_bindings,
+            body: then_branch,
+        };
+        preadmit_step_return_state_value(context, &then_input)?;
+        let else_input = StepReturnInput {
+            variant: input.variant,
+            payload_guard: input.payload_guard,
+            payload_bindings: input.payload_bindings,
+            state_payload_bindings: input.state_payload_bindings,
+            body: else_branch,
+        };
+        return preadmit_step_return_state_value(context, &else_input);
+    }
+
     let source_bindings =
         step_source_bindings(input.payload_bindings, input.state_payload_bindings);
     let module = context.module;
@@ -245,7 +270,7 @@ fn validate_step_return_match_arm(
     }
     let resolved = match &arm.body.returns {
         ReturnExpr::Call { name, arg } => step_result_call(name, arg, "step return match arm")?,
-        ReturnExpr::Match(_) | ReturnExpr::Value(_) => {
+        ReturnExpr::Match(_) | ReturnExpr::Value(_) | ReturnExpr::IfElse { .. } => {
             return Err(step_return_shape_error("step return match arm"));
         }
     };

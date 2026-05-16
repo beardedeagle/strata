@@ -32,9 +32,12 @@ impl LoadedEffectAuthority {
             admitted[index] = true;
         }
 
-        let mut used = [false; 3];
+        let mut action_effects = std::collections::BTreeSet::new();
         for action in actions {
-            let effect = action.effect();
+            action.collect_effects(&mut action_effects);
+        }
+        let mut used = [false; 3];
+        for effect in action_effects {
             let index = Self::effect_index(effect);
             if !admitted[index] {
                 return Err(Error::new(format!(

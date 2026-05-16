@@ -198,7 +198,7 @@ function_body =
   | "{" match_body "}"
 
 block_body =
-    statement* return_statement
+    statement* (return_statement | return_if_else)
 
 match_body =
     "match" ident "{" match_arm+ "}"
@@ -394,6 +394,10 @@ payload_arg =
 
 return_statement =
     "return" return_expr ";"
+
+return_if_else =
+    "if" "(" value_expr ")" "{" block_body "}"
+    "else" "{" block_body "}"
 ```
 
 The identifier after `let` names an immutable process reference value. The
@@ -463,11 +467,18 @@ Pure conditionals require the exact fieldless source contract
 the same expected type, and the checker selects a concrete branch before
 lowering. Branch bodies cannot contain statements or effects.
 
+Final-position `return_if_else` is runtime control flow in `step` bodies. The
+condition must have the same `Bool` contract, but it may depend on received
+payload or current-state payload bindings. Each branch is a block body with its
+own statements and terminal return. Strata lowers the checked condition and
+branches to Mantle control flow; Mantle executes only the selected branch and
+traces the branch choice.
+
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,
-`Stop(value)`, `Panic(value)`, or a `return match` that the checker reduces to
-one of those result forms before lowering while preserving any uniform action
-prefix as typed transition actions.
+`Stop(value)`, `Panic(value)`, a final-position runtime `if`, or a
+`return match` that the checker reduces to one of those result forms before
+lowering while preserving any uniform action prefix as typed transition actions.
 
 ## Literals
 

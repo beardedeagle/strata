@@ -235,10 +235,11 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
         run.processes[worker_index].status = ProcessStatus::Stopped;
 
         let mut process_refs = worker_ref_binding(worker_pid);
+        let mut branch_decisions = Vec::new();
         let step = main_step(main_pid);
         let action = failing_current_state_payload_send();
         let err = run
-            .execute_action(&mut process_refs, &step, &action)
+            .execute_action(&mut process_refs, &mut branch_decisions, &step, &action)
             .expect_err("stopped target should reject before payload template evaluation");
 
         assert_eq!(run.processes[worker_index].mailbox.len(), 0);
@@ -268,10 +269,11 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
         run.processes[worker_index].status = ProcessStatus::Failed;
 
         let mut process_refs = worker_ref_binding(worker_pid);
+        let mut branch_decisions = Vec::new();
         let step = main_step(main_pid);
         let action = failing_current_state_payload_send();
         let err = run
-            .execute_action(&mut process_refs, &step, &action)
+            .execute_action(&mut process_refs, &mut branch_decisions, &step, &action)
             .expect_err("failed target should reject before payload template evaluation");
 
         assert_eq!(run.processes[worker_index].mailbox.len(), 0);
@@ -307,10 +309,11 @@ fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation()
         .expect("first send should fill worker mailbox");
 
         let mut process_refs = worker_ref_binding(worker_pid);
+        let mut branch_decisions = Vec::new();
         let step = main_step(main_pid);
         let action = failing_current_state_payload_send();
         let err = run
-            .execute_action(&mut process_refs, &step, &action)
+            .execute_action(&mut process_refs, &mut branch_decisions, &step, &action)
             .expect_err("full mailbox should reject before payload template evaluation");
 
         assert_eq!(run.processes[worker_index].mailbox.len(), 1);

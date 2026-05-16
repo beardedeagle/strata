@@ -389,8 +389,16 @@ impl fmt::Display for Effect {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReturnExpr {
     Value(ValueExpr),
-    Call { name: Identifier, arg: ValueExpr },
+    Call {
+        name: Identifier,
+        arg: ValueExpr,
+    },
     Match(Match),
+    IfElse {
+        condition: ValueExpr,
+        then_branch: Box<FunctionBlock>,
+        else_branch: Box<FunctionBlock>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

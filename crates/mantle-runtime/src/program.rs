@@ -7,7 +7,7 @@ use admission::{
 pub(crate) use effects::LoadedEffectAuthority;
 use templates::{
     LoadedTemplateAdmission, evaluate_loaded_state_value,
-    loaded_template_depends_on_received_payload,
+    loaded_template_depends_on_received_payload, validate_loaded_bool_condition,
 };
 use transitions::{TransitionLookup, load_transitions, validate_loaded_transition_coverage};
 pub use values::RuntimePayload;
@@ -45,6 +45,12 @@ pub(crate) struct LoadedProgram {
     pub(crate) types: Vec<ArtifactType>,
     pub(crate) outputs: Vec<String>,
     pub(crate) processes: Vec<LoadedProcess>,
+}
+
+#[derive(Clone, Copy)]
+struct LoadedTransitionValueTypes {
+    received_payload: Option<TypeId>,
+    current_state_payload: Option<TypeId>,
 }
 
 impl LoadedProgram {
@@ -437,7 +443,7 @@ impl LoadedProcess {
             .iter()
             .try_fold(0usize, |count, transition| {
                 count
-                    .checked_add(transition.actions.len())
+                    .checked_add(actions::action_count(&transition.actions)?)
                     .ok_or_else(|| Error::new("loaded action_count overflowed"))
             })?;
         if action_count > MAX_ACTIONS_PER_PROCESS {
@@ -757,7 +763,39 @@ impl LoadedTransition {
         message: MessageId,
     ) -> Result<()> {
         let context = self.transition_context(message);
-        match &self.next_state {
+        let value_types = LoadedTransitionValueTypes {
+            received_payload: process
+                .message_variants
+                .get(message.index())
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} message id {} is not loaded",
+                        process.debug_name,
+                        message.as_u32()
+                    ))
+                })?
+                .payload_type,
+            current_state_payload: transition_current_state_payload_type(process, self)?,
+        };
+        self.validate_next_state_node(program, process, &context, &self.next_state, value_types, 0)
+    }
+
+    fn validate_next_state_node(
+        &self,
+        program: &LoadedProgram,
+        process: &LoadedProcess,
+        context: &str,
+        next_state: &LoadedNextState,
+        value_types: LoadedTransitionValueTypes,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return Err(Error::new(format!(
+                "process {} {} next_state nesting exceeds maximum depth {}",
+                process.debug_name, context, MAX_VALUE_TEMPLATE_DEPTH
+            )));
+        }
+        match next_state {
             LoadedNextState::Current => Ok(()),
             LoadedNextState::Value(state) => {
                 if state.index() >= process.state_values.len() {
@@ -771,13 +809,10 @@ impl LoadedTransition {
                 Ok(())
             }
             LoadedNextState::Template(template) => {
-                let received_payload_type = process.message_variants[message.index()].payload_type;
-                let current_state_payload_type =
-                    transition_current_state_payload_type(process, self)?;
                 LoadedTemplateAdmission {
                     expected_type: Some(process.state_type),
-                    received_payload_type,
-                    current_state_payload_type,
+                    received_payload_type: value_types.received_payload,
+                    current_state_payload_type: value_types.current_state_payload,
                     allow_direct_process_ref: false,
                     program,
                     process,
@@ -809,6 +844,39 @@ impl LoadedTransition {
                     process.debug_name, context, value.label
                 )))
             }
+            LoadedNextState::IfElse {
+                condition,
+                then_state,
+                else_state,
+            } => {
+                validate_loaded_bool_condition(
+                    program,
+                    process,
+                    &format!(
+                        "process {} {} next_state_condition",
+                        process.debug_name, context
+                    ),
+                    condition,
+                    value_types.received_payload,
+                    value_types.current_state_payload,
+                )?;
+                self.validate_next_state_node(
+                    program,
+                    process,
+                    &format!("{context} then"),
+                    then_state,
+                    value_types,
+                    depth + 1,
+                )?;
+                self.validate_next_state_node(
+                    program,
+                    process,
+                    &format!("{context} else"),
+                    else_state,
+                    value_types,
+                    depth + 1,
+                )
+            }
         }
     }
 
@@ -829,6 +897,11 @@ pub(crate) enum LoadedNextState {
     Current,
     Value(StateId),
     Template(LoadedValueTemplate),
+    IfElse {
+        condition: LoadedValueTemplate,
+        then_state: Box<LoadedNextState>,
+        else_state: Box<LoadedNextState>,
+    },
 }
 
 impl LoadedNextState {
@@ -839,6 +912,15 @@ impl LoadedNextState {
             NextState::Template(template) => Ok(Self::Template(
                 LoadedValueTemplate::from_artifact(template)?,
             )),
+            NextState::IfElse {
+                condition,
+                then_state,
+                else_state,
+            } => Ok(Self::IfElse {
+                condition: LoadedValueTemplate::from_artifact(condition)?,
+                then_state: Box::new(LoadedNextState::from_artifact(then_state)?),
+                else_state: Box::new(LoadedNextState::from_artifact(else_state)?),
+            }),
         }
     }
 }

@@ -17,6 +17,72 @@ pub(super) fn evaluate_loaded_state_value(
     Ok(LoadedStateValue::from_payload(payload))
 }
 
+pub(super) fn validate_loaded_bool_condition(
+    program: &LoadedProgram,
+    process: &LoadedProcess,
+    field: &str,
+    condition: &LoadedValueTemplate,
+    received_payload_type: Option<TypeId>,
+    current_state_payload_type: Option<TypeId>,
+) -> Result<()> {
+    let bool_type = condition.result_type();
+    let ty = program.type_entry(bool_type)?;
+    let is_bool_contract = matches!(ty.kind, ArtifactTypeKind::Value)
+        && ty.enum_variants.len() == 2
+        && ty.enum_variants[0] == "False"
+        && ty.enum_variants[1] == "True";
+    if !is_bool_contract {
+        return Err(Error::new(format!(
+            "{field} must have type enum Bool {{ False, True }}"
+        )));
+    }
+    LoadedTemplateAdmission {
+        expected_type: Some(bool_type),
+        received_payload_type,
+        current_state_payload_type,
+        allow_direct_process_ref: false,
+        program,
+        process,
+        spawned_refs: &[],
+    }
+    .validate(field, condition)?;
+    validate_loaded_static_bool_condition_value(field, condition)
+}
+
+fn validate_loaded_static_bool_condition_value(
+    field: &str,
+    condition: &LoadedValueTemplate,
+) -> Result<()> {
+    match condition {
+        LoadedValueTemplate::Literal { value, .. } => validate_loaded_bool_atom_value(field, value),
+        LoadedValueTemplate::EnumVariant { .. }
+        | LoadedValueTemplate::Record { .. }
+        | LoadedValueTemplate::List { .. }
+        | LoadedValueTemplate::Map { .. } => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
+        LoadedValueTemplate::ReceivedPayload { .. }
+        | LoadedValueTemplate::CurrentStatePayload { .. }
+        | LoadedValueTemplate::EnumPayload { .. }
+        | LoadedValueTemplate::RecordField { .. }
+        | LoadedValueTemplate::ListElement { .. }
+        | LoadedValueTemplate::ListPrefixElement { .. }
+        | LoadedValueTemplate::ListRest { .. }
+        | LoadedValueTemplate::MapValue { .. }
+        | LoadedValueTemplate::MapRest { .. }
+        | LoadedValueTemplate::ProcessRef { .. } => Ok(()),
+    }
+}
+
+fn validate_loaded_bool_atom_value(field: &str, value: &RuntimeValue) -> Result<()> {
+    match value {
+        RuntimeValue::Atom(label) if label == "False" || label == "True" => Ok(()),
+        _ => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
+    }
+}
+
 fn evaluate_loaded_payload_value(
     program: &LoadedProgram,
     template: &LoadedValueTemplate,

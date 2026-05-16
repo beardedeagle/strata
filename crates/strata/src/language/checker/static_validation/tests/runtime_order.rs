@@ -95,3 +95,80 @@ fn static_process_capacity_rejects_instance_limit() {
         )
     );
 }
+
+#[test]
+fn static_runtime_resolves_next_state_before_actions() {
+    let main_state = value_type("MainState");
+    let main = CheckedProcess::new(CheckedProcessParts {
+        debug_name: ident("Main"),
+        state_type: main_state.clone(),
+        state_values: checked_state_values_for_type(main_state.clone(), &["MainState"]),
+        message_type: value_type("MainMsg"),
+        message_cases: vec![
+            CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                Some(main_state.clone()),
+            )
+            .expect("valid checked message case"),
+        ],
+        process_refs: vec![CheckedProcessRef::new(
+            ident("worker"),
+            checked_process_id(1),
+        )],
+        mailbox_bound: 1,
+        init_state: checked_state_id(0),
+        transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+            current_state: None,
+            message: checked_message_id(0),
+            step_result: CheckedStepResult::Stop,
+            next_state: CheckedNextState::Template(CheckedValueTemplate::ReceivedPayload {
+                ty: main_state,
+            }),
+            effects: Vec::new(),
+            actions: vec![CheckedAction::Send {
+                target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                message: checked_message_id(0),
+                payload: None,
+            }],
+        })],
+    });
+    let worker = CheckedProcess::new(CheckedProcessParts {
+        debug_name: ident("Worker"),
+        state_type: value_type("WorkerState"),
+        state_values: checked_state_values("WorkerState", &["WorkerState"]),
+        message_type: value_type("WorkerMsg"),
+        message_cases: vec![
+            CheckedMessageCase::new(
+                "Ping".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case"),
+        ],
+        process_refs: Vec::new(),
+        mailbox_bound: 1,
+        init_state: checked_state_id(0),
+        transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+            current_state: None,
+            message: checked_message_id(0),
+            step_result: CheckedStepResult::Stop,
+            next_state: CheckedNextState::Current,
+            effects: Vec::new(),
+            actions: Vec::new(),
+        })],
+    });
+
+    let err = validate_static_runtime_order(
+        &[main, worker],
+        checked_process_id(0),
+        checked_message_id(0),
+    )
+    .expect_err("next-state preflight should fail before actions execute");
+
+    assert!(
+        err.to_string()
+            .contains("received payload template requires a payload-bearing message"),
+        "{err}"
+    );
+}

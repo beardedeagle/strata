@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use mantle_artifact::{
-    Error, MantleArtifact, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult,
+    ArtifactBranch, ArtifactValue, Error, MantleArtifact, OutputId, ProcessId, ProcessRefId,
+    Result, StateId, StepResult,
 };
 
 use accounting::{checked_output_bytes, checked_trace_event_bytes};
@@ -339,11 +340,19 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         )?;
         let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
-        let final_state = self.resolve_next_state(process_index, &step, &next_state)?;
         let mut local_process_refs = BTreeMap::new();
+        let mut branch_decisions = Vec::new();
+
+        let final_state =
+            self.resolve_next_state(process_index, &step, &next_state, &mut branch_decisions)?;
 
         for action in &transition.actions {
-            self.execute_action(&mut local_process_refs, &step, action)?;
+            self.execute_action(
+                &mut local_process_refs,
+                &mut branch_decisions,
+                &step,
+                action,
+            )?;
         }
 
         self.apply_next_state(process_index, &step, final_state)?;
@@ -353,6 +362,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     fn execute_action(
         &mut self,
         local_process_refs: &mut BTreeMap<ProcessRefId, RuntimeProcessId>,
+        branch_decisions: &mut Vec<(LoadedValueTemplate, ArtifactBranch)>,
         step: &ActiveStep,
         action: &LoadedAction,
     ) -> Result<()> {
@@ -403,7 +413,105 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     Some(step.pid),
                 )
             }
+            LoadedAction::IfElse {
+                condition,
+                then_actions,
+                else_actions,
+            } => {
+                let branch =
+                    self.select_branch(step, condition, local_process_refs, branch_decisions)?;
+                let selected_actions = match branch {
+                    ArtifactBranch::Then => then_actions,
+                    ArtifactBranch::Else => else_actions,
+                };
+                for action in selected_actions {
+                    self.execute_action(local_process_refs, branch_decisions, step, action)?;
+                }
+                Ok(())
+            }
         }
+    }
+
+    fn evaluate_bool_condition(
+        &self,
+        step: &ActiveStep,
+        condition: &LoadedValueTemplate,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+    ) -> Result<(ArtifactBranch, RuntimePayload)> {
+        let condition_value = evaluate_runtime_template(
+            self.program,
+            condition,
+            step.payload.as_ref(),
+            step,
+            local_process_refs,
+        )?;
+        if condition_value.ty != condition.result_type() {
+            return Err(Error::new(format!(
+                "process {} if condition produced type id {}, expected {}",
+                step.process_name,
+                condition_value.ty.as_u32(),
+                condition.result_type().as_u32()
+            )));
+        }
+        let ArtifactValue::Atom(value) = &condition_value.value else {
+            return Err(Error::new(format!(
+                "process {} if condition produced non-Bool value {}",
+                step.process_name,
+                condition_value.label()
+            )));
+        };
+        let branch = match value.as_str() {
+            "True" => ArtifactBranch::Then,
+            "False" => ArtifactBranch::Else,
+            _ => {
+                return Err(Error::new(format!(
+                    "process {} if condition produced invalid Bool value {}",
+                    step.process_name,
+                    condition_value.label()
+                )));
+            }
+        };
+        Ok((branch, condition_value))
+    }
+
+    fn select_branch(
+        &mut self,
+        step: &ActiveStep,
+        condition: &LoadedValueTemplate,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        branch_decisions: &mut Vec<(LoadedValueTemplate, ArtifactBranch)>,
+    ) -> Result<ArtifactBranch> {
+        if let Some((_, branch)) = branch_decisions
+            .iter()
+            .rev()
+            .find(|(seen_condition, _)| seen_condition == condition)
+        {
+            return Ok(*branch);
+        }
+
+        let (branch, condition_value) =
+            self.evaluate_bool_condition(step, condition, local_process_refs)?;
+        self.record_branch_selected(step, branch, &condition_value)?;
+        branch_decisions.push((condition.clone(), branch));
+        Ok(branch)
+    }
+
+    fn record_branch_selected(
+        &mut self,
+        step: &ActiveStep,
+        branch: ArtifactBranch,
+        condition: &RuntimePayload,
+    ) -> Result<()> {
+        self.record_event(RuntimeEvent::BranchSelected {
+            pid: step.pid,
+            process_id: step.process_id,
+            process: step.process_name.clone(),
+            message_id: step.message,
+            message: step.message_label.clone(),
+            branch,
+            condition_type_id: condition.ty,
+            condition: condition.label().to_string(),
+        })
     }
 
     fn resolve_send_target(
@@ -574,15 +682,30 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     }
 
     fn resolve_next_state(
-        &self,
+        &mut self,
         process_index: usize,
         step: &ActiveStep,
         next_state: &LoadedNextState,
+        branch_decisions: &mut Vec<(LoadedValueTemplate, ArtifactBranch)>,
     ) -> Result<StateId> {
         match next_state {
             LoadedNextState::Current => Ok(self.processes[process_index].state),
             LoadedNextState::Value(state) => Ok(*state),
             LoadedNextState::Template(template) => self.resolve_template_state(step, template),
+            LoadedNextState::IfElse {
+                condition,
+                then_state,
+                else_state,
+            } => {
+                let empty_process_refs = BTreeMap::new();
+                let branch =
+                    self.select_branch(step, condition, &empty_process_refs, branch_decisions)?;
+                let selected_state = match branch {
+                    ArtifactBranch::Then => then_state,
+                    ArtifactBranch::Else => else_state,
+                };
+                self.resolve_next_state(process_index, step, selected_state, branch_decisions)
+            }
         }
     }
 

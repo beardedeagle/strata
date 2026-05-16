@@ -3,6 +3,12 @@ use super::*;
 type TransitionPayloadGuardKey = Option<(u32, ArtifactValue)>;
 type TransitionCoverageKey = (u32, Option<u32>, TransitionPayloadGuardKey);
 
+#[derive(Clone, Copy)]
+struct TransitionValueTypes {
+    received_payload: Option<TypeId>,
+    current_state_payload: Option<TypeId>,
+}
+
 impl ArtifactProcess {
     pub(super) fn validate_identity(&self, artifact: &MantleArtifact) -> Result<()> {
         validate_ident_field("process debug_name", &self.debug_name)?;
@@ -111,39 +117,23 @@ impl ArtifactProcess {
             let current_state_payload_type =
                 self.transition_current_state_payload_type(transition)?;
             let transition_context = transition.transition_context();
-            match &transition.next_state {
-                NextState::Current => {}
-                NextState::Value(state) => {
-                    if state.index() >= self.state_values.len() {
-                        return Err(Error::new(format!(
-                            "process {} {} next_state id {} is not a valid state value",
-                            self.debug_name,
-                            transition_context,
-                            state.as_u32()
-                        )));
-                    }
-                }
-                NextState::Template(template) => {
-                    let received_payload_type = self
-                        .message_variants
-                        .get(transition.message.index())
-                        .and_then(|message| message.payload_type);
-                    template.validate_for_received_payload(
-                        artifact,
-                        &format!(
-                            "process {} {} next_state_template",
-                            self.debug_name, transition_context
-                        ),
-                        Some(self.state_type),
-                        received_payload_type,
-                        current_state_payload_type,
-                        0,
-                    )?;
-                    self.validate_static_next_state_template_value(artifact, transition, template)?;
-                }
-            }
+            let value_types = TransitionValueTypes {
+                received_payload: self
+                    .message_variants
+                    .get(transition.message.index())
+                    .and_then(|message| message.payload_type),
+                current_state_payload: current_state_payload_type,
+            };
+            self.validate_next_state(
+                artifact,
+                transition,
+                &transition_context,
+                &transition.next_state,
+                value_types,
+                0,
+            )?;
             action_count = action_count
-                .checked_add(transition.actions.len())
+                .checked_add(super::action_count(&transition.actions)?)
                 .ok_or_else(|| Error::new("process action_count overflowed"))?;
         }
         validate_count("action_count", action_count, 0, MAX_ACTIONS_PER_PROCESS)?;
@@ -299,6 +289,83 @@ impl ArtifactProcess {
         )))
     }
 
+    fn validate_next_state(
+        &self,
+        artifact: &MantleArtifact,
+        transition: &ArtifactTransition,
+        transition_context: &str,
+        next_state: &NextState,
+        value_types: TransitionValueTypes,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return Err(Error::new(format!(
+                "process {} {} next_state exceeds maximum control-flow depth of {MAX_VALUE_TEMPLATE_DEPTH}",
+                self.debug_name, transition_context
+            )));
+        }
+        match next_state {
+            NextState::Current => Ok(()),
+            NextState::Value(state) => {
+                if state.index() >= self.state_values.len() {
+                    return Err(Error::new(format!(
+                        "process {} {} next_state id {} is not a valid state value",
+                        self.debug_name,
+                        transition_context,
+                        state.as_u32()
+                    )));
+                }
+                Ok(())
+            }
+            NextState::Template(template) => {
+                template.validate_for_received_payload(
+                    artifact,
+                    &format!(
+                        "process {} {} next_state_template",
+                        self.debug_name, transition_context
+                    ),
+                    Some(self.state_type),
+                    value_types.received_payload,
+                    value_types.current_state_payload,
+                    0,
+                )?;
+                self.validate_static_next_state_template_value(artifact, transition, template)
+            }
+            NextState::IfElse {
+                condition,
+                then_state,
+                else_state,
+            } => {
+                validate_bool_condition_template(
+                    artifact,
+                    &format!(
+                        "process {} {} next_state_condition",
+                        self.debug_name, transition_context
+                    ),
+                    condition,
+                    value_types.received_payload,
+                    value_types.current_state_payload,
+                )?;
+                self.validate_next_state(
+                    artifact,
+                    transition,
+                    &format!("{transition_context} then"),
+                    then_state,
+                    value_types,
+                    depth + 1,
+                )?;
+                self.validate_next_state(
+                    artifact,
+                    transition,
+                    &format!("{transition_context} else"),
+                    else_state,
+                    value_types,
+                    depth + 1,
+                )
+            }
+        }
+    }
+
     fn transition_current_state_payload_type(
         &self,
         transition: &ArtifactTransition,
@@ -354,15 +421,18 @@ impl ArtifactProcess {
             let mut spawned_refs = BTreeSet::new();
             let mut used_effects = BTreeSet::new();
             for action in &transition.actions {
-                let action_effect = action.effect();
-                if !declared_effects.contains(&action_effect) {
+                action.collect_effects(&mut used_effects);
+            }
+            for action_effect in &used_effects {
+                if !declared_effects.contains(action_effect) {
                     return Err(Error::new(format!(
                         "process {} transition {} uses effect {action_effect} but does not declare it",
                         self.debug_name,
                         transition.message.as_u32()
                     )));
                 }
-                used_effects.insert(action_effect);
+            }
+            for action in &transition.actions {
                 self.validate_action_reference(artifact, transition, &mut spawned_refs, action)?;
             }
             for declared_effect in &declared_effects {
@@ -488,6 +558,39 @@ impl ArtifactProcess {
                         )?;
                     }
                 }
+            }
+            ArtifactAction::IfElse {
+                condition,
+                then_actions,
+                else_actions,
+            } => {
+                let received_payload_type = self
+                    .message_variants
+                    .get(transition.message.index())
+                    .and_then(|message| message.payload_type);
+                let current_state_payload_type =
+                    self.transition_current_state_payload_type(transition)?;
+                validate_bool_condition_template(
+                    artifact,
+                    &format!(
+                        "process {} transition {} if condition",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    ),
+                    condition,
+                    received_payload_type,
+                    current_state_payload_type,
+                )?;
+                let mut then_refs = spawned_refs.clone();
+                for action in then_actions {
+                    self.validate_action_reference(artifact, transition, &mut then_refs, action)?;
+                }
+                let mut else_refs = spawned_refs.clone();
+                for action in else_actions {
+                    self.validate_action_reference(artifact, transition, &mut else_refs, action)?;
+                }
+                then_refs.retain(|process_ref| else_refs.contains(process_ref));
+                *spawned_refs = then_refs;
             }
         }
         Ok(())
@@ -636,6 +739,69 @@ impl ArtifactProcess {
                     process_ref.as_u32()
                 ))
             })
+    }
+}
+
+fn validate_bool_condition_template(
+    artifact: &MantleArtifact,
+    field: &str,
+    condition: &ArtifactValueTemplate,
+    received_payload_type: Option<TypeId>,
+    current_state_payload_type: Option<TypeId>,
+) -> Result<()> {
+    let bool_type = condition.result_type();
+    let ty = artifact.type_entry(bool_type)?;
+    let is_bool_contract = matches!(ty.kind, ArtifactTypeKind::Value)
+        && ty.enum_variants.len() == 2
+        && ty.enum_variants[0] == "False"
+        && ty.enum_variants[1] == "True";
+    if !is_bool_contract {
+        return Err(Error::new(format!(
+            "{field} must have type enum Bool {{ False, True }}"
+        )));
+    }
+    condition.validate_for_received_payload(
+        artifact,
+        field,
+        Some(bool_type),
+        received_payload_type,
+        current_state_payload_type,
+        0,
+    )?;
+    validate_static_bool_condition_value(field, condition)
+}
+
+fn validate_static_bool_condition_value(
+    field: &str,
+    condition: &ArtifactValueTemplate,
+) -> Result<()> {
+    match condition {
+        ArtifactValueTemplate::Literal { value, .. } => validate_bool_atom_value(field, value),
+        ArtifactValueTemplate::EnumVariant { .. }
+        | ArtifactValueTemplate::Record { .. }
+        | ArtifactValueTemplate::List { .. }
+        | ArtifactValueTemplate::Map { .. } => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
+        ArtifactValueTemplate::ReceivedPayload { .. }
+        | ArtifactValueTemplate::CurrentStatePayload { .. }
+        | ArtifactValueTemplate::EnumPayload { .. }
+        | ArtifactValueTemplate::RecordField { .. }
+        | ArtifactValueTemplate::ListElement { .. }
+        | ArtifactValueTemplate::ListPrefixElement { .. }
+        | ArtifactValueTemplate::ListRest { .. }
+        | ArtifactValueTemplate::MapValue { .. }
+        | ArtifactValueTemplate::MapRest { .. }
+        | ArtifactValueTemplate::ProcessRef { .. } => Ok(()),
+    }
+}
+
+fn validate_bool_atom_value(field: &str, value: &ArtifactValue) -> Result<()> {
+    match value {
+        ArtifactValue::Atom(label) if label == "False" || label == "True" => Ok(()),
+        _ => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
     }
 }
 

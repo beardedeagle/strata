@@ -104,6 +104,38 @@ fn runtime_rejects_loaded_unadmitted_template_state_before_artifact_loaded() {
 }
 
 #[test]
+fn runtime_rejects_loaded_if_else_literal_that_is_not_bool_value_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    artifact.processes[0].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::Literal {
+            ty: bool_type,
+            value: artifact_value("True"),
+        },
+        then_state: Box::new(NextState::Current),
+        else_state: Box::new(NextState::Current),
+    };
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state = LoadedNextState::IfElse {
+        condition: LoadedValueTemplate::Literal {
+            ty: bool_type,
+            value: RuntimeValue::Atom("Maybe".to_string()),
+        },
+        then_state: Box::new(LoadedNextState::Current),
+        else_state: Box::new(LoadedNextState::Current),
+    };
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main message id 0 next_state_condition must evaluate to unit Bool value False or True",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_invalid_literal_template_shape_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

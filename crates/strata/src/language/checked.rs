@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 
 use mantle_artifact::{ArtifactValue, MapProjectionMode, validate_message_label};
@@ -207,6 +208,11 @@ pub(in crate::language) enum CheckedNextState {
     Current,
     Value(CheckedStateId),
     Template(CheckedValueTemplate),
+    IfElse {
+        condition: CheckedValueTemplate,
+        then_state: Box<CheckedNextState>,
+        else_state: Box<CheckedNextState>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -537,16 +543,65 @@ pub(in crate::language) enum CheckedAction {
         message: CheckedMessageId,
         payload: Option<Box<CheckedValueTemplate>>,
     },
+    IfElse {
+        condition: CheckedValueTemplate,
+        then_actions: Vec<CheckedAction>,
+        else_actions: Vec<CheckedAction>,
+    },
 }
 
 impl CheckedAction {
-    pub(in crate::language) fn effect(&self) -> Effect {
+    pub(in crate::language) fn collect_effects(&self, effects: &mut BTreeSet<Effect>) {
         match self {
-            Self::Emit { .. } => Effect::Emit,
-            Self::Spawn { .. } => Effect::Spawn,
-            Self::Send { .. } => Effect::Send,
+            Self::Emit { .. } => {
+                effects.insert(Effect::Emit);
+            }
+            Self::Spawn { .. } => {
+                effects.insert(Effect::Spawn);
+            }
+            Self::Send { .. } => {
+                effects.insert(Effect::Send);
+            }
+            Self::IfElse {
+                then_actions,
+                else_actions,
+                ..
+            } => {
+                for action in then_actions {
+                    action.collect_effects(effects);
+                }
+                for action in else_actions {
+                    action.collect_effects(effects);
+                }
+            }
         }
     }
+
+    pub(in crate::language) fn action_count(&self) -> Result<usize> {
+        match self {
+            Self::Emit { .. } | Self::Spawn { .. } | Self::Send { .. } => Ok(1),
+            Self::IfElse {
+                then_actions,
+                else_actions,
+                ..
+            } => {
+                let then_count = checked_action_count(then_actions)?;
+                let else_count = checked_action_count(else_actions)?;
+                then_count
+                    .checked_add(else_count)
+                    .and_then(|count| count.checked_add(1))
+                    .ok_or_else(|| Error::new("checked action_count overflowed"))
+            }
+        }
+    }
+}
+
+pub(in crate::language) fn checked_action_count(actions: &[CheckedAction]) -> Result<usize> {
+    actions.iter().try_fold(0usize, |count, action| {
+        count
+            .checked_add(action.action_count()?)
+            .ok_or_else(|| Error::new("checked action_count overflowed"))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -603,8 +658,13 @@ impl CheckedTransition {
         self.step_result
     }
 
+    #[cfg(test)]
     pub(in crate::language) fn next_state(&self) -> CheckedNextState {
         self.next_state.clone()
+    }
+
+    pub(in crate::language) fn next_state_ref(&self) -> &CheckedNextState {
+        &self.next_state
     }
 
     pub(in crate::language) fn effects(&self) -> &[Effect] {

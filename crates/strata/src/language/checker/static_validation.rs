@@ -16,8 +16,9 @@ use process_refs::{
 };
 use runtime_order::validate_static_runtime_order;
 use templates::{
-    current_state_payload_type, validate_next_state, validate_value_template_binding_types,
-    validate_value_template_payload_labels, validate_value_template_process_refs,
+    current_state_payload_type, validate_bool_condition_template, validate_next_state,
+    validate_value_template_binding_types, validate_value_template_payload_labels,
+    validate_value_template_process_refs,
 };
 
 type TransitionPayloadGuardKey = Option<(CheckedTypeId, ArtifactValue)>;
@@ -137,89 +138,157 @@ fn validate_transition(
         process,
         transition.message(),
         transition.current_state(),
-        transition.next_state(),
+        transition.next_state_ref(),
     )?;
     validate_transition_payload_guard(process, transition)?;
     validate_transition_effects(process, transition)?;
     let mut spawned_refs = BTreeSet::new();
 
     for action in transition.actions() {
-        match action {
-            CheckedAction::Emit { .. } => {}
-            CheckedAction::Spawn {
-                target,
-                process_ref,
-            } => {
-                if target.index() >= processes.len() {
-                    return Err(Error::new(format!(
-                        "process {} spawns undefined process id {}",
-                        process.debug_name(),
-                        target.as_u32()
-                    )));
-                }
-                if *target == entry_process {
-                    return Err(Error::new(format!(
-                        "process {} spawns entry process {}, which is already started",
-                        process.debug_name(),
-                        process_label(processes, *target)?
-                    )));
-                }
-                if *target == process_id {
-                    return Err(Error::new(format!(
-                        "process {} spawns itself, which is not supported",
-                        process.debug_name()
-                    )));
-                }
-                let declared_target = process_ref_target(process, *process_ref)?;
-                if declared_target != *target {
-                    return Err(Error::new(format!(
-                        "process {} spawn process reference id {} targets process id {}, expected {}",
-                        process.debug_name(),
-                        process_ref.as_u32(),
-                        target.as_u32(),
-                        declared_target.as_u32()
-                    )));
-                }
-                if !spawned_refs.insert(*process_ref) {
-                    return Err(Error::new(format!(
-                        "process {} duplicates process reference id {} within message transition {}",
-                        process.debug_name(),
-                        process_ref.as_u32(),
-                        transition.message().as_u32()
-                    )));
-                }
+        validate_action_reference(
+            processes,
+            process,
+            process_id,
+            entry_process,
+            transition,
+            &mut spawned_refs,
+            action,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_action_reference(
+    processes: &[CheckedProcess],
+    process: &CheckedProcess,
+    process_id: CheckedProcessId,
+    entry_process: CheckedProcessId,
+    transition: &CheckedTransition,
+    spawned_refs: &mut BTreeSet<CheckedProcessRefId>,
+    action: &CheckedAction,
+) -> Result<()> {
+    match action {
+        CheckedAction::Emit { .. } => {}
+        CheckedAction::Spawn {
+            target,
+            process_ref,
+        } => {
+            if target.index() >= processes.len() {
+                return Err(Error::new(format!(
+                    "process {} spawns undefined process id {}",
+                    process.debug_name(),
+                    target.as_u32()
+                )));
             }
-            CheckedAction::Send {
+            if *target == entry_process {
+                return Err(Error::new(format!(
+                    "process {} spawns entry process {}, which is already started",
+                    process.debug_name(),
+                    process_label(processes, *target)?
+                )));
+            }
+            if *target == process_id {
+                return Err(Error::new(format!(
+                    "process {} spawns itself, which is not supported",
+                    process.debug_name()
+                )));
+            }
+            let declared_target = process_ref_target(process, *process_ref)?;
+            if declared_target != *target {
+                return Err(Error::new(format!(
+                    "process {} spawn process reference id {} targets process id {}, expected {}",
+                    process.debug_name(),
+                    process_ref.as_u32(),
+                    target.as_u32(),
+                    declared_target.as_u32()
+                )));
+            }
+            if !spawned_refs.insert(*process_ref) {
+                return Err(Error::new(format!(
+                    "process {} duplicates process reference id {} within message transition {}",
+                    process.debug_name(),
+                    process_ref.as_u32(),
+                    transition.message().as_u32()
+                )));
+            }
+        }
+        CheckedAction::Send {
+            target,
+            message,
+            payload,
+        } => {
+            let target_process_id = validate_send_target(
+                processes,
+                process,
+                transition.message(),
                 target,
-                message,
-                payload,
-            } => {
-                let target_process_id = validate_send_target(
+                spawned_refs,
+            )?;
+            let target_process = process_by_id(processes, target_process_id)?;
+            if message.index() >= target_process.message_cases().len() {
+                return Err(Error::new(format!(
+                    "process {} sends message id {} not accepted by {}",
+                    process.debug_name(),
+                    message.as_u32(),
+                    target_process.debug_name()
+                )));
+            }
+            validate_send_payload_shape(
+                process,
+                transition,
+                target_process,
+                *message,
+                payload.as_deref(),
+                spawned_refs,
+                processes,
+            )?;
+        }
+        CheckedAction::IfElse {
+            condition,
+            then_actions,
+            else_actions,
+        } => {
+            validate_bool_condition_template(process, condition)?;
+            validate_value_template_binding_types(
+                condition,
+                message_payload_type(process, transition.message())?,
+                current_state_payload_type(process, transition.current_state())?,
+            )?;
+            validate_value_template_payload_labels(condition)?;
+            validate_value_template_process_refs(
+                processes,
+                process,
+                condition,
+                spawned_refs,
+                false,
+            )?;
+
+            let mut then_refs = spawned_refs.clone();
+            for action in then_actions {
+                validate_action_reference(
                     processes,
                     process,
-                    transition.message(),
-                    target,
-                    &spawned_refs,
-                )?;
-                let target_process = process_by_id(processes, target_process_id)?;
-                if message.index() >= target_process.message_cases().len() {
-                    return Err(Error::new(format!(
-                        "process {} sends message id {} not accepted by {}",
-                        process.debug_name(),
-                        message.as_u32(),
-                        target_process.debug_name()
-                    )));
-                }
-                validate_send_payload_shape(
-                    process,
+                    process_id,
+                    entry_process,
                     transition,
-                    target_process,
-                    *message,
-                    payload.as_deref(),
-                    &spawned_refs,
-                    processes,
+                    &mut then_refs,
+                    action,
                 )?;
             }
+            let mut else_refs = spawned_refs.clone();
+            for action in else_actions {
+                validate_action_reference(
+                    processes,
+                    process,
+                    process_id,
+                    entry_process,
+                    transition,
+                    &mut else_refs,
+                    action,
+                )?;
+            }
+            then_refs.retain(|process_ref| else_refs.contains(process_ref));
+            *spawned_refs = then_refs;
         }
     }
     Ok(())
@@ -242,15 +311,16 @@ fn validate_transition_effects(
 
     let mut used_effects = BTreeSet::new();
     for action in transition.actions() {
-        let effect = action.effect();
-        if !declared_effects.contains(&effect) {
+        action.collect_effects(&mut used_effects);
+    }
+    for effect in &used_effects {
+        if !declared_effects.contains(effect) {
             return Err(Error::new(format!(
                 "process {} transition {} uses effect {effect} but does not declare it",
                 process.debug_name(),
                 transition.message().as_u32()
             )));
         }
-        used_effects.insert(effect);
     }
 
     for effect in &declared_effects {

@@ -129,6 +129,33 @@ pub(super) fn artifact_payload(ty: TypeId, value: &str) -> ArtifactPayload {
         .expect("test artifact payload should be valid")
 }
 
+pub(super) fn append_bool_type(artifact: &mut MantleArtifact) -> TypeId {
+    let ty = TypeId::from_index(artifact.types.len()).expect("test type index should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    ty
+}
+
+pub(super) fn nested_if_else_action(depth: usize, bool_type: TypeId) -> ArtifactAction {
+    let condition = ArtifactValueTemplate::Literal {
+        ty: bool_type,
+        value: artifact_value("True"),
+    };
+    let mut action = ArtifactAction::Emit {
+        output: OutputId::new(0),
+    };
+    for _ in 0..depth {
+        action = ArtifactAction::IfElse {
+            condition: condition.clone(),
+            then_actions: vec![action],
+            else_actions: Vec::new(),
+        };
+    }
+    action
+}
+
 pub(super) fn emit_actions(count: usize) -> Vec<ArtifactAction> {
     vec![
         ArtifactAction::Emit {

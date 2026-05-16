@@ -28,6 +28,7 @@ use super::checked::{
     CheckedProcessId, CheckedProcessParts, CheckedProcessRef, CheckedProcessRefId, CheckedProgram,
     CheckedProgramParts, CheckedSendTarget, CheckedStateId, CheckedStepResult, CheckedTransition,
     CheckedTransitionParts, CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
+    checked_action_count,
 };
 use super::diagnostic::{Error, Result};
 use super::{LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
@@ -2064,7 +2065,7 @@ fn reject_payload_entry_message(
 fn total_action_count(transitions: &[CheckedTransition]) -> Result<usize> {
     transitions.iter().try_fold(0usize, |total, transition| {
         total
-            .checked_add(transition.actions().len())
+            .checked_add(checked_action_count(transition.actions())?)
             .ok_or_else(|| Error::new("process action_count overflowed"))
     })
 }

@@ -62,6 +62,10 @@ fn validate_source_function_return_expr(
             match_body,
             bindings,
         ),
+        ReturnExpr::IfElse { .. } => Err(Error::new(format!(
+            "source function {} must return a pure value expression",
+            function.name
+        ))),
     }
 }
 

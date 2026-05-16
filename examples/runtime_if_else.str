@@ -1,0 +1,54 @@
+module runtime_if_else;
+
+record MainState;
+enum Bool {
+    False,
+    True,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Idle,
+    WarmReady,
+    ColdReady,
+}
+enum WorkerMsg {
+    Branch(Bool),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let warm: ProcessRef<Worker> = spawn Worker;
+        let cold: ProcessRef<Worker> = spawn Worker;
+        send warm Branch(True);
+        send cold Branch(False);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (flag) {
+            emit "worker took warm branch";
+            return Stop(WarmReady);
+        } else {
+            emit "worker took cold branch";
+            return Stop(ColdReady);
+        }
+    }
+}
