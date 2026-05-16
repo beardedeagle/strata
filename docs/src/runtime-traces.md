@@ -53,6 +53,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 | `process_spawned` | Mantle creates a runtime process instance. |
 | `message_accepted` | Mantle accepts a message into a process mailbox. |
 | `message_dequeued` | A process dequeued a message for handling. |
+| `branch_selected` | Mantle selected a typed runtime control-flow branch. |
 | `process_stepped` | A transition ran for a message. |
 | `state_updated` | A process state changes to another admitted state value. |
 | `program_output` | A process emitted declared output. |
@@ -121,6 +122,19 @@ admitted target process ID and runtime process ID:
 ```json
 {"event":"message_accepted","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Work","payload_type_id":2,"payload":"type2#3","payload_process_id":2,"payload_pid":3,"queue_depth":1,"sender_pid":1}
 ```
+
+## Branch Selected
+
+Example shape:
+
+```json
+{"event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","condition_type_id":0,"condition":"True"}
+```
+
+`branch` is `then` or `else`. `condition_type_id` is the admitted artifact type
+ID for the checked `Bool` condition, and `condition` is trace metadata for the
+evaluated value. Runtime branch selection uses the admitted typed condition,
+not source strings, helper names, or debug labels.
 
 ## Process Stepped
 

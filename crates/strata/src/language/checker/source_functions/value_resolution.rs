@@ -551,6 +551,10 @@ fn resolve_source_function_return_value(
             bindings,
             depth + 1,
         ),
+        ReturnExpr::IfElse { .. } => Err(Error::new(format!(
+            "source function {} must return a pure value expression",
+            function.name
+        ))),
     }
 }
 

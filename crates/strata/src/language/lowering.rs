@@ -153,7 +153,7 @@ fn lower_transition(
             .map(|payload| lower_payload_guard(payload, types))
             .transpose()?,
         step_result: lower_step_result(transition.step_result()),
-        next_state: lower_next_state(transition.next_state(), types)?,
+        next_state: lower_next_state(transition.next_state_ref(), types)?,
         effects: transition
             .effects()
             .iter()
@@ -215,19 +215,43 @@ fn lower_action(
                 .map(|payload| lower_value_template(payload, types))
                 .transpose()?,
         }),
+        CheckedAction::IfElse {
+            condition,
+            then_actions,
+            else_actions,
+        } => Ok(ArtifactAction::IfElse {
+            condition: lower_value_template(condition, types)?,
+            then_actions: then_actions
+                .iter()
+                .map(|action| lower_action(action, types))
+                .collect::<mantle_artifact::Result<Vec<_>>>()?,
+            else_actions: else_actions
+                .iter()
+                .map(|action| lower_action(action, types))
+                .collect::<mantle_artifact::Result<Vec<_>>>()?,
+        }),
     }
 }
 
 fn lower_next_state(
-    next_state: CheckedNextState,
+    next_state: &CheckedNextState,
     types: &ArtifactTypeMap,
 ) -> mantle_artifact::Result<NextState> {
     match next_state {
         CheckedNextState::Current => Ok(NextState::Current),
-        CheckedNextState::Value(state) => Ok(NextState::Value(lower_state_id(state))),
+        CheckedNextState::Value(state) => Ok(NextState::Value(lower_state_id(*state))),
         CheckedNextState::Template(template) => {
-            Ok(NextState::Template(lower_value_template(&template, types)?))
+            Ok(NextState::Template(lower_value_template(template, types)?))
         }
+        CheckedNextState::IfElse {
+            condition,
+            then_state,
+            else_state,
+        } => Ok(NextState::IfElse {
+            condition: lower_value_template(condition, types)?,
+            then_state: Box::new(lower_next_state(then_state, types)?),
+            else_state: Box::new(lower_next_state(else_state, types)?),
+        }),
     }
 }
 

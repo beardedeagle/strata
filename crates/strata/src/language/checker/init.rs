@@ -173,6 +173,12 @@ fn resolve_init_return_block_value(
                 process.name
             )));
         }
+        ReturnExpr::IfElse { .. } => {
+            return Err(Error::new(format!(
+                "process {} {context} runtime if is not supported in init in this source slice",
+                process.name
+            )));
+        }
     };
     let binding_storage;
     let bindings: &[SourceValueBinding<'_>] = if payload_bindings.is_empty() {

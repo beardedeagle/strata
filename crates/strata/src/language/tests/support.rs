@@ -11,8 +11,8 @@ pub(super) use mantle_artifact::{
     ArtifactValue, ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_ENUM_VARIANTS_PER_TYPE,
     MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, ProcessId, ProcessRefId,
-    StepResult, TypeId,
+    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState, ProcessId,
+    ProcessRefId, StepResult, TypeId,
 };
 
 pub(super) use super::fixtures::*;

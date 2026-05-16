@@ -74,10 +74,9 @@ impl MantleArtifact {
             for (transition_index, transition) in process.transitions.iter().enumerate() {
                 let transition_prefix = format!("{prefix}.transition.{transition_index}");
                 encoded.push_str(&format!(
-                    "{transition_prefix}.message={}\n{transition_prefix}.step_result={}\n{transition_prefix}.next_state={}\n",
+                    "{transition_prefix}.message={}\n{transition_prefix}.step_result={}\n",
                     transition.message.as_u32(),
-                    transition.step_result.as_str(),
-                    transition.next_state.kind_str()
+                    transition.step_result.as_str()
                 ));
                 if let Some(current_state) = transition.current_state {
                     encoded.push_str(&format!(
@@ -92,19 +91,7 @@ impl MantleArtifact {
                         payload_guard.value.label()
                     ));
                 }
-                if let NextState::Value(state) = &transition.next_state {
-                    encoded.push_str(&format!(
-                        "{transition_prefix}.next_state_value={}\n",
-                        state.as_u32()
-                    ));
-                }
-                if let NextState::Template(template) = &transition.next_state {
-                    encode_value_template(
-                        &mut encoded,
-                        &format!("{transition_prefix}.next_state_template"),
-                        template,
-                    );
-                }
+                encode_next_state(&mut encoded, &transition_prefix, &transition.next_state);
                 encoded.push_str(&format!(
                     "{transition_prefix}.effect_count={}\n",
                     transition.effects.len()
@@ -228,7 +215,7 @@ impl MantleArtifact {
                 let mut actions = Vec::with_capacity(action_count);
                 for action_index in 0..action_count {
                     let action_prefix = format!("{transition_prefix}.action.{action_index}");
-                    actions.push(decode_action(&mut fields, &action_prefix)?);
+                    actions.push(decode_action(&mut fields, &action_prefix, 0)?);
                 }
 
                 transitions.push(ArtifactTransition {
@@ -241,7 +228,7 @@ impl MantleArtifact {
                     )?,
                     step_result: fields
                         .take_step_result(&format!("{transition_prefix}.step_result"))?,
-                    next_state: decode_next_state(&mut fields, &transition_prefix)?,
+                    next_state: decode_next_state(&mut fields, &transition_prefix, 0)?,
                     effects,
                     actions,
                 });
@@ -569,7 +556,38 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
     }
 }
 
-fn decode_next_state(fields: &mut ArtifactFields, prefix: &str) -> Result<NextState> {
+fn encode_next_state(encoded: &mut String, prefix: &str, next_state: &NextState) {
+    encoded.push_str(&format!("{prefix}.next_state={}\n", next_state.kind_str()));
+    match next_state {
+        NextState::Current => {}
+        NextState::Value(state) => {
+            encoded.push_str(&format!("{prefix}.next_state_value={}\n", state.as_u32()));
+        }
+        NextState::Template(template) => {
+            encode_value_template(encoded, &format!("{prefix}.next_state_template"), template);
+        }
+        NextState::IfElse {
+            condition,
+            then_state,
+            else_state,
+        } => {
+            encode_value_template(
+                encoded,
+                &format!("{prefix}.next_state_condition"),
+                condition,
+            );
+            encode_next_state(encoded, &format!("{prefix}.next_state_then"), then_state);
+            encode_next_state(encoded, &format!("{prefix}.next_state_else"), else_state);
+        }
+    }
+}
+
+fn decode_next_state(fields: &mut ArtifactFields, prefix: &str, depth: usize) -> Result<NextState> {
+    if depth > MAX_VALUE_TEMPLATE_DEPTH {
+        return Err(Error::new(format!(
+            "{prefix}.next_state exceeds maximum control-flow depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+        )));
+    }
     let key = format!("{prefix}.next_state");
     match fields.take_required(&key)?.as_str() {
         "current" => Ok(NextState::Current),
@@ -581,8 +599,21 @@ fn decode_next_state(fields: &mut ArtifactFields, prefix: &str) -> Result<NextSt
             &format!("{prefix}.next_state_template"),
             0,
         )?)),
+        "if_else" => Ok(NextState::IfElse {
+            condition: decode_value_template(fields, &format!("{prefix}.next_state_condition"), 0)?,
+            then_state: Box::new(decode_next_state(
+                fields,
+                &format!("{prefix}.next_state_then"),
+                depth + 1,
+            )?),
+            else_state: Box::new(decode_next_state(
+                fields,
+                &format!("{prefix}.next_state_else"),
+                depth + 1,
+            )?),
+        }),
         value => Err(Error::new(format!(
-            "invalid {key} value {value:?}; expected \"current\", \"value\", or \"template\""
+            "invalid {key} value {value:?}; expected \"current\", \"value\", \"template\", or \"if_else\""
         ))),
     }
 }
@@ -857,6 +888,36 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
                 );
             }
         }
+        ArtifactAction::IfElse {
+            condition,
+            then_actions,
+            else_actions,
+        } => {
+            encoded.push_str(&format!("{action_prefix}.kind=if_else\n"));
+            encode_value_template(encoded, &format!("{action_prefix}.condition"), condition);
+            encoded.push_str(&format!(
+                "{action_prefix}.then_action_count={}\n",
+                then_actions.len()
+            ));
+            for (action_index, action) in then_actions.iter().enumerate() {
+                encode_action(
+                    encoded,
+                    &format!("{action_prefix}.then_action.{action_index}"),
+                    action,
+                );
+            }
+            encoded.push_str(&format!(
+                "{action_prefix}.else_action_count={}\n",
+                else_actions.len()
+            ));
+            for (action_index, action) in else_actions.iter().enumerate() {
+                encode_action(
+                    encoded,
+                    &format!("{action_prefix}.else_action.{action_index}"),
+                    action,
+                );
+            }
+        }
     }
 }
 
@@ -895,7 +956,16 @@ fn decode_send_target(
     }
 }
 
-fn decode_action(fields: &mut ArtifactFields, action_prefix: &str) -> Result<ArtifactAction> {
+fn decode_action(
+    fields: &mut ArtifactFields,
+    action_prefix: &str,
+    depth: usize,
+) -> Result<ArtifactAction> {
+    if depth > MAX_VALUE_TEMPLATE_DEPTH {
+        return Err(Error::new(format!(
+            "{action_prefix} exceeds maximum action nesting depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+        )));
+    }
     let kind = fields.take_required(&format!("{action_prefix}.kind"))?;
     match kind.as_str() {
         "emit" => Ok(ArtifactAction::Emit {
@@ -926,6 +996,41 @@ fn decode_action(fields: &mut ArtifactFields, action_prefix: &str) -> Result<Art
                 target,
                 message,
                 payload,
+            })
+        }
+        "if_else" => {
+            let condition =
+                decode_value_template(fields, &format!("{action_prefix}.condition"), 0)?;
+            let then_action_count = fields.take_bounded_usize(
+                &format!("{action_prefix}.then_action_count"),
+                0,
+                MAX_ACTIONS_PER_PROCESS,
+            )?;
+            let mut then_actions = Vec::with_capacity(then_action_count);
+            for action_index in 0..then_action_count {
+                then_actions.push(decode_action(
+                    fields,
+                    &format!("{action_prefix}.then_action.{action_index}"),
+                    depth + 1,
+                )?);
+            }
+            let else_action_count = fields.take_bounded_usize(
+                &format!("{action_prefix}.else_action_count"),
+                0,
+                MAX_ACTIONS_PER_PROCESS,
+            )?;
+            let mut else_actions = Vec::with_capacity(else_action_count);
+            for action_index in 0..else_action_count {
+                else_actions.push(decode_action(
+                    fields,
+                    &format!("{action_prefix}.else_action.{action_index}"),
+                    depth + 1,
+                )?);
+            }
+            Ok(ArtifactAction::IfElse {
+                condition,
+                then_actions,
+                else_actions,
             })
         }
         _ => Err(Error::new(format!("invalid artifact action kind {kind:?}"))),

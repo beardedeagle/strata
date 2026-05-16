@@ -117,6 +117,26 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             output_id.as_u32(),
             json_escape(text)
         ),
+        RuntimeEvent::BranchSelected {
+            pid,
+            process_id,
+            process,
+            message_id,
+            message,
+            branch,
+            condition_type_id,
+            condition,
+        } => format!(
+            "{{\"event\":\"branch_selected\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\",\"branch\":\"{}\",\"condition_type_id\":{},\"condition\":\"{}\"}}",
+            pid.as_u64(),
+            process_id.as_u32(),
+            json_escape(process),
+            message_id.as_u32(),
+            json_escape(message),
+            branch.as_str(),
+            condition_type_id.as_u32(),
+            json_escape(condition)
+        ),
         RuntimeEvent::StateUpdated {
             pid,
             process_id,

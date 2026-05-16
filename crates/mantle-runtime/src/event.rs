@@ -1,7 +1,9 @@
 use std::fmt;
 use std::num::NonZeroU64;
 
-use mantle_artifact::{Error, MessageId, OutputId, ProcessId, Result, StateId, StepResult};
+use mantle_artifact::{
+    ArtifactBranch, Error, MessageId, OutputId, ProcessId, Result, StateId, StepResult,
+};
 
 use crate::program::RuntimePayload;
 
@@ -85,6 +87,16 @@ pub enum RuntimeEvent {
         stream: RuntimeOutputStream,
         output_id: OutputId,
         text: String,
+    },
+    BranchSelected {
+        pid: RuntimeProcessId,
+        process_id: ProcessId,
+        process: String,
+        message_id: MessageId,
+        message: String,
+        branch: ArtifactBranch,
+        condition_type_id: mantle_artifact::TypeId,
+        condition: String,
     },
     StateUpdated {
         pid: RuntimeProcessId,

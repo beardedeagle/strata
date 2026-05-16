@@ -11,10 +11,10 @@ pub(super) use crate::program::{
 pub(super) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactMessageVariant,
     ArtifactPayload, ArtifactProcess, ArtifactProcessRef, ArtifactProcessRefPayload,
-    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField, EnumVariantId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
+    ArtifactRecordField, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue,
+    ArtifactValueTemplate, ArtifactValueTemplateField, EnumVariantId, MAX_FIELD_VALUE_BYTES,
+    MAX_IDENTIFIER_BYTES, MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact,
+    MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";

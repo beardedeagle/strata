@@ -42,6 +42,113 @@ fn validate_rejects_action_without_declared_effect() {
 }
 
 #[test]
+fn validate_rejects_nested_if_else_action_without_declared_effect() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].effects = Vec::new();
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::IfElse {
+        condition: ArtifactValueTemplate::Literal {
+            ty: bool_type,
+            value: artifact_value("True"),
+        },
+        then_actions: vec![ArtifactAction::Emit {
+            output: OutputId::new(0),
+        }],
+        else_actions: Vec::new(),
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("nested emit without declared emit effect should fail");
+
+    assert!(
+        err.to_string()
+            .contains("process Worker transition 0 uses effect emit but does not declare it")
+    );
+}
+
+#[test]
+fn validate_rejects_if_else_action_nesting_above_limit() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].actions = vec![nested_if_else_action(
+        MAX_VALUE_TEMPLATE_DEPTH + 1,
+        bool_type,
+    )];
+
+    let err = artifact
+        .validate()
+        .expect_err("overly nested if_else action should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "artifact action nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+    )));
+}
+
+#[test]
+fn validate_rejects_send_after_process_ref_spawned_in_only_one_branch() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[0].transitions[0].actions = vec![
+        ArtifactAction::IfElse {
+            condition: ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            },
+            then_actions: vec![ArtifactAction::Spawn {
+                target: ProcessId::new(1),
+                process_ref: ProcessRefId::new(0),
+            }],
+            else_actions: Vec::new(),
+        },
+        ArtifactAction::Send {
+            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            message: MessageId::new(0),
+            payload: None,
+        },
+    ];
+
+    let err = artifact
+        .validate()
+        .expect_err("branch-local process reference should not be available after if");
+
+    assert!(err.to_string().contains(
+        "process Main sends through unbound process reference id 0 within message transition 0"
+    ));
+}
+
+#[test]
+fn validate_accepts_send_after_process_ref_spawned_in_both_branches() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[0].transitions[0].actions = vec![
+        ArtifactAction::IfElse {
+            condition: ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            },
+            then_actions: vec![ArtifactAction::Spawn {
+                target: ProcessId::new(1),
+                process_ref: ProcessRefId::new(0),
+            }],
+            else_actions: vec![ArtifactAction::Spawn {
+                target: ProcessId::new(1),
+                process_ref: ProcessRefId::new(0),
+            }],
+        },
+        ArtifactAction::Send {
+            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            message: MessageId::new(0),
+            payload: None,
+        },
+    ];
+
+    artifact
+        .validate()
+        .expect("process reference spawned in both branches should be available after if");
+}
+
+#[test]
 fn validate_rejects_declared_effect_without_action() {
     let mut artifact = valid_artifact();
     artifact.processes[1].transitions[0]

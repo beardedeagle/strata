@@ -19,7 +19,8 @@ Mantle artifact internals.
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
-| Pure conditionals | Expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`. |
+| Pure conditionals | Source-time expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`. |
+| Runtime branching | Final-position `if (condition) { ... return ...; } else { ... return ...; }` in `step` bodies, lowered to Mantle control flow. |
 | Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, step return-match expressions with optional uniform action prefixes, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
 | Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for helpers, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
@@ -488,7 +489,7 @@ expanded before lowering and do not become runtime dispatch entries.
 
 ## Pure Conditionals
 
-The accepted ordinary control-flow expression is a pure value-level
+Source helpers and pure value expressions can use a source-time value-level
 conditional:
 
 ```strata
@@ -509,6 +510,32 @@ selected branch is what lowering sees; Mantle does not receive a conditional
 runtime dispatch entry, a source function name, or a source-string branch key.
 If the condition is not a concrete `True` or `False` value after source helper
 expansion, checking fails closed.
+
+## Runtime Branching
+
+Step bodies can use a final-position runtime `if` whose condition is a checked
+`Bool` value template:
+
+```strata
+fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    if (flag) {
+        emit "worker took warm branch";
+        return Stop(WarmReady);
+    } else {
+        emit "worker took cold branch";
+        return Stop(ColdReady);
+    }
+}
+```
+
+This is ordinary runtime branching. If the condition depends on the received
+payload or current state payload, Strata lowers the checked condition, branch
+actions, and branch next states into the Mantle artifact. Mantle admits the
+typed condition, validates both branches, executes only the selected branch,
+and records `branch_selected` trace events. Branch effects must be declared by
+the step effect list, both branches must return the same step result, and state
+changes still occur only through immutable whole-value `Continue`, `Stop`, or
+`Panic` returns.
 
 This slice does not add comparison operators, arithmetic, loops, imports, or a
 standard library.

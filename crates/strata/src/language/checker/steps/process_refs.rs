@@ -140,6 +140,29 @@ pub(super) fn collect_process_refs_from_block(
             },
         );
     }
+    if let ReturnExpr::IfElse {
+        then_branch,
+        else_branch,
+        ..
+    } = &block.returns
+    {
+        collect_process_refs_from_block(
+            context,
+            then_branch,
+            payload_bindings,
+            state_payload_bindings,
+            process_refs,
+            process_ref_index,
+        )?;
+        collect_process_refs_from_block(
+            context,
+            else_branch,
+            payload_bindings,
+            state_payload_bindings,
+            process_refs,
+            process_ref_index,
+        )?;
+    }
     Ok(())
 }
 

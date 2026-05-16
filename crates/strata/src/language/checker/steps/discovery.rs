@@ -102,10 +102,31 @@ pub(in crate::language::checker) fn step_discovery_clauses<'a>(
 }
 
 pub(super) fn collect_step_blocks(step: &Function) -> Vec<&FunctionBlock> {
+    fn collect_block<'a>(body: &'a FunctionBlock, blocks: &mut Vec<&'a FunctionBlock>) {
+        blocks.push(body);
+        if let ReturnExpr::IfElse {
+            then_branch,
+            else_branch,
+            ..
+        } = &body.returns
+        {
+            collect_block(then_branch, blocks);
+            collect_block(else_branch, blocks);
+        }
+    }
+
     match &step.body {
-        Some(FunctionBody::Block(body)) => vec![body],
+        Some(FunctionBody::Block(body)) => {
+            let mut blocks = Vec::new();
+            collect_block(body, &mut blocks);
+            blocks
+        }
         Some(FunctionBody::Match(match_body)) => {
-            match_body.arms.iter().map(|arm| &arm.body).collect()
+            let mut blocks = Vec::new();
+            for arm in &match_body.arms {
+                collect_block(&arm.body, &mut blocks);
+            }
+            blocks
         }
         None => Vec::new(),
     }

@@ -73,7 +73,7 @@ pub(in crate::language::checker) fn check_step<'state>(
                 .actions()
                 .iter()
                 .fold(BTreeSet::new(), |mut effects, action| {
-                    effects.insert(action.effect());
+                    action.collect_effects(&mut effects);
                     effects
                 });
         validate_effects("step", &clause.step.effects, used_effects)?;

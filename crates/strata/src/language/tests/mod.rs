@@ -10,6 +10,7 @@ mod nested_pattern_destructuring;
 mod payload_limits;
 mod process_refs;
 mod process_return_match;
+mod runtime_if_else;
 mod source_function_collection_patterns;
 mod source_function_core;
 mod source_function_if_else;

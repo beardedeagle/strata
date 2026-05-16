@@ -18,7 +18,7 @@ pub(super) fn validate_next_state(
     process: &CheckedProcess,
     current_message: CheckedMessageId,
     current_state: Option<CheckedStateId>,
-    next_state: CheckedNextState,
+    next_state: &CheckedNextState,
 ) -> Result<()> {
     match next_state {
         CheckedNextState::Current => Ok(()),
@@ -42,16 +42,16 @@ pub(super) fn validate_next_state(
                 )));
             }
             validate_value_template_binding_types(
-                &template,
+                template,
                 message_payload_type(process, current_message)?,
                 current_state_payload_type(process, current_state)?,
             )?;
-            validate_value_template_payload_labels(&template)?;
-            reject_process_ref_template_in_next_state(&template)?;
-            if !checked_template_depends_on_received_payload(&template) {
+            validate_value_template_payload_labels(template)?;
+            reject_process_ref_template_in_next_state(template)?;
+            if !checked_template_depends_on_received_payload(template) {
                 resolve_checked_template_state(
                     process,
-                    &template,
+                    template,
                     None,
                     current_state
                         .and_then(|state| process.state_values().get(state.index()))
@@ -60,6 +60,45 @@ pub(super) fn validate_next_state(
             }
             Ok(())
         }
+        CheckedNextState::IfElse {
+            condition,
+            then_state,
+            else_state,
+        } => {
+            validate_bool_condition_template(process, condition)?;
+            validate_value_template_binding_types(
+                condition,
+                message_payload_type(process, current_message)?,
+                current_state_payload_type(process, current_state)?,
+            )?;
+            validate_value_template_payload_labels(condition)?;
+            reject_process_ref_template_in_next_state(condition)?;
+            validate_next_state(process, current_message, current_state, then_state)?;
+            validate_next_state(process, current_message, current_state, else_state)
+        }
+    }
+}
+
+pub(super) fn validate_bool_condition_template(
+    process: &CheckedProcess,
+    condition: &CheckedValueTemplate,
+) -> Result<()> {
+    let CheckedTypeKind::Value { enum_variants } = condition.result_type().kind() else {
+        return Err(Error::new(format!(
+            "process {} if condition requires enum Bool {{ False, True }}",
+            process.debug_name()
+        )));
+    };
+    let is_bool_contract = enum_variants.len() == 2
+        && enum_variants[0].as_str() == "False"
+        && enum_variants[1].as_str() == "True";
+    if is_bool_contract {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "process {} if condition requires enum Bool {{ False, True }}",
+            process.debug_name()
+        )))
     }
 }
 
@@ -1006,7 +1045,7 @@ fn resolve_checked_template_state(
 pub(super) fn resolve_checked_next_state(
     process: &CheckedProcess,
     current_state: CheckedStateId,
-    next_state: CheckedNextState,
+    next_state: &CheckedNextState,
     received_payload: Option<&CheckedPayloadValue>,
 ) -> Result<CheckedStateId> {
     let current_state_payload = process
@@ -1015,12 +1054,59 @@ pub(super) fn resolve_checked_next_state(
         .and_then(|state| state.payload());
     match next_state {
         CheckedNextState::Current => Ok(current_state),
-        CheckedNextState::Value(state) => Ok(state),
+        CheckedNextState::Value(state) => Ok(*state),
         CheckedNextState::Template(template) => resolve_checked_template_state(
             process,
-            &template,
+            template,
             received_payload,
             current_state_payload,
         ),
+        CheckedNextState::IfElse {
+            condition,
+            then_state,
+            else_state,
+        } => {
+            let selected_state = match checked_bool_condition_value(
+                process,
+                condition,
+                received_payload,
+                current_state_payload,
+            )? {
+                true => then_state,
+                false => else_state,
+            };
+            resolve_checked_next_state(process, current_state, selected_state, received_payload)
+        }
+    }
+}
+
+fn checked_bool_condition_value(
+    process: &CheckedProcess,
+    condition: &CheckedValueTemplate,
+    received_payload: Option<&CheckedPayloadValue>,
+    current_state_payload: Option<&CheckedPayloadValue>,
+) -> Result<bool> {
+    let value = evaluate_checked_template(condition, received_payload, current_state_payload)?;
+    let value = value.value().ok_or_else(|| {
+        Error::new(format!(
+            "process {} if condition produced a process reference payload",
+            process.debug_name()
+        ))
+    })?;
+    let ArtifactValue::Atom(label) = value else {
+        return Err(Error::new(format!(
+            "process {} if condition produced non-Bool value {}",
+            process.debug_name(),
+            value.label()
+        )));
+    };
+    match label.as_str() {
+        "True" => Ok(true),
+        "False" => Ok(false),
+        _ => Err(Error::new(format!(
+            "process {} if condition produced invalid Bool value {}",
+            process.debug_name(),
+            label
+        ))),
     }
 }

@@ -627,6 +627,32 @@ fn preadmit_concrete_step_return(
     body: &FunctionBlock,
     binding_names: &[&Identifier],
 ) -> Result<()> {
+    if let ReturnExpr::IfElse {
+        then_branch,
+        else_branch,
+        ..
+    } = &body.returns
+    {
+        preadmit_concrete_step_return(
+            module,
+            process,
+            semantic_index,
+            state_space,
+            types,
+            then_branch,
+            binding_names,
+        )?;
+        return preadmit_concrete_step_return(
+            module,
+            process,
+            semantic_index,
+            state_space,
+            types,
+            else_branch,
+            binding_names,
+        );
+    }
+
     let state_arg = match &body.returns {
         ReturnExpr::Call { name, arg }
             if name.as_str() == "Stop"

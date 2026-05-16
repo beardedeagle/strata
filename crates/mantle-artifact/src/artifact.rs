@@ -88,6 +88,11 @@ pub enum NextState {
     Current,
     Value(StateId),
     Template(ArtifactValueTemplate),
+    IfElse {
+        condition: ArtifactValueTemplate,
+        then_state: Box<NextState>,
+        else_state: Box<NextState>,
+    },
 }
 
 impl NextState {
@@ -96,6 +101,7 @@ impl NextState {
             Self::Current => "current",
             Self::Value(_) => "value",
             Self::Template(_) => "template",
+            Self::IfElse { .. } => "if_else",
         }
     }
 }
@@ -520,6 +526,21 @@ impl ArtifactTransition {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactBranch {
+    Then,
+    Else,
+}
+
+impl ArtifactBranch {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Then => "then",
+            Self::Else => "else",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactAction {
     Emit {
@@ -534,16 +555,74 @@ pub enum ArtifactAction {
         message: MessageId,
         payload: Option<ArtifactValueTemplate>,
     },
+    IfElse {
+        condition: ArtifactValueTemplate,
+        then_actions: Vec<ArtifactAction>,
+        else_actions: Vec<ArtifactAction>,
+    },
 }
 
 impl ArtifactAction {
-    fn effect(&self) -> ArtifactEffect {
+    fn collect_effects(&self, effects: &mut BTreeSet<ArtifactEffect>) {
         match self {
-            Self::Emit { .. } => ArtifactEffect::Emit,
-            Self::Spawn { .. } => ArtifactEffect::Spawn,
-            Self::Send { .. } => ArtifactEffect::Send,
+            Self::Emit { .. } => {
+                effects.insert(ArtifactEffect::Emit);
+            }
+            Self::Spawn { .. } => {
+                effects.insert(ArtifactEffect::Spawn);
+            }
+            Self::Send { .. } => {
+                effects.insert(ArtifactEffect::Send);
+            }
+            Self::IfElse {
+                then_actions,
+                else_actions,
+                ..
+            } => {
+                for action in then_actions {
+                    action.collect_effects(effects);
+                }
+                for action in else_actions {
+                    action.collect_effects(effects);
+                }
+            }
         }
     }
+
+    fn action_count_at_depth(&self, depth: usize) -> Result<usize> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return Err(Error::new(format!(
+                "artifact action nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+            )));
+        }
+        match self {
+            Self::Emit { .. } | Self::Spawn { .. } | Self::Send { .. } => Ok(1),
+            Self::IfElse {
+                then_actions,
+                else_actions,
+                ..
+            } => {
+                let then_count = action_count_at_depth(then_actions, depth + 1)?;
+                let else_count = action_count_at_depth(else_actions, depth + 1)?;
+                then_count
+                    .checked_add(else_count)
+                    .and_then(|count| count.checked_add(1))
+                    .ok_or_else(|| Error::new("artifact action_count overflowed"))
+            }
+        }
+    }
+}
+
+fn action_count(actions: &[ArtifactAction]) -> Result<usize> {
+    action_count_at_depth(actions, 0)
+}
+
+fn action_count_at_depth(actions: &[ArtifactAction], depth: usize) -> Result<usize> {
+    actions.iter().try_fold(0usize, |count, action| {
+        count
+            .checked_add(action.action_count_at_depth(depth)?)
+            .ok_or_else(|| Error::new("artifact action_count overflowed"))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -339,20 +339,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                 &format!("{transition_prefix}.next_state"),
                 transition.next_state.kind_str(),
             )?;
-            if let NextState::Value(state) = &transition.next_state {
-                add_field_bytes(
-                    &mut encoded_len,
-                    &format!("{transition_prefix}.next_state_value"),
-                    &state.as_u32().to_string(),
-                )?;
-            }
-            if let NextState::Template(template) = &transition.next_state {
-                add_value_template_bytes(
-                    &mut encoded_len,
-                    &format!("{transition_prefix}.next_state_template"),
-                    template,
-                )?;
-            }
+            add_next_state_bytes(&mut encoded_len, &transition_prefix, &transition.next_state)?;
             add_field_bytes(
                 &mut encoded_len,
                 &format!("{transition_prefix}.effect_count"),
@@ -372,73 +359,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
             )?;
             for (action_index, action) in transition.actions.iter().enumerate() {
                 let action_prefix = format!("{transition_prefix}.action.{action_index}");
-                match action {
-                    ArtifactAction::Emit { output } => {
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.kind"),
-                            "emit",
-                        )?;
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.output"),
-                            &output.as_u32().to_string(),
-                        )?;
-                    }
-                    ArtifactAction::Spawn {
-                        target,
-                        process_ref,
-                    } => {
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.kind"),
-                            "spawn",
-                        )?;
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.target_process"),
-                            &target.as_u32().to_string(),
-                        )?;
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.process_ref"),
-                            &process_ref.as_u32().to_string(),
-                        )?;
-                    }
-                    ArtifactAction::Send {
-                        target,
-                        message,
-                        payload,
-                    } => {
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.kind"),
-                            "send",
-                        )?;
-                        add_send_target_bytes(&mut encoded_len, &action_prefix, target)?;
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.message"),
-                            &message.as_u32().to_string(),
-                        )?;
-                        add_field_bytes(
-                            &mut encoded_len,
-                            &format!("{action_prefix}.payload"),
-                            if payload.is_some() {
-                                "template"
-                            } else {
-                                "none"
-                            },
-                        )?;
-                        if let Some(payload) = payload {
-                            add_value_template_bytes(
-                                &mut encoded_len,
-                                &format!("{action_prefix}.payload_template"),
-                                payload,
-                            )?;
-                        }
-                    }
-                }
+                add_action_bytes(&mut encoded_len, &action_prefix, action)?;
             }
         }
     }
@@ -681,6 +602,131 @@ fn add_value_template_bytes(
         }
     }
     Ok(())
+}
+
+fn add_next_state_bytes(total: &mut usize, prefix: &str, next_state: &NextState) -> Result<()> {
+    match next_state {
+        NextState::Current => Ok(()),
+        NextState::Value(state) => add_field_bytes(
+            total,
+            &format!("{prefix}.next_state_value"),
+            &state.as_u32().to_string(),
+        ),
+        NextState::Template(template) => {
+            add_value_template_bytes(total, &format!("{prefix}.next_state_template"), template)
+        }
+        NextState::IfElse {
+            condition,
+            then_state,
+            else_state,
+        } => {
+            add_value_template_bytes(total, &format!("{prefix}.next_state_condition"), condition)?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.next_state_then.next_state"),
+                then_state.kind_str(),
+            )?;
+            add_next_state_bytes(total, &format!("{prefix}.next_state_then"), then_state)?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.next_state_else.next_state"),
+                else_state.kind_str(),
+            )?;
+            add_next_state_bytes(total, &format!("{prefix}.next_state_else"), else_state)
+        }
+    }
+}
+
+fn add_action_bytes(total: &mut usize, action_prefix: &str, action: &ArtifactAction) -> Result<()> {
+    match action {
+        ArtifactAction::Emit { output } => {
+            add_field_bytes(total, &format!("{action_prefix}.kind"), "emit")?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.output"),
+                &output.as_u32().to_string(),
+            )
+        }
+        ArtifactAction::Spawn {
+            target,
+            process_ref,
+        } => {
+            add_field_bytes(total, &format!("{action_prefix}.kind"), "spawn")?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.target_process"),
+                &target.as_u32().to_string(),
+            )?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.process_ref"),
+                &process_ref.as_u32().to_string(),
+            )
+        }
+        ArtifactAction::Send {
+            target,
+            message,
+            payload,
+        } => {
+            add_field_bytes(total, &format!("{action_prefix}.kind"), "send")?;
+            add_send_target_bytes(total, action_prefix, target)?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.message"),
+                &message.as_u32().to_string(),
+            )?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.payload"),
+                if payload.is_some() {
+                    "template"
+                } else {
+                    "none"
+                },
+            )?;
+            if let Some(payload) = payload {
+                add_value_template_bytes(
+                    total,
+                    &format!("{action_prefix}.payload_template"),
+                    payload,
+                )?;
+            }
+            Ok(())
+        }
+        ArtifactAction::IfElse {
+            condition,
+            then_actions,
+            else_actions,
+        } => {
+            add_field_bytes(total, &format!("{action_prefix}.kind"), "if_else")?;
+            add_value_template_bytes(total, &format!("{action_prefix}.condition"), condition)?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.then_action_count"),
+                &then_actions.len().to_string(),
+            )?;
+            for (action_index, action) in then_actions.iter().enumerate() {
+                add_action_bytes(
+                    total,
+                    &format!("{action_prefix}.then_action.{action_index}"),
+                    action,
+                )?;
+            }
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.else_action_count"),
+                &else_actions.len().to_string(),
+            )?;
+            for (action_index, action) in else_actions.iter().enumerate() {
+                add_action_bytes(
+                    total,
+                    &format!("{action_prefix}.else_action.{action_index}"),
+                    action,
+                )?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn add_send_target_bytes(

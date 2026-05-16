@@ -345,6 +345,15 @@ fn collect_source_return_expr_calls<'a>(returns: &'a ReturnExpr, calls: &mut BTr
                 collect_source_return_expr_calls(&arm.body.returns, calls);
             }
         }
+        ReturnExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_source_value_expr_calls(condition, calls);
+            collect_source_return_expr_calls(&then_branch.returns, calls);
+            collect_source_return_expr_calls(&else_branch.returns, calls);
+        }
     }
 }
 

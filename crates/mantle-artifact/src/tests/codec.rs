@@ -137,6 +137,82 @@ fn artifact_round_trips_list_prefix_template_with_prefix_len() {
 }
 
 #[test]
+fn artifact_round_trips_if_else_control_flow() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    let condition = ArtifactValueTemplate::Literal {
+        ty: bool_type,
+        value: artifact_value("True"),
+    };
+    artifact.processes[1].transitions[0].next_state = NextState::IfElse {
+        condition: condition.clone(),
+        then_state: Box::new(NextState::Value(StateId::new(1))),
+        else_state: Box::new(NextState::Current),
+    };
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::IfElse {
+        condition,
+        then_actions: vec![ArtifactAction::Emit {
+            output: OutputId::new(0),
+        }],
+        else_actions: Vec::new(),
+    }];
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("if_else artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains("process.1.transition.0.next_state=if_else"));
+    assert!(encoded.contains("process.1.transition.0.next_state_condition.kind=literal"));
+    assert!(encoded.contains("process.1.transition.0.next_state_then.next_state=value"));
+    assert!(encoded.contains("process.1.transition.0.next_state_else.next_state=current"));
+    assert!(encoded.contains("process.1.transition.0.action.0.kind=if_else"));
+    assert!(encoded.contains("process.1.transition.0.action.0.then_action_count=1"));
+    assert!(encoded.contains("process.1.transition.0.action.0.else_action_count=0"));
+}
+
+#[test]
+fn decode_rejects_missing_if_else_next_state_branch() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::Literal {
+            ty: bool_type,
+            value: artifact_value("True"),
+        },
+        then_state: Box::new(NextState::Value(StateId::new(1))),
+        else_state: Box::new(NextState::Current),
+    };
+    let encoded = artifact.encode().replace(
+        "process.1.transition.0.next_state_else.next_state=current\n",
+        "",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("missing else branch should fail");
+
+    assert!(
+        err.to_string()
+            .contains("missing artifact field process.1.transition.0.next_state_else.next_state")
+    );
+}
+
+#[test]
+fn decode_rejects_if_else_action_nesting_above_limit() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].actions = vec![nested_if_else_action(
+        MAX_VALUE_TEMPLATE_DEPTH + 1,
+        bool_type,
+    )];
+    let encoded = artifact.encode();
+
+    let err = MantleArtifact::decode(&encoded).expect_err("overly nested action should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "exceeds maximum action nesting depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+    )));
+}
+
+#[test]
 fn decode_rejects_unknown_step_result() {
     let encoded = valid_artifact().encode().replace(
         "process.1.transition.0.step_result=Stop",

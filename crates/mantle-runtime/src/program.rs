@@ -7,7 +7,7 @@ use admission::{
 pub(crate) use effects::LoadedEffectAuthority;
 use templates::{
     LoadedTemplateAdmission, evaluate_loaded_state_value,
-    loaded_template_depends_on_received_payload,
+    loaded_template_depends_on_received_payload, validate_loaded_bool_condition,
 };
 use transitions::{TransitionLookup, load_transitions, validate_loaded_transition_coverage};
 pub use values::RuntimePayload;
@@ -45,6 +45,18 @@ pub(crate) struct LoadedProgram {
     pub(crate) types: Vec<ArtifactType>,
     pub(crate) outputs: Vec<String>,
     pub(crate) processes: Vec<LoadedProcess>,
+}
+
+#[derive(Clone, Copy)]
+struct LoadedTransitionValueTypes<'a> {
+    received_payload: Option<TypeId>,
+    current_state_payload: Option<&'a RuntimePayload>,
+}
+
+impl LoadedTransitionValueTypes<'_> {
+    fn current_state_payload_type(self) -> Option<TypeId> {
+        self.current_state_payload.map(|payload| payload.ty)
+    }
 }
 
 impl LoadedProgram {
@@ -437,7 +449,7 @@ impl LoadedProcess {
             .iter()
             .try_fold(0usize, |count, transition| {
                 count
-                    .checked_add(transition.actions.len())
+                    .checked_add(actions::action_count(&transition.actions)?)
                     .ok_or_else(|| Error::new("loaded action_count overflowed"))
             })?;
         if action_count > MAX_ACTIONS_PER_PROCESS {
@@ -681,14 +693,14 @@ impl LoadedTransition {
         self.validate_next_state(program, process, message)?;
         self.validate_payload_guard(program, process, message)?;
 
-        let current_state_payload_type = transition_current_state_payload_type(process, self)?;
+        let current_state_payload = transition_current_state_payload(process, self)?;
         let mut spawned_refs = vec![false; process.process_refs.len()];
         for action in &self.actions {
             action.validate_admission(
                 program,
                 process,
                 message,
-                current_state_payload_type,
+                current_state_payload,
                 &mut spawned_refs,
             )?;
         }
@@ -757,7 +769,39 @@ impl LoadedTransition {
         message: MessageId,
     ) -> Result<()> {
         let context = self.transition_context(message);
-        match &self.next_state {
+        let value_types = LoadedTransitionValueTypes {
+            received_payload: process
+                .message_variants
+                .get(message.index())
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} message id {} is not loaded",
+                        process.debug_name,
+                        message.as_u32()
+                    ))
+                })?
+                .payload_type,
+            current_state_payload: transition_current_state_payload(process, self)?,
+        };
+        self.validate_next_state_node(program, process, &context, &self.next_state, value_types, 0)
+    }
+
+    fn validate_next_state_node(
+        &self,
+        program: &LoadedProgram,
+        process: &LoadedProcess,
+        context: &str,
+        next_state: &LoadedNextState,
+        value_types: LoadedTransitionValueTypes,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return Err(Error::new(format!(
+                "process {} {} next_state nesting exceeds maximum depth {}",
+                process.debug_name, context, MAX_VALUE_TEMPLATE_DEPTH
+            )));
+        }
+        match next_state {
             LoadedNextState::Current => Ok(()),
             LoadedNextState::Value(state) => {
                 if state.index() >= process.state_values.len() {
@@ -771,13 +815,10 @@ impl LoadedTransition {
                 Ok(())
             }
             LoadedNextState::Template(template) => {
-                let received_payload_type = process.message_variants[message.index()].payload_type;
-                let current_state_payload_type =
-                    transition_current_state_payload_type(process, self)?;
                 LoadedTemplateAdmission {
                     expected_type: Some(process.state_type),
-                    received_payload_type,
-                    current_state_payload_type,
+                    received_payload_type: value_types.received_payload,
+                    current_state_payload_type: value_types.current_state_payload_type(),
                     allow_direct_process_ref: false,
                     program,
                     process,
@@ -793,12 +834,12 @@ impl LoadedTransition {
                 if loaded_template_depends_on_received_payload(template) {
                     return Ok(());
                 }
-                let current_state_payload = self
-                    .current_state
-                    .and_then(|state| process.state_values.get(state.index()))
-                    .and_then(|state| state.payload.as_ref());
-                let value =
-                    evaluate_loaded_state_value(program, template, None, current_state_payload)?;
+                let value = evaluate_loaded_state_value(
+                    program,
+                    template,
+                    None,
+                    value_types.current_state_payload,
+                )?;
                 if process.state_values.iter().any(|state_value| {
                     state_value.ty == value.ty && state_value.value == value.value
                 }) {
@@ -808,6 +849,39 @@ impl LoadedTransition {
                     "process {} {} next_state_template produced value {} not admitted by loaded state table",
                     process.debug_name, context, value.label
                 )))
+            }
+            LoadedNextState::IfElse {
+                condition,
+                then_state,
+                else_state,
+            } => {
+                validate_loaded_bool_condition(
+                    program,
+                    process,
+                    &format!(
+                        "process {} {} next_state_condition",
+                        process.debug_name, context
+                    ),
+                    condition,
+                    value_types.received_payload,
+                    value_types.current_state_payload,
+                )?;
+                self.validate_next_state_node(
+                    program,
+                    process,
+                    &format!("{context} then"),
+                    then_state,
+                    value_types,
+                    depth + 1,
+                )?;
+                self.validate_next_state_node(
+                    program,
+                    process,
+                    &format!("{context} else"),
+                    else_state,
+                    value_types,
+                    depth + 1,
+                )
             }
         }
     }
@@ -829,6 +903,11 @@ pub(crate) enum LoadedNextState {
     Current,
     Value(StateId),
     Template(LoadedValueTemplate),
+    IfElse {
+        condition: LoadedValueTemplate,
+        then_state: Box<LoadedNextState>,
+        else_state: Box<LoadedNextState>,
+    },
 }
 
 impl LoadedNextState {
@@ -839,14 +918,23 @@ impl LoadedNextState {
             NextState::Template(template) => Ok(Self::Template(
                 LoadedValueTemplate::from_artifact(template)?,
             )),
+            NextState::IfElse {
+                condition,
+                then_state,
+                else_state,
+            } => Ok(Self::IfElse {
+                condition: LoadedValueTemplate::from_artifact(condition)?,
+                then_state: Box::new(LoadedNextState::from_artifact(then_state)?),
+                else_state: Box::new(LoadedNextState::from_artifact(else_state)?),
+            }),
         }
     }
 }
 
-fn transition_current_state_payload_type(
-    process: &LoadedProcess,
+fn transition_current_state_payload<'a>(
+    process: &'a LoadedProcess,
     transition: &LoadedTransition,
-) -> Result<Option<TypeId>> {
+) -> Result<Option<&'a RuntimePayload>> {
     let Some(current_state) = transition.current_state else {
         return Ok(None);
     };
@@ -861,5 +949,5 @@ fn transition_current_state_payload_type(
                 current_state.as_u32()
             ))
         })?;
-    Ok(state_value.payload.as_ref().map(|payload| payload.ty))
+    Ok(state_value.payload.as_ref())
 }

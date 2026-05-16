@@ -37,23 +37,25 @@ Read them in this order:
    definition.
 20. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-21. `actor_payload_match.str` for the same payload binding through a whole-body
+21. `runtime_if_else.str` for Mantle-backed runtime branching over a message
+   payload.
+22. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-22. `actor_payload_split_match.str` for payload-sensitive same-message
+23. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-23. `actor_payload_split_signature.str` for payload-sensitive same-message
+24. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-24. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+25. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-25. `actor_payload_state_match_split.str` for payload-sensitive same-message
+26. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-26. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+27. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-27. `nested_patterns.str` for nested immutable constructor, record, list, and
+28. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-28. `actor_reply.str` for transporting typed process references through message
+29. `actor_reply.str` for transporting typed process references through message
    payloads.
-29. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+30. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -483,6 +485,25 @@ Key source ideas:
 - `Assign(job: Job)` binds the received payload as an immutable step-local
   value.
 - `WorkerState { job: job }` constructs the next state as a whole value.
+
+## Runtime If Else
+
+`examples/runtime_if_else.str` branches inside `Worker.step` over a received
+`Bool` payload. The branch is not selected by Strata during checking; it lowers
+as typed Mantle control flow and executes when each worker handles its message.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_if_else.str
+cargo run -p strata --bin strata -- build examples/runtime_if_else.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_if_else.mta
+```
+
+Key source ideas:
+
+- `Branch(True)` and `Branch(False)` send two different runtime payloads.
+- `if (flag) { ... } else { ... }` lowers to Mantle branch control flow.
+- Each branch emits its own declared output and returns a whole immutable state.
+- The runtime trace records `branch_selected` for both `then` and `else` paths.
 
 ## Actor Payload Match
 

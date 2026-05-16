@@ -1,4 +1,7 @@
+use std::collections::BTreeSet;
+
 use super::templates::LoadedTemplateAdmission;
+use super::templates::validate_loaded_bool_condition;
 use super::*;
 use mantle_artifact::ArtifactEffect;
 
@@ -16,6 +19,11 @@ pub(crate) enum LoadedAction {
         message: MessageId,
         payload: Option<LoadedValueTemplate>,
     },
+    IfElse {
+        condition: LoadedValueTemplate,
+        then_actions: Vec<LoadedAction>,
+        else_actions: Vec<LoadedAction>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,11 +36,52 @@ pub(crate) enum LoadedSendTarget {
 }
 
 impl LoadedAction {
-    pub(super) fn effect(&self) -> ArtifactEffect {
+    pub(super) fn collect_effects(&self, effects: &mut BTreeSet<ArtifactEffect>) {
         match self {
-            Self::Emit { .. } => ArtifactEffect::Emit,
-            Self::Spawn { .. } => ArtifactEffect::Spawn,
-            Self::Send { .. } => ArtifactEffect::Send,
+            Self::Emit { .. } => {
+                effects.insert(ArtifactEffect::Emit);
+            }
+            Self::Spawn { .. } => {
+                effects.insert(ArtifactEffect::Spawn);
+            }
+            Self::Send { .. } => {
+                effects.insert(ArtifactEffect::Send);
+            }
+            Self::IfElse {
+                then_actions,
+                else_actions,
+                ..
+            } => {
+                for action in then_actions {
+                    action.collect_effects(effects);
+                }
+                for action in else_actions {
+                    action.collect_effects(effects);
+                }
+            }
+        }
+    }
+
+    fn action_count_at_depth(&self, depth: usize) -> Result<usize> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return Err(Error::new(format!(
+                "loaded action nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+            )));
+        }
+        match self {
+            Self::Emit { .. } | Self::Spawn { .. } | Self::Send { .. } => Ok(1),
+            Self::IfElse {
+                then_actions,
+                else_actions,
+                ..
+            } => {
+                let then_count = action_count_at_depth(then_actions, depth + 1)?;
+                let else_count = action_count_at_depth(else_actions, depth + 1)?;
+                then_count
+                    .checked_add(else_count)
+                    .and_then(|count| count.checked_add(1))
+                    .ok_or_else(|| Error::new("loaded action_count overflowed"))
+            }
         }
     }
 
@@ -58,6 +107,21 @@ impl LoadedAction {
                     .map(LoadedValueTemplate::from_artifact)
                     .transpose()?,
             }),
+            ArtifactAction::IfElse {
+                condition,
+                then_actions,
+                else_actions,
+            } => Ok(Self::IfElse {
+                condition: LoadedValueTemplate::from_artifact(condition)?,
+                then_actions: then_actions
+                    .iter()
+                    .map(LoadedAction::from_artifact)
+                    .collect::<Result<Vec<_>>>()?,
+                else_actions: else_actions
+                    .iter()
+                    .map(LoadedAction::from_artifact)
+                    .collect::<Result<Vec<_>>>()?,
+            }),
         }
     }
 
@@ -66,9 +130,10 @@ impl LoadedAction {
         program: &LoadedProgram,
         process: &LoadedProcess,
         message: MessageId,
-        current_state_payload_type: Option<TypeId>,
+        current_state_payload: Option<&RuntimePayload>,
         spawned_refs: &mut [bool],
     ) -> Result<()> {
+        let current_state_payload_type = current_state_payload.map(|payload| payload.ty);
         match self {
             Self::Emit { output } => {
                 program.output(*output)?;
@@ -162,8 +227,65 @@ impl LoadedAction {
                     ),
                 }
             }
+            Self::IfElse {
+                condition,
+                then_actions,
+                else_actions,
+            } => {
+                validate_loaded_bool_condition(
+                    program,
+                    process,
+                    &format!(
+                        "process {} transition {} if condition",
+                        process.debug_name,
+                        message.as_u32()
+                    ),
+                    condition,
+                    process.message_variants[message.index()].payload_type,
+                    current_state_payload,
+                )?;
+                let mut then_refs = spawned_refs.to_vec();
+                for action in then_actions {
+                    action.validate_admission(
+                        program,
+                        process,
+                        message,
+                        current_state_payload,
+                        &mut then_refs,
+                    )?;
+                }
+                let mut else_refs = spawned_refs.to_vec();
+                for action in else_actions {
+                    action.validate_admission(
+                        program,
+                        process,
+                        message,
+                        current_state_payload,
+                        &mut else_refs,
+                    )?;
+                }
+                for (spawned, (then_spawned, else_spawned)) in spawned_refs
+                    .iter_mut()
+                    .zip(then_refs.into_iter().zip(else_refs))
+                {
+                    *spawned = *spawned || (then_spawned && else_spawned);
+                }
+                Ok(())
+            }
         }
     }
+}
+
+pub(super) fn action_count(actions: &[LoadedAction]) -> Result<usize> {
+    action_count_at_depth(actions, 0)
+}
+
+fn action_count_at_depth(actions: &[LoadedAction], depth: usize) -> Result<usize> {
+    actions.iter().try_fold(0usize, |count, action| {
+        count
+            .checked_add(action.action_count_at_depth(depth)?)
+            .ok_or_else(|| Error::new("loaded action_count overflowed"))
+    })
 }
 
 impl LoadedSendTarget {
