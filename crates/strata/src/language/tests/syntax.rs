@@ -154,10 +154,10 @@ fn rejects_security_declarations_instead_of_erasing_source() {
 }
 
 #[test]
-fn rejects_mutability_keywords_as_state_values() {
-    for keyword in ["as", "mut", "var"] {
+fn rejects_reserved_keywords_as_state_values() {
+    for keyword in ["as", "else", "if", "let", "mut", "var"] {
         let source = r#"
-module reserved_mutability_keyword;
+module reserved_keyword;
 
 record Marker;
 enum MainState { REPLACE_KEYWORD }
@@ -178,7 +178,7 @@ proc Main mailbox bounded(1) {
 "#
         .replace("REPLACE_KEYWORD", keyword);
 
-        let err = parse_source(&source).expect_err("mutability keyword should be reserved");
+        let err = parse_source(&source).expect_err("keyword should be reserved");
 
         assert!(
             err.to_string()

@@ -15,43 +15,45 @@ Read them in this order:
    pattern matching outside actor dispatch.
 8. `function_payload_match.str` for payload-bearing enum construction and
    matching in normal source helpers.
-9. `function_collection_match.str` for immutable list/map source values and
+9. `function_if_else.str` for pure value-level conditionals selected before
+   lowering.
+10. `function_collection_match.str` for immutable list/map source values and
    collection patterns in normal source helpers.
-10. `function_return_match.str` for helper return-match expressions.
-11. `process_return_match.str` for process step return-match expressions with
+11. `function_return_match.str` for helper return-match expressions.
+12. `process_return_match.str` for process step return-match expressions with
     uniform effect prefixes.
-12. `function_record_pattern.str` for source helper record destructuring
+13. `function_record_pattern.str` for source helper record destructuring
    patterns.
-13. `function_record_return_match.str` for helper return-match record
+14. `function_record_return_match.str` for helper return-match record
    destructuring.
-14. `function_record_body_match.str` for whole-body helper match record
+15. `function_record_body_match.str` for whole-body helper match record
    destructuring.
-15. `state_payload_enum.str` for payload-bearing process state enum transitions.
-16. `collection_state.str` for immutable collection state and payload-dependent
+16. `state_payload_enum.str` for payload-bearing process state enum transitions.
+17. `collection_state.str` for immutable collection state and payload-dependent
    collection next-state templates.
-17. `state_payload_match.str` for matching immutable current process state
+18. `state_payload_match.str` for matching immutable current process state
    payloads.
-18. `actor_instances.str` for multiple runtime instances of one process
+19. `actor_instances.str` for multiple runtime instances of one process
    definition.
-19. `actor_payloads.str` for typed message payloads and immutable payload
+20. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-20. `actor_payload_match.str` for the same payload binding through a whole-body
+21. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-21. `actor_payload_split_match.str` for payload-sensitive same-message
+22. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-22. `actor_payload_split_signature.str` for payload-sensitive same-message
+23. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-23. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+24. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-24. `actor_payload_state_match_split.str` for payload-sensitive same-message
+25. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-25. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+26. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-26. `nested_patterns.str` for nested immutable constructor, record, list, and
+27. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-27. `actor_reply.str` for transporting typed process references through message
+28. `actor_reply.str` for transporting typed process references through message
    payloads.
-28. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+29. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -228,6 +230,27 @@ Key source ideas:
   payload inside the selected arm.
 - `state_for(Assigned(job))` proves a process-local helper can wrap a received
   immutable payload into a source enum value before lowering.
+
+## Function If Else
+
+`examples/function_if_else.str` uses a pure value-level conditional in normal
+source helpers. The checker resolves the explicit `Bool { False, True }`
+condition and selects one immutable branch before lowering.
+
+```sh
+cargo run -p strata --bin strata -- check examples/function_if_else.str
+cargo run -p strata --bin strata -- build examples/function_if_else.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/function_if_else.mta
+```
+
+Key source ideas:
+
+- `enum Bool { False, True }` is an exact source contract for conditionals.
+- `if (flag) { WarmReady } else { ColdReady }` is a pure value expression, not
+  a statement block.
+- Both branches are checked against the same expected type.
+- Mantle receives selected typed state values, not a conditional branch key or
+  source helper dispatch name.
 
 ## Function Collection Match
 

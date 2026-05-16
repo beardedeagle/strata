@@ -750,6 +750,15 @@ fn substitute_step_return_bindings(
                 })
                 .collect(),
         }),
+        ValueExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => ValueExpr::IfElse {
+            condition: Box::new(substitute_step_return_bindings(*condition, bindings)),
+            then_branch: Box::new(substitute_step_return_bindings(*then_branch, bindings)),
+            else_branch: Box::new(substitute_step_return_bindings(*else_branch, bindings)),
+        },
     }
 }
 

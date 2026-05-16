@@ -1,0 +1,60 @@
+module function_if_else;
+
+record MainState {
+    init: Readiness,
+    step: Readiness,
+}
+enum Bool {
+    False,
+    True,
+}
+enum Mode {
+    Cold,
+    Warm,
+}
+enum Readiness {
+    ColdReady,
+    WarmReady,
+}
+enum MainMsg {
+    Start,
+}
+
+fn is_warm(mode: Mode) -> Bool ! [] ~ [] @det {
+    return match mode {
+        Cold => {
+            return False;
+        }
+        Warm => {
+            return True;
+        }
+    };
+}
+
+fn choose(flag: Bool) -> Readiness ! [] ~ [] @det {
+    return if (flag) { WarmReady } else { ColdReady };
+}
+
+fn readiness(mode: Mode) -> Readiness ! [] ~ [] @det {
+    return choose(is_warm(mode));
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            init: readiness(Warm),
+            step: readiness(Cold),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "pure conditional selected source values";
+        return Stop(MainState {
+            init: readiness(Cold),
+            step: readiness(Warm),
+        });
+    }
+}

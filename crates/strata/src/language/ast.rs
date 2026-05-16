@@ -108,7 +108,7 @@ fn is_identifier(value: &str) -> bool {
 }
 
 fn is_reserved_identifier(value: &str) -> bool {
-    matches!(value, "_" | "as" | "let" | "mut" | "var")
+    matches!(value, "_" | "as" | "else" | "if" | "let" | "mut" | "var")
 }
 
 fn validate_output_literal(value: &str) -> Result<()> {
@@ -407,6 +407,11 @@ pub enum ValueExpr {
     Record(RecordValue),
     List(ListValue),
     Map(MapValue),
+    IfElse {
+        condition: Box<ValueExpr>,
+        then_branch: Box<ValueExpr>,
+        else_branch: Box<ValueExpr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -451,6 +456,11 @@ impl fmt::Display for ValueExpr {
             Self::Record(value) => write!(f, "{value}"),
             Self::List(value) => write!(f, "{value}"),
             Self::Map(value) => write!(f, "{value}"),
+            Self::IfElse {
+                condition,
+                then_branch,
+                else_branch,
+            } => write!(f, "if({condition}){{{then_branch}}}else{{{else_branch}}}"),
         }
     }
 }

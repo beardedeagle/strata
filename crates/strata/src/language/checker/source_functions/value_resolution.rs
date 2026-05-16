@@ -562,9 +562,11 @@ fn concrete_source_enum_value<'a>(
     match value {
         ValueExpr::Identifier(name) => Ok((name, None)),
         ValueExpr::EnumVariant { name, payload } => Ok((name, Some(payload.as_ref()))),
-        ValueExpr::Call { .. } | ValueExpr::Record(_) => Err(Error::new(format!(
-            "function {function_name} {usage} requires a concrete enum constructor argument"
-        ))),
+        ValueExpr::Call { .. } | ValueExpr::Record(_) | ValueExpr::IfElse { .. } => {
+            Err(Error::new(format!(
+                "function {function_name} {usage} requires a concrete enum constructor argument"
+            )))
+        }
         ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
             "function {function_name} {usage} requires a concrete enum constructor argument"
         ))),
@@ -578,11 +580,12 @@ fn concrete_source_record_value<'a>(
 ) -> Result<&'a RecordValue> {
     match value {
         ValueExpr::Record(record) => Ok(record),
-        ValueExpr::Identifier(_) | ValueExpr::Call { .. } | ValueExpr::EnumVariant { .. } => {
-            Err(Error::new(format!(
-                "function {function_name} {usage} requires a concrete record value argument"
-            )))
-        }
+        ValueExpr::Identifier(_)
+        | ValueExpr::Call { .. }
+        | ValueExpr::EnumVariant { .. }
+        | ValueExpr::IfElse { .. } => Err(Error::new(format!(
+            "function {function_name} {usage} requires a concrete record value argument"
+        ))),
         ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
             "function {function_name} {usage} requires a concrete record value argument"
         ))),
@@ -639,5 +642,14 @@ fn substitute_source_value_bindings(
                 })
                 .collect(),
         }),
+        ValueExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => ValueExpr::IfElse {
+            condition: Box::new(substitute_source_value_bindings(*condition, bindings)),
+            then_branch: Box::new(substitute_source_value_bindings(*then_branch, bindings)),
+            else_branch: Box::new(substitute_source_value_bindings(*else_branch, bindings)),
+        },
     }
 }

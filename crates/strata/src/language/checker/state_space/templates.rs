@@ -82,6 +82,11 @@ fn checked_value_template(
             "function call {name} must be resolved before checking value template of type {expected_type}"
         )));
     }
+    if matches!(value, ValueExpr::IfElse { .. }) {
+        return Err(Error::new(format!(
+            "if expression must be resolved before checking value template of type {expected_type}"
+        )));
+    }
 
     if !bindings
         .iter()
