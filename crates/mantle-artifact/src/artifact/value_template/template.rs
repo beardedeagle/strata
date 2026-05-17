@@ -15,6 +15,45 @@ use super::projection::{
 use crate::validation::{validate_count, validate_ident_field, validate_value_label};
 use crate::{Error, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result, TypeId};
 
+#[derive(Debug, Clone, Copy)]
+pub(in crate::artifact) struct ValueTemplatePayloadValidation {
+    expected_type: Option<TypeId>,
+    received_payload_type: Option<TypeId>,
+    current_state_payload_type: Option<TypeId>,
+    allow_direct_process_ref: bool,
+}
+
+impl ValueTemplatePayloadValidation {
+    pub(in crate::artifact) const fn new(
+        expected_type: Option<TypeId>,
+        received_payload_type: Option<TypeId>,
+        current_state_payload_type: Option<TypeId>,
+        allow_direct_process_ref: bool,
+    ) -> Self {
+        Self {
+            expected_type,
+            received_payload_type,
+            current_state_payload_type,
+            allow_direct_process_ref,
+        }
+    }
+
+    const fn nested(self) -> Self {
+        Self {
+            expected_type: None,
+            allow_direct_process_ref: false,
+            ..self
+        }
+    }
+
+    const fn with_expected_type(self, expected_type: Option<TypeId>) -> Self {
+        Self {
+            expected_type,
+            ..self
+        }
+    }
+}
+
 impl ArtifactValueTemplate {
     pub fn result_type(&self) -> TypeId {
         match self {
@@ -317,9 +356,7 @@ impl ArtifactValueTemplate {
         &self,
         artifact: &MantleArtifact,
         field: &str,
-        expected_type: Option<TypeId>,
-        received_payload_type: Option<TypeId>,
-        current_state_payload_type: Option<TypeId>,
+        validation: ValueTemplatePayloadValidation,
         depth: usize,
     ) -> Result<()> {
         if depth > MAX_VALUE_TEMPLATE_DEPTH {
@@ -328,7 +365,7 @@ impl ArtifactValueTemplate {
             )));
         }
         artifact.type_entry(self.result_type())?;
-        if let Some(expected_type) = expected_type {
+        if let Some(expected_type) = validation.expected_type {
             if self.result_type() != expected_type {
                 return Err(Error::new(format!(
                     "{field} has type id {}, expected {}",
@@ -340,7 +377,7 @@ impl ArtifactValueTemplate {
         match self {
             Self::Literal { ty, value } => artifact.validate_value_matches_type(field, *ty, value),
             Self::ReceivedPayload { ty } => {
-                let Some(received_payload_type) = received_payload_type else {
+                let Some(received_payload_type) = validation.received_payload_type else {
                     return Err(Error::new(format!(
                         "{field} requires a payload-bearing transition message"
                     )));
@@ -352,7 +389,7 @@ impl ArtifactValueTemplate {
                         received_payload_type.as_u32()
                     )));
                 }
-                if expected_type.is_none()
+                if !validation.allow_direct_process_ref
                     && matches!(
                         artifact.type_entry(*ty)?.kind,
                         ArtifactTypeKind::ProcessRef { .. }
@@ -365,7 +402,7 @@ impl ArtifactValueTemplate {
                 Ok(())
             }
             Self::CurrentStatePayload { ty } => {
-                let Some(current_state_payload_type) = current_state_payload_type else {
+                let Some(current_state_payload_type) = validation.current_state_payload_type else {
                     return Err(Error::new(format!(
                         "{field} requires a payload-bearing current state"
                     )));
@@ -375,6 +412,16 @@ impl ArtifactValueTemplate {
                         "{field} has current state payload type id {}, expected {}",
                         ty.as_u32(),
                         current_state_payload_type.as_u32()
+                    )));
+                }
+                if !validation.allow_direct_process_ref
+                    && matches!(
+                        artifact.type_entry(*ty)?.kind,
+                        ArtifactTypeKind::ProcessRef { .. }
+                    )
+                {
+                    return Err(Error::new(format!(
+                        "{field} process reference template must be a direct message payload"
                     )));
                 }
                 Ok(())
@@ -392,9 +439,7 @@ impl ArtifactValueTemplate {
                 value.validate_for_received_payload(
                     artifact,
                     &format!("{field}.value"),
-                    None,
-                    received_payload_type,
-                    current_state_payload_type,
+                    validation.nested(),
                     depth + 1,
                 )
             }
@@ -416,9 +461,7 @@ impl ArtifactValueTemplate {
                 record.validate_for_received_payload(
                     artifact,
                     &format!("{field}.record"),
-                    None,
-                    received_payload_type,
-                    current_state_payload_type,
+                    validation.nested(),
                     depth + 1,
                 )
             }
@@ -440,9 +483,7 @@ impl ArtifactValueTemplate {
                 list.validate_for_received_payload(
                     artifact,
                     &format!("{field}.list"),
-                    None,
-                    received_payload_type,
-                    current_state_payload_type,
+                    validation.nested(),
                     depth + 1,
                 )
             }
@@ -469,9 +510,7 @@ impl ArtifactValueTemplate {
                 list.validate_for_received_payload(
                     artifact,
                     &format!("{field}.list"),
-                    None,
-                    received_payload_type,
-                    current_state_payload_type,
+                    validation.nested(),
                     depth + 1,
                 )
             }
@@ -492,9 +531,7 @@ impl ArtifactValueTemplate {
                 list.validate_for_received_payload(
                     artifact,
                     &format!("{field}.list"),
-                    None,
-                    received_payload_type,
-                    current_state_payload_type,
+                    validation.nested(),
                     depth + 1,
                 )
             }
@@ -519,9 +556,7 @@ impl ArtifactValueTemplate {
                 map.validate_for_received_payload(
                     artifact,
                     &format!("{field}.map"),
-                    None,
-                    received_payload_type,
-                    current_state_payload_type,
+                    validation.nested(),
                     depth + 1,
                 )
             }
@@ -543,16 +578,14 @@ impl ArtifactValueTemplate {
                 map.validate_for_received_payload(
                     artifact,
                     &format!("{field}.map"),
-                    None,
-                    received_payload_type,
-                    current_state_payload_type,
+                    validation.nested(),
                     depth + 1,
                 )
             }
             Self::ProcessRef {
                 ty, target_process, ..
             } => {
-                if let Some(expected_type) = expected_type
+                if let Some(expected_type) = validation.expected_type
                     && *ty != expected_type
                 {
                     return Err(Error::new(format!(
@@ -561,7 +594,7 @@ impl ArtifactValueTemplate {
                         expected_type.as_u32()
                     )));
                 }
-                if expected_type.is_none() {
+                if !validation.allow_direct_process_ref {
                     return Err(Error::new(format!(
                         "{field} process reference template must be a direct message payload"
                     )));
@@ -591,9 +624,7 @@ impl ArtifactValueTemplate {
                 payload.validate_for_received_payload(
                     artifact,
                     &format!("{field}.payload"),
-                    None,
-                    received_payload_type,
-                    current_state_payload_type,
+                    validation.nested(),
                     depth + 1,
                 )
             }
@@ -622,9 +653,7 @@ impl ArtifactValueTemplate {
                     record_field.value.validate_for_received_payload(
                         artifact,
                         &format!("{field}.field.{}", record_field.name),
-                        Some(expected.ty),
-                        received_payload_type,
-                        current_state_payload_type,
+                        validation.nested().with_expected_type(Some(expected.ty)),
                         depth + 1,
                     )?;
                 }
@@ -650,9 +679,7 @@ impl ArtifactValueTemplate {
                     item.validate_for_received_payload(
                         artifact,
                         &format!("{field}.item.{index}"),
-                        Some(element),
-                        received_payload_type,
-                        current_state_payload_type,
+                        validation.nested().with_expected_type(Some(element)),
                         depth + 1,
                     )?;
                 }
@@ -685,9 +712,7 @@ impl ArtifactValueTemplate {
                     entry.key.validate_for_received_payload(
                         artifact,
                         &format!("{field}.entry.{index}.key"),
-                        Some(key_type),
-                        received_payload_type,
-                        current_state_payload_type,
+                        validation.nested().with_expected_type(Some(key_type)),
                         depth + 1,
                     )?;
                     let key = static_map_key_template_value(artifact, &entry.key)?;
@@ -701,9 +726,7 @@ impl ArtifactValueTemplate {
                     entry.value.validate_for_received_payload(
                         artifact,
                         &format!("{field}.entry.{index}.value"),
-                        Some(value_type),
-                        received_payload_type,
-                        current_state_payload_type,
+                        validation.nested().with_expected_type(Some(value_type)),
                         depth + 1,
                     )?;
                 }

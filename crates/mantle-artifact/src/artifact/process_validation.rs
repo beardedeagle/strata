@@ -1,3 +1,4 @@
+use super::value_template::ValueTemplatePayloadValidation;
 use super::*;
 
 type TransitionPayloadGuardKey = Option<(u32, ArtifactValue)>;
@@ -381,9 +382,12 @@ impl ArtifactProcess {
                         "process {} {} next_state_template",
                         self.debug_name, transition_context
                     ),
-                    Some(self.state_type),
-                    value_types.received_payload,
-                    value_types.current_state_payload_type(),
+                    ValueTemplatePayloadValidation::new(
+                        Some(self.state_type),
+                        value_types.received_payload,
+                        value_types.current_state_payload_type(),
+                        false,
+                    ),
                     0,
                 )?;
                 self.validate_static_next_state_template_value(artifact, transition, template)
@@ -648,9 +652,12 @@ impl ArtifactProcess {
                                 self.debug_name,
                                 transition.message.as_u32()
                             ),
-                            Some(*payload_type),
-                            received_payload_type,
-                            current_state_payload.map(|payload| payload.ty),
+                            ValueTemplatePayloadValidation::new(
+                                Some(*payload_type),
+                                received_payload_type,
+                                current_state_payload.map(|payload| payload.ty),
+                                !scope.inside_loop,
+                            ),
                             0,
                         )?;
                     }
@@ -781,9 +788,12 @@ impl ArtifactProcess {
                         self.debug_name,
                         transition.message.as_u32()
                     ),
-                    None,
-                    received_payload_type,
-                    current_state_payload.map(|payload| payload.ty),
+                    ValueTemplatePayloadValidation::new(
+                        None,
+                        received_payload_type,
+                        current_state_payload.map(|payload| payload.ty),
+                        false,
+                    ),
                     0,
                 )?;
                 if !collection.depends_on_received_payload() {
@@ -1108,9 +1118,12 @@ fn validate_bool_condition_template(
     condition.validate_for_received_payload(
         artifact,
         field,
-        Some(bool_type),
-        received_payload_type,
-        current_state_payload.map(|payload| payload.ty),
+        ValueTemplatePayloadValidation::new(
+            Some(bool_type),
+            received_payload_type,
+            current_state_payload.map(|payload| payload.ty),
+            false,
+        ),
         0,
     )?;
     validate_static_bool_condition_value(artifact, field, condition, current_state_payload)

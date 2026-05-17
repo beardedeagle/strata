@@ -45,6 +45,16 @@ execution, the artifact decoder and validator check:
 Decode-time bounds must happen before allocation when counts come from the
 artifact body.
 
+## Host Path Handling
+
+Artifact and trace paths are validated before host IO. On Unix targets, Mantle
+opens artifact and trace paths with descriptor-relative parent traversal and
+`O_NOFOLLOW` so symlink parents and final symlink leaves fail closed at open
+time. On non-Unix targets, Mantle rejects symbolic-link components during
+preflight and uses the strongest standard-library open flags available on that
+platform; this is a fail-closed validation policy, not a claim of Unix-equivalent
+descriptor-relative race resistance.
+
 ## Execution
 
 Mantle loads admitted transitions into indexed runtime tables. Before emitting

@@ -10,3 +10,4 @@ pub use model::{
     ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MapProjectionMode,
 };
 pub use payload::{ArtifactPayload, ArtifactProcessRefPayload};
+pub(in crate::artifact) use template::ValueTemplatePayloadValidation;

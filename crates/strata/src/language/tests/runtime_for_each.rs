@@ -329,6 +329,94 @@ fn runtime_for_each_rejects_process_ref_binding_inside_loop_body() {
 }
 
 #[test]
+fn runtime_for_each_rejects_direct_process_ref_payload_inside_loop_body() {
+    let source = r#"
+module loop_ref_payload;
+
+record MainState;
+record HubState;
+record SinkState;
+enum Bool { False, True }
+enum MainMsg { Start }
+enum WorkerState { Holding(List<Bool,2>) }
+enum WorkerMsg { Work(ProcessRef<Sink>) }
+enum HubMsg { Route(ProcessRef<Sink>) }
+enum SinkMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Work(sink);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Holding(List<Bool,2>[True, False]);
+    }
+
+    fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+        match state {
+            Holding(items: List<Bool,2>) => {
+                let hub: ProcessRef<Hub> = spawn Hub;
+                for item in items {
+                    send hub Route(reply_to);
+                }
+                return Stop(Holding(items));
+            }
+        }
+    }
+}
+
+proc Hub mailbox bounded(2) {
+    type State = HubState;
+    type Msg = HubMsg;
+
+    fn init() -> HubState ! [] ~ [] @det {
+        return HubState;
+    }
+
+    fn step(state: HubState, Route(reply_to: ProcessRef<Sink>)) -> ProcResult<HubState> ! [send] ~ [] @det {
+        send reply_to Done;
+        return Continue(state);
+    }
+}
+
+proc Sink mailbox bounded(2) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+}
+"#;
+    let error = check_source(source).expect_err("loop body must not forward direct process refs");
+    assert!(
+        error
+            .to_string()
+            .contains("process reference payload templates must be direct message payloads"),
+        "{error}"
+    );
+}
+
+#[test]
 fn runtime_for_each_rejects_loop_element_reassignment() {
     let source = RUNTIME_FOR_EACH.replace(
         "        for item in items {\n            send worker Branch(item);\n        }",

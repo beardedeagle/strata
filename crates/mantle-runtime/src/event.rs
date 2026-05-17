@@ -135,6 +135,12 @@ impl RuntimeBranchPathSegment {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeLoopContext {
+    pub element_id: LoopElementId,
+    pub index: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeEvent {
     ArtifactLoaded {
@@ -192,8 +198,7 @@ pub enum RuntimeEvent {
         branch: ArtifactBranch,
         scope: RuntimeBranchScope,
         branch_path: RuntimeBranchPath,
-        loop_element_id: Option<LoopElementId>,
-        loop_index: Option<usize>,
+        loop_context: Option<RuntimeLoopContext>,
         condition_type_id: mantle_artifact::TypeId,
         condition: String,
     },

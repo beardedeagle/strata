@@ -1285,6 +1285,109 @@ fn runtime_for_each_if_preflights_malformed_loop_bool_before_branch_effects() {
 }
 
 #[test]
+fn runtime_for_each_rejects_direct_process_ref_payload_before_build() {
+    let gate = GateHarness::new();
+    const STEM: &str = "runtime_for_each_ref_payload";
+    const ARTIFACT: &str = "target/strata/runtime_for_each_ref_payload.mta";
+    let source = gate.write_target_source(
+        STEM,
+        r#"
+module runtime_for_each_ref_payload;
+
+record MainState;
+record HubState;
+record SinkState;
+enum Bool { False, True }
+enum MainMsg { Start }
+enum WorkerState { Holding(List<Bool,2>) }
+enum WorkerMsg { Work(ProcessRef<Sink>) }
+enum HubMsg { Route(ProcessRef<Sink>) }
+enum SinkMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Work(sink);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Holding(List<Bool,2>[True, False]);
+    }
+
+    fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+        match state {
+            Holding(items: List<Bool,2>) => {
+                let hub: ProcessRef<Hub> = spawn Hub;
+                for item in items {
+                    send hub Route(reply_to);
+                }
+                return Stop(Holding(items));
+            }
+        }
+    }
+}
+
+proc Hub mailbox bounded(2) {
+    type State = HubState;
+    type Msg = HubMsg;
+
+    fn init() -> HubState ! [] ~ [] @det {
+        return HubState;
+    }
+
+    fn step(state: HubState, Route(reply_to: ProcessRef<Sink>)) -> ProcResult<HubState> ! [send] ~ [] @det {
+        send reply_to Done;
+        return Continue(state);
+    }
+}
+
+proc Sink mailbox bounded(2) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+}
+"#,
+    );
+    let source = source
+        .to_str()
+        .expect("target source path should be valid UTF-8");
+    gate.remove_artifact(ARTIFACT);
+
+    let check = gate.check_failure(source);
+    let stderr = String::from_utf8_lossy(&check.stderr);
+
+    assert!(
+        stderr.contains("process reference payload templates must be direct message payloads"),
+        "unexpected diagnostic\nstderr:\n{stderr}"
+    );
+    assert!(
+        !gate.root.join(ARTIFACT).exists(),
+        "source check failure must not create {ARTIFACT}"
+    );
+}
+
+#[test]
 fn runtime_for_each_empty_collection_runs_zero_body_iterations() {
     let gate = GateHarness::new();
     gate.remove_trace("runtime_for_each_empty");

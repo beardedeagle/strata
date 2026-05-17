@@ -333,6 +333,58 @@ fn artifact_round_trips_for_each_control_flow() {
 }
 
 #[test]
+fn admission_rejects_direct_process_ref_payload_inside_for_each_loop_body() {
+    let mut artifact = valid_artifact();
+    let job_list = append_list_type(&mut artifact, "JobList", JOB, 1);
+    artifact.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    artifact.processes[0].transitions[0].actions = vec![
+        ArtifactAction::Spawn {
+            target: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        },
+        ArtifactAction::Send {
+            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            message: MessageId::new(0),
+            payload: Some(ArtifactValueTemplate::ProcessRef {
+                ty: PROCESS_REF_WORKER,
+                target_process: ProcessId::new(1),
+                process_ref: ProcessRefId::new(0),
+            }),
+        },
+    ];
+    artifact.processes[1].transitions[0].effects = vec![ArtifactEffect::Send];
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::ForEach {
+        element: ArtifactLoopElement {
+            id: LoopElementId::new(0),
+            ty: JOB,
+        },
+        collection: ArtifactValueTemplate::Literal {
+            ty: job_list,
+            value: artifact_value("List[Ready]"),
+        },
+        max_items: 1,
+        body: vec![ArtifactAction::Send {
+            target: ArtifactSendTarget::ReceivedPayload {
+                ty: PROCESS_REF_WORKER,
+                target_process: ProcessId::new(1),
+            },
+            message: MessageId::new(0),
+            payload: Some(ArtifactValueTemplate::ReceivedPayload {
+                ty: PROCESS_REF_WORKER,
+            }),
+        }],
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("loop body direct process ref payload should fail admission");
+
+    assert!(err.to_string().contains(
+        "process Worker transition 0 send payload process reference template must be a direct message payload"
+    ));
+}
+
+#[test]
 fn admission_accepts_if_else_inside_for_each_loop_body() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);

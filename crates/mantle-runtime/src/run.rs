@@ -11,8 +11,8 @@ use templates::evaluate_runtime_template;
 
 use crate::event::{
     RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope, RuntimeEvent,
-    RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
-    RuntimeStepResult, RuntimeStopReason,
+    RuntimeEventRecord, RuntimeFailureReason, RuntimeLoopContext, RuntimeOutputStream,
+    RuntimeProcessId, RuntimeStepResult, RuntimeStopReason,
 };
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
@@ -714,8 +714,10 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             branch,
             scope,
             branch_path,
-            loop_element_id: loop_context.map(|element| element.id),
-            loop_index: loop_context.map(|element| element.index),
+            loop_context: loop_context.map(|element| RuntimeLoopContext {
+                element_id: element.id,
+                index: element.index,
+            }),
             condition_type_id: condition.ty,
             condition: condition.label().to_string(),
         })

@@ -127,8 +127,7 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             branch,
             scope,
             branch_path,
-            loop_element_id,
-            loop_index,
+            loop_context,
             condition_type_id,
             condition,
         } => format!(
@@ -141,7 +140,7 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             branch.as_str(),
             scope.as_str(),
             branch_path_json(branch_path),
-            loop_context_json(*loop_element_id, *loop_index),
+            loop_context_json(*loop_context),
             condition_type_id.as_u32(),
             json_escape(condition)
         ),
@@ -328,20 +327,16 @@ fn branch_path_json(path: &super::RuntimeBranchPath) -> String {
     json
 }
 
-fn loop_context_json(
-    element_id: Option<mantle_artifact::LoopElementId>,
-    index: Option<usize>,
-) -> String {
-    match (element_id, index) {
-        (Some(element_id), Some(index)) => {
+fn loop_context_json(context: Option<super::RuntimeLoopContext>) -> String {
+    match context {
+        Some(context) => {
             format!(
                 ",\"loop_element_id\":{},\"loop_index\":{}",
-                element_id.as_u32(),
-                index
+                context.element_id.as_u32(),
+                context.index
             )
         }
-        (None, None) => String::new(),
-        _ => String::new(),
+        None => String::new(),
     }
 }
 
@@ -369,10 +364,12 @@ fn payload_json(payload: &Option<crate::program::RuntimePayload>) -> String {
 #[cfg(test)]
 mod tests {
     use mantle_artifact::{
-        ARTIFACT_SCHEMA_VERSION, ArtifactBranch, MessageId, OutputId, ProcessId, TypeId,
+        ARTIFACT_SCHEMA_VERSION, ArtifactBranch, LoopElementId, MessageId, OutputId, ProcessId,
+        TypeId,
     };
 
     use super::*;
+    use crate::event::RuntimeLoopContext;
     use crate::{
         RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeOutputStream, RuntimeProcessId,
     };
@@ -426,8 +423,7 @@ mod tests {
             branch: ArtifactBranch::Then,
             scope: RuntimeBranchScope::Action,
             branch_path: RuntimeBranchPath::root(),
-            loop_element_id: None,
-            loop_index: None,
+            loop_context: None,
             condition_type_id: TypeId::new(1),
             condition: "True".to_string(),
         };
@@ -439,6 +435,31 @@ mod tests {
         assert!(line.contains(r#""scope":"action""#));
         assert!(line.contains(r#""branch_path":[]"#));
         assert!(line.contains(r#""condition_type_id":1"#));
+    }
+
+    #[test]
+    fn branch_selected_trace_includes_typed_loop_context() {
+        let event = RuntimeEvent::BranchSelected {
+            pid: RuntimeProcessId::FIRST,
+            process_id: ProcessId::new(2),
+            process: "Worker".to_string(),
+            message_id: MessageId::new(0),
+            message: "Branch".to_string(),
+            branch: ArtifactBranch::Else,
+            scope: RuntimeBranchScope::Action,
+            branch_path: RuntimeBranchPath::root(),
+            loop_context: Some(RuntimeLoopContext {
+                element_id: LoopElementId::new(3),
+                index: 5,
+            }),
+            condition_type_id: TypeId::new(1),
+            condition: "False".to_string(),
+        };
+
+        let line = encode_json_line(&event);
+
+        assert!(line.contains(r#""loop_element_id":3"#));
+        assert!(line.contains(r#""loop_index":5"#));
     }
 
     #[test]

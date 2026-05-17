@@ -532,6 +532,7 @@ fn validate_send_payload_shape(
             target_message.as_u32()
         ))),
         (Some(expected_type), Some(payload)) => {
+            let allow_direct_process_ref = active_loop_elements.is_empty();
             validate_value_template_binding_types(
                 payload,
                 current_payload_type,
@@ -543,7 +544,7 @@ fn validate_send_payload_shape(
                 process,
                 payload,
                 spawned_refs,
-                true,
+                allow_direct_process_ref,
             )?;
             validate_value_template_loop_elements(payload, active_loop_elements)?;
             if payload.result_type() != expected_type {
