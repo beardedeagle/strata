@@ -23,12 +23,12 @@ use super::ast::{
     Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
-    CheckedAction, CheckedEnumVariantId, CheckedMessageCase, CheckedMessageId,
-    CheckedMessageVariantId, CheckedNextState, CheckedPayloadValue, CheckedProcess,
-    CheckedProcessId, CheckedProcessParts, CheckedProcessRef, CheckedProcessRefId, CheckedProgram,
-    CheckedProgramParts, CheckedSendTarget, CheckedStateId, CheckedStepResult, CheckedTransition,
-    CheckedTransitionParts, CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
-    checked_action_count,
+    CheckedAction, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,
+    CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
+    CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef,
+    CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedSendTarget, CheckedStateId,
+    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeId, CheckedTypeKind,
+    CheckedTypeRef, CheckedValueTemplate, checked_action_count,
 };
 use super::diagnostic::{Error, Result};
 use super::{LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};

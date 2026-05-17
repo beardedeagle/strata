@@ -537,8 +537,38 @@ the step effect list, both branches must return the same step result, and state
 changes still occur only through immutable whole-value `Continue`, `Stop`, or
 `Panic` returns.
 
-This slice does not add comparison operators, arithmetic, loops, imports, or a
-standard library.
+This slice does not add comparison operators, arithmetic, unbounded loops,
+imports, or a standard library.
+
+## Runtime Iteration
+
+Step bodies can use a bounded runtime `for` loop over an immutable typed list
+binding:
+
+```strata
+fn step(state: BatchState, Batch(items: List<Bool,2>)) -> ProcResult<BatchState> ! [spawn, send] ~ [] @det {
+    let worker: ProcessRef<Worker> = spawn Worker;
+    for item in items {
+        send worker Branch(item);
+    }
+    return Stop(state);
+}
+```
+
+This is ordinary runtime iteration. The collection source must be an identifier
+binding that checks as `List<Element,N>` and remains runtime-bound, such as a
+message payload binding. Strata lowers the checked collection template, typed
+loop element ID, immutable element binding, maximum item count, and body actions
+into the Mantle artifact. Mantle admits the loop structure, validates the body,
+executes the body once per runtime element in collection order, enforces the
+collection length and runtime fuel limits, and records `loop_started`,
+`loop_iteration`, and `loop_completed` trace events.
+
+The loop element is immutable and may be used only as a typed value template in
+the loop body. The body is intentionally narrow in this slice: no nested loops,
+no `spawn`, no branch body, no `return`, no assignment, and no process-reference
+element type. Bind process references before the loop and declare every body
+effect in the enclosing step effect list.
 
 ## Statements
 
@@ -548,6 +578,7 @@ The accepted statements are:
 emit "text";
 let worker: ProcessRef<Worker> = spawn Worker;
 send worker Ping;
+for item in items { send worker Branch(item); }
 return Stop(state);
 return Continue(next_state);
 return Panic(failed_state);

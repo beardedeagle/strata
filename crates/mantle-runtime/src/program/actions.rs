@@ -24,6 +24,18 @@ pub(crate) enum LoadedAction {
         then_actions: Vec<LoadedAction>,
         else_actions: Vec<LoadedAction>,
     },
+    ForEach {
+        element: LoadedLoopElement,
+        collection: LoadedValueTemplate,
+        max_items: usize,
+        body: Vec<LoadedAction>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedLoopElement {
+    pub(crate) id: LoopElementId,
+    pub(crate) ty: TypeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +71,11 @@ impl LoadedAction {
                     action.collect_effects(effects);
                 }
             }
+            Self::ForEach { body, .. } => {
+                for action in body {
+                    action.collect_effects(effects);
+                }
+            }
         }
     }
 
@@ -82,6 +99,9 @@ impl LoadedAction {
                     .and_then(|count| count.checked_add(1))
                     .ok_or_else(|| Error::new("loaded action_count overflowed"))
             }
+            Self::ForEach { body, .. } => action_count_at_depth(body, depth + 1)?
+                .checked_add(1)
+                .ok_or_else(|| Error::new("loaded action_count overflowed")),
         }
     }
 
@@ -118,6 +138,23 @@ impl LoadedAction {
                     .map(LoadedAction::from_artifact)
                     .collect::<Result<Vec<_>>>()?,
                 else_actions: else_actions
+                    .iter()
+                    .map(LoadedAction::from_artifact)
+                    .collect::<Result<Vec<_>>>()?,
+            }),
+            ArtifactAction::ForEach {
+                element,
+                collection,
+                max_items,
+                body,
+            } => Ok(Self::ForEach {
+                element: LoadedLoopElement {
+                    id: element.id,
+                    ty: element.ty,
+                },
+                collection: LoadedValueTemplate::from_artifact(collection)?,
+                max_items: *max_items,
+                body: body
                     .iter()
                     .map(LoadedAction::from_artifact)
                     .collect::<Result<Vec<_>>>()?,
@@ -213,6 +250,7 @@ impl LoadedAction {
                             .payload_type,
                         current_state_payload_type,
                         allow_direct_process_ref: true,
+                        loop_elements: &[],
                         program,
                         process,
                         spawned_refs,
@@ -271,6 +309,146 @@ impl LoadedAction {
                     *spawned = *spawned || (then_spawned && else_spawned);
                 }
                 Ok(())
+            }
+            Self::ForEach {
+                element,
+                collection,
+                max_items,
+                body,
+            } => {
+                program.validate_value_type("for loop element type", element.ty)?;
+                if element.id.index() >= MAX_VALUE_TEMPLATE_FIELDS {
+                    return Err(Error::new(format!(
+                        "for loop element id {} must be no greater than {}",
+                        element.id.as_u32(),
+                        MAX_VALUE_TEMPLATE_FIELDS - 1
+                    )));
+                }
+                if *max_items > MAX_VALUE_TEMPLATE_FIELDS {
+                    return Err(Error::new(format!(
+                        "for loop max_items must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+                    )));
+                }
+                LoadedTemplateAdmission {
+                    expected_type: None,
+                    received_payload_type: process.message_variants[message.index()].payload_type,
+                    current_state_payload_type,
+                    allow_direct_process_ref: false,
+                    loop_elements: &[],
+                    program,
+                    process,
+                    spawned_refs,
+                }
+                .validate(
+                    &format!(
+                        "process {} transition {} for collection",
+                        process.debug_name,
+                        message.as_u32()
+                    ),
+                    collection,
+                )?;
+                let active = [element.clone()];
+                for action in body {
+                    if matches!(action, Self::Spawn { .. }) {
+                        return Err(Error::new(format!(
+                            "process {} transition {} for loop body cannot bind process references",
+                            process.debug_name,
+                            message.as_u32()
+                        )));
+                    }
+                    action.validate_loop_body_admission(
+                        program,
+                        process,
+                        message,
+                        current_state_payload,
+                        spawned_refs,
+                        &active,
+                    )?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn validate_loop_body_admission(
+        &self,
+        program: &LoadedProgram,
+        process: &LoadedProcess,
+        message: MessageId,
+        current_state_payload: Option<&RuntimePayload>,
+        spawned_refs: &mut [bool],
+        loop_elements: &[LoadedLoopElement],
+    ) -> Result<()> {
+        let current_state_payload_type = current_state_payload.map(|payload| payload.ty);
+        match self {
+            Self::Spawn { .. } | Self::ForEach { .. } | Self::IfElse { .. } => {
+                Err(Error::new(format!(
+                    "process {} transition {} for loop body supports only linear effects in this artifact slice",
+                    process.debug_name,
+                    message.as_u32()
+                )))
+            }
+            Self::Emit { .. } => self.validate_admission(
+                program,
+                process,
+                message,
+                current_state_payload,
+                spawned_refs,
+            ),
+            Self::Send {
+                target,
+                message: sent_message,
+                payload,
+            } => {
+                let target_process_id =
+                    target.validate_admission(program, process, message, spawned_refs)?;
+                let target_process = program.process(target_process_id)?;
+                let target_message =
+                    target_process.message_variants.get(sent_message.index()).ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} transition {} sends message id {} not loaded by process id {}",
+                            process.debug_name,
+                            message.as_u32(),
+                            sent_message.as_u32(),
+                            target_process_id.as_u32()
+                        ))
+                    })?;
+                match (target_message.payload_type, payload) {
+                    (None, None) => Ok(()),
+                    (Some(payload_type), Some(payload)) => LoadedTemplateAdmission {
+                        expected_type: Some(payload_type),
+                        received_payload_type: process.message_variants[message.index()]
+                            .payload_type,
+                        current_state_payload_type,
+                        allow_direct_process_ref: false,
+                        loop_elements,
+                        program,
+                        process,
+                        spawned_refs,
+                    }
+                    .validate(
+                        &format!(
+                            "process {} transition {} send payload",
+                            process.debug_name,
+                            message.as_u32()
+                        ),
+                        payload,
+                    ),
+                    (None, Some(_)) => Err(Error::new(format!(
+                        "process {} transition {} sends payload to process id {} message id {}, which does not accept one",
+                        process.debug_name,
+                        message.as_u32(),
+                        target_process_id.as_u32(),
+                        sent_message.as_u32()
+                    ))),
+                    (Some(_), None) => Err(Error::new(format!(
+                        "process {} transition {} sends process id {} message id {} without required payload",
+                        process.debug_name,
+                        message.as_u32(),
+                        target_process_id.as_u32(),
+                        sent_message.as_u32()
+                    ))),
+                }
             }
         }
     }

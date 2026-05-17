@@ -202,13 +202,7 @@ fn runtime_rejects_unspawned_process_ref_payload() {
         vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)];
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(
-        &program,
-        &mut host,
-        DEFAULT_MAX_RUNTIME_PROCESSES,
-        DEFAULT_MAX_TRACE_BYTES,
-        DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
-    );
+    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(ProcessId::new(0), None)
         .expect("entry process should spawn");
@@ -247,13 +241,7 @@ fn runtime_rejects_process_ref_payload_target_type_mismatch() {
         vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)];
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(
-        &program,
-        &mut host,
-        DEFAULT_MAX_RUNTIME_PROCESSES,
-        DEFAULT_MAX_TRACE_BYTES,
-        DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
-    );
+    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(ProcessId::new(0), None)
         .expect("entry process should spawn");
@@ -319,6 +307,7 @@ fn runtime_rejects_oversized_record_payload_template_value() {
         Some(&received),
         &step,
         &BTreeMap::new(),
+        &[],
     )
     .expect_err("oversized record payload labels should fail closed");
 

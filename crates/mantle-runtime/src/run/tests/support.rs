@@ -1,10 +1,7 @@
 pub(super) use super::super::model::RuntimeMessageEnvelope;
 pub(super) use super::super::*;
 pub(super) use crate::host::InMemoryRuntimeHost;
-pub(super) use crate::limits::{
-    DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES,
-    RunLimits,
-};
+pub(super) use crate::limits::RunLimits;
 pub(super) use crate::program::{
     LoadedNextState, LoadedProgram, LoadedValueTemplate, RuntimePayload, RuntimeValue,
 };

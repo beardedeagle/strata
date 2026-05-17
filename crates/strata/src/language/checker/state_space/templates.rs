@@ -7,8 +7,8 @@ use super::super::super::ast::{
     Identifier, ListValue, MapValue, Module, Record, TypeRef, ValueExpr,
 };
 use super::super::super::checked::{
-    CheckedEnumVariantId, CheckedPayloadValue, CheckedTypeRef, CheckedValueTemplate,
-    CheckedValueTemplateField, CheckedValueTemplateMapEntry,
+    CheckedEnumVariantId, CheckedLoopElementId, CheckedPayloadValue, CheckedTypeRef,
+    CheckedValueTemplate, CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::CheckedTypeInterner;
@@ -30,6 +30,7 @@ pub(in crate::language::checker) struct ValueTemplateBinding<'a> {
 pub(in crate::language::checker) enum ValueTemplateSource {
     ReceivedPayload,
     CurrentStatePayload,
+    LoopElement(CheckedLoopElementId),
 }
 
 pub(in crate::language::checker) fn checked_value_template_with_binding(
@@ -152,6 +153,10 @@ fn checked_binding_value_template(
         },
         ValueTemplateSource::CurrentStatePayload => CheckedValueTemplate::CurrentStatePayload {
             ty: binding.root_checked_ty.clone(),
+        },
+        ValueTemplateSource::LoopElement(element) => CheckedValueTemplate::LoopElement {
+            ty: binding.root_checked_ty.clone(),
+            element,
         },
     };
     for segment in binding.path.segments() {
@@ -519,7 +524,8 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         | CheckedValueTemplate::ListRest { .. }
         | CheckedValueTemplate::MapValue { .. }
         | CheckedValueTemplate::MapRest { .. }
-        | CheckedValueTemplate::ProcessRef { .. } => None,
+        | CheckedValueTemplate::ProcessRef { .. }
+        | CheckedValueTemplate::LoopElement { .. } => None,
         CheckedValueTemplate::EnumVariant {
             ty,
             variant,

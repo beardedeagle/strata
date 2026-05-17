@@ -39,23 +39,26 @@ Read them in this order:
    bindings in actor step parameter patterns.
 21. `runtime_if_else.str` for Mantle-backed runtime branching over a message
    payload.
-22. `actor_payload_match.str` for the same payload binding through a whole-body
+22. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+   typed list payload.
+23. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+24. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-23. `actor_payload_split_match.str` for payload-sensitive same-message
+25. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-24. `actor_payload_split_signature.str` for payload-sensitive same-message
+26. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-25. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+27. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-26. `actor_payload_state_match_split.str` for payload-sensitive same-message
+28. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-27. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+29. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-28. `nested_patterns.str` for nested immutable constructor, record, list, and
+30. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-29. `actor_reply.str` for transporting typed process references through message
+31. `actor_reply.str` for transporting typed process references through message
    payloads.
-30. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+32. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -504,6 +507,39 @@ Key source ideas:
 - `if (flag) { ... } else { ... }` lowers to Mantle branch control flow.
 - Each branch emits its own declared output and returns a whole immutable state.
 - The runtime trace records `branch_selected` for both `then` and `else` paths.
+
+## Runtime For Each
+
+`examples/runtime_for_each.str` iterates inside `BatchWorker.step` over a
+received `List<Bool,2>` payload. The loop is not unrolled or selected by Strata
+during checking; it lowers as typed Mantle loop control flow and executes once
+per runtime element.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_for_each.str
+cargo run -p strata --bin strata -- build examples/runtime_for_each.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta
+```
+
+`examples/runtime_for_each_empty.str` uses the same shape with
+`List<Bool,0>[]` and proves that Mantle records loop start/completion without
+executing the body.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_for_each_empty.str
+cargo run -p strata --bin strata -- build examples/runtime_for_each_empty.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_empty.mta
+```
+
+Key source ideas:
+
+- `for item in items { ... }` requires `items` to be a typed runtime list
+  binding.
+- `item` is an immutable per-iteration value binding lowered to a typed loop
+  element ID.
+- The loop body sends `Branch(item)` in collection order.
+- The runtime trace records `loop_started`, one `loop_iteration` per item, and
+  `loop_completed`.
 
 ## Actor Payload Match
 

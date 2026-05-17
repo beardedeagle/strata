@@ -60,6 +60,15 @@ cargo run -p strata --bin strata -- build examples/state_payload_match.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta
 ```
 
+A runtime control-flow gate checks, builds, admits, runs, and traces typed
+Mantle execution:
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_for_each.str
+cargo run -p strata --bin strata -- build examples/runtime_for_each.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta
+```
+
 A source rejection gate must fail during checking and must not create a target
 artifact:
 

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-pub(crate) use actions::{LoadedAction, LoadedSendTarget};
+pub(crate) use actions::{LoadedAction, LoadedLoopElement, LoadedSendTarget};
 use admission::{
     validate_loaded_artifact_identity, validate_loaded_ident_field, validate_loaded_output_text,
 };
@@ -26,7 +26,7 @@ mod values;
 use mantle_artifact::{
     ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
     ArtifactSendTarget, ArtifactTransition, ArtifactType, ArtifactTypeKind, EnumVariantId, Error,
-    MAX_ACTIONS_PER_PROCESS, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
+    LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
     MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
@@ -820,6 +820,7 @@ impl LoadedTransition {
                     received_payload_type: value_types.received_payload,
                     current_state_payload_type: value_types.current_state_payload_type(),
                     allow_direct_process_ref: false,
+                    loop_elements: &[],
                     program,
                     process,
                     spawned_refs: &[],

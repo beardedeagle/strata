@@ -682,6 +682,9 @@ impl Parser {
                 self.error_here("match body must be the whole function body in this source slice")
             );
         }
+        if self.peek_keyword("for") {
+            return self.parse_for_each_statement();
+        }
         if self.peek_keyword("emit") {
             self.expect_keyword("emit")?;
             let text = self.expect_string_literal()?;
@@ -717,7 +720,46 @@ impl Parser {
                 payload,
             });
         }
+        if self.peek_ident_followed_by_symbol('=') {
+            return Err(self.error_here(
+                "assignment statements are not supported; Strata source bindings are immutable",
+            ));
+        }
         Err(self.error_here("expected emit, let, send, or return statement"))
+    }
+
+    fn parse_for_each_statement(&mut self) -> Result<Statement> {
+        self.expect_keyword("for")?;
+        let item = self.expect_identifier()?;
+        self.expect_keyword("in")?;
+        let collection_name = self.expect_identifier()?;
+        if !self.peek_symbol('{') {
+            return Err(self.error_here(
+                "for loop collection must be an identifier binding in this source slice",
+            ));
+        }
+        let collection = ValueExpr::Identifier(collection_name);
+        self.expect_symbol('{')?;
+        let mut body = Vec::new();
+        while !self.peek_symbol('}') {
+            if self.peek_keyword("return") || self.peek_keyword("if") {
+                return Err(
+                    self.error_here("for loop bodies are statement-only in this source slice")
+                );
+            }
+            if self.peek_keyword("for") {
+                return Err(
+                    self.error_here("nested for loops are not supported in this source slice")
+                );
+            }
+            body.push(self.parse_function_statement()?);
+        }
+        self.expect_symbol('}')?;
+        Ok(Statement::ForEach {
+            item,
+            collection,
+            body,
+        })
     }
 
     fn parse_return_if_else_expr(&mut self) -> Result<ReturnExpr> {
@@ -1161,6 +1203,14 @@ impl Parser {
 
     fn peek_symbol(&self, symbol: char) -> bool {
         matches!(self.peek_kind(), TokenKind::Symbol(value) if *value == symbol)
+    }
+
+    fn peek_ident_followed_by_symbol(&self, symbol: char) -> bool {
+        matches!(self.peek_kind(), TokenKind::Ident(_))
+            && matches!(
+                self.tokens.get(self.index + 1).map(|token| &token.kind),
+                Some(TokenKind::Symbol(value)) if *value == symbol
+            )
     }
 
     fn advance(&mut self) {

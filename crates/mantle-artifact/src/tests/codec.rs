@@ -171,6 +171,210 @@ fn artifact_round_trips_if_else_control_flow() {
 }
 
 #[test]
+fn artifact_round_trips_for_each_control_flow() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants[0].payload_type = Some(JOB);
+    artifact.processes[0].transitions[0].actions = vec![
+        ArtifactAction::Spawn {
+            target: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        },
+        ArtifactAction::ForEach {
+            element: ArtifactLoopElement {
+                id: LoopElementId::new(0),
+                ty: JOB,
+            },
+            collection: ArtifactValueTemplate::Literal {
+                ty: JOB,
+                value: artifact_value("List[Ready,Done]"),
+            },
+            max_items: 2,
+            body: vec![ArtifactAction::Send {
+                target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                message: MessageId::new(0),
+                payload: Some(ArtifactValueTemplate::LoopElement {
+                    ty: JOB,
+                    element: LoopElementId::new(0),
+                }),
+            }],
+        },
+    ];
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("for_each artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains("process.0.transition.0.action.1.kind=for_each"));
+    assert!(encoded.contains("process.0.transition.0.action.1.loop_element=0"));
+    assert!(encoded.contains("process.0.transition.0.action.1.collection.kind=literal"));
+    assert!(encoded.contains("process.0.transition.0.action.1.body_action.0.kind=send"));
+    assert!(encoded.contains(
+        "process.0.transition.0.action.1.body_action.0.payload_template.kind=loop_element"
+    ));
+}
+
+#[test]
+fn decode_rejects_missing_for_each_body_action() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants[0].payload_type = Some(JOB);
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
+        element: ArtifactLoopElement {
+            id: LoopElementId::new(0),
+            ty: JOB,
+        },
+        collection: ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("List[Ready]"),
+        },
+        max_items: 1,
+        body: vec![ArtifactAction::Send {
+            target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            message: MessageId::new(0),
+            payload: Some(ArtifactValueTemplate::LoopElement {
+                ty: JOB,
+                element: LoopElementId::new(0),
+            }),
+        }],
+    }];
+    let encoded = artifact.encode().replace(
+        "process.0.transition.0.action.0.body_action.0.kind=send\n",
+        "",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("missing loop body action should fail");
+
+    assert!(
+        err.to_string()
+            .contains("missing artifact field process.0.transition.0.action.0.body_action.0.kind")
+    );
+}
+
+#[test]
+fn admission_rejects_inactive_for_each_loop_element_payload() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants[0].payload_type = Some(JOB);
+    artifact.processes[0].transitions[0].actions = vec![
+        ArtifactAction::Spawn {
+            target: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        },
+        ArtifactAction::ForEach {
+            element: ArtifactLoopElement {
+                id: LoopElementId::new(0),
+                ty: JOB,
+            },
+            collection: ArtifactValueTemplate::Literal {
+                ty: JOB,
+                value: artifact_value("List[Ready]"),
+            },
+            max_items: 1,
+            body: vec![ArtifactAction::Send {
+                target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                message: MessageId::new(0),
+                payload: Some(ArtifactValueTemplate::LoopElement {
+                    ty: JOB,
+                    element: LoopElementId::new(1),
+                }),
+            }],
+        },
+    ];
+
+    let err = artifact
+        .validate()
+        .expect_err("inactive loop element should fail admission");
+
+    assert!(
+        err.to_string()
+            .contains("references inactive loop element id 1"),
+        "{err}"
+    );
+}
+
+#[test]
+fn admission_rejects_static_for_each_non_list_collection() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].effects = Vec::new();
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
+        element: ArtifactLoopElement {
+            id: LoopElementId::new(0),
+            ty: JOB,
+        },
+        collection: ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("Ready"),
+        },
+        max_items: 1,
+        body: Vec::new(),
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("static non-list for_each collection should fail admission");
+
+    assert!(
+        err.to_string()
+            .contains("process Main transition 0 for collection must evaluate to a list value"),
+        "{err}"
+    );
+}
+
+#[test]
+fn admission_rejects_for_each_process_ref_element_type() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].effects = Vec::new();
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
+        element: ArtifactLoopElement {
+            id: LoopElementId::new(0),
+            ty: PROCESS_REF_WORKER,
+        },
+        collection: ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("List[Ready]"),
+        },
+        max_items: 1,
+        body: Vec::new(),
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("process-ref for_each element should fail admission");
+
+    assert!(
+        err.to_string()
+            .contains("artifact field for loop element type type id 9 must be a value type"),
+        "{err}"
+    );
+}
+
+#[test]
+fn admission_rejects_for_each_loop_element_id_above_codec_bound() {
+    let mut artifact = valid_artifact();
+    artifact.processes[0].transitions[0].effects = Vec::new();
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
+        element: ArtifactLoopElement {
+            id: LoopElementId::new(MAX_VALUE_TEMPLATE_FIELDS as u32),
+            ty: JOB,
+        },
+        collection: ArtifactValueTemplate::Literal {
+            ty: JOB,
+            value: artifact_value("List[Ready]"),
+        },
+        max_items: 1,
+        body: Vec::new(),
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("loop element ids above the codec bound should fail admission");
+
+    assert!(
+        err.to_string()
+            .contains("for loop element id must be no greater than"),
+        "{err}"
+    );
+}
+
+#[test]
 fn decode_rejects_missing_if_else_next_state_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);

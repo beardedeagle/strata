@@ -1,4 +1,4 @@
-use crate::{EnumVariantId, ProcessId, ProcessRefId, TypeId};
+use crate::{EnumVariantId, LoopElementId, ProcessId, ProcessRefId, TypeId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ArtifactRecordField {
@@ -92,6 +92,10 @@ pub enum ArtifactValueTemplate {
         ty: TypeId,
         target_process: ProcessId,
         process_ref: ProcessRefId,
+    },
+    LoopElement {
+        ty: TypeId,
+        element: LoopElementId,
     },
     EnumVariant {
         ty: TypeId,

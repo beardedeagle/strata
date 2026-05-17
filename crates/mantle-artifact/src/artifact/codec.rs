@@ -507,6 +507,13 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
                 process_ref.as_u32()
             ));
         }
+        ArtifactValueTemplate::LoopElement { ty, element } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=loop_element\n{prefix}.type_id={}\n{prefix}.loop_element={}\n",
+                ty.as_u32(),
+                element.as_u32()
+            ));
+        }
         ArtifactValueTemplate::EnumVariant {
             ty,
             variant,
@@ -771,6 +778,10 @@ fn decode_value_template(
             target_process: fields.take_process_id(&format!("{prefix}.target_process"))?,
             process_ref: fields.take_process_ref_id(&format!("{prefix}.process_ref"))?,
         }),
+        "loop_element" => Ok(ArtifactValueTemplate::LoopElement {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            element: fields.take_loop_element_id(&format!("{prefix}.loop_element"))?,
+        }),
         "enum_variant" => Ok(ArtifactValueTemplate::EnumVariant {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
             variant: fields.take_enum_variant_id(&format!("{prefix}.variant_id"))?,
@@ -918,6 +929,30 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
                 );
             }
         }
+        ArtifactAction::ForEach {
+            element,
+            collection,
+            max_items,
+            body,
+        } => {
+            encoded.push_str(&format!(
+                "{action_prefix}.kind=for_each\n{action_prefix}.loop_element={}\n{action_prefix}.element_type_id={}\n{action_prefix}.max_items={max_items}\n",
+                element.id.as_u32(),
+                element.ty.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{action_prefix}.collection"), collection);
+            encoded.push_str(&format!(
+                "{action_prefix}.body_action_count={}\n",
+                body.len()
+            ));
+            for (action_index, action) in body.iter().enumerate() {
+                encode_action(
+                    encoded,
+                    &format!("{action_prefix}.body_action.{action_index}"),
+                    action,
+                );
+            }
+        }
     }
 }
 
@@ -1031,6 +1066,38 @@ fn decode_action(
                 condition,
                 then_actions,
                 else_actions,
+            })
+        }
+        "for_each" => {
+            let body_action_count = fields.take_bounded_usize(
+                &format!("{action_prefix}.body_action_count"),
+                0,
+                MAX_ACTIONS_PER_PROCESS,
+            )?;
+            let mut body = Vec::with_capacity(body_action_count);
+            for action_index in 0..body_action_count {
+                body.push(decode_action(
+                    fields,
+                    &format!("{action_prefix}.body_action.{action_index}"),
+                    depth + 1,
+                )?);
+            }
+            Ok(ArtifactAction::ForEach {
+                element: ArtifactLoopElement {
+                    id: fields.take_loop_element_id(&format!("{action_prefix}.loop_element"))?,
+                    ty: fields.take_type_id(&format!("{action_prefix}.element_type_id"))?,
+                },
+                collection: decode_value_template(
+                    fields,
+                    &format!("{action_prefix}.collection"),
+                    0,
+                )?,
+                max_items: fields.take_bounded_usize(
+                    &format!("{action_prefix}.max_items"),
+                    0,
+                    MAX_VALUE_TEMPLATE_FIELDS,
+                )?,
+                body,
             })
         }
         _ => Err(Error::new(format!("invalid artifact action kind {kind:?}"))),

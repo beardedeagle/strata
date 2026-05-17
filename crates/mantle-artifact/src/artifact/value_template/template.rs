@@ -23,6 +23,7 @@ impl ArtifactValueTemplate {
             | Self::MapValue { ty, .. }
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
+            | Self::LoopElement { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
@@ -169,6 +170,9 @@ impl ArtifactValueTemplate {
             Self::ProcessRef { .. } => Err(Error::new(
                 "process reference template requires runtime process reference bindings",
             )),
+            Self::LoopElement { .. } => Err(Error::new(
+                "loop element template requires runtime loop element bindings",
+            )),
             Self::EnumVariant {
                 ty,
                 variant,
@@ -284,6 +288,7 @@ impl ArtifactValueTemplate {
             Self::MapValue { map, .. } => map.depends_on_received_payload(),
             Self::MapRest { map, .. } => map.depends_on_received_payload(),
             Self::ProcessRef { .. } => false,
+            Self::LoopElement { .. } => false,
             Self::EnumVariant { payload, .. } => payload.depends_on_received_payload(),
             Self::Record { fields, .. } => fields
                 .iter()
@@ -517,6 +522,9 @@ impl ArtifactValueTemplate {
                     *target_process,
                 )
             }
+            Self::LoopElement { ty, .. } => {
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)
+            }
             Self::EnumVariant {
                 ty,
                 variant,
@@ -676,7 +684,8 @@ fn is_static_map_key_template(template: &ArtifactValueTemplate) -> bool {
         | ArtifactValueTemplate::ListRest { .. }
         | ArtifactValueTemplate::MapValue { .. }
         | ArtifactValueTemplate::MapRest { .. }
-        | ArtifactValueTemplate::ProcessRef { .. } => false,
+        | ArtifactValueTemplate::ProcessRef { .. }
+        | ArtifactValueTemplate::LoopElement { .. } => false,
         ArtifactValueTemplate::EnumVariant { payload, .. } => is_static_map_key_template(payload),
         ArtifactValueTemplate::Record { fields, .. } => fields
             .iter()

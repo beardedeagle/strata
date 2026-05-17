@@ -34,6 +34,7 @@ define_checked_id!(CheckedMessageId);
 define_checked_id!(CheckedOutputId);
 define_checked_id!(CheckedTypeId);
 define_checked_id!(CheckedEnumVariantId);
+define_checked_id!(CheckedLoopElementId);
 
 impl CheckedProcessId {
     pub(in crate::language) fn index(self) -> usize {
@@ -394,6 +395,10 @@ pub(in crate::language) enum CheckedValueTemplate {
         target: CheckedProcessId,
         process_ref: CheckedProcessRefId,
     },
+    LoopElement {
+        ty: CheckedTypeRef,
+        element: CheckedLoopElementId,
+    },
     EnumVariant {
         ty: CheckedTypeRef,
         variant: CheckedEnumVariantId,
@@ -427,6 +432,7 @@ impl CheckedValueTemplate {
             | Self::MapValue { ty, .. }
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
+            | Self::LoopElement { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
@@ -548,6 +554,12 @@ pub(in crate::language) enum CheckedAction {
         then_actions: Vec<CheckedAction>,
         else_actions: Vec<CheckedAction>,
     },
+    ForEach {
+        element: CheckedLoopElement,
+        collection: CheckedValueTemplate,
+        max_items: usize,
+        body: Vec<CheckedAction>,
+    },
 }
 
 impl CheckedAction {
@@ -574,6 +586,11 @@ impl CheckedAction {
                     action.collect_effects(effects);
                 }
             }
+            Self::ForEach { body, .. } => {
+                for action in body {
+                    action.collect_effects(effects);
+                }
+            }
         }
     }
 
@@ -592,7 +609,30 @@ impl CheckedAction {
                     .and_then(|count| count.checked_add(1))
                     .ok_or_else(|| Error::new("checked action_count overflowed"))
             }
+            Self::ForEach { body, .. } => checked_action_count(body)?
+                .checked_add(1)
+                .ok_or_else(|| Error::new("checked action_count overflowed")),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedLoopElement {
+    id: CheckedLoopElementId,
+    ty: CheckedTypeRef,
+}
+
+impl CheckedLoopElement {
+    pub(in crate::language) fn new(id: CheckedLoopElementId, ty: CheckedTypeRef) -> Self {
+        Self { id, ty }
+    }
+
+    pub(in crate::language) fn id(&self) -> CheckedLoopElementId {
+        self.id
+    }
+
+    pub(in crate::language) fn ty(&self) -> &CheckedTypeRef {
+        &self.ty
     }
 }
 

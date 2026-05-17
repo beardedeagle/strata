@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use crate::artifact::StepResult;
 use crate::validation::validate_count;
 use crate::{
-    ARTIFACT_MAGIC, EnumVariantId, Error, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FIELDS,
+    ARTIFACT_MAGIC, EnumVariantId, Error, LoopElementId, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FIELDS,
     MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES, MAX_MESSAGE_VARIANTS_PER_PROCESS,
     MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT, MessageId, OutputId, ProcessId, ProcessRefId,
-    Result, StateId, TypeId,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId,
+    ProcessId, ProcessRefId, Result, StateId, TypeId,
 };
 
 pub(crate) struct ArtifactFields {
@@ -125,6 +125,10 @@ impl ArtifactFields {
             0,
             MAX_ENUM_VARIANTS_PER_TYPE - 1,
         )?)
+    }
+
+    pub(crate) fn take_loop_element_id(&mut self, key: &str) -> Result<LoopElementId> {
+        LoopElementId::from_index(self.take_bounded_usize(key, 0, MAX_VALUE_TEMPLATE_FIELDS - 1)?)
     }
 
     pub(crate) fn take_optional_type_id(&mut self, key: &str) -> Result<Option<TypeId>> {

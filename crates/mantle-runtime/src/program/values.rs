@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use mantle_artifact::{
     ArtifactPayload, ArtifactProcessRefPayload, ArtifactStateValue, ArtifactValue,
-    ArtifactValueTemplate, ArtifactValueTemplateMapEntry, EnumVariantId, Error,
+    ArtifactValueTemplate, ArtifactValueTemplateMapEntry, EnumVariantId, Error, LoopElementId,
     MAX_VALUE_TEMPLATE_FIELDS, MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
     validate_state_value_identity_label,
 };
@@ -224,6 +224,10 @@ pub(crate) enum LoadedValueTemplate {
         target_process: ProcessId,
         process_ref: ProcessRefId,
     },
+    LoopElement {
+        ty: TypeId,
+        element: LoopElementId,
+    },
     EnumVariant {
         ty: TypeId,
         variant: EnumVariantId,
@@ -346,6 +350,10 @@ impl LoadedValueTemplate {
                 target_process: *target_process,
                 process_ref: *process_ref,
             }),
+            ArtifactValueTemplate::LoopElement { ty, element } => Ok(Self::LoopElement {
+                ty: *ty,
+                element: *element,
+            }),
             ArtifactValueTemplate::EnumVariant {
                 ty,
                 variant,
@@ -392,6 +400,7 @@ impl LoadedValueTemplate {
             | Self::MapValue { ty, .. }
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
+            | Self::LoopElement { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }

@@ -6,12 +6,12 @@ pub(super) use super::super::validate_action_references;
 pub(super) use crate::language::STATIC_RUNTIME_PROCESS_LIMIT;
 pub(super) use crate::language::ast::{Effect, Identifier};
 pub(super) use crate::language::checked::{
-    CheckedAction, CheckedEnumVariantId, CheckedMessageCase, CheckedMessageId,
-    CheckedMessageVariantId, CheckedNextState, CheckedOutputId, CheckedPayloadValue,
-    CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef, CheckedProcessRefId,
-    CheckedSendTarget, CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition,
-    CheckedTransitionParts, CheckedTypeRef, CheckedValueTemplate, CheckedValueTemplateField,
-    CheckedValueTemplateMapEntry,
+    CheckedAction, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,
+    CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
+    CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts,
+    CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStateValue,
+    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeRef,
+    CheckedValueTemplate, CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
 pub(super) use mantle_artifact::ArtifactValue;
 

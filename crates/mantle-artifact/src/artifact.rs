@@ -17,7 +17,7 @@ pub use value_template::{
 };
 
 use crate::{
-    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, EnumVariantId, Error,
+    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, EnumVariantId, Error, LoopElementId,
     MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE,
     MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
@@ -494,6 +494,12 @@ pub struct ArtifactTransition {
     pub actions: Vec<ArtifactAction>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactLoopElement {
+    pub id: LoopElementId,
+    pub ty: TypeId,
+}
+
 impl ArtifactTransition {
     fn transition_context(&self) -> String {
         match self.current_state {
@@ -560,6 +566,12 @@ pub enum ArtifactAction {
         then_actions: Vec<ArtifactAction>,
         else_actions: Vec<ArtifactAction>,
     },
+    ForEach {
+        element: ArtifactLoopElement,
+        collection: ArtifactValueTemplate,
+        max_items: usize,
+        body: Vec<ArtifactAction>,
+    },
 }
 
 impl ArtifactAction {
@@ -586,6 +598,11 @@ impl ArtifactAction {
                     action.collect_effects(effects);
                 }
             }
+            Self::ForEach { body, .. } => {
+                for action in body {
+                    action.collect_effects(effects);
+                }
+            }
         }
     }
 
@@ -609,6 +626,9 @@ impl ArtifactAction {
                     .and_then(|count| count.checked_add(1))
                     .ok_or_else(|| Error::new("artifact action_count overflowed"))
             }
+            Self::ForEach { body, .. } => action_count_at_depth(body, depth + 1)?
+                .checked_add(1)
+                .ok_or_else(|| Error::new("artifact action_count overflowed")),
         }
     }
 }

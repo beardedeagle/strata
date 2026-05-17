@@ -247,6 +247,7 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
                 &step,
                 &action,
                 BranchDecisionPath::root(),
+                &[],
             )
             .expect_err("stopped target should reject before payload template evaluation");
 
@@ -287,6 +288,7 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
                 &step,
                 &action,
                 BranchDecisionPath::root(),
+                &[],
             )
             .expect_err("failed target should reject before payload template evaluation");
 
@@ -333,6 +335,7 @@ fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation()
                 &step,
                 &action,
                 BranchDecisionPath::root(),
+                &[],
             )
             .expect_err("full mailbox should reject before payload template evaluation");
 
@@ -529,13 +532,7 @@ fn new_test_run<'program, 'host>(
     program: &'program LoadedProgram,
     host: &'host mut InMemoryRuntimeHost,
 ) -> RuntimeRun<'program, 'host, InMemoryRuntimeHost> {
-    RuntimeRun::new(
-        program,
-        host,
-        DEFAULT_MAX_RUNTIME_PROCESSES,
-        DEFAULT_MAX_TRACE_BYTES,
-        DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
-    )
+    RuntimeRun::new(program, host, RunLimits::default())
 }
 
 fn process_index_for_pid(
