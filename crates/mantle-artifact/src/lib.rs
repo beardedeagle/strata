@@ -14,7 +14,7 @@ pub use artifact::{
     ArtifactProcessRefPayload, ArtifactRecordField, ArtifactSendTarget, ArtifactStateValue,
     ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
     ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode,
-    NextState, StepResult,
+    NextState, StepResult, validate_value_enum_membership,
 };
 pub use constants::*;
 pub use error::{Error, Result};

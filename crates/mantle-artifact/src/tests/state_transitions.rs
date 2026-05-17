@@ -52,7 +52,7 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Literal {
             ty: WORKER_STATE,
-            value: artifact_value("Missing"),
+            value: artifact_value("Done"),
         });
 
     let err = artifact
@@ -60,7 +60,7 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
         .expect_err("static next-state template outside state table should fail");
 
     assert!(err.to_string().contains(
-        "process Worker message id 0 next_state_template produced value Missing not admitted by state table"
+        "process Worker message id 0 next_state_template produced value Done not admitted by state table"
     ));
 }
 
@@ -86,7 +86,7 @@ fn validate_rejects_state_value_type_mismatch() {
 #[test]
 fn validate_rejects_next_state_template_when_identity_is_not_admitted() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].state_values[1] = state_value(WORKER_STATE, "Spoofed");
+    artifact.processes[1].state_values[1] = state_value(WORKER_STATE, "Done");
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Literal {
             ty: WORKER_STATE,
@@ -129,7 +129,7 @@ fn validate_rejects_if_else_next_state_literal_that_is_not_bool_value() {
     artifact.processes[1].transitions[0].next_state = NextState::IfElse {
         condition: ArtifactValueTemplate::Literal {
             ty: bool_type,
-            value: artifact_value("Maybe"),
+            value: artifact_value("True(Payload)"),
         },
         then_state: Box::new(NextState::Value(StateId::new(1))),
         else_state: Box::new(NextState::Current),

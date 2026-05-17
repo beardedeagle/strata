@@ -1270,9 +1270,7 @@ fn runtime_for_each_if_preflights_malformed_loop_bool_before_branch_effects() {
 
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains(
-            "mantle: error: process BatchWorker if condition produced invalid Bool value Maybe"
-        ),
+        stderr.contains("mantle: error: process BatchWorker for loop element 0 item 1 value Maybe is not a member of enum type Bool"),
         "unexpected diagnostic\nstdout:\n{}\nstderr:\n{stderr}",
         String::from_utf8_lossy(&run.stdout)
     );

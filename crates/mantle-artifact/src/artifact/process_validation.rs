@@ -97,20 +97,23 @@ impl ArtifactProcess {
                     self.state_type.as_u32()
                 )));
             }
-            state_value
-                .value
-                .validate_without_process_ref("state value")?;
+            artifact.validate_value_matches_type(
+                "state value",
+                state_value.ty,
+                &state_value.value,
+            )?;
             if let Some(payload) = &state_value.payload {
-                artifact.validate_value_type("state value payload type", payload.ty)?;
-                payload
-                    .value
-                    .validate_without_process_ref("state value payload")?;
                 if payload.process_ref.is_some() {
                     return Err(Error::new(format!(
                         "process {} state value {} carries a process reference payload",
                         self.debug_name, state_value.label
                     )));
                 }
+                artifact.validate_value_matches_type(
+                    "state value payload",
+                    payload.ty,
+                    &payload.value,
+                )?;
             }
         }
         validate_unique_message_variant_list(&self.message_variants)?;
@@ -268,9 +271,6 @@ impl ArtifactProcess {
                 transition.message.as_u32()
             )));
         }
-        payload_guard
-            .value
-            .validate_without_process_ref("transition payload guard")?;
         let message = self
             .message_variants
             .get(transition.message.index())
@@ -297,7 +297,11 @@ impl ArtifactProcess {
                 expected_type.as_u32()
             )));
         }
-        artifact.validate_value_type("transition payload guard type", payload_guard.ty)
+        artifact.validate_value_matches_type(
+            "transition payload guard",
+            payload_guard.ty,
+            &payload_guard.value,
+        )
     }
 
     fn validate_static_next_state_template_value(
@@ -803,6 +807,17 @@ impl ArtifactProcess {
                             items.len(),
                             max_items
                         )));
+                    }
+                    for (index, item) in items.iter().enumerate() {
+                        artifact.validate_value_matches_type(
+                            &format!(
+                                "process {} transition {} for collection item {index}",
+                                self.debug_name,
+                                transition.message.as_u32()
+                            ),
+                            element.ty,
+                            item,
+                        )?;
                     }
                 }
                 let active = [ActiveArtifactLoopElement {

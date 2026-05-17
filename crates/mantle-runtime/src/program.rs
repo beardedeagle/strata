@@ -31,7 +31,7 @@ use mantle_artifact::{
     MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
     MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
     NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
-    validate_message_label, validate_state_value_identity_label,
+    validate_message_label, validate_state_value_identity_label, validate_value_enum_membership,
 };
 
 #[derive(Debug, Clone)]
@@ -181,6 +181,75 @@ impl LoadedProgram {
                 ty.as_u32()
             ))),
         }
+    }
+
+    pub(crate) fn validate_value_matches_type(
+        &self,
+        field: &str,
+        ty: TypeId,
+        value: &RuntimeValue,
+    ) -> Result<()> {
+        let type_entry = self.type_entry(ty)?;
+        if matches!(type_entry.kind, ArtifactTypeKind::ProcessRef { .. }) {
+            return Err(Error::new(format!(
+                "{field} type id {} must be a value type",
+                ty.as_u32()
+            )));
+        }
+        values::validate_non_process_ref_value(field, value)?;
+        validate_value_enum_membership(field, ty, type_entry, value)
+    }
+
+    pub(crate) fn validate_runtime_payload_matches_type(
+        &self,
+        field: &str,
+        expected_type: TypeId,
+        payload: &RuntimePayload,
+    ) -> Result<()> {
+        if payload.ty != expected_type {
+            return Err(Error::new(format!(
+                "{field} has type id {}, expected {}",
+                payload.ty.as_u32(),
+                expected_type.as_u32()
+            )));
+        }
+        match self.type_entry(expected_type)?.kind {
+            ArtifactTypeKind::Value => {
+                if payload.process_ref.is_some() {
+                    return Err(Error::new(format!(
+                        "{field} must not carry process reference metadata"
+                    )));
+                }
+                self.validate_value_matches_type(field, expected_type, &payload.value)
+            }
+            ArtifactTypeKind::ProcessRef { target } => {
+                let Some(process_ref) = payload.process_ref else {
+                    return Err(Error::new(format!(
+                        "{field} requires process reference metadata"
+                    )));
+                };
+                if process_ref.target_process != target {
+                    return Err(Error::new(format!(
+                        "{field} process reference metadata targets process id {}, expected {} for type id {}",
+                        process_ref.target_process.as_u32(),
+                        target.as_u32(),
+                        expected_type.as_u32()
+                    )));
+                }
+                RuntimePayload::validate_process_ref_value(field, payload)
+            }
+        }
+    }
+
+    pub(crate) fn runtime_payload_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        value: RuntimeValue,
+    ) -> Result<RuntimePayload> {
+        let payload = RuntimePayload::value(ty, value)?;
+        self.validate_runtime_payload_matches_type(field, ty, &payload)?;
+        Ok(payload)
     }
 
     pub(crate) fn process_ref_target_for_type_id(
@@ -492,15 +561,11 @@ impl LoadedProcess {
                         self.debug_name
                     ))
                 })?;
-            state.value.validate("state value").map_err(|err| {
-                Error::new(format!("process {} state value: {err}", self.debug_name))
-            })?;
-            if state.value.contains_process_ref() {
-                return Err(Error::new(format!(
-                    "process {} state value {} carries a process reference value",
-                    self.debug_name, state.label
-                )));
-            }
+            program
+                .validate_value_matches_type("state value", state.ty, &state.value)
+                .map_err(|err| {
+                    Error::new(format!("process {} state value: {err}", self.debug_name))
+                })?;
             validate_state_value_identity_label(&state.value, &state.label)
                 .map_err(|err| Error::new(format!("process {} {err}", self.debug_name)))?;
             if state.ty != self.state_type {
@@ -521,21 +586,20 @@ impl LoadedProcess {
                             self.debug_name
                         ))
                     })?;
-                payload
-                    .value
-                    .validate("state value payload")
-                    .map_err(|err| {
-                        Error::new(format!(
-                            "process {} state value payload: {err}",
-                            self.debug_name
-                        ))
-                    })?;
                 if payload.process_ref.is_some() || payload.value.contains_process_ref() {
                     return Err(Error::new(format!(
                         "process {} state value {} carries a process reference payload",
                         self.debug_name, state.label
                     )));
                 }
+                program
+                    .validate_value_matches_type("state value payload", payload.ty, &payload.value)
+                    .map_err(|err| {
+                        Error::new(format!(
+                            "process {} state value payload: {err}",
+                            self.debug_name
+                        ))
+                    })?;
             }
             if !states.insert((state.ty, state.value.clone())) {
                 return Err(Error::new(format!(
@@ -751,13 +815,14 @@ impl LoadedTransition {
                 payload_type.as_u32()
             )));
         }
-        program.validate_value_type(
+        program.validate_value_matches_type(
             &format!(
                 "process {} message id {} payload guard",
                 process.debug_name,
                 message.as_u32()
             ),
             payload_guard.ty,
+            &payload_guard.value,
         )?;
         Ok(())
     }

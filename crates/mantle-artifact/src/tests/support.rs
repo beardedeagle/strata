@@ -138,6 +138,12 @@ pub(super) fn append_bool_type(artifact: &mut MantleArtifact) -> TypeId {
     ty
 }
 
+pub(super) fn append_value_type(artifact: &mut MantleArtifact, label: &str) -> TypeId {
+    let ty = TypeId::from_index(artifact.types.len()).expect("test type index should fit");
+    artifact.types.push(ArtifactType::value(label));
+    ty
+}
+
 pub(super) fn nested_if_else_action(depth: usize, bool_type: TypeId) -> ArtifactAction {
     let condition = ArtifactValueTemplate::Literal {
         ty: bool_type,

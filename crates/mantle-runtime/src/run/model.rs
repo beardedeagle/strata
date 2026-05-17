@@ -80,15 +80,15 @@ impl RuntimeMessageEnvelope {
                 process_id.as_u32()
             ))),
             (Some(expected_type), Some(payload)) => {
-                if payload.ty != expected_type {
-                    return Err(Error::new(format!(
-                        "message id {} for process id {} payload has type id {}, expected {}",
+                program.validate_runtime_payload_matches_type(
+                    &format!(
+                        "message id {} for process id {} payload",
                         self.message.as_u32(),
-                        process_id.as_u32(),
-                        payload.ty.as_u32(),
-                        expected_type.as_u32()
-                    )));
-                }
+                        process_id.as_u32()
+                    ),
+                    expected_type,
+                    payload,
+                )?;
                 Ok(())
             }
         }

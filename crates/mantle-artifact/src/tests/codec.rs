@@ -232,6 +232,7 @@ fn admission_rejects_spawn_inside_runtime_if_branch() {
 fn admission_rejects_for_each_inside_runtime_if_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
+    let list_type = append_value_type(&mut artifact, "BoolList");
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::IfElse {
         condition: ArtifactValueTemplate::Literal {
@@ -244,7 +245,7 @@ fn admission_rejects_for_each_inside_runtime_if_branch() {
                 ty: bool_type,
             },
             collection: ArtifactValueTemplate::Literal {
-                ty: bool_type,
+                ty: list_type,
                 value: artifact_value("List[True]"),
             },
             max_items: 1,
@@ -312,6 +313,7 @@ fn artifact_round_trips_for_each_control_flow() {
 fn admission_accepts_if_else_inside_for_each_loop_body() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
+    let list_type = append_value_type(&mut artifact, "BoolList");
     artifact.processes[1].message_variants[0].payload_type = Some(bool_type);
     artifact.processes[0].transitions[0].effects = vec![
         ArtifactEffect::Spawn,
@@ -329,7 +331,7 @@ fn admission_accepts_if_else_inside_for_each_loop_body() {
                 ty: bool_type,
             },
             collection: ArtifactValueTemplate::Literal {
-                ty: bool_type,
+                ty: list_type,
                 value: artifact_value("List[True,False]"),
             },
             max_items: 2,
@@ -376,6 +378,7 @@ fn admission_rejects_loop_branch_condition_without_bool_contract() {
         "Bool",
         vec!["No".to_string(), "Yes".to_string()],
     ));
+    let list_type = append_value_type(&mut artifact, "BoolList");
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -383,7 +386,7 @@ fn admission_rejects_loop_branch_condition_without_bool_contract() {
             ty: non_contract_bool,
         },
         collection: ArtifactValueTemplate::Literal {
-            ty: non_contract_bool,
+            ty: list_type,
             value: artifact_value("List[Yes]"),
         },
         max_items: 1,
@@ -415,6 +418,7 @@ fn admission_rejects_loop_branch_condition_without_bool_contract() {
 fn admission_rejects_loop_branch_condition_with_non_unit_bool_shape() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
+    let list_type = append_value_type(&mut artifact, "BoolList");
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -422,7 +426,7 @@ fn admission_rejects_loop_branch_condition_with_non_unit_bool_shape() {
             ty: bool_type,
         },
         collection: ArtifactValueTemplate::Literal {
-            ty: bool_type,
+            ty: list_type,
             value: artifact_value("List[True]"),
         },
         max_items: 1,
@@ -460,6 +464,7 @@ fn admission_rejects_loop_branch_condition_with_non_unit_bool_shape() {
 fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
+    let list_type = append_value_type(&mut artifact, "BoolList");
     let condition = ArtifactValueTemplate::LoopElement {
         ty: bool_type,
         element: LoopElementId::new(0),
@@ -471,7 +476,7 @@ fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
             ty: bool_type,
         },
         collection: ArtifactValueTemplate::Literal {
-            ty: bool_type,
+            ty: list_type,
             value: artifact_value("List[True]"),
         },
         max_items: 1,
@@ -502,6 +507,7 @@ fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
 fn admission_rejects_empty_if_else_branch_inside_for_each_loop_body() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
+    let list_type = append_value_type(&mut artifact, "BoolList");
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -509,7 +515,7 @@ fn admission_rejects_empty_if_else_branch_inside_for_each_loop_body() {
             ty: bool_type,
         },
         collection: ArtifactValueTemplate::Literal {
-            ty: bool_type,
+            ty: list_type,
             value: artifact_value("List[True]"),
         },
         max_items: 1,
@@ -636,6 +642,36 @@ fn admission_rejects_static_for_each_non_list_collection() {
     assert!(
         err.to_string()
             .contains("process Main transition 0 for collection must evaluate to a list value"),
+        "{err}"
+    );
+}
+
+#[test]
+fn admission_rejects_static_for_each_item_outside_declared_enum_variants() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    let list_type = append_value_type(&mut artifact, "BoolList");
+    artifact.processes[0].transitions[0].effects = Vec::new();
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
+        element: ArtifactLoopElement {
+            id: LoopElementId::new(0),
+            ty: bool_type,
+        },
+        collection: ArtifactValueTemplate::Literal {
+            ty: list_type,
+            value: artifact_value("List[True,Maybe]"),
+        },
+        max_items: 2,
+        body: Vec::new(),
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("static for_each item outside enum variants should fail admission");
+
+    assert!(
+        err.to_string()
+            .contains("for collection item 1 value Maybe is not a member of enum type Bool"),
         "{err}"
     );
 }

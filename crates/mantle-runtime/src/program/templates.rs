@@ -1,6 +1,6 @@
 use super::values::{
     validate_list_prefix_projection, validate_list_rest_prefix_len, validate_map_projection_keys,
-    validate_map_rest_keys, validate_non_process_ref_value,
+    validate_map_rest_keys,
 };
 use super::*;
 use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField};
@@ -129,31 +129,21 @@ fn evaluate_loaded_payload_value(
     current_state_payload: Option<&RuntimePayload>,
 ) -> Result<RuntimePayload> {
     match template {
-        LoadedValueTemplate::Literal { ty, value } => RuntimePayload::value(*ty, value.clone()),
+        LoadedValueTemplate::Literal { ty, value } => {
+            program.runtime_payload_value("literal value template", *ty, value.clone())
+        }
         LoadedValueTemplate::ReceivedPayload { ty } => {
             let payload = received_payload.ok_or_else(|| {
                 Error::new("received payload template requires a payload-bearing message")
             })?;
-            if payload.ty != *ty {
-                return Err(Error::new(format!(
-                    "received payload has type id {}, expected {}",
-                    payload.ty.as_u32(),
-                    ty.as_u32()
-                )));
-            }
+            program.validate_runtime_payload_matches_type("received payload", *ty, payload)?;
             Ok(payload.clone())
         }
         LoadedValueTemplate::CurrentStatePayload { ty } => {
             let payload = current_state_payload.ok_or_else(|| {
                 Error::new("current state payload template requires a payload-bearing state")
             })?;
-            if payload.ty != *ty {
-                return Err(Error::new(format!(
-                    "current state payload has type id {}, expected {}",
-                    payload.ty.as_u32(),
-                    ty.as_u32()
-                )));
-            }
+            program.validate_runtime_payload_matches_type("current state payload", *ty, payload)?;
             Ok(payload.clone())
         }
         LoadedValueTemplate::EnumPayload { ty, value, variant } => {
@@ -164,7 +154,11 @@ fn evaluate_loaded_payload_value(
                 current_state_payload,
             )?;
             let variant = program.enum_variant_label(value.ty, *variant)?;
-            RuntimePayload::value(*ty, value.value.project_enum_payload(variant)?)
+            program.runtime_payload_value(
+                "enum payload projection value",
+                *ty,
+                value.value.project_enum_payload(variant)?,
+            )
         }
         LoadedValueTemplate::RecordField { ty, record, field } => {
             let record = evaluate_loaded_payload_value(
@@ -173,7 +167,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, record.value.project_record_field(field)?)
+            program.runtime_payload_value(
+                "record field projection value",
+                *ty,
+                record.value.project_record_field(field)?,
+            )
         }
         LoadedValueTemplate::ListElement {
             ty,
@@ -187,7 +185,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, list.value.project_list_element(*index, *len)?)
+            program.runtime_payload_value(
+                "list element projection value",
+                *ty,
+                list.value.project_list_element(*index, *len)?,
+            )
         }
         LoadedValueTemplate::ListPrefixElement {
             ty,
@@ -201,7 +203,8 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(
+            program.runtime_payload_value(
+                "list prefix projection value",
                 *ty,
                 list.value
                     .project_list_prefix_element(*index, *prefix_len)?,
@@ -218,7 +221,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, list.value.project_list_rest(*prefix_len)?)
+            program.runtime_payload_value(
+                "list rest projection value",
+                *ty,
+                list.value.project_list_rest(*prefix_len)?,
+            )
         }
         LoadedValueTemplate::MapValue {
             ty,
@@ -233,7 +240,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, map.value.project_map_value(key, keys, *projection)?)
+            program.runtime_payload_value(
+                "map value projection value",
+                *ty,
+                map.value.project_map_value(key, keys, *projection)?,
+            )
         }
         LoadedValueTemplate::MapRest {
             ty,
@@ -246,7 +257,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, map.value.project_map_rest(excluded_keys)?)
+            program.runtime_payload_value(
+                "map rest projection value",
+                *ty,
+                map.value.project_map_rest(excluded_keys)?,
+            )
         }
         LoadedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires runtime process reference bindings",
@@ -265,7 +280,8 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(
+            program.runtime_payload_value(
+                "enum variant template value",
                 *ty,
                 RuntimeValue::EnumVariant {
                     variant: program.enum_variant_label(*ty, *variant)?.to_string(),
@@ -294,7 +310,8 @@ fn evaluate_loaded_payload_value(
                     value: value.value,
                 });
             }
-            RuntimePayload::value(
+            program.runtime_payload_value(
+                "record template value",
                 *ty,
                 RuntimeValue::Record {
                     constructor: program.type_label(*ty)?.to_string(),
@@ -315,7 +332,7 @@ fn evaluate_loaded_payload_value(
                     .value,
                 );
             }
-            RuntimePayload::value(*ty, RuntimeValue::List(values))
+            program.runtime_payload_value("list template value", *ty, RuntimeValue::List(values))
         }
         LoadedValueTemplate::Map { ty, entries } => {
             let mut values = Vec::with_capacity(entries.len());
@@ -344,7 +361,7 @@ fn evaluate_loaded_payload_value(
                     value: value.value,
                 });
             }
-            RuntimePayload::value(*ty, RuntimeValue::Map(values))
+            program.runtime_payload_value("map template value", *ty, RuntimeValue::Map(values))
         }
     }
 }
@@ -390,9 +407,7 @@ impl LoadedTemplateAdmission<'_> {
 
         match template {
             LoadedValueTemplate::Literal { ty, value } => {
-                self.program
-                    .validate_value_type(&format!("{field}.type"), *ty)?;
-                validate_non_process_ref_value(field, value)
+                self.program.validate_value_matches_type(field, *ty, value)
             }
             LoadedValueTemplate::ReceivedPayload { ty } => {
                 self.validate_received_payload(field, *ty)

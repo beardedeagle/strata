@@ -73,6 +73,19 @@ fn runtime_rejects_loaded_state_value_label_mismatch_before_artifact_loaded() {
 }
 
 #[test]
+fn runtime_rejects_loaded_state_value_outside_declared_enum_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].state_values[0].value = RuntimeValue::Atom("Bogus".to_string());
+    program.processes[1].state_values[0].label = "Bogus".to_string();
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker state value: state value value Bogus is not a member of enum type WorkerState",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_unknown_next_state_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
@@ -104,6 +117,27 @@ fn runtime_rejects_loaded_unadmitted_template_state_before_artifact_loaded() {
 }
 
 #[test]
+fn runtime_rejects_loaded_literal_template_outside_declared_enum_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    artifact.processes[1].transitions[0].next_state =
+        NextState::Template(ArtifactValueTemplate::Literal {
+            ty: WORKER_STATE,
+            value: artifact_value("Idle"),
+        });
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].transitions[0].next_state =
+        loaded_next_state(NextState::Template(ArtifactValueTemplate::Literal {
+            ty: WORKER_STATE,
+            value: artifact_value("Bogus"),
+        }));
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker message id 0 next_state_template value Bogus is not a member of enum type WorkerState",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_if_else_literal_that_is_not_bool_value_before_artifact_loaded() {
     let mut artifact = artifact_with_unbound_worker_process_ref();
     let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
@@ -123,7 +157,10 @@ fn runtime_rejects_loaded_if_else_literal_that_is_not_bool_value_before_artifact
     program.processes[0].transitions[0].next_state = LoadedNextState::IfElse {
         condition: LoadedValueTemplate::Literal {
             ty: bool_type,
-            value: RuntimeValue::Atom("Maybe".to_string()),
+            value: RuntimeValue::EnumVariant {
+                variant: "True".to_string(),
+                payload: Box::new(RuntimeValue::Atom("Payload".to_string())),
+            },
         },
         then_state: Box::new(LoadedNextState::Current),
         else_state: Box::new(LoadedNextState::Current),
@@ -162,7 +199,10 @@ fn runtime_rejects_loaded_if_else_static_projection_that_is_not_bool_value_befor
                     constructor: "Box".to_string(),
                     fields: vec![ArtifactRecordField {
                         name: "flag".to_string(),
-                        value: RuntimeValue::Atom("Maybe".to_string()),
+                        value: RuntimeValue::EnumVariant {
+                            variant: "True".to_string(),
+                            payload: Box::new(RuntimeValue::Atom("Payload".to_string())),
+                        },
                     }],
                 },
             }),

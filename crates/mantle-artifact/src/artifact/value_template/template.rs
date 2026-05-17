@@ -350,10 +350,7 @@ impl ArtifactValueTemplate {
             }
         }
         match self {
-            Self::Literal { ty, value } => {
-                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
-                value.validate_without_process_ref(field)
-            }
+            Self::Literal { ty, value } => artifact.validate_value_matches_type(field, *ty, value),
             Self::ReceivedPayload { ty } => {
                 let Some(received_payload_type) = received_payload_type else {
                     return Err(Error::new(format!(

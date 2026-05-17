@@ -506,7 +506,18 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 self.ensure_loop_iteration_budget(item_count)?;
                 let loop_payloads = items
                     .into_iter()
-                    .map(|item| RuntimePayload::value(element.ty, item))
+                    .enumerate()
+                    .map(|(index, item)| {
+                        self.program.runtime_payload_value(
+                            &format!(
+                                "process {} for loop element {} item {index}",
+                                step.process_name,
+                                element.id.as_u32()
+                            ),
+                            element.ty,
+                            item,
+                        )
+                    })
                     .collect::<Result<Vec<_>>>()?;
                 self.preflight_loop_body(local_process_refs, step, element, body, &loop_payloads)?;
                 self.record_loop_started(

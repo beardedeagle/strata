@@ -755,6 +755,7 @@ fn loaded_program_selects_transitions_by_message_id() {
 #[test]
 fn loaded_program_selects_payload_guarded_transitions_by_exact_payload_identity() {
     let mut artifact = valid_artifact();
+    artifact.types[WORKER_STATE.index()] = worker_state_type(&["Idle", "Ready", "Done"]);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -1152,6 +1153,7 @@ fn panic_artifact() -> MantleArtifact {
 fn payload_artifact() -> MantleArtifact {
     let mut artifact = valid_artifact();
     artifact.module = "actor_payloads".to_string();
+    artifact.types[WORKER_STATE.index()] = ArtifactType::value("WorkerState");
     artifact.outputs = vec!["worker assigned job".to_string()];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -1282,7 +1284,7 @@ fn looping_artifact() -> MantleArtifact {
             ArtifactProcess {
                 debug_name: "Worker".to_string(),
                 state_type: WORKER_STATE,
-                state_values: state_values(WORKER_STATE, &["WorkerState"]),
+                state_values: state_values(WORKER_STATE, &["Idle"]),
                 message_type: WORKER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: vec![ArtifactProcessRef {
@@ -1356,7 +1358,7 @@ fn sequence_artifact() -> MantleArtifact {
         module: "actor_sequence".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
-        types: base_types(),
+        types: types_with_worker_state(&["Waiting", "SawFirst", "Done"]),
         outputs: vec![
             "worker handled First".to_string(),
             "worker handled Second".to_string(),
@@ -1445,21 +1447,28 @@ fn base_types() -> Vec<ArtifactType> {
     vec![
         ArtifactType::value("MainState"),
         ArtifactType::value("MainMsg"),
-        ArtifactType::enum_value(
-            "WorkerState",
-            vec![
-                "Idle".to_string(),
-                "Handled".to_string(),
-                "Working".to_string(),
-                "Done".to_string(),
-                "Routed".to_string(),
-            ],
-        ),
+        worker_state_type(&["Idle", "Handled", "Working", "Done", "Routed"]),
         ArtifactType::value("WorkerMsg"),
         ArtifactType::value("Job"),
         ArtifactType::value("HelperState"),
         ArtifactType::value("HelperMsg"),
     ]
+}
+
+fn types_with_worker_state(variants: &[&str]) -> Vec<ArtifactType> {
+    let mut types = base_types();
+    types[WORKER_STATE.index()] = worker_state_type(variants);
+    types
+}
+
+fn worker_state_type(variants: &[&str]) -> ArtifactType {
+    ArtifactType::enum_value(
+        "WorkerState",
+        variants
+            .iter()
+            .map(|variant| (*variant).to_string())
+            .collect(),
+    )
 }
 
 fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {

@@ -50,6 +50,47 @@ fn validate_rejects_enum_variant_metadata_above_artifact_limit() {
 }
 
 #[test]
+fn validate_rejects_state_value_outside_declared_enum_variants() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].state_values[0] = state_value(WORKER_STATE, "Bogus");
+
+    let err = artifact
+        .validate()
+        .expect_err("state value outside enum variants should fail admission");
+
+    assert!(
+        err.to_string()
+            .contains("state value value Bogus is not a member of enum type WorkerState"),
+        "{err}"
+    );
+}
+
+#[test]
+fn validate_rejects_literal_payload_outside_declared_enum_variants() {
+    let mut artifact = valid_artifact();
+    artifact.processes[1].message_variants[0] =
+        ArtifactMessageVariant::payload("Ping", WORKER_STATE);
+    artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
+        target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        message: MessageId::new(0),
+        payload: Some(ArtifactValueTemplate::Literal {
+            ty: WORKER_STATE,
+            value: artifact_value("Bogus"),
+        }),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("literal payload outside enum variants should fail admission");
+
+    assert!(
+        err.to_string()
+            .contains("send payload value Bogus is not a member of enum type WorkerState"),
+        "{err}"
+    );
+}
+
+#[test]
 fn validate_accepts_structured_state_value_labels() {
     let mut artifact = valid_artifact();
     artifact.processes[0].state_values = state_values(

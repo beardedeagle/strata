@@ -435,6 +435,42 @@ fn runtime_traces_distinct_nested_branches_with_identical_conditions() {
     );
 }
 
+#[test]
+fn runtime_rejects_message_payload_outside_declared_enum_before_acceptance() {
+    let artifact = artifact_with_nested_worker_bool_branch();
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program
+        .validate_admission()
+        .expect("Bool payload artifact should admit");
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = {
+        let mut run = new_test_run(&program, &mut host);
+        let worker_pid = run
+            .spawn_process(WORKER_PROCESS, None)
+            .expect("worker process should spawn");
+        run.send_message(
+            worker_pid,
+            RuntimeMessageEnvelope::new(
+                PING_MESSAGE,
+                Some(
+                    RuntimePayload::value(BOOL, RuntimeValue::Atom("Maybe".to_string()))
+                        .expect("test malformed Bool payload should construct"),
+                ),
+            ),
+            None,
+        )
+        .expect_err("payload outside enum variants should fail before acceptance")
+        .to_string()
+    };
+
+    assert!(
+        err.contains("payload value Maybe is not a member of enum type Bool"),
+        "{err}"
+    );
+    assert_no_worker_ping_accepted_event(host.events());
+}
+
 fn artifact_with_worker_process_ref_payload() -> MantleArtifact {
     let mut artifact = artifact_with_unbound_worker_process_ref();
     artifact.processes[1].message_variants =
@@ -450,7 +486,7 @@ fn artifact_with_nested_worker_bool_branch() -> MantleArtifact {
         "Bool",
         vec!["False".to_string(), "True".to_string()],
     ));
-    artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Warm", "Cold"]);
+    artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Handled", "Done"]);
     artifact.processes[1].message_variants =
         vec![ArtifactMessageVariant::payload("Ping", bool_type)];
     let condition = ArtifactValueTemplate::ReceivedPayload { ty: bool_type };

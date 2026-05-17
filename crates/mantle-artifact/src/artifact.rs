@@ -264,13 +264,19 @@ impl MantleArtifact {
     }
 
     pub fn validate_value_type(&self, field: &str, ty: TypeId) -> Result<()> {
-        match self.type_entry(ty)?.kind {
-            ArtifactTypeKind::Value => Ok(()),
-            ArtifactTypeKind::ProcessRef { .. } => Err(Error::new(format!(
-                "artifact field {field} type id {} must be a value type",
-                ty.as_u32()
-            ))),
-        }
+        validate_value_type_entry(field, ty, self.type_entry(ty)?)
+    }
+
+    pub fn validate_value_matches_type(
+        &self,
+        field: &str,
+        ty: TypeId,
+        value: &ArtifactValue,
+    ) -> Result<()> {
+        let type_entry = self.type_entry(ty)?;
+        validate_value_type_entry(field, ty, type_entry)?;
+        value.validate_without_process_ref(field)?;
+        validate_value_enum_membership(field, ty, type_entry, value)
     }
 
     pub fn process_ref_target_for_type_id(&self, field: &str, ty: TypeId) -> Result<ProcessId> {
@@ -344,6 +350,53 @@ impl MantleArtifact {
         }
         Ok(())
     }
+}
+
+fn validate_value_type_entry(field: &str, ty: TypeId, type_entry: &ArtifactType) -> Result<()> {
+    match type_entry.kind {
+        ArtifactTypeKind::Value => Ok(()),
+        ArtifactTypeKind::ProcessRef { .. } => Err(Error::new(format!(
+            "artifact field {field} type id {} must be a value type",
+            ty.as_u32()
+        ))),
+    }
+}
+
+pub fn validate_value_enum_membership(
+    field: &str,
+    ty: TypeId,
+    type_entry: &ArtifactType,
+    value: &ArtifactValue,
+) -> Result<()> {
+    if type_entry.enum_variants.is_empty() {
+        return Ok(());
+    }
+
+    let matches_variant = match value {
+        ArtifactValue::Atom(label) => type_entry
+            .enum_variants
+            .iter()
+            .any(|variant| variant == label),
+        ArtifactValue::EnumVariant { variant, .. } => type_entry
+            .enum_variants
+            .iter()
+            .any(|declared| declared == variant),
+        ArtifactValue::Record { .. }
+        | ArtifactValue::List(_)
+        | ArtifactValue::Map(_)
+        | ArtifactValue::ProcessRef { .. } => false,
+    };
+
+    if matches_variant {
+        return Ok(());
+    }
+
+    Err(Error::new(format!(
+        "{field} value {} is not a member of enum type {} (type id {})",
+        value.label(),
+        type_entry.label,
+        ty.as_u32()
+    )))
 }
 
 fn validate_artifact_identity(format: &str, schema_version: &str) -> Result<()> {
