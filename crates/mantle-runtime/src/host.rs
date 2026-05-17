@@ -141,12 +141,25 @@ fn open_trace_file(path: &Path) -> std::io::Result<File> {
     Ok(File::from(fd))
 }
 
-#[cfg(not(unix))]
-fn open_trace_file(_path: &Path) -> std::io::Result<File> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "symlink-resistant runtime trace open is unsupported on this platform",
-    ))
+#[cfg(all(not(unix), not(windows)))]
+fn open_trace_file(path: &Path) -> std::io::Result<File> {
+    fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)
+}
+
+#[cfg(windows)]
+fn open_trace_file(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
 }
 
 #[cfg(unix)]
@@ -268,6 +281,9 @@ fn output_file_mode() -> nix::sys::stat::Mode {
 fn nix_to_io_error(err: nix::errno::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(err as i32)
 }
+
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 
 fn validate_trace_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()> {
     if metadata.is_file() {
