@@ -134,12 +134,13 @@ Example shape:
 {"event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"action","condition_type_id":0,"condition":"True"}
 ```
 
-`branch` is `then` or `else`. `scope` is `action` for statement-level branch
-execution and `next_state` for branch selection used to resolve the transition
-result state. `condition_type_id` is the admitted artifact type ID for the
-checked `Bool` condition, and `condition` is trace metadata for the evaluated
-value. Runtime branch selection uses the admitted typed condition, not source
-strings, helper names, or debug labels.
+`branch` is `then` or `else`. `scope` is `action` for action-level branch
+execution, including statement-level branches and branch action prefixes lowered
+from final-position runtime `if`, and `next_state` for branch selection used to
+resolve the transition result state. `condition_type_id` is the admitted
+artifact type ID for the checked `Bool` condition, and `condition` is trace
+metadata for the evaluated value. Runtime branch selection uses the admitted
+typed condition, not source strings, helper names, or debug labels.
 
 When a branch runs inside a bounded runtime loop body, `branch_selected` appears
 after that iteration's `loop_iteration` event and before the selected branch

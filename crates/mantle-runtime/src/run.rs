@@ -16,8 +16,8 @@ use crate::event::{
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
 use crate::program::{
-    LoadedAction, LoadedNextState, LoadedProgram, LoadedSendTarget, LoadedValueTemplate,
-    RuntimePayload,
+    LoadedAction, LoadedLoopElement, LoadedNextState, LoadedProgram, LoadedSendTarget,
+    LoadedValueTemplate, RuntimePayload,
 };
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
@@ -504,6 +504,11 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     )));
                 }
                 self.ensure_loop_iteration_budget(item_count)?;
+                let loop_payloads = items
+                    .into_iter()
+                    .map(|item| RuntimePayload::value(element.ty, item))
+                    .collect::<Result<Vec<_>>>()?;
+                self.preflight_loop_body(local_process_refs, step, element, body, &loop_payloads)?;
                 self.record_loop_started(
                     step,
                     element.id,
@@ -511,9 +516,8 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     *max_items,
                     item_count,
                 )?;
-                for (index, item) in items.into_iter().enumerate() {
+                for (index, payload) in loop_payloads.into_iter().enumerate() {
                     self.consume_loop_iteration()?;
-                    let payload = RuntimePayload::value(element.ty, item)?;
                     self.record_loop_iteration(step, element.id, index, &payload)?;
                     let active = [RuntimeLoopElement {
                         id: element.id,
@@ -532,6 +536,88 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 self.record_loop_completed(step, element.id, item_count)?;
                 Ok(())
             }
+        }
+    }
+
+    fn preflight_loop_body(
+        &self,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        step: &ActiveStep,
+        element: &LoadedLoopElement,
+        body: &[LoadedAction],
+        loop_payloads: &[RuntimePayload],
+    ) -> Result<()> {
+        for payload in loop_payloads {
+            let active = [RuntimeLoopElement {
+                id: element.id,
+                payload: payload.clone(),
+            }];
+            for action in body {
+                self.preflight_loop_action(local_process_refs, step, action, &active)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn preflight_loop_action(
+        &self,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        step: &ActiveStep,
+        action: &LoadedAction,
+        loop_elements: &[RuntimeLoopElement],
+    ) -> Result<()> {
+        match action {
+            LoadedAction::Emit { .. } => Ok(()),
+            LoadedAction::Spawn { .. } => Err(Error::new(format!(
+                "process {} for loop body cannot bind process references",
+                step.process_name
+            ))),
+            LoadedAction::Send {
+                target,
+                message,
+                payload,
+            } => {
+                let pid = self.resolve_send_target(local_process_refs, step, target)?;
+                let target_process_index = self.preflight_delivery_target(pid)?;
+                let target_process_id = self.processes[target_process_index].process_id;
+                self.program
+                    .message_payload_type(target_process_id, *message)?;
+                if let Some(payload) = payload {
+                    evaluate_runtime_template(
+                        self.program,
+                        payload,
+                        step.payload.as_ref(),
+                        step,
+                        local_process_refs,
+                        loop_elements,
+                    )?;
+                }
+                Ok(())
+            }
+            LoadedAction::IfElse {
+                condition,
+                then_actions,
+                else_actions,
+            } => {
+                let (branch, _) = self.evaluate_bool_condition(
+                    step,
+                    condition,
+                    local_process_refs,
+                    loop_elements,
+                )?;
+                let selected_actions = match branch {
+                    ArtifactBranch::Then => then_actions,
+                    ArtifactBranch::Else => else_actions,
+                };
+                for action in selected_actions {
+                    self.preflight_loop_action(local_process_refs, step, action, loop_elements)?;
+                }
+                Ok(())
+            }
+            LoadedAction::ForEach { .. } => Err(Error::new(format!(
+                "process {} nested for loops are not supported in this artifact slice",
+                step.process_name
+            ))),
         }
     }
 

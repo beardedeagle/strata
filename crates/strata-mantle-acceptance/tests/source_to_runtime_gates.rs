@@ -1247,6 +1247,72 @@ fn runtime_for_each_if_rejects_malformed_branch_send_target_before_runtime() {
 }
 
 #[test]
+fn runtime_for_each_if_preflights_malformed_loop_bool_before_branch_effects() {
+    let gate = GateHarness::new();
+    let seed_artifact_path = "target/strata/runtime_for_each_if_bad_loop_bool_seed.mta";
+    let invalid_artifact_path = "target/strata/runtime_for_each_if_bad_loop_bool.mta";
+    let invalid_trace_stem = "runtime_for_each_if_bad_loop_bool";
+
+    gate.check("examples/runtime_for_each_if.str");
+    gate.build("examples/runtime_for_each_if.str", seed_artifact_path);
+    gate.remove_artifact(invalid_artifact_path);
+    gate.remove_trace(invalid_trace_stem);
+
+    let artifact = gate.read_artifact(seed_artifact_path);
+    let encoded = replace_exactly_once(
+        &artifact.encode(),
+        "process.0.transition.0.action.1.payload_template.value=List[True,False]\n",
+        "process.0.transition.0.action.1.payload_template.value=List[True,Maybe]\n",
+    );
+    gate.write_unvalidated_encoded_artifact(invalid_artifact_path, &encoded);
+
+    let run = gate.run_mantle_failure(invalid_artifact_path);
+
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains(
+            "mantle: error: process BatchWorker if condition produced invalid Bool value Maybe"
+        ),
+        "unexpected diagnostic\nstdout:\n{}\nstderr:\n{stderr}",
+        String::from_utf8_lossy(&run.stdout)
+    );
+
+    let trace = gate.read_trace(invalid_trace_stem);
+    assert!(trace.contains(r#""event":"artifact_loaded""#));
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"message_accepted""#,
+            r#""process":"BatchWorker""#,
+            r#""message":"Batch""#,
+            r#""payload":"List[True,Maybe]""#,
+        ],
+    );
+    assert!(
+        !trace.contains(r#""event":"loop_started","pid":2,"process_id":1,"process":"BatchWorker""#),
+        "malformed loop Bool must be rejected before BatchWorker loop body starts\n{trace}"
+    );
+    assert!(
+        !trace.contains(
+            r#""event":"branch_selected","pid":2,"process_id":1,"process":"BatchWorker""#
+        ),
+        "malformed loop Bool must be rejected before BatchWorker branch selection is traced\n{trace}"
+    );
+    assert!(
+        !trace.contains(r#""text":"batch selected true""#),
+        "malformed loop Bool must be rejected before then-branch emit effects\n{trace}"
+    );
+    assert!(
+        !trace.contains(r#""text":"batch selected false""#),
+        "malformed loop Bool must be rejected before else-branch emit effects\n{trace}"
+    );
+    assert!(
+        !trace.contains(r#""event":"message_accepted","pid":3,"process_id":2,"process":"Worker""#),
+        "malformed loop Bool must be rejected before branch send effects\n{trace}"
+    );
+}
+
+#[test]
 fn runtime_for_each_empty_collection_runs_zero_body_iterations() {
     let gate = GateHarness::new();
     gate.remove_trace("runtime_for_each_empty");
