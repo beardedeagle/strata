@@ -670,6 +670,18 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
             r#""pid":2"#,
             r#""process":"Worker""#,
             r#""branch":"then""#,
+            r#""scope":"next_state""#,
+            r#""condition":"True""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":2"#,
+            r#""process":"Worker""#,
+            r#""branch":"then""#,
+            r#""scope":"action""#,
             r#""condition":"True""#,
         ],
     );
@@ -680,6 +692,18 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
             r#""pid":3"#,
             r#""process":"Worker""#,
             r#""branch":"else""#,
+            r#""scope":"next_state""#,
+            r#""condition":"False""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":3"#,
+            r#""process":"Worker""#,
+            r#""branch":"else""#,
+            r#""scope":"action""#,
             r#""condition":"False""#,
         ],
     );
@@ -697,7 +721,7 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
 
     let warm_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker""#,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"action""#,
     );
     let warm_output = trace_line_index(
         &trace,
@@ -705,7 +729,7 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
     );
     let cold_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker""#,
+        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"else","scope":"action""#,
     );
     let cold_output = trace_line_index(
         &trace,
@@ -790,23 +814,21 @@ proc Worker mailbox bounded(1) {
     assert!(stdout.contains("statement false"));
 
     let trace = gate.read_trace(STEM);
-    let warm_branches = trace_line_indexes(
+    let warm_next_state_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then""#,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"next_state""#,
     );
-    let cold_branches = trace_line_indexes(
+    let warm_action_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"else""#,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"action""#,
     );
-    assert_eq!(
-        warm_branches.len(),
-        2,
-        "Worker true path should trace both final next-state and statement branch selections"
+    let cold_next_state_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"else","scope":"next_state""#,
     );
-    assert_eq!(
-        cold_branches.len(),
-        2,
-        "Worker false path should trace both final next-state and statement branch selections"
+    let cold_action_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"else","scope":"action""#,
     );
 
     let warm_prefix = trace_line_index(
@@ -817,9 +839,9 @@ proc Worker mailbox bounded(1) {
         &trace,
         r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":1,"text":"statement true""#,
     );
-    assert!(warm_branches[0] < warm_prefix);
-    assert!(warm_prefix < warm_branches[1]);
-    assert!(warm_branches[1] < warm_statement);
+    assert!(warm_next_state_branch < warm_prefix);
+    assert!(warm_prefix < warm_action_branch);
+    assert!(warm_action_branch < warm_statement);
 
     let cold_prefix = trace_line_index(
         &trace,
@@ -829,9 +851,9 @@ proc Worker mailbox bounded(1) {
         &trace,
         r#""event":"program_output","pid":3,"process_id":1,"process":"Worker","stream":"stdout","output_id":2,"text":"statement false""#,
     );
-    assert!(cold_branches[0] < cold_prefix);
-    assert!(cold_prefix < cold_branches[1]);
-    assert!(cold_branches[1] < cold_statement);
+    assert!(cold_next_state_branch < cold_prefix);
+    assert!(cold_prefix < cold_action_branch);
+    assert!(cold_action_branch < cold_statement);
 }
 
 #[test]
@@ -1060,6 +1082,7 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
             r#""event":"branch_selected""#,
             r#""process":"BatchWorker""#,
             r#""branch":"then""#,
+            r#""scope":"action""#,
             r#""condition":"True""#,
         ],
     );
@@ -1069,6 +1092,7 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
             r#""event":"branch_selected""#,
             r#""process":"BatchWorker""#,
             r#""branch":"else""#,
+            r#""scope":"action""#,
             r#""condition":"False""#,
         ],
     );
@@ -1078,6 +1102,7 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
             r#""event":"branch_selected""#,
             r#""process":"Worker""#,
             r#""branch":"then""#,
+            r#""scope":"action""#,
             r#""condition":"True""#,
         ],
     );
@@ -1087,6 +1112,7 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
             r#""event":"branch_selected""#,
             r#""process":"Worker""#,
             r#""branch":"else""#,
+            r#""scope":"action""#,
             r#""condition":"False""#,
         ],
     );
@@ -1094,7 +1120,7 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
     let first_iteration = trace_line_index(&trace, r#""event":"loop_iteration","pid":2"#);
     let batch_true_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","branch":"then""#,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","branch":"then","scope":"action""#,
     );
     let batch_true_output = trace_line_index(
         &trace,
@@ -1107,7 +1133,7 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
     let second_iteration = trace_line_index(&trace, r#""index":1,"element_type_id""#);
     let batch_false_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","branch":"else""#,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","branch":"else","scope":"action""#,
     );
     let batch_false_output = trace_line_index(
         &trace,
@@ -1123,7 +1149,7 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
     );
     let worker_true_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":3,"process_id":2,"process":"Worker","message_id":0,"message":"Branch","branch":"then""#,
+        r#""event":"branch_selected","pid":3,"process_id":2,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"action""#,
     );
     let worker_true_output = trace_line_index(
         &trace,
@@ -1131,7 +1157,7 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
     );
     let worker_false_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":3,"process_id":2,"process":"Worker","message_id":0,"message":"Branch","branch":"else""#,
+        r#""event":"branch_selected","pid":3,"process_id":2,"process":"Worker","message_id":0,"message":"Branch","branch":"else","scope":"action""#,
     );
     let worker_false_output = trace_line_index(
         &trace,
@@ -1393,19 +1419,6 @@ fn trace_line_index(trace: &str, needle: &str) -> usize {
         .lines()
         .position(|line| line.contains(needle))
         .unwrap_or_else(|| panic!("trace should contain {needle:?}\n{trace}"))
-}
-
-fn trace_line_indexes(trace: &str, needle: &str) -> Vec<usize> {
-    let indexes = trace
-        .lines()
-        .enumerate()
-        .filter_map(|(index, line)| line.contains(needle).then_some(index))
-        .collect::<Vec<_>>();
-    assert!(
-        !indexes.is_empty(),
-        "trace should contain {needle:?}\n{trace}"
-    );
-    indexes
 }
 
 #[test]

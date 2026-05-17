@@ -124,16 +124,18 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             message_id,
             message,
             branch,
+            scope,
             condition_type_id,
             condition,
         } => format!(
-            "{{\"event\":\"branch_selected\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\",\"branch\":\"{}\",\"condition_type_id\":{},\"condition\":\"{}\"}}",
+            "{{\"event\":\"branch_selected\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"message_id\":{},\"message\":\"{}\",\"branch\":\"{}\",\"scope\":\"{}\",\"condition_type_id\":{},\"condition\":\"{}\"}}",
             pid.as_u64(),
             process_id.as_u32(),
             json_escape(process),
             message_id.as_u32(),
             json_escape(message),
             branch.as_str(),
+            scope.as_str(),
             condition_type_id.as_u32(),
             json_escape(condition)
         ),
@@ -329,10 +331,12 @@ fn payload_json(payload: &Option<crate::program::RuntimePayload>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use mantle_artifact::{ARTIFACT_SCHEMA_VERSION, MessageId, OutputId, ProcessId};
+    use mantle_artifact::{
+        ARTIFACT_SCHEMA_VERSION, ArtifactBranch, MessageId, OutputId, ProcessId, TypeId,
+    };
 
     use super::*;
-    use crate::{RuntimeEvent, RuntimeOutputStream, RuntimeProcessId};
+    use crate::{RuntimeBranchScope, RuntimeEvent, RuntimeOutputStream, RuntimeProcessId};
 
     #[test]
     fn artifact_loaded_trace_includes_entry_ids() {
@@ -370,6 +374,28 @@ mod tests {
         assert!(line.contains(r#""event":"program_output""#));
         assert!(line.contains(r#""process_id":2"#));
         assert!(line.contains(r#""output_id":13"#));
+    }
+
+    #[test]
+    fn branch_selected_trace_includes_typed_scope() {
+        let event = RuntimeEvent::BranchSelected {
+            pid: RuntimeProcessId::FIRST,
+            process_id: ProcessId::new(2),
+            process: "Worker".to_string(),
+            message_id: MessageId::new(0),
+            message: "Branch".to_string(),
+            branch: ArtifactBranch::Then,
+            scope: RuntimeBranchScope::Action,
+            condition_type_id: TypeId::new(1),
+            condition: "True".to_string(),
+        };
+
+        let line = encode_json_line(&event);
+
+        assert!(line.contains(r#""event":"branch_selected""#));
+        assert!(line.contains(r#""branch":"then""#));
+        assert!(line.contains(r#""scope":"action""#));
+        assert!(line.contains(r#""condition_type_id":1"#));
     }
 
     #[test]

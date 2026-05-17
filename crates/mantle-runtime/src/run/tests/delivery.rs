@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::support::*;
-use crate::{ProcessStatus, RuntimeEvent, RuntimeProcessId};
+use crate::{ProcessStatus, RuntimeBranchScope, RuntimeEvent, RuntimeProcessId};
 use mantle_artifact::ArtifactBranch;
 
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
@@ -416,12 +416,14 @@ fn runtime_traces_distinct_nested_branches_with_identical_conditions() {
                     process,
                     message_id,
                     branch,
+                    scope,
                     condition,
                     ..
                 } if *process_id == WORKER_PROCESS
                     && process == "Worker"
                     && *message_id == PING_MESSAGE
                     && *branch == ArtifactBranch::Then
+                    && *scope == RuntimeBranchScope::NextState
                     && condition == "True"
             )
         })

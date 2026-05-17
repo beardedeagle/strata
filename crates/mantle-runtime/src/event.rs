@@ -96,6 +96,7 @@ pub enum RuntimeEvent {
         message_id: MessageId,
         message: String,
         branch: ArtifactBranch,
+        scope: RuntimeBranchScope,
         condition_type_id: mantle_artifact::TypeId,
         condition: String,
     },
@@ -164,6 +165,21 @@ pub enum RuntimeEvent {
         state: String,
         reason: RuntimeFailureReason,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeBranchScope {
+    NextState,
+    Action,
+}
+
+impl RuntimeBranchScope {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::NextState => "next_state",
+            Self::Action => "action",
+        }
+    }
 }
 
 #[derive(Debug)]

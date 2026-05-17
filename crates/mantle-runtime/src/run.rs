@@ -10,8 +10,8 @@ use model::{ActiveStep, ProcessInstance, RuntimeMessageEnvelope};
 use templates::evaluate_runtime_template;
 
 use crate::event::{
-    RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
-    RuntimeStepResult, RuntimeStopReason,
+    RuntimeBranchScope, RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason,
+    RuntimeOutputStream, RuntimeProcessId, RuntimeStepResult, RuntimeStopReason,
 };
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
@@ -56,6 +56,7 @@ pub(super) struct RuntimeLoopElement {
 
 struct BranchSelection<'a> {
     step: &'a ActiveStep,
+    scope: RuntimeBranchScope,
     condition: &'a LoadedValueTemplate,
     local_process_refs: &'a BTreeMap<ProcessRefId, RuntimeProcessId>,
     loop_elements: &'a [RuntimeLoopElement],
@@ -449,6 +450,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             } => {
                 let branch = self.select_branch(BranchSelection {
                     step,
+                    scope: RuntimeBranchScope::Action,
                     condition,
                     local_process_refs,
                     loop_elements,
@@ -597,13 +599,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             selection.local_process_refs,
             selection.loop_elements,
         )?;
-        self.record_branch_selected(selection.step, branch, &condition_value)?;
+        self.record_branch_selected(selection.step, selection.scope, branch, &condition_value)?;
         Ok(branch)
     }
 
     fn record_branch_selected(
         &mut self,
         step: &ActiveStep,
+        scope: RuntimeBranchScope,
         branch: ArtifactBranch,
         condition: &RuntimePayload,
     ) -> Result<()> {
@@ -614,6 +617,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             message_id: step.message,
             message: step.message_label.clone(),
             branch,
+            scope,
             condition_type_id: condition.ty,
             condition: condition.label().to_string(),
         })
@@ -878,6 +882,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 let empty_process_refs = BTreeMap::new();
                 let branch = self.select_branch(BranchSelection {
                     step,
+                    scope: RuntimeBranchScope::NextState,
                     condition,
                     local_process_refs: &empty_process_refs,
                     loop_elements: &[],
