@@ -14,7 +14,7 @@ mod run;
 
 pub use cli::{mantle_main, run_mantle_from_env};
 pub use event::{
-    RuntimeBranchScope, RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason,
+    RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason,
     RuntimeOutputStream, RuntimeProcessId, RuntimeStepResult, RuntimeStopReason,
 };
 pub use host::{InMemoryRuntimeHost, RuntimeHost};

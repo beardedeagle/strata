@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::support::*;
-use crate::{ProcessStatus, RuntimeBranchScope, RuntimeEvent, RuntimeProcessId};
+use crate::{ProcessStatus, RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeProcessId};
 use mantle_artifact::ArtifactBranch;
 
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
@@ -244,7 +244,7 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
                 &mut process_refs,
                 &step,
                 &action,
-                BranchNesting::root(),
+                RuntimeBranchPath::root(),
                 &[],
             )
             .expect_err("stopped target should reject before payload template evaluation");
@@ -283,7 +283,7 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
                 &mut process_refs,
                 &step,
                 &action,
-                BranchNesting::root(),
+                RuntimeBranchPath::root(),
                 &[],
             )
             .expect_err("failed target should reject before payload template evaluation");
@@ -328,7 +328,7 @@ fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation()
                 &mut process_refs,
                 &step,
                 &action,
-                BranchNesting::root(),
+                RuntimeBranchPath::root(),
                 &[],
             )
             .expect_err("full mailbox should reject before payload template evaluation");
@@ -405,33 +405,52 @@ fn runtime_traces_distinct_nested_branches_with_identical_conditions() {
             .expect("worker should process nested branch");
     }
 
-    let selected_branches = host
+    let selected_branch_paths = host
         .events()
         .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                RuntimeEvent::BranchSelected {
-                    process_id,
-                    process,
-                    message_id,
-                    branch,
-                    scope,
-                    condition,
-                    ..
-                } if *process_id == WORKER_PROCESS
-                    && process == "Worker"
-                    && *message_id == PING_MESSAGE
-                    && *branch == ArtifactBranch::Then
-                    && *scope == RuntimeBranchScope::NextState
-                    && condition == "True"
-            )
+        .filter_map(|event| match event {
+            RuntimeEvent::BranchSelected {
+                process_id,
+                process,
+                message_id,
+                branch,
+                scope,
+                branch_path,
+                condition,
+                ..
+            } if *process_id == WORKER_PROCESS
+                && process == "Worker"
+                && *message_id == PING_MESSAGE
+                && *branch == ArtifactBranch::Then
+                && *scope == RuntimeBranchScope::NextState
+                && condition == "True" =>
+            {
+                Some(*branch_path)
+            }
+            _ => None,
         })
-        .count();
+        .collect::<Vec<_>>();
 
     assert_eq!(
-        selected_branches, 2,
+        selected_branch_paths.len(),
+        2,
         "outer and nested branch nodes should each record branch_selected"
+    );
+    assert_eq!(selected_branch_paths[0], RuntimeBranchPath::root());
+    assert_eq!(
+        selected_branch_paths[1].segments(),
+        [0x4000],
+        "nested then-state branch should carry a stable typed branch path"
+    );
+
+    let distinct_paths = selected_branch_paths
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+
+    assert_eq!(
+        distinct_paths, 2,
+        "branch_selected events with identical scope and condition must remain distinguishable"
     );
 }
 

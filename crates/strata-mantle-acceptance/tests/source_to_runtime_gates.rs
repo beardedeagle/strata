@@ -1083,6 +1083,9 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
             r#""process":"BatchWorker""#,
             r#""branch":"then""#,
             r#""scope":"action""#,
+            r#""branch_path":[1,12288]"#,
+            r#""loop_element_id":0"#,
+            r#""loop_index":0"#,
             r#""condition":"True""#,
         ],
     );
@@ -1093,6 +1096,9 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
             r#""process":"BatchWorker""#,
             r#""branch":"else""#,
             r#""scope":"action""#,
+            r#""branch_path":[1,12288]"#,
+            r#""loop_element_id":0"#,
+            r#""loop_index":1"#,
             r#""condition":"False""#,
         ],
     );

@@ -544,9 +544,10 @@ This is ordinary runtime branching. If the condition depends on the received
 payload or current state payload, Strata lowers the checked condition, branch
 actions, and any branch next states into the Mantle artifact. Mantle admits the
 typed condition, validates both branches, executes only the selected branch, and
-records `branch_selected` trace events. Branch effects must be declared by the
-step effect list. Runtime branch statement prefixes cannot bind process
-references, contain nested branches, or contain loops in this slice.
+records `branch_selected` trace events with a stable admitted-artifact
+`branch_path`. Branch effects must be declared by the step effect list. Runtime
+branch statement prefixes cannot bind process references, contain nested
+branches, or contain loops in this slice.
 Final-position runtime branches must return the same step result from both
 branches. Statement-level runtime branches cannot return; state changes still
 occur only through the enclosing immutable whole-value `Continue`, `Stop`, or
@@ -582,11 +583,12 @@ collection length and runtime fuel limits, and records `loop_started`,
 The loop element is immutable and may be used only as a typed value template in
 the loop body. Loop bodies may use statement-level runtime `if` over the active
 loop element or another checked `Bool` template; Mantle selects the branch during
-execution and records `branch_selected` inside the loop trace. The body is still
-intentionally narrow in this slice: no nested loops, no `spawn`, no `return`, no
-assignment, no nested statement branches, and no process-reference element type.
-Bind process references before the loop and declare every body effect in the
-enclosing step effect list.
+execution and records `branch_selected` inside the loop trace with the active
+loop element ID and iteration index. The body is still intentionally narrow in
+this slice: no nested loops, no `spawn`, no `return`, no assignment, no nested
+statement branches, and no process-reference element type. Bind process
+references before the loop and declare every body effect in the enclosing step
+effect list.
 
 ## Statements
 
