@@ -15,6 +15,12 @@ impl TransitionValueTypes<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ActiveArtifactLoopElement {
+    id: LoopElementId,
+    ty: TypeId,
+}
+
 impl ArtifactProcess {
     pub(super) fn validate_identity(&self, artifact: &MantleArtifact) -> Result<()> {
         validate_ident_field("process debug_name", &self.debug_name)?;
@@ -323,6 +329,15 @@ impl ArtifactProcess {
                 Ok(())
             }
             NextState::Template(template) => {
+                validate_template_loop_elements(
+                    artifact,
+                    template,
+                    &[],
+                    &format!(
+                        "process {} {} next_state_template",
+                        self.debug_name, transition_context
+                    ),
+                )?;
                 template.validate_for_received_payload(
                     artifact,
                     &format!(
@@ -350,6 +365,15 @@ impl ArtifactProcess {
                     condition,
                     value_types.received_payload,
                     value_types.current_state_payload,
+                )?;
+                validate_template_loop_elements(
+                    artifact,
+                    condition,
+                    &[],
+                    &format!(
+                        "process {} {} next_state_condition",
+                        self.debug_name, transition_context
+                    ),
                 )?;
                 self.validate_next_state(
                     artifact,
@@ -438,7 +462,14 @@ impl ArtifactProcess {
                 }
             }
             for action in &transition.actions {
-                self.validate_action_reference(artifact, transition, &mut spawned_refs, action)?;
+                self.validate_action_reference(
+                    artifact,
+                    transition,
+                    &mut spawned_refs,
+                    action,
+                    &[],
+                    false,
+                )?;
             }
             for declared_effect in &declared_effects {
                 if !used_effects.contains(declared_effect) {
@@ -459,6 +490,8 @@ impl ArtifactProcess {
         transition: &ArtifactTransition,
         spawned_refs: &mut BTreeSet<ProcessRefId>,
         action: &ArtifactAction,
+        active_loop_elements: &[ActiveArtifactLoopElement],
+        inside_loop: bool,
     ) -> Result<()> {
         match action {
             ArtifactAction::Emit { output } => {
@@ -474,6 +507,13 @@ impl ArtifactProcess {
                 target,
                 process_ref,
             } => {
+                if inside_loop {
+                    return Err(Error::new(format!(
+                        "process {} transition {} for loop body cannot bind process references",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
                 let declared_target = self.process_ref_target(*process_ref)?;
                 if declared_target != *target {
                     return Err(Error::new(format!(
@@ -543,6 +583,16 @@ impl ArtifactProcess {
                     }
                     (Some(payload_type), Some(payload)) => {
                         self.validate_template_process_refs(artifact, payload, spawned_refs)?;
+                        validate_template_loop_elements(
+                            artifact,
+                            payload,
+                            active_loop_elements,
+                            &format!(
+                                "process {} transition {} send payload",
+                                self.debug_name,
+                                transition.message.as_u32()
+                            ),
+                        )?;
                         let received_payload_type = self
                             .message_variants
                             .get(transition.message.index())
@@ -569,6 +619,13 @@ impl ArtifactProcess {
                 then_actions,
                 else_actions,
             } => {
+                if inside_loop {
+                    return Err(Error::new(format!(
+                        "process {} transition {} for loop body cannot contain runtime if actions in this artifact slice",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
                 let received_payload_type = self
                     .message_variants
                     .get(transition.message.index())
@@ -585,16 +642,131 @@ impl ArtifactProcess {
                     received_payload_type,
                     current_state_payload,
                 )?;
+                validate_template_loop_elements(
+                    artifact,
+                    condition,
+                    active_loop_elements,
+                    &format!(
+                        "process {} transition {} if condition",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    ),
+                )?;
                 let mut then_refs = spawned_refs.clone();
                 for action in then_actions {
-                    self.validate_action_reference(artifact, transition, &mut then_refs, action)?;
+                    self.validate_action_reference(
+                        artifact,
+                        transition,
+                        &mut then_refs,
+                        action,
+                        active_loop_elements,
+                        false,
+                    )?;
                 }
                 let mut else_refs = spawned_refs.clone();
                 for action in else_actions {
-                    self.validate_action_reference(artifact, transition, &mut else_refs, action)?;
+                    self.validate_action_reference(
+                        artifact,
+                        transition,
+                        &mut else_refs,
+                        action,
+                        active_loop_elements,
+                        false,
+                    )?;
                 }
                 then_refs.retain(|process_ref| else_refs.contains(process_ref));
                 *spawned_refs = then_refs;
+            }
+            ArtifactAction::ForEach {
+                element,
+                collection,
+                max_items,
+                body,
+            } => {
+                if inside_loop {
+                    return Err(Error::new(format!(
+                        "process {} transition {} nested for loops are not supported in this artifact slice",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
+                artifact.validate_value_type("for loop element type", element.ty)?;
+                validate_count(
+                    "for loop element id",
+                    element.id.index(),
+                    0,
+                    MAX_VALUE_TEMPLATE_FIELDS - 1,
+                )?;
+                validate_count(
+                    "for loop max_items",
+                    *max_items,
+                    0,
+                    MAX_VALUE_TEMPLATE_FIELDS,
+                )?;
+                validate_template_loop_elements(
+                    artifact,
+                    collection,
+                    active_loop_elements,
+                    &format!(
+                        "process {} transition {} for collection",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    ),
+                )?;
+                let received_payload_type = self
+                    .message_variants
+                    .get(transition.message.index())
+                    .and_then(|message| message.payload_type);
+                let current_state_payload = self.transition_current_state_payload(transition)?;
+                collection.validate_for_received_payload(
+                    artifact,
+                    &format!(
+                        "process {} transition {} for collection",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    ),
+                    None,
+                    received_payload_type,
+                    current_state_payload.map(|payload| payload.ty),
+                    0,
+                )?;
+                if !collection.depends_on_received_payload() {
+                    let evaluated = artifact.evaluate_state_value_with_current_state(
+                        collection,
+                        None,
+                        current_state_payload,
+                    )?;
+                    let ArtifactValue::List(items) = evaluated.value else {
+                        return Err(Error::new(format!(
+                            "process {} transition {} for collection must evaluate to a list value",
+                            self.debug_name,
+                            transition.message.as_u32()
+                        )));
+                    };
+                    if items.len() > *max_items {
+                        return Err(Error::new(format!(
+                            "process {} transition {} for collection has {} item(s), max_items is {}",
+                            self.debug_name,
+                            transition.message.as_u32(),
+                            items.len(),
+                            max_items
+                        )));
+                    }
+                }
+                let active = [ActiveArtifactLoopElement {
+                    id: element.id,
+                    ty: element.ty,
+                }];
+                for body_action in body {
+                    self.validate_action_reference(
+                        artifact,
+                        transition,
+                        spawned_refs,
+                        body_action,
+                        &active,
+                        true,
+                    )?;
+                }
             }
         }
         Ok(())
@@ -707,6 +879,9 @@ impl ArtifactProcess {
                 }
                 Ok(())
             }
+            ArtifactValueTemplate::LoopElement { ty, .. } => {
+                artifact.validate_value_type("loop element payload type", *ty)
+            }
             ArtifactValueTemplate::EnumVariant { payload, .. } => {
                 self.validate_template_process_refs(artifact, payload, spawned_refs)
             }
@@ -743,6 +918,100 @@ impl ArtifactProcess {
                     process_ref.as_u32()
                 ))
             })
+    }
+}
+
+fn validate_template_loop_elements(
+    artifact: &MantleArtifact,
+    template: &ArtifactValueTemplate,
+    active_loop_elements: &[ActiveArtifactLoopElement],
+    field: &str,
+) -> Result<()> {
+    match template {
+        ArtifactValueTemplate::Literal { .. }
+        | ArtifactValueTemplate::ReceivedPayload { .. }
+        | ArtifactValueTemplate::CurrentStatePayload { .. }
+        | ArtifactValueTemplate::ProcessRef { .. } => Ok(()),
+        ArtifactValueTemplate::LoopElement { ty, element } => {
+            artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+            let Some(active) = active_loop_elements
+                .iter()
+                .find(|active| active.id == *element)
+            else {
+                return Err(Error::new(format!(
+                    "{field} references inactive loop element id {}",
+                    element.as_u32()
+                )));
+            };
+            if active.ty != *ty {
+                return Err(Error::new(format!(
+                    "{field} loop element id {} has type id {}, expected {}",
+                    element.as_u32(),
+                    active.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            Ok(())
+        }
+        ArtifactValueTemplate::EnumPayload { value, .. } => {
+            validate_template_loop_elements(artifact, value, active_loop_elements, field)
+        }
+        ArtifactValueTemplate::RecordField { record, .. } => {
+            validate_template_loop_elements(artifact, record, active_loop_elements, field)
+        }
+        ArtifactValueTemplate::ListElement { list, .. }
+        | ArtifactValueTemplate::ListPrefixElement { list, .. }
+        | ArtifactValueTemplate::ListRest { list, .. } => {
+            validate_template_loop_elements(artifact, list, active_loop_elements, field)
+        }
+        ArtifactValueTemplate::MapValue { map, .. } => {
+            validate_template_loop_elements(artifact, map, active_loop_elements, field)
+        }
+        ArtifactValueTemplate::MapRest { map, .. } => {
+            validate_template_loop_elements(artifact, map, active_loop_elements, field)
+        }
+        ArtifactValueTemplate::EnumVariant { payload, .. } => {
+            validate_template_loop_elements(artifact, payload, active_loop_elements, field)
+        }
+        ArtifactValueTemplate::Record { fields, .. } => {
+            for record_field in fields {
+                validate_template_loop_elements(
+                    artifact,
+                    &record_field.value,
+                    active_loop_elements,
+                    &format!("{field}.{}", record_field.name),
+                )?;
+            }
+            Ok(())
+        }
+        ArtifactValueTemplate::List { items, .. } => {
+            for (index, item) in items.iter().enumerate() {
+                validate_template_loop_elements(
+                    artifact,
+                    item,
+                    active_loop_elements,
+                    &format!("{field}.{index}"),
+                )?;
+            }
+            Ok(())
+        }
+        ArtifactValueTemplate::Map { entries, .. } => {
+            for (index, entry) in entries.iter().enumerate() {
+                validate_template_loop_elements(
+                    artifact,
+                    &entry.key,
+                    active_loop_elements,
+                    &format!("{field}.{index}.key"),
+                )?;
+                validate_template_loop_elements(
+                    artifact,
+                    &entry.value,
+                    active_loop_elements,
+                    &format!("{field}.{index}.value"),
+                )?;
+            }
+            Ok(())
+        }
     }
 }
 

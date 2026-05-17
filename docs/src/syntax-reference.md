@@ -376,6 +376,7 @@ statement =
     emit_statement
   | process_ref_statement
   | send_statement
+  | for_statement
 
 emit_statement =
     "emit" string_literal ";"
@@ -391,6 +392,9 @@ send_statement =
 
 payload_arg =
     "(" value_expr ")"
+
+for_statement =
+    "for" ident "in" ident "{" statement* "}"
 
 return_statement =
     "return" return_expr ";"
@@ -408,6 +412,12 @@ The first identifier in `send` is a local process reference or a received
 payload binding whose type is `ProcessRef<T>`. The second identifier is the
 message variant to send. Payload variants require one payload value. Unit
 variants reject payload values.
+
+The `for` collection source is an identifier binding, not an arbitrary
+expression. Checking requires it to be a runtime-bound `List<T,N>` value. The
+element identifier is immutable and visible only in the loop body. This slice
+does not admit nested loops, `return`, runtime `if`, or `spawn` inside loop
+bodies.
 
 ## Types
 

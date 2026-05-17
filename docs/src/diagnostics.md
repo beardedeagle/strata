@@ -43,6 +43,12 @@ result of the first invalid shape.
 | `uses effect ... but does not declare it` | The body performs `emit`, `spawn`, or `send` without matching effect authority. | Add the exact used effect to `! [...]` or remove the statement. |
 | `declares effect ... but does not use it` | The effect list is wider than the body. | Remove the unused effect. |
 | `declares duplicate effect` | The effect list repeats one authority. | Keep each effect at most once. |
+| `for loop collection must be an identifier binding` | A runtime `for` loop tries to iterate a literal or computed value. | Iterate an immutable runtime collection binding such as a typed message payload binding. |
+| `for loop collection ... must have type List<T,N>` | A runtime `for` loop source is not a typed list collection. | Use a binding whose type is `List<Element,N>`. |
+| `for loop collection must be a runtime list binding` | A `for` loop source is static source data rather than runtime data. | Pass the list as a typed runtime payload or state-derived runtime binding. |
+| `for loop body cannot bind process reference` | A loop body tries to create new authority with `spawn`. | Bind process references before the loop and use only admitted linear loop body effects. |
+| `nested for loops are not supported` | A loop body contains another loop. | Flatten the runtime payload shape or split the behavior into separate admitted steps for this slice. |
+| `assignment statements are not supported` | Source code uses assignment-style mutation. | Bind immutable values through declarations or return a whole replacement state value. |
 
 ## Source Function Errors
 
@@ -59,7 +65,7 @@ result of the first invalid shape.
 | `if condition requires enum Bool { False, True }` | A source conditional is used without the explicit fieldless Bool contract. | Declare `enum Bool { False, True }`. |
 | `if condition must have type Bool` | A source conditional condition resolves to a non-Bool source value. | Return or pass `True` or `False` from the declared `Bool` enum. |
 | `if then branch must produce ...` / `if else branch must produce ...` | A conditional branch does not match the expected source value type. | Return the same source value type from both branches. |
-| `if condition requires a concrete Bool value` | A conditional condition remains runtime-bound after helper expansion. | Use a concrete Bool value before lowering; this slice does not lower runtime conditionals. |
+| `if condition requires a concrete Bool value` | A pure source conditional condition remains runtime-bound after helper expansion. | Use a concrete Bool value for source-level `if`, or use the admitted final-position runtime `if` form in a `step` body. |
 | `if branches are pure value expressions and must not perform statements` | A conditional branch contains `emit`, `let`, `send`, or `return`. | Keep branch bodies to one source value expression and move effects to admitted `step` forms. |
 | `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
 | `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |

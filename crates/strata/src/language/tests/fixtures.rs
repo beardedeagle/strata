@@ -59,6 +59,8 @@ pub(super) const STATE_PAYLOAD_MATCH: &str =
 pub(super) const ACTOR_REPLY: &str = include_str!("../../../../../examples/actor_reply.str");
 pub(super) const RUNTIME_IF_ELSE: &str =
     include_str!("../../../../../examples/runtime_if_else.str");
+pub(super) const RUNTIME_FOR_EACH: &str =
+    include_str!("../../../../../examples/runtime_for_each.str");
 
 pub(super) const ACTOR_PING: &str = r#"
 module actor_ping;

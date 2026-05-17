@@ -3,14 +3,20 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
 
 use super::super::super::checked::{
-    CheckedAction, CheckedMessageId, CheckedPayloadValue, CheckedProcess, CheckedProcessId,
-    CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult, CheckedTransition,
-    CheckedValueTemplate,
+    CheckedAction, CheckedLoopElementId, CheckedMessageId, CheckedPayloadValue, CheckedProcess,
+    CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
+    CheckedTransition, CheckedValueTemplate,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
 use super::process_refs::{process_by_id, process_label, process_ref_target};
 use super::templates::resolve_checked_next_state;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StaticLoopElementBinding {
+    id: CheckedLoopElementId,
+    value: CheckedPayloadValue,
+}
 
 fn evaluate_checked_runtime_template(
     template: &CheckedValueTemplate,
@@ -18,6 +24,7 @@ fn evaluate_checked_runtime_template(
     current_state_payload: Option<&CheckedPayloadValue>,
     process: &CheckedProcess,
     process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    loop_elements: &[StaticLoopElementBinding],
 ) -> Result<CheckedPayloadValue> {
     match template {
         CheckedValueTemplate::Literal(value) => Ok(value.clone()),
@@ -54,6 +61,7 @@ fn evaluate_checked_runtime_template(
                 current_state_payload,
                 process,
                 process_refs,
+                loop_elements,
             )?;
             let variant = value.ty().enum_variant_label(*variant)?;
             let payload = checked_payload_value(&value)?
@@ -68,6 +76,7 @@ fn evaluate_checked_runtime_template(
                 current_state_payload,
                 process,
                 process_refs,
+                loop_elements,
             )?;
             let value = checked_payload_value(&record)?
                 .project_record_field(field.as_str())
@@ -86,6 +95,7 @@ fn evaluate_checked_runtime_template(
                 current_state_payload,
                 process,
                 process_refs,
+                loop_elements,
             )?;
             let value = checked_payload_value(&list)?
                 .project_list_element(*index, *len)
@@ -104,6 +114,7 @@ fn evaluate_checked_runtime_template(
                 current_state_payload,
                 process,
                 process_refs,
+                loop_elements,
             )?;
             let value = checked_payload_value(&list)?
                 .project_list_prefix_element(*index, *prefix_len)
@@ -121,6 +132,7 @@ fn evaluate_checked_runtime_template(
                 current_state_payload,
                 process,
                 process_refs,
+                loop_elements,
             )?;
             let value = checked_payload_value(&list)?
                 .project_list_rest(*prefix_len)
@@ -140,6 +152,7 @@ fn evaluate_checked_runtime_template(
                 current_state_payload,
                 process,
                 process_refs,
+                loop_elements,
             )?;
             let value = checked_payload_value(&map)?
                 .project_map_value(key, keys, *projection)
@@ -157,6 +170,7 @@ fn evaluate_checked_runtime_template(
                 current_state_payload,
                 process,
                 process_refs,
+                loop_elements,
             )?;
             let value = checked_payload_value(&map)?
                 .project_map_rest(excluded_keys)
@@ -176,6 +190,28 @@ fn evaluate_checked_runtime_template(
                 u64::from(pid.as_u32()),
             ))
         }
+        CheckedValueTemplate::LoopElement { ty, element } => {
+            let value = loop_elements
+                .iter()
+                .find(|binding| binding.id == *element)
+                .map(|binding| &binding.value)
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} references inactive loop element id {}",
+                        process.debug_name(),
+                        element.as_u32()
+                    ))
+                })?;
+            if value.ty() != ty {
+                return Err(Error::new(format!(
+                    "loop element id {} has type {}, expected {}",
+                    element.as_u32(),
+                    value.ty(),
+                    ty
+                )));
+            }
+            Ok(value.clone())
+        }
         CheckedValueTemplate::EnumVariant {
             ty,
             variant,
@@ -187,6 +223,7 @@ fn evaluate_checked_runtime_template(
                 current_state_payload,
                 process,
                 process_refs,
+                loop_elements,
             )?;
             Ok(CheckedPayloadValue::new(
                 ty.clone(),
@@ -206,6 +243,7 @@ fn evaluate_checked_runtime_template(
                     current_state_payload,
                     process,
                     process_refs,
+                    loop_elements,
                 )?;
                 if !seen.insert(field.name()) {
                     return Err(Error::new(format!(
@@ -235,6 +273,7 @@ fn evaluate_checked_runtime_template(
                     current_state_payload,
                     process,
                     process_refs,
+                    loop_elements,
                 )?;
                 values.push(checked_payload_value(&value)?);
             }
@@ -253,6 +292,7 @@ fn evaluate_checked_runtime_template(
                     current_state_payload,
                     process,
                     process_refs,
+                    loop_elements,
                 )?;
                 let value = evaluate_checked_runtime_template(
                     entry.value(),
@@ -260,6 +300,7 @@ fn evaluate_checked_runtime_template(
                     current_state_payload,
                     process,
                     process_refs,
+                    loop_elements,
                 )?;
                 let key_value = checked_payload_value(&key)?;
                 let item_value = checked_payload_value(&value)?;
@@ -503,6 +544,7 @@ pub(super) fn validate_static_runtime_order(
                 &envelope,
                 current_state_payload,
                 action,
+                &[],
             )?;
         }
 
@@ -543,6 +585,7 @@ fn execute_static_action(
     envelope: &StaticMessageEnvelope,
     current_state_payload: Option<&CheckedPayloadValue>,
     action: &CheckedAction,
+    loop_elements: &[StaticLoopElementBinding],
 ) -> Result<()> {
     match action {
         CheckedAction::Emit { .. } => Ok(()),
@@ -616,6 +659,7 @@ fn execute_static_action(
                     current_state_payload,
                     process,
                     local_process_refs,
+                    loop_elements,
                 )?),
                 None => None,
             };
@@ -635,6 +679,7 @@ fn execute_static_action(
                 current_state_payload,
                 process,
                 local_process_refs,
+                loop_elements,
             )? {
                 then_actions
             } else {
@@ -650,11 +695,91 @@ fn execute_static_action(
                     envelope,
                     current_state_payload,
                     action,
+                    loop_elements,
+                )?;
+            }
+            Ok(())
+        }
+        CheckedAction::ForEach {
+            element,
+            collection,
+            max_items,
+            body,
+        } => {
+            let collection = evaluate_checked_runtime_template(
+                collection,
+                envelope.payload.as_ref(),
+                current_state_payload,
+                process,
+                local_process_refs,
+                loop_elements,
+            )?;
+            let collection_label = collection.label();
+            let collection_value = checked_payload_value(&collection)?;
+            let ArtifactValue::List(items) = collection_value else {
+                return Err(Error::new(format!(
+                    "process {} for loop collection produced non-list value {}",
+                    process.debug_name(),
+                    collection_label
+                )));
+            };
+            if items.len() > *max_items {
+                return Err(Error::new(format!(
+                    "process {} for loop collection has {} item(s), max_items is {}",
+                    process.debug_name(),
+                    items.len(),
+                    max_items
+                )));
+            }
+            for item in items {
+                let item_payload = CheckedPayloadValue::new(element.ty().clone(), item);
+                let binding = StaticLoopElementBinding {
+                    id: element.id(),
+                    value: item_payload,
+                };
+                execute_static_action_list(
+                    processes,
+                    instances,
+                    next_pid,
+                    process,
+                    local_process_refs,
+                    envelope,
+                    current_state_payload,
+                    body,
+                    &[binding],
                 )?;
             }
             Ok(())
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_static_action_list(
+    processes: &[CheckedProcess],
+    instances: &mut Vec<StaticProcessInstance>,
+    next_pid: &mut StaticProcessId,
+    process: &CheckedProcess,
+    local_process_refs: &mut BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    envelope: &StaticMessageEnvelope,
+    current_state_payload: Option<&CheckedPayloadValue>,
+    actions: &[CheckedAction],
+    loop_elements: &[StaticLoopElementBinding],
+) -> Result<()> {
+    for action in actions {
+        execute_static_action(
+            processes,
+            instances,
+            next_pid,
+            process,
+            local_process_refs,
+            envelope,
+            current_state_payload,
+            action,
+            loop_elements,
+        )?;
+    }
+    Ok(())
 }
 
 fn evaluate_checked_bool_condition(
@@ -663,6 +788,7 @@ fn evaluate_checked_bool_condition(
     current_state_payload: Option<&CheckedPayloadValue>,
     process: &CheckedProcess,
     process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    loop_elements: &[StaticLoopElementBinding],
 ) -> Result<bool> {
     let value = evaluate_checked_runtime_template(
         condition,
@@ -670,6 +796,7 @@ fn evaluate_checked_bool_condition(
         current_state_payload,
         process,
         process_refs,
+        loop_elements,
     )?;
     let value = value.value().ok_or_else(|| {
         Error::new(format!(

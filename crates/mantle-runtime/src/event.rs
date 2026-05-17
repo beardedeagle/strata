@@ -2,7 +2,8 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 use mantle_artifact::{
-    ArtifactBranch, Error, MessageId, OutputId, ProcessId, Result, StateId, StepResult,
+    ArtifactBranch, Error, LoopElementId, MessageId, OutputId, ProcessId, Result, StateId,
+    StepResult, TypeId,
 };
 
 use crate::program::RuntimePayload;
@@ -97,6 +98,37 @@ pub enum RuntimeEvent {
         branch: ArtifactBranch,
         condition_type_id: mantle_artifact::TypeId,
         condition: String,
+    },
+    LoopStarted {
+        pid: RuntimeProcessId,
+        process_id: ProcessId,
+        process: String,
+        message_id: MessageId,
+        message: String,
+        element_id: LoopElementId,
+        collection_type_id: TypeId,
+        max_items: usize,
+        item_count: usize,
+    },
+    LoopIteration {
+        pid: RuntimeProcessId,
+        process_id: ProcessId,
+        process: String,
+        message_id: MessageId,
+        message: String,
+        element_id: LoopElementId,
+        index: usize,
+        element_type_id: TypeId,
+        element: String,
+    },
+    LoopCompleted {
+        pid: RuntimeProcessId,
+        process_id: ProcessId,
+        process: String,
+        message_id: MessageId,
+        message: String,
+        element_id: LoopElementId,
+        iteration_count: usize,
     },
     StateUpdated {
         pid: RuntimeProcessId,

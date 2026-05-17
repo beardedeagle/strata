@@ -54,6 +54,9 @@ instances share `process_id` and label metadata but have different `pid` values.
 | `message_accepted` | Mantle accepts a message into a process mailbox. |
 | `message_dequeued` | A process dequeued a message for handling. |
 | `branch_selected` | Mantle selected a typed runtime control-flow branch. |
+| `loop_started` | Mantle started a bounded runtime collection loop. |
+| `loop_iteration` | Mantle started one ordered runtime loop body iteration. |
+| `loop_completed` | Mantle completed a bounded runtime collection loop. |
 | `process_stepped` | A transition ran for a message. |
 | `state_updated` | A process state changes to another admitted state value. |
 | `program_output` | A process emitted declared output. |
@@ -135,6 +138,22 @@ Example shape:
 ID for the checked `Bool` condition, and `condition` is trace metadata for the
 evaluated value. Runtime branch selection uses the admitted typed condition,
 not source strings, helper names, or debug labels.
+
+## Runtime Loop Events
+
+Example shape:
+
+```json
+{"event":"loop_started","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","element_id":0,"collection_type_id":0,"max_items":2,"item_count":2}
+{"event":"loop_iteration","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","element_id":0,"index":0,"element_type_id":1,"element":"True"}
+{"event":"loop_completed","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","element_id":0,"iteration_count":2}
+```
+
+`element_id`, `collection_type_id`, and `element_type_id` are admitted artifact
+IDs. `index`, `item_count`, and `iteration_count` record the bounded runtime
+execution. `element` is trace metadata for the evaluated element value. Runtime
+loop execution uses the admitted typed collection template and loop element ID,
+not the source binding name.
 
 ## Process Stepped
 

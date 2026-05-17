@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 
 use super::super::checked::{
-    CheckedAction, CheckedMessageId, CheckedPayloadValue, CheckedProcess, CheckedProcessId,
-    CheckedProcessRefId, CheckedStateId, CheckedTransition, CheckedTypeId, CheckedValueTemplate,
+    CheckedAction, CheckedLoopElementId, CheckedMessageId, CheckedPayloadValue, CheckedProcess,
+    CheckedProcessId, CheckedProcessRefId, CheckedStateId, CheckedTransition, CheckedTypeId,
+    CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
 };
 use super::super::diagnostic::{Error, Result};
-use mantle_artifact::ArtifactValue;
+use mantle_artifact::{ArtifactValue, MAX_VALUE_TEMPLATE_FIELDS};
 
 mod process_refs;
 mod runtime_order;
@@ -27,6 +28,20 @@ type TransitionCoverageKey = (
     Option<CheckedStateId>,
     TransitionPayloadGuardKey,
 );
+
+#[derive(Clone)]
+struct ActiveCheckedLoopElement {
+    id: CheckedLoopElementId,
+    ty: CheckedTypeRef,
+}
+
+struct ActionValidationContext<'a> {
+    processes: &'a [CheckedProcess],
+    process: &'a CheckedProcess,
+    process_id: CheckedProcessId,
+    entry_process: CheckedProcessId,
+    transition: &'a CheckedTransition,
+}
 
 pub(super) fn validate_action_references(
     processes: &[CheckedProcess],
@@ -143,51 +158,56 @@ fn validate_transition(
     validate_transition_payload_guard(process, transition)?;
     validate_transition_effects(process, transition)?;
     let mut spawned_refs = BTreeSet::new();
+    let context = ActionValidationContext {
+        processes,
+        process,
+        process_id,
+        entry_process,
+        transition,
+    };
 
     for action in transition.actions() {
-        validate_action_reference(
-            processes,
-            process,
-            process_id,
-            entry_process,
-            transition,
-            &mut spawned_refs,
-            action,
-        )?;
+        validate_action_reference(&context, &mut spawned_refs, action, &[], false)?;
     }
     Ok(())
 }
 
 fn validate_action_reference(
-    processes: &[CheckedProcess],
-    process: &CheckedProcess,
-    process_id: CheckedProcessId,
-    entry_process: CheckedProcessId,
-    transition: &CheckedTransition,
+    context: &ActionValidationContext<'_>,
     spawned_refs: &mut BTreeSet<CheckedProcessRefId>,
     action: &CheckedAction,
+    active_loop_elements: &[ActiveCheckedLoopElement],
+    inside_loop: bool,
 ) -> Result<()> {
+    let process = context.process;
+    let transition = context.transition;
     match action {
         CheckedAction::Emit { .. } => {}
         CheckedAction::Spawn {
             target,
             process_ref,
         } => {
-            if target.index() >= processes.len() {
+            if inside_loop {
+                return Err(Error::new(format!(
+                    "process {} for loop body cannot bind process references",
+                    process.debug_name()
+                )));
+            }
+            if target.index() >= context.processes.len() {
                 return Err(Error::new(format!(
                     "process {} spawns undefined process id {}",
                     process.debug_name(),
                     target.as_u32()
                 )));
             }
-            if *target == entry_process {
+            if *target == context.entry_process {
                 return Err(Error::new(format!(
                     "process {} spawns entry process {}, which is already started",
                     process.debug_name(),
-                    process_label(processes, *target)?
+                    process_label(context.processes, *target)?
                 )));
             }
-            if *target == process_id {
+            if *target == context.process_id {
                 return Err(Error::new(format!(
                     "process {} spawns itself, which is not supported",
                     process.debug_name()
@@ -218,13 +238,13 @@ fn validate_action_reference(
             payload,
         } => {
             let target_process_id = validate_send_target(
-                processes,
+                context.processes,
                 process,
                 transition.message(),
                 target,
                 spawned_refs,
             )?;
-            let target_process = process_by_id(processes, target_process_id)?;
+            let target_process = process_by_id(context.processes, target_process_id)?;
             if message.index() >= target_process.message_cases().len() {
                 return Err(Error::new(format!(
                     "process {} sends message id {} not accepted by {}",
@@ -234,13 +254,12 @@ fn validate_action_reference(
                 )));
             }
             validate_send_payload_shape(
-                process,
-                transition,
+                context,
                 target_process,
                 *message,
                 payload.as_deref(),
                 spawned_refs,
-                processes,
+                active_loop_elements,
             )?;
         }
         CheckedAction::IfElse {
@@ -248,6 +267,12 @@ fn validate_action_reference(
             then_actions,
             else_actions,
         } => {
+            if inside_loop {
+                return Err(Error::new(format!(
+                    "process {} for loop body cannot contain runtime if actions in this source slice",
+                    process.debug_name()
+                )));
+            }
             validate_bool_condition_template(process, condition)?;
             validate_value_template_binding_types(
                 condition,
@@ -256,39 +281,84 @@ fn validate_action_reference(
             )?;
             validate_value_template_payload_labels(condition)?;
             validate_value_template_process_refs(
-                processes,
+                context.processes,
                 process,
                 condition,
                 spawned_refs,
                 false,
             )?;
+            validate_value_template_loop_elements(condition, active_loop_elements)?;
 
             let mut then_refs = spawned_refs.clone();
             for action in then_actions {
                 validate_action_reference(
-                    processes,
-                    process,
-                    process_id,
-                    entry_process,
-                    transition,
+                    context,
                     &mut then_refs,
                     action,
+                    active_loop_elements,
+                    false,
                 )?;
             }
             let mut else_refs = spawned_refs.clone();
             for action in else_actions {
                 validate_action_reference(
-                    processes,
-                    process,
-                    process_id,
-                    entry_process,
-                    transition,
+                    context,
                     &mut else_refs,
                     action,
+                    active_loop_elements,
+                    false,
                 )?;
             }
             then_refs.retain(|process_ref| else_refs.contains(process_ref));
             *spawned_refs = then_refs;
+        }
+        CheckedAction::ForEach {
+            element,
+            collection,
+            body,
+            ..
+        } => {
+            if inside_loop {
+                return Err(Error::new(format!(
+                    "process {} nested for loops are not supported in this source slice",
+                    process.debug_name()
+                )));
+            }
+            if matches!(element.ty().kind(), CheckedTypeKind::ProcessRef { .. }) {
+                return Err(Error::new(format!(
+                    "process {} for loop element cannot have process reference type",
+                    process.debug_name()
+                )));
+            }
+            if element.id().as_u32() >= MAX_VALUE_TEMPLATE_FIELDS as u32 {
+                return Err(Error::new(format!(
+                    "process {} for loop element id {} must be no greater than {}",
+                    process.debug_name(),
+                    element.id().as_u32(),
+                    MAX_VALUE_TEMPLATE_FIELDS - 1
+                )));
+            }
+            validate_value_template_binding_types(
+                collection,
+                message_payload_type(process, transition.message())?,
+                current_state_payload_type(process, transition.current_state())?,
+            )?;
+            validate_value_template_payload_labels(collection)?;
+            validate_value_template_process_refs(
+                context.processes,
+                process,
+                collection,
+                spawned_refs,
+                false,
+            )?;
+            validate_value_template_loop_elements(collection, active_loop_elements)?;
+            let active = [ActiveCheckedLoopElement {
+                id: element.id(),
+                ty: element.ty().clone(),
+            }];
+            for action in body {
+                validate_action_reference(context, spawned_refs, action, &active, true)?;
+            }
         }
     }
     Ok(())
@@ -386,14 +456,15 @@ fn validate_transition_payload_guard(
 }
 
 fn validate_send_payload_shape(
-    process: &CheckedProcess,
-    transition: &CheckedTransition,
+    context: &ActionValidationContext<'_>,
     target_process: &CheckedProcess,
     target_message: CheckedMessageId,
     payload: Option<&CheckedValueTemplate>,
     spawned_refs: &BTreeSet<CheckedProcessRefId>,
-    processes: &[CheckedProcess],
+    active_loop_elements: &[ActiveCheckedLoopElement],
 ) -> Result<()> {
+    let process = context.process;
+    let transition = context.transition;
     let current_payload_type = message_payload_type(process, transition.message())?;
     let current_state_payload_type =
         current_state_payload_type(process, transition.current_state())?;
@@ -417,7 +488,14 @@ fn validate_send_payload_shape(
                 current_state_payload_type,
             )?;
             validate_value_template_payload_labels(payload)?;
-            validate_value_template_process_refs(processes, process, payload, spawned_refs, true)?;
+            validate_value_template_process_refs(
+                context.processes,
+                process,
+                payload,
+                spawned_refs,
+                true,
+            )?;
+            validate_value_template_loop_elements(payload, active_loop_elements)?;
             if payload.result_type() != expected_type {
                 return Err(Error::new(format!(
                     "process {} sends payload of type {}, expected {}",
@@ -425,6 +503,77 @@ fn validate_send_payload_shape(
                     payload.result_type(),
                     expected_type
                 )));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_value_template_loop_elements(
+    template: &CheckedValueTemplate,
+    active_loop_elements: &[ActiveCheckedLoopElement],
+) -> Result<()> {
+    match template {
+        CheckedValueTemplate::Literal(_)
+        | CheckedValueTemplate::ReceivedPayload { .. }
+        | CheckedValueTemplate::CurrentStatePayload { .. }
+        | CheckedValueTemplate::ProcessRef { .. } => Ok(()),
+        CheckedValueTemplate::LoopElement { ty, element } => {
+            let Some(active) = active_loop_elements
+                .iter()
+                .find(|active| active.id == *element)
+            else {
+                return Err(Error::new(format!(
+                    "references inactive loop element id {}",
+                    element.as_u32()
+                )));
+            };
+            if active.ty != *ty {
+                return Err(Error::new(format!(
+                    "loop element id {} has type {}, expected {}",
+                    element.as_u32(),
+                    active.ty,
+                    ty
+                )));
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::EnumPayload { value, .. } => {
+            validate_value_template_loop_elements(value, active_loop_elements)
+        }
+        CheckedValueTemplate::RecordField { record, .. } => {
+            validate_value_template_loop_elements(record, active_loop_elements)
+        }
+        CheckedValueTemplate::ListElement { list, .. }
+        | CheckedValueTemplate::ListPrefixElement { list, .. }
+        | CheckedValueTemplate::ListRest { list, .. } => {
+            validate_value_template_loop_elements(list, active_loop_elements)
+        }
+        CheckedValueTemplate::MapValue { map, .. } => {
+            validate_value_template_loop_elements(map, active_loop_elements)
+        }
+        CheckedValueTemplate::MapRest { map, .. } => {
+            validate_value_template_loop_elements(map, active_loop_elements)
+        }
+        CheckedValueTemplate::EnumVariant { payload, .. } => {
+            validate_value_template_loop_elements(payload, active_loop_elements)
+        }
+        CheckedValueTemplate::Record { fields, .. } => {
+            for field in fields {
+                validate_value_template_loop_elements(field.value(), active_loop_elements)?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::List { items, .. } => {
+            for item in items {
+                validate_value_template_loop_elements(item, active_loop_elements)?;
+            }
+            Ok(())
+        }
+        CheckedValueTemplate::Map { entries, .. } => {
+            for entry in entries {
+                validate_value_template_loop_elements(entry.key(), active_loop_elements)?;
+                validate_value_template_loop_elements(entry.value(), active_loop_elements)?;
             }
             Ok(())
         }

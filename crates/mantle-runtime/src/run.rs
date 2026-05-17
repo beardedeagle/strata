@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use mantle_artifact::{
-    ArtifactBranch, ArtifactValue, Error, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, OutputId,
-    ProcessId, ProcessRefId, Result, StateId, StepResult,
+    ArtifactBranch, ArtifactValue, Error, LoopElementId, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact,
+    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
 };
 
 use accounting::{checked_output_bytes, checked_trace_event_bytes};
@@ -61,10 +61,25 @@ struct BranchDecision {
     branch: ArtifactBranch,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RuntimeLoopElement {
+    id: LoopElementId,
+    payload: RuntimePayload,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BranchDecisionMode {
     StoreForAction,
     ReuseFromNextState,
+}
+
+struct BranchSelection<'a> {
+    step: &'a ActiveStep,
+    condition: &'a LoadedValueTemplate,
+    local_process_refs: &'a BTreeMap<ProcessRefId, RuntimeProcessId>,
+    path: BranchDecisionPath,
+    mode: BranchDecisionMode,
+    loop_elements: &'a [RuntimeLoopElement],
 }
 
 pub fn run_artifact_with_host<H: RuntimeHost>(
@@ -83,13 +98,7 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
     limits: RunLimits,
 ) -> Result<RuntimeReport> {
     program.validate_admission()?;
-    let mut run = RuntimeRun::new(
-        program,
-        host,
-        limits.max_runtime_processes,
-        limits.max_trace_bytes,
-        limits.max_emitted_output_bytes,
-    );
+    let mut run = RuntimeRun::new(program, host, limits);
     run.record_event(RuntimeEvent::ArtifactLoaded {
         format: program.format.clone(),
         schema_version: program.schema_version.clone(),
@@ -143,6 +152,8 @@ struct RuntimeRun<'program, 'host, H: RuntimeHost> {
     processes: Vec<ProcessInstance>,
     next_pid: RuntimeProcessId,
     max_runtime_processes: usize,
+    loop_iterations: usize,
+    max_loop_iterations: usize,
     trace_bytes: usize,
     max_trace_bytes: usize,
     emitted_output_bytes: usize,
@@ -153,23 +164,19 @@ struct RuntimeRun<'program, 'host, H: RuntimeHost> {
 }
 
 impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
-    fn new(
-        program: &'program LoadedProgram,
-        host: &'host mut H,
-        max_runtime_processes: usize,
-        max_trace_bytes: usize,
-        max_emitted_output_bytes: usize,
-    ) -> Self {
+    fn new(program: &'program LoadedProgram, host: &'host mut H, limits: RunLimits) -> Self {
         Self {
             program,
             host,
             processes: Vec::new(),
             next_pid: RuntimeProcessId::FIRST,
-            max_runtime_processes,
+            max_runtime_processes: limits.max_runtime_processes,
+            loop_iterations: 0,
+            max_loop_iterations: limits.max_dispatches,
             trace_bytes: 0,
-            max_trace_bytes,
+            max_trace_bytes: limits.max_trace_bytes,
             emitted_output_bytes: 0,
-            max_emitted_output_bytes,
+            max_emitted_output_bytes: limits.max_emitted_output_bytes,
             spawned_processes: Vec::new(),
             delivered_messages: Vec::new(),
             emitted_outputs: Vec::new(),
@@ -399,6 +406,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 &step,
                 action,
                 BranchDecisionPath::root(),
+                &[],
             )?;
         }
 
@@ -413,6 +421,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         action: &LoadedAction,
         branch_path: BranchDecisionPath,
+        loop_elements: &[RuntimeLoopElement],
     ) -> Result<()> {
         match action {
             LoadedAction::Emit { output } => self.emit_output(step, *output),
@@ -452,6 +461,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         step.payload.as_ref(),
                         step,
                         local_process_refs,
+                        loop_elements,
                     )?),
                     None => None,
                 };
@@ -467,12 +477,15 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 else_actions,
             } => {
                 let branch = self.select_branch(
-                    step,
-                    condition,
-                    local_process_refs,
+                    BranchSelection {
+                        step,
+                        condition,
+                        local_process_refs,
+                        path: branch_path,
+                        mode: BranchDecisionMode::ReuseFromNextState,
+                        loop_elements,
+                    },
                     branch_decisions,
-                    branch_path,
-                    BranchDecisionMode::ReuseFromNextState,
                 )?;
                 let selected_actions = match branch {
                     ArtifactBranch::Then => then_actions,
@@ -486,11 +499,87 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         step,
                         action,
                         selected_branch_path,
+                        loop_elements,
                     )?;
                 }
                 Ok(())
             }
+            LoadedAction::ForEach {
+                element,
+                collection,
+                max_items,
+                body,
+            } => {
+                let collection = evaluate_runtime_template(
+                    self.program,
+                    collection,
+                    step.payload.as_ref(),
+                    step,
+                    local_process_refs,
+                    loop_elements,
+                )?;
+                let collection_type = collection.ty;
+                let items = match collection.value {
+                    ArtifactValue::List(items) => items,
+                    value => {
+                        return Err(Error::new(format!(
+                            "process {} for loop collection produced non-list value {}",
+                            step.process_name,
+                            value.label()
+                        )));
+                    }
+                };
+                let item_count = items.len();
+                if item_count > *max_items {
+                    return Err(Error::new(format!(
+                        "process {} for loop collection has {} item(s), max_items is {}",
+                        step.process_name, item_count, max_items
+                    )));
+                }
+                self.ensure_loop_iteration_budget(item_count)?;
+                self.record_loop_started(
+                    step,
+                    element.id,
+                    collection_type,
+                    *max_items,
+                    item_count,
+                )?;
+                for (index, item) in items.into_iter().enumerate() {
+                    self.consume_loop_iteration()?;
+                    let payload = RuntimePayload::value(element.ty, item)?;
+                    self.record_loop_iteration(step, element.id, index, &payload)?;
+                    let active = [RuntimeLoopElement {
+                        id: element.id,
+                        payload,
+                    }];
+                    for action in body {
+                        self.execute_action(
+                            local_process_refs,
+                            branch_decisions,
+                            step,
+                            action,
+                            branch_path,
+                            &active,
+                        )?;
+                    }
+                }
+                self.record_loop_completed(step, element.id, item_count)?;
+                Ok(())
+            }
         }
+    }
+
+    fn ensure_loop_iteration_budget(&self, item_count: usize) -> Result<()> {
+        let remaining = self
+            .max_loop_iterations
+            .checked_sub(self.loop_iterations)
+            .ok_or_else(|| Error::new("runtime loop iteration counter exceeded its budget"))?;
+        if item_count > remaining {
+            return Err(Error::new(format!(
+                "runtime loop iteration budget exceeded: loop requires {item_count} iteration(s), remaining budget is {remaining}"
+            )));
+        }
+        Ok(())
     }
 
     fn evaluate_bool_condition(
@@ -498,6 +587,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         condition: &LoadedValueTemplate,
         local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        loop_elements: &[RuntimeLoopElement],
     ) -> Result<(ArtifactBranch, RuntimePayload)> {
         let condition_value = evaluate_runtime_template(
             self.program,
@@ -505,6 +595,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             step.payload.as_ref(),
             step,
             local_process_refs,
+            loop_elements,
         )?;
         if condition_value.ty != condition.result_type() {
             return Err(Error::new(format!(
@@ -537,28 +628,28 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     fn select_branch(
         &mut self,
-        step: &ActiveStep,
-        condition: &LoadedValueTemplate,
-        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        selection: BranchSelection<'_>,
         branch_decisions: &mut Vec<BranchDecision>,
-        branch_path: BranchDecisionPath,
-        mode: BranchDecisionMode,
     ) -> Result<ArtifactBranch> {
-        if mode == BranchDecisionMode::ReuseFromNextState {
+        if selection.mode == BranchDecisionMode::ReuseFromNextState {
             if let Some(index) = branch_decisions.iter().rposition(|decision| {
-                decision.path == branch_path && decision.condition == *condition
+                decision.path == selection.path && decision.condition == *selection.condition
             }) {
                 return Ok(branch_decisions.remove(index).branch);
             }
         }
 
-        let (branch, condition_value) =
-            self.evaluate_bool_condition(step, condition, local_process_refs)?;
-        self.record_branch_selected(step, branch, &condition_value)?;
-        if mode == BranchDecisionMode::StoreForAction {
+        let (branch, condition_value) = self.evaluate_bool_condition(
+            selection.step,
+            selection.condition,
+            selection.local_process_refs,
+            selection.loop_elements,
+        )?;
+        self.record_branch_selected(selection.step, branch, &condition_value)?;
+        if selection.mode == BranchDecisionMode::StoreForAction {
             branch_decisions.push(BranchDecision {
-                path: branch_path,
-                condition: condition.clone(),
+                path: selection.path,
+                condition: selection.condition.clone(),
                 branch,
             });
         }
@@ -580,6 +671,78 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             branch,
             condition_type_id: condition.ty,
             condition: condition.label().to_string(),
+        })
+    }
+
+    fn consume_loop_iteration(&mut self) -> Result<()> {
+        if self.loop_iterations >= self.max_loop_iterations {
+            return Err(Error::new(format!(
+                "runtime loop iteration budget exceeded after {} iteration(s)",
+                self.max_loop_iterations
+            )));
+        }
+        self.loop_iterations = self
+            .loop_iterations
+            .checked_add(1)
+            .ok_or_else(|| Error::new("runtime loop iteration counter overflowed"))?;
+        Ok(())
+    }
+
+    fn record_loop_started(
+        &mut self,
+        step: &ActiveStep,
+        element_id: LoopElementId,
+        collection_type_id: TypeId,
+        max_items: usize,
+        item_count: usize,
+    ) -> Result<()> {
+        self.record_event(RuntimeEvent::LoopStarted {
+            pid: step.pid,
+            process_id: step.process_id,
+            process: step.process_name.clone(),
+            message_id: step.message,
+            message: step.message_label.clone(),
+            element_id,
+            collection_type_id,
+            max_items,
+            item_count,
+        })
+    }
+
+    fn record_loop_iteration(
+        &mut self,
+        step: &ActiveStep,
+        element_id: LoopElementId,
+        index: usize,
+        element: &RuntimePayload,
+    ) -> Result<()> {
+        self.record_event(RuntimeEvent::LoopIteration {
+            pid: step.pid,
+            process_id: step.process_id,
+            process: step.process_name.clone(),
+            message_id: step.message,
+            message: step.message_label.clone(),
+            element_id,
+            index,
+            element_type_id: element.ty,
+            element: element.label().to_string(),
+        })
+    }
+
+    fn record_loop_completed(
+        &mut self,
+        step: &ActiveStep,
+        element_id: LoopElementId,
+        iteration_count: usize,
+    ) -> Result<()> {
+        self.record_event(RuntimeEvent::LoopCompleted {
+            pid: step.pid,
+            process_id: step.process_id,
+            process: step.process_name.clone(),
+            message_id: step.message,
+            message: step.message_label.clone(),
+            element_id,
+            iteration_count,
         })
     }
 
@@ -747,6 +910,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             step.payload.as_ref(),
             step,
             &BTreeMap::new(),
+            &[],
         )
     }
 
@@ -769,12 +933,15 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             } => {
                 let empty_process_refs = BTreeMap::new();
                 let branch = self.select_branch(
-                    step,
-                    condition,
-                    &empty_process_refs,
+                    BranchSelection {
+                        step,
+                        condition,
+                        local_process_refs: &empty_process_refs,
+                        path: branch_path,
+                        mode: BranchDecisionMode::StoreForAction,
+                        loop_elements: &[],
+                    },
                     branch_decisions,
-                    branch_path,
-                    BranchDecisionMode::StoreForAction,
                 )?;
                 let selected_state = match branch {
                     ArtifactBranch::Then => then_state,

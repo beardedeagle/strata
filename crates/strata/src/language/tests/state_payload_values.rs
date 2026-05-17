@@ -69,7 +69,11 @@ fn rejects_assignment_style_state_update_syntax() {
 
     let err = parse_source(&source).expect_err("assignment syntax should fail to parse");
 
-    assert!(err.to_string().contains("expected") || err.to_string().contains("unexpected token"));
+    assert!(
+        err.to_string()
+            .contains("assignment statements are not supported"),
+        "{err}"
+    );
 }
 
 #[test]

@@ -157,6 +157,7 @@ pub(super) fn validate_value_template_binding_types(
             }
             Ok(())
         }
+        CheckedValueTemplate::LoopElement { .. } => Ok(()),
         CheckedValueTemplate::EnumPayload { value, .. } => validate_value_template_binding_types(
             value,
             received_payload_type,
@@ -244,7 +245,8 @@ pub(super) fn validate_value_template_payload_labels(
     match template {
         CheckedValueTemplate::Literal(value) => validate_checked_payload_value(value),
         CheckedValueTemplate::ReceivedPayload { .. }
-        | CheckedValueTemplate::CurrentStatePayload { .. } => Ok(()),
+        | CheckedValueTemplate::CurrentStatePayload { .. }
+        | CheckedValueTemplate::LoopElement { .. } => Ok(()),
         CheckedValueTemplate::EnumPayload { value, .. } => {
             validate_value_template_payload_labels(value)
         }
@@ -393,7 +395,8 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         | CheckedValueTemplate::ListRest { .. }
         | CheckedValueTemplate::MapValue { .. }
         | CheckedValueTemplate::MapRest { .. }
-        | CheckedValueTemplate::ProcessRef { .. } => None,
+        | CheckedValueTemplate::ProcessRef { .. }
+        | CheckedValueTemplate::LoopElement { .. } => None,
         CheckedValueTemplate::EnumVariant {
             ty,
             variant,
@@ -563,6 +566,9 @@ pub(super) fn validate_value_template_process_refs(
                 reject_projected_process_ref_payload_type(ty)?;
             }
             Ok(())
+        }
+        CheckedValueTemplate::LoopElement { ty, .. } => {
+            reject_projected_process_ref_payload_type(ty)
         }
         CheckedValueTemplate::EnumPayload { ty, value, .. } => {
             reject_projected_process_ref_payload_type(ty)?;
@@ -740,6 +746,9 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference templates are not valid next-state values",
         )),
+        CheckedValueTemplate::LoopElement { .. } => Err(Error::new(
+            "loop element templates are not valid next-state values",
+        )),
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             reject_process_ref_template_in_next_state(payload)
         }
@@ -792,6 +801,7 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
             checked_template_depends_on_received_payload(map)
         }
         CheckedValueTemplate::ProcessRef { .. } => false,
+        CheckedValueTemplate::LoopElement { .. } => false,
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             checked_template_depends_on_received_payload(payload)
         }
@@ -923,6 +933,9 @@ fn evaluate_checked_template(
         }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires static runtime process reference bindings",
+        )),
+        CheckedValueTemplate::LoopElement { .. } => Err(Error::new(
+            "loop element template requires static runtime loop element bindings",
         )),
         CheckedValueTemplate::EnumVariant {
             ty,

@@ -290,6 +290,11 @@ pub enum Statement {
         message: Identifier,
         payload: Option<ValueExpr>,
     },
+    ForEach {
+        item: Identifier,
+        collection: ValueExpr,
+        body: Vec<Statement>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

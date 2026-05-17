@@ -1,0 +1,81 @@
+module runtime_for_each_empty;
+
+record MainState;
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum BatchState {
+    Ready,
+}
+
+enum BatchMsg {
+    Batch(List<Bool,0>),
+}
+
+enum WorkerState {
+    Waiting,
+    SawTrue,
+    Done,
+}
+
+enum WorkerMsg {
+    Branch(Bool),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let batch: ProcessRef<BatchWorker> = spawn BatchWorker;
+        send batch Batch(List<Bool,0>[]);
+        return Stop(state);
+    }
+}
+
+proc BatchWorker mailbox bounded(1) {
+    type State = BatchState;
+    type Msg = BatchMsg;
+
+    fn init() -> BatchState ! [] ~ [] @det {
+        return Ready;
+    }
+
+    fn step(state: BatchState, Batch(items: List<Bool,0>)) -> ProcResult<BatchState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        for item in items {
+            send worker Branch(item);
+        }
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Waiting;
+    }
+
+    fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (flag) {
+            emit "worker handled true";
+            return Continue(SawTrue);
+        } else {
+            emit "worker handled false";
+            return Continue(Done);
+        }
+    }
+}

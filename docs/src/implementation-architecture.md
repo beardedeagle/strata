@@ -133,6 +133,8 @@ The runnable examples are:
 - `examples/actor_instances.str`;
 - `examples/actor_payloads.str`;
 - `examples/runtime_if_else.str`;
+- `examples/runtime_for_each.str`;
+- `examples/runtime_for_each_empty.str`;
 - `examples/actor_payload_match.str`;
 - `examples/actor_payload_split_match.str`;
 - `examples/actor_payload_split_signature.str`;

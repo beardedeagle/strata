@@ -1,18 +1,19 @@
 use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactLoopElement,
     ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactSendTarget,
     ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact,
-    MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
-    source_hash_fnv1a64,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, LoopElementId,
+    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
+    TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
 use super::checked::{
-    CheckedAction, CheckedEnumVariantId, CheckedMessageCase, CheckedMessageId, CheckedNextState,
-    CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessRefId,
-    CheckedProgram, CheckedSendTarget, CheckedStateId, CheckedStateValue, CheckedStepResult,
-    CheckedTransition, CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
+    CheckedAction, CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageCase,
+    CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess,
+    CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget, CheckedStateId,
+    CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId, CheckedTypeKind,
+    CheckedTypeRef, CheckedValueTemplate,
 };
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
@@ -230,6 +231,23 @@ fn lower_action(
                 .map(|action| lower_action(action, types))
                 .collect::<mantle_artifact::Result<Vec<_>>>()?,
         }),
+        CheckedAction::ForEach {
+            element,
+            collection,
+            max_items,
+            body,
+        } => Ok(ArtifactAction::ForEach {
+            element: ArtifactLoopElement {
+                id: lower_loop_element_id(element.id()),
+                ty: types.artifact_id(element.ty())?,
+            },
+            collection: lower_value_template(collection, types)?,
+            max_items: *max_items,
+            body: body
+                .iter()
+                .map(|action| lower_action(action, types))
+                .collect::<mantle_artifact::Result<Vec<_>>>()?,
+        }),
     }
 }
 
@@ -386,6 +404,12 @@ fn lower_value_template(
             target_process: lower_process_id(*target),
             process_ref: lower_process_ref_id(*process_ref),
         }),
+        CheckedValueTemplate::LoopElement { ty, element } => {
+            Ok(ArtifactValueTemplate::LoopElement {
+                ty: types.artifact_id(ty)?,
+                element: lower_loop_element_id(*element),
+            })
+        }
         CheckedValueTemplate::EnumVariant {
             ty,
             variant,
@@ -476,4 +500,8 @@ fn lower_output_id(id: CheckedOutputId) -> OutputId {
 
 fn lower_enum_variant_id(id: CheckedEnumVariantId) -> EnumVariantId {
     EnumVariantId::new(id.as_u32())
+}
+
+fn lower_loop_element_id(id: CheckedLoopElementId) -> LoopElementId {
+    LoopElementId::new(id.as_u32())
 }

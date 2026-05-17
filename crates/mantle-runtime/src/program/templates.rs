@@ -41,6 +41,7 @@ pub(super) fn validate_loaded_bool_condition(
         received_payload_type,
         current_state_payload_type: current_state_payload.map(|payload| payload.ty),
         allow_direct_process_ref: false,
+        loop_elements: &[],
         program,
         process,
         spawned_refs: &[],
@@ -55,7 +56,9 @@ fn validate_loaded_static_bool_condition_value(
     condition: &LoadedValueTemplate,
     current_state_payload: Option<&RuntimePayload>,
 ) -> Result<()> {
-    if loaded_template_depends_on_received_payload(condition) {
+    if loaded_template_depends_on_received_payload(condition)
+        || loaded_template_depends_on_loop_element(condition)
+    {
         return Ok(());
     }
 
@@ -201,6 +204,9 @@ fn evaluate_loaded_payload_value(
         LoadedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires runtime process reference bindings",
         )),
+        LoadedValueTemplate::LoopElement { .. } => Err(Error::new(
+            "loop element template requires runtime loop element bindings",
+        )),
         LoadedValueTemplate::EnumVariant {
             ty,
             variant,
@@ -302,6 +308,7 @@ pub(super) struct LoadedTemplateAdmission<'a> {
     pub(super) received_payload_type: Option<TypeId>,
     pub(super) current_state_payload_type: Option<TypeId>,
     pub(super) allow_direct_process_ref: bool,
+    pub(super) loop_elements: &'a [LoadedLoopElement],
     pub(super) program: &'a LoadedProgram,
     pub(super) process: &'a LoadedProcess,
     pub(super) spawned_refs: &'a [bool],
@@ -472,6 +479,9 @@ impl LoadedTemplateAdmission<'_> {
                 target_process,
                 process_ref,
             } => self.validate_process_ref(field, *ty, *target_process, *process_ref),
+            LoadedValueTemplate::LoopElement { ty, element } => {
+                self.validate_loop_element(field, *ty, *element)
+            }
             LoadedValueTemplate::EnumVariant {
                 ty,
                 variant,
@@ -621,6 +631,30 @@ impl LoadedTemplateAdmission<'_> {
         Ok(())
     }
 
+    fn validate_loop_element(&self, field: &str, ty: TypeId, element: LoopElementId) -> Result<()> {
+        self.program
+            .validate_value_type(&format!("{field}.type"), ty)?;
+        let Some(active) = self
+            .loop_elements
+            .iter()
+            .find(|active| active.id == element)
+        else {
+            return Err(Error::new(format!(
+                "{field} references inactive loop element id {}",
+                element.as_u32()
+            )));
+        };
+        if active.ty != ty {
+            return Err(Error::new(format!(
+                "{field} loop element id {} has type id {}, expected {}",
+                element.as_u32(),
+                active.ty.as_u32(),
+                ty.as_u32()
+            )));
+        }
+        Ok(())
+    }
+
     fn validate_record(
         &self,
         field: &str,
@@ -741,7 +775,8 @@ fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) -> bool {
         | LoadedValueTemplate::ListRest { .. }
         | LoadedValueTemplate::MapValue { .. }
         | LoadedValueTemplate::MapRest { .. }
-        | LoadedValueTemplate::ProcessRef { .. } => false,
+        | LoadedValueTemplate::ProcessRef { .. }
+        | LoadedValueTemplate::LoopElement { .. } => false,
         LoadedValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_is_static_map_key(payload)
         }
@@ -760,7 +795,9 @@ fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) -> bool {
 
 pub(super) fn loaded_template_depends_on_received_payload(template: &LoadedValueTemplate) -> bool {
     match template {
-        LoadedValueTemplate::Literal { .. } | LoadedValueTemplate::ProcessRef { .. } => false,
+        LoadedValueTemplate::Literal { .. }
+        | LoadedValueTemplate::ProcessRef { .. }
+        | LoadedValueTemplate::LoopElement { .. } => false,
         LoadedValueTemplate::ReceivedPayload { .. } => true,
         LoadedValueTemplate::CurrentStatePayload { .. } => false,
         LoadedValueTemplate::EnumPayload { value, .. } => {
@@ -792,6 +829,42 @@ pub(super) fn loaded_template_depends_on_received_payload(template: &LoadedValue
         LoadedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
             loaded_template_depends_on_received_payload(&entry.key)
                 || loaded_template_depends_on_received_payload(&entry.value)
+        }),
+    }
+}
+
+fn loaded_template_depends_on_loop_element(template: &LoadedValueTemplate) -> bool {
+    match template {
+        LoadedValueTemplate::LoopElement { .. } => true,
+        LoadedValueTemplate::Literal { .. }
+        | LoadedValueTemplate::ReceivedPayload { .. }
+        | LoadedValueTemplate::CurrentStatePayload { .. }
+        | LoadedValueTemplate::ProcessRef { .. } => false,
+        LoadedValueTemplate::EnumPayload { value, .. } => {
+            loaded_template_depends_on_loop_element(value)
+        }
+        LoadedValueTemplate::RecordField { record, .. } => {
+            loaded_template_depends_on_loop_element(record)
+        }
+        LoadedValueTemplate::ListElement { list, .. }
+        | LoadedValueTemplate::ListPrefixElement { list, .. }
+        | LoadedValueTemplate::ListRest { list, .. } => {
+            loaded_template_depends_on_loop_element(list)
+        }
+        LoadedValueTemplate::MapValue { map, .. } => loaded_template_depends_on_loop_element(map),
+        LoadedValueTemplate::MapRest { map, .. } => loaded_template_depends_on_loop_element(map),
+        LoadedValueTemplate::EnumVariant { payload, .. } => {
+            loaded_template_depends_on_loop_element(payload)
+        }
+        LoadedValueTemplate::Record { fields, .. } => fields
+            .iter()
+            .any(|field| loaded_template_depends_on_loop_element(&field.value)),
+        LoadedValueTemplate::List { items, .. } => {
+            items.iter().any(loaded_template_depends_on_loop_element)
+        }
+        LoadedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
+            loaded_template_depends_on_loop_element(&entry.key)
+                || loaded_template_depends_on_loop_element(&entry.value)
         }),
     }
 }

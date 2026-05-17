@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactLoopElement,
     ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
     ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue,
-    ArtifactValueTemplate, ArtifactValueTemplateField, EnumVariantId, MantleArtifact, MessageId,
-    NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, write_artifact,
+    ArtifactValueTemplate, ArtifactValueTemplateField, EnumVariantId, LoopElementId,
+    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
+    TypeId, write_artifact,
 };
 
 use super::program::{LoadedProgram, RuntimePayload};
@@ -364,6 +365,197 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
             ..
         } if process == "Worker"
     )));
+}
+
+#[test]
+fn in_memory_host_executes_for_each_loop_in_collection_order() {
+    let artifact = for_each_artifact("List[Ready,Done]", 2);
+    let mut host = InMemoryRuntimeHost::default();
+
+    let report = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect("for_each artifact should run through in-memory host");
+
+    assert_eq!(
+        report.emitted_outputs,
+        ["loop worker handled item", "loop worker handled item"]
+    );
+
+    let iterations = host
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::LoopIteration {
+                element_id,
+                index,
+                element_type_id,
+                element,
+                ..
+            } => Some((*element_id, *index, *element_type_id, element.as_str())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        iterations,
+        [
+            (LoopElementId::new(0), 0, JOB, "Ready"),
+            (LoopElementId::new(0), 1, JOB, "Done"),
+        ]
+    );
+
+    let accepted_payloads = host
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeEvent::MessageAccepted {
+                process,
+                payload: Some(payload),
+                ..
+            } if process == "Worker" => Some(payload.label()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(accepted_payloads, ["Ready", "Done"]);
+
+    let first_iteration = event_index(host.events(), |event| {
+        matches!(event, RuntimeEvent::LoopIteration { index: 0, .. })
+    });
+    let first_send = event_index(host.events(), |event| {
+        matches!(
+            event,
+            RuntimeEvent::MessageAccepted {
+                process,
+                payload: Some(payload),
+                ..
+            } if process == "Worker" && payload.label() == "Ready"
+        )
+    });
+    let second_iteration = event_index(host.events(), |event| {
+        matches!(event, RuntimeEvent::LoopIteration { index: 1, .. })
+    });
+    let second_send = event_index(host.events(), |event| {
+        matches!(
+            event,
+            RuntimeEvent::MessageAccepted {
+                process,
+                payload: Some(payload),
+                ..
+            } if process == "Worker" && payload.label() == "Done"
+        )
+    });
+    let completed = event_index(host.events(), |event| {
+        matches!(
+            event,
+            RuntimeEvent::LoopCompleted {
+                element_id,
+                iteration_count: 2,
+                ..
+            } if *element_id == LoopElementId::new(0)
+        )
+    });
+
+    assert!(first_iteration < first_send);
+    assert!(first_send < second_iteration);
+    assert!(second_iteration < second_send);
+    assert!(second_send < completed);
+}
+
+#[test]
+fn in_memory_host_executes_empty_for_each_loop_without_body_iterations() {
+    let artifact = for_each_artifact("List[]", 0);
+    let mut host = InMemoryRuntimeHost::default();
+
+    let report = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect("empty for_each artifact should run through in-memory host");
+
+    assert!(report.emitted_outputs.is_empty());
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::LoopStarted {
+            item_count: 0,
+            max_items: 0,
+            ..
+        }
+    )));
+    assert!(
+        !host
+            .events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::LoopIteration { .. }))
+    );
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::LoopCompleted {
+            iteration_count: 0,
+            ..
+        }
+    )));
+    assert!(
+        !host.events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::MessageAccepted {
+                process,
+                payload: Some(_),
+                ..
+            } if process == "Worker"
+        )),
+        "empty loop must not execute body sends"
+    );
+}
+
+#[test]
+fn in_memory_host_fails_closed_when_for_each_iteration_budget_exhausts() {
+    let artifact = for_each_artifact("List[Ready,Done]", 2);
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_artifact_with_host(
+        &artifact,
+        &mut host,
+        RunLimits {
+            max_dispatches: 1,
+            ..RunLimits::default()
+        },
+    )
+    .expect_err("for_each artifact should fail closed on iteration budget exhaustion");
+
+    assert!(
+        err.to_string()
+            .contains(
+                "runtime loop iteration budget exceeded: loop requires 2 iteration(s), remaining budget is 1"
+            ),
+        "{err}"
+    );
+    assert_eq!(
+        host.events()
+            .iter()
+            .filter(|event| matches!(event, RuntimeEvent::LoopIteration { .. }))
+            .count(),
+        0
+    );
+    assert!(
+        !host
+            .events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::LoopStarted { .. })),
+        "over-budget loop must fail before loop start"
+    );
+    assert!(
+        !host.events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::MessageAccepted {
+                process,
+                payload: Some(_),
+                ..
+            } if process == "Worker"
+        )),
+        "over-budget loop must not execute body sends"
+    );
+    assert!(
+        !host
+            .events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::LoopCompleted { .. })),
+        "failed loop must not record completion"
+    );
 }
 
 #[test]
@@ -999,6 +1191,51 @@ fn payload_artifact() -> MantleArtifact {
     artifact
 }
 
+fn for_each_artifact(items: &str, max_items: usize) -> MantleArtifact {
+    let mut artifact = valid_artifact();
+    artifact.module = "runtime_for_each".to_string();
+    artifact.outputs = vec!["loop worker handled item".to_string()];
+    artifact.processes[0].transitions[0].actions = vec![
+        ArtifactAction::Spawn {
+            target: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        },
+        ArtifactAction::ForEach {
+            element: ArtifactLoopElement {
+                id: LoopElementId::new(0),
+                ty: JOB,
+            },
+            collection: ArtifactValueTemplate::Literal {
+                ty: JOB,
+                value: artifact_value(items),
+            },
+            max_items,
+            body: vec![ArtifactAction::Send {
+                target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                message: MessageId::new(0),
+                payload: Some(ArtifactValueTemplate::LoopElement {
+                    ty: JOB,
+                    element: LoopElementId::new(0),
+                }),
+            }],
+        },
+    ];
+    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Ping", JOB)];
+    artifact.processes[1].mailbox_bound = max_items.max(1);
+    artifact.processes[1].transitions[0] = ArtifactTransition {
+        current_state: None,
+        message: MessageId::new(0),
+        payload_guard: None,
+        step_result: StepResult::Continue,
+        next_state: NextState::Current,
+        effects: vec![ArtifactEffect::Emit],
+        actions: vec![ArtifactAction::Emit {
+            output: OutputId::new(0),
+        }],
+    };
+    artifact
+}
+
 fn looping_artifact() -> MantleArtifact {
     MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
@@ -1240,6 +1477,13 @@ fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {
 fn artifact_payload(ty: TypeId, value: &str) -> ArtifactPayload {
     ArtifactPayload::value(ty, artifact_value(value))
         .expect("test artifact payload should be valid")
+}
+
+fn event_index(events: &[RuntimeEvent], predicate: impl Fn(&RuntimeEvent) -> bool) -> usize {
+    events
+        .iter()
+        .position(predicate)
+        .expect("expected runtime event should be recorded")
 }
 
 fn unique_test_dir(name: &str) -> PathBuf {

@@ -546,6 +546,15 @@ fn add_value_template_bytes(
                 &process_ref.as_u32().to_string(),
             )?;
         }
+        ArtifactValueTemplate::LoopElement { ty, element } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "loop_element")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.loop_element"),
+                &element.as_u32().to_string(),
+            )?;
+        }
         ArtifactValueTemplate::EnumVariant {
             ty,
             variant,
@@ -721,6 +730,43 @@ fn add_action_bytes(total: &mut usize, action_prefix: &str, action: &ArtifactAct
                 add_action_bytes(
                     total,
                     &format!("{action_prefix}.else_action.{action_index}"),
+                    action,
+                )?;
+            }
+            Ok(())
+        }
+        ArtifactAction::ForEach {
+            element,
+            collection,
+            max_items,
+            body,
+        } => {
+            add_field_bytes(total, &format!("{action_prefix}.kind"), "for_each")?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.loop_element"),
+                &element.id.as_u32().to_string(),
+            )?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.element_type_id"),
+                &type_id_string(element.ty),
+            )?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.max_items"),
+                &max_items.to_string(),
+            )?;
+            add_value_template_bytes(total, &format!("{action_prefix}.collection"), collection)?;
+            add_field_bytes(
+                total,
+                &format!("{action_prefix}.body_action_count"),
+                &body.len().to_string(),
+            )?;
+            for (action_index, action) in body.iter().enumerate() {
+                add_action_bytes(
+                    total,
+                    &format!("{action_prefix}.body_action.{action_index}"),
                     action,
                 )?;
             }

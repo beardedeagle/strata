@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, Error, ProcessRefId, Result};
 
+use super::RuntimeLoopElement;
 use super::model::ActiveStep;
 use crate::event::RuntimeProcessId;
 use crate::program::{LoadedProgram, LoadedValueTemplate, RuntimePayload, RuntimeValue};
@@ -12,6 +13,7 @@ pub(super) fn evaluate_runtime_template(
     received_payload: Option<&RuntimePayload>,
     step: &ActiveStep,
     process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+    loop_elements: &[RuntimeLoopElement],
 ) -> Result<RuntimePayload> {
     match template {
         LoadedValueTemplate::Literal { ty, value } => RuntimePayload::value(*ty, value.clone()),
@@ -42,14 +44,26 @@ pub(super) fn evaluate_runtime_template(
             Ok(payload.clone())
         }
         LoadedValueTemplate::EnumPayload { ty, value, variant } => {
-            let value =
-                evaluate_runtime_template(program, value, received_payload, step, process_refs)?;
+            let value = evaluate_runtime_template(
+                program,
+                value,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
             let variant = program.enum_variant_label(value.ty, *variant)?;
             RuntimePayload::value(*ty, value.value.project_enum_payload(variant)?)
         }
         LoadedValueTemplate::RecordField { ty, record, field } => {
-            let record =
-                evaluate_runtime_template(program, record, received_payload, step, process_refs)?;
+            let record = evaluate_runtime_template(
+                program,
+                record,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
             RuntimePayload::value(*ty, record.value.project_record_field(field)?)
         }
         LoadedValueTemplate::ListElement {
@@ -58,8 +72,14 @@ pub(super) fn evaluate_runtime_template(
             index,
             len,
         } => {
-            let list =
-                evaluate_runtime_template(program, list, received_payload, step, process_refs)?;
+            let list = evaluate_runtime_template(
+                program,
+                list,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
             RuntimePayload::value(*ty, list.value.project_list_element(*index, *len)?)
         }
         LoadedValueTemplate::ListPrefixElement {
@@ -68,8 +88,14 @@ pub(super) fn evaluate_runtime_template(
             index,
             prefix_len,
         } => {
-            let list =
-                evaluate_runtime_template(program, list, received_payload, step, process_refs)?;
+            let list = evaluate_runtime_template(
+                program,
+                list,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
             RuntimePayload::value(
                 *ty,
                 list.value
@@ -81,8 +107,14 @@ pub(super) fn evaluate_runtime_template(
             list,
             prefix_len,
         } => {
-            let list =
-                evaluate_runtime_template(program, list, received_payload, step, process_refs)?;
+            let list = evaluate_runtime_template(
+                program,
+                list,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
             RuntimePayload::value(*ty, list.value.project_list_rest(*prefix_len)?)
         }
         LoadedValueTemplate::MapValue {
@@ -92,8 +124,14 @@ pub(super) fn evaluate_runtime_template(
             keys,
             projection,
         } => {
-            let map =
-                evaluate_runtime_template(program, map, received_payload, step, process_refs)?;
+            let map = evaluate_runtime_template(
+                program,
+                map,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
             RuntimePayload::value(*ty, map.value.project_map_value(key, keys, *projection)?)
         }
         LoadedValueTemplate::MapRest {
@@ -101,8 +139,14 @@ pub(super) fn evaluate_runtime_template(
             map,
             excluded_keys,
         } => {
-            let map =
-                evaluate_runtime_template(program, map, received_payload, step, process_refs)?;
+            let map = evaluate_runtime_template(
+                program,
+                map,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
             RuntimePayload::value(*ty, map.value.project_map_rest(excluded_keys)?)
         }
         LoadedValueTemplate::ProcessRef {
@@ -119,13 +163,41 @@ pub(super) fn evaluate_runtime_template(
             })?;
             RuntimePayload::from_process_ref(*ty, *target_process, pid)
         }
+        LoadedValueTemplate::LoopElement { ty, element } => {
+            let payload = loop_elements
+                .iter()
+                .find(|binding| binding.id == *element)
+                .map(|binding| &binding.payload)
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} references inactive loop element id {}",
+                        step.process_name,
+                        element.as_u32()
+                    ))
+                })?;
+            if payload.ty != *ty {
+                return Err(Error::new(format!(
+                    "loop element id {} has type id {}, expected {}",
+                    element.as_u32(),
+                    payload.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            Ok(payload.clone())
+        }
         LoadedValueTemplate::EnumVariant {
             ty,
             variant,
             payload,
         } => {
-            let payload =
-                evaluate_runtime_template(program, payload, received_payload, step, process_refs)?;
+            let payload = evaluate_runtime_template(
+                program,
+                payload,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
             RuntimePayload::value(
                 *ty,
                 RuntimeValue::EnumVariant {
@@ -145,6 +217,7 @@ pub(super) fn evaluate_runtime_template(
                     received_payload,
                     step,
                     process_refs,
+                    loop_elements,
                 )?;
                 if !seen.insert(field.name.as_str()) {
                     return Err(Error::new(format!(
@@ -168,8 +241,14 @@ pub(super) fn evaluate_runtime_template(
         LoadedValueTemplate::List { ty, items } => {
             let mut values = Vec::with_capacity(items.len());
             for item in items {
-                let value =
-                    evaluate_runtime_template(program, item, received_payload, step, process_refs)?;
+                let value = evaluate_runtime_template(
+                    program,
+                    item,
+                    received_payload,
+                    step,
+                    process_refs,
+                    loop_elements,
+                )?;
                 values.push(value.value);
             }
             RuntimePayload::value(*ty, RuntimeValue::List(values))
@@ -184,6 +263,7 @@ pub(super) fn evaluate_runtime_template(
                     received_payload,
                     step,
                     process_refs,
+                    loop_elements,
                 )?;
                 let value = evaluate_runtime_template(
                     program,
@@ -191,6 +271,7 @@ pub(super) fn evaluate_runtime_template(
                     received_payload,
                     step,
                     process_refs,
+                    loop_elements,
                 )?;
                 if !seen.insert(key.value.clone()) {
                     return Err(Error::new(format!(

@@ -1,6 +1,7 @@
 use super::super::source_functions::validate_source_function_value_expr;
 use super::returns::{StepReturnInput, resolve_step_return, step_source_bindings};
 use super::*;
+use mantle_artifact::MAX_VALUE_TEMPLATE_FIELDS;
 
 pub(super) fn check_step_transition(
     context: &mut StepCheckContext<'_>,
@@ -44,6 +45,7 @@ pub(super) fn check_step_transition(
     };
     let source_bindings =
         step_source_bindings(input.payload_bindings, input.state_payload_bindings);
+    let mut loop_elements = LoopElementAllocator::default();
     let outcome = check_step_block_outcome(
         context,
         state_space,
@@ -53,6 +55,7 @@ pub(super) fn check_step_transition(
         &source_bindings,
         &template_bindings,
         &input,
+        &mut loop_elements,
         input.body,
     )?;
     let transition = CheckedTransition::new(CheckedTransitionParts {
@@ -75,6 +78,27 @@ struct CheckedBlockOutcome {
     actions: Vec<CheckedAction>,
 }
 
+#[derive(Default)]
+struct LoopElementAllocator {
+    next: usize,
+}
+
+impl LoopElementAllocator {
+    fn next_id(&mut self) -> Result<CheckedLoopElementId> {
+        if self.next >= MAX_VALUE_TEMPLATE_FIELDS {
+            return Err(Error::new(format!(
+                "loop element count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+            )));
+        }
+        let id = CheckedLoopElementId::from_index(self.next)?;
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or_else(|| Error::new("loop element id overflowed"))?;
+        Ok(id)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn check_step_block_outcome(
     context: &mut StepCheckContext<'_>,
@@ -85,15 +109,19 @@ fn check_step_block_outcome(
     source_bindings: &[SourceValueBinding<'_>],
     template_bindings: &[ValueTemplateBinding<'_>],
     input: &StepTransitionInput<'_>,
+    loop_elements: &mut LoopElementAllocator,
     body: &FunctionBlock,
 ) -> Result<CheckedBlockOutcome> {
     let mut actions = checked_actions_for_statements(
         context,
         outputs,
         types,
+        function_scope,
         source_bindings,
         template_bindings,
         input.payload_bindings,
+        loop_elements,
+        false,
         &body.statements,
     )?;
     let outcome = checked_return_outcome(
@@ -105,6 +133,7 @@ fn check_step_block_outcome(
         source_bindings,
         template_bindings,
         input,
+        loop_elements,
         body,
     )?;
     actions.extend(outcome.actions);
@@ -116,9 +145,12 @@ fn checked_actions_for_statements(
     context: &mut StepCheckContext<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
     template_bindings: &[ValueTemplateBinding<'_>],
     payload_bindings: &[StepPayloadBinding],
+    loop_elements: &mut LoopElementAllocator,
+    inside_loop: bool,
     statements: &[Statement],
 ) -> Result<Vec<CheckedAction>> {
     let mut actions = Vec::with_capacity(statements.len());
@@ -130,6 +162,12 @@ fn checked_actions_for_statements(
                 });
             }
             Statement::LetProcessRef { name, target, .. } => {
+                if inside_loop {
+                    return Err(Error::new(format!(
+                        "process {} for loop body cannot bind process reference {} in this source slice",
+                        context.process.name, name
+                    )));
+                }
                 let binding = context.process_ref_index.get(name).ok_or_else(|| {
                     Error::new(format!(
                         "process {} process reference {} was not resolved",
@@ -162,9 +200,198 @@ fn checked_actions_for_statements(
                     payload: message_id.payload.map(Box::new),
                 });
             }
+            Statement::ForEach {
+                item,
+                collection,
+                body,
+            } => {
+                if inside_loop {
+                    return Err(Error::new(format!(
+                        "process {} nested for loops are not supported in this source slice",
+                        context.process.name
+                    )));
+                }
+                actions.push(checked_for_each_action(
+                    context,
+                    outputs,
+                    types,
+                    function_scope,
+                    source_bindings,
+                    template_bindings,
+                    payload_bindings,
+                    loop_elements,
+                    item,
+                    collection,
+                    body,
+                )?);
+            }
         }
     }
     Ok(actions)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checked_for_each_action(
+    context: &mut StepCheckContext<'_>,
+    outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    payload_bindings: &[StepPayloadBinding],
+    loop_elements: &mut LoopElementAllocator,
+    item: &Identifier,
+    collection: &ValueExpr,
+    body: &[Statement],
+) -> Result<CheckedAction> {
+    validate_loop_element_binding(context, source_bindings, item)?;
+    let ValueExpr::Identifier(collection_name) = collection else {
+        return Err(Error::new(format!(
+            "process {} for loop collection must be a runtime list binding",
+            context.process.name
+        )));
+    };
+    let Some(collection_binding) = source_bindings
+        .iter()
+        .find(|binding| binding.name == collection_name)
+    else {
+        return Err(Error::new(format!(
+            "process {} for loop collection {} is not a source value binding",
+            context.process.name, collection_name
+        )));
+    };
+    let Some(CollectionType::List {
+        element: element_type,
+        capacity,
+    }) = context
+        .semantic_index
+        .collection_type(collection_binding.ty)?
+    else {
+        return Err(Error::new(format!(
+            "process {} for loop collection {} must have type List<T,N>",
+            context.process.name, collection_name
+        )));
+    };
+    if context
+        .semantic_index
+        .process_ref_target_type(element_type)?
+        .is_some()
+    {
+        return Err(Error::new(format!(
+            "process {} for loop element binding {} cannot have process reference type",
+            context.process.name, item
+        )));
+    }
+    if !template_bindings
+        .iter()
+        .any(|binding| binding.name == collection_name)
+    {
+        return Err(Error::new(format!(
+            "process {} for loop collection {} must be runtime-bound",
+            context.process.name, collection_name
+        )));
+    }
+    validate_source_function_value_expr(
+        function_scope,
+        collection_binding.ty,
+        collection,
+        source_bindings,
+    )?;
+    let collection = resolve_source_value_expr(
+        function_scope,
+        collection_binding.ty,
+        collection,
+        source_bindings,
+        0,
+    )?;
+    let collection_template = checked_value_template_with_binding(
+        context.module,
+        context.semantic_index,
+        types,
+        collection_binding.ty,
+        &collection,
+        template_bindings,
+    )?;
+
+    let element_id = loop_elements.next_id()?;
+    let element_ty = types.intern(element_type)?;
+    let loop_element = CheckedLoopElement::new(element_id, element_ty.clone());
+    let element_path = PayloadBindingPath::whole();
+    let element_template_binding = ValueTemplateBinding {
+        name: item,
+        ty: element_type,
+        checked_ty: &element_ty,
+        root_checked_ty: &element_ty,
+        source: ValueTemplateSource::LoopElement(element_id),
+        path: &element_path,
+    };
+    let mut body_source_bindings = source_bindings.to_vec();
+    body_source_bindings.push(SourceValueBinding {
+        name: item,
+        ty: element_type,
+    });
+    let mut body_template_bindings = template_bindings.to_vec();
+    body_template_bindings.push(element_template_binding);
+    let body = checked_actions_for_statements(
+        context,
+        outputs,
+        types,
+        function_scope,
+        &body_source_bindings,
+        &body_template_bindings,
+        payload_bindings,
+        loop_elements,
+        true,
+        body,
+    )?;
+
+    Ok(CheckedAction::ForEach {
+        element: loop_element,
+        collection: collection_template,
+        max_items: capacity,
+        body,
+    })
+}
+
+fn validate_loop_element_binding(
+    context: &StepCheckContext<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    item: &Identifier,
+) -> Result<()> {
+    if item.as_str() == STEP_STATE_PARAMETER_NAME {
+        return Err(Error::new(format!(
+            "process {} loop element binding {} conflicts with a reserved state parameter name",
+            context.process.name, item
+        )));
+    }
+    if source_bindings.iter().any(|binding| binding.name == item) {
+        return Err(Error::new(format!(
+            "process {} loop element binding {} conflicts with an existing source value binding",
+            context.process.name, item
+        )));
+    }
+    if context.process_ref_index.contains_key(item) {
+        return Err(Error::new(format!(
+            "process {} loop element binding {} conflicts with a process reference binding",
+            context.process.name, item
+        )));
+    }
+    if context.semantic_index.process_id(item).is_ok() {
+        return Err(Error::new(format!(
+            "process {} loop element binding {} conflicts with a process declaration",
+            context.process.name, item
+        )));
+    }
+    if context
+        .semantic_index
+        .identifier_conflicts_with_declared_value(item)
+    {
+        return Err(Error::new(format!(
+            "process {} loop element binding {} conflicts with a declared type or value constructor",
+            context.process.name, item
+        )));
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -177,6 +404,7 @@ fn checked_return_outcome(
     source_bindings: &[SourceValueBinding<'_>],
     template_bindings: &[ValueTemplateBinding<'_>],
     input: &StepTransitionInput<'_>,
+    loop_elements: &mut LoopElementAllocator,
     body: &FunctionBlock,
 ) -> Result<CheckedBlockOutcome> {
     if let ReturnExpr::IfElse {
@@ -194,6 +422,7 @@ fn checked_return_outcome(
             source_bindings,
             template_bindings,
             input,
+            loop_elements,
             condition,
             then_branch,
             else_branch,
@@ -241,6 +470,7 @@ fn checked_if_else_return_outcome(
     source_bindings: &[SourceValueBinding<'_>],
     template_bindings: &[ValueTemplateBinding<'_>],
     input: &StepTransitionInput<'_>,
+    loop_elements: &mut LoopElementAllocator,
     condition: &ValueExpr,
     then_branch: &FunctionBlock,
     else_branch: &FunctionBlock,
@@ -262,6 +492,7 @@ fn checked_if_else_return_outcome(
         source_bindings,
         template_bindings,
         input,
+        loop_elements,
         then_branch,
     )?;
     let else_outcome = check_step_block_outcome(
@@ -273,6 +504,7 @@ fn checked_if_else_return_outcome(
         source_bindings,
         template_bindings,
         input,
+        loop_elements,
         else_branch,
     )?;
     if then_outcome.step_result != else_outcome.step_result {
@@ -556,6 +788,12 @@ fn checked_send_payload_template(
                     ValueTemplateSource::CurrentStatePayload => {
                         CheckedValueTemplate::CurrentStatePayload {
                             ty: binding.checked_ty.clone(),
+                        }
+                    }
+                    ValueTemplateSource::LoopElement(element) => {
+                        CheckedValueTemplate::LoopElement {
+                            ty: binding.checked_ty.clone(),
+                            element,
                         }
                     }
                 });
