@@ -659,7 +659,9 @@ impl Parser {
 
     fn parse_function_block(&mut self) -> Result<FunctionBlock> {
         let mut statements = Vec::new();
-        while !self.peek_keyword("return") && !self.peek_keyword("if") {
+        while !(self.peek_keyword("return")
+            || self.peek_keyword("if") && self.if_starts_return_expr())
+        {
             statements.push(self.parse_function_statement()?);
         }
         let returns = if self.peek_keyword("if") {
@@ -684,6 +686,9 @@ impl Parser {
         }
         if self.peek_keyword("for") {
             return self.parse_for_each_statement();
+        }
+        if self.peek_keyword("if") {
+            return self.parse_if_else_statement();
         }
         if self.peek_keyword("emit") {
             self.expect_keyword("emit")?;
@@ -725,7 +730,55 @@ impl Parser {
                 "assignment statements are not supported; Strata source bindings are immutable",
             ));
         }
-        Err(self.error_here("expected emit, let, send, or return statement"))
+        Err(self.error_here("expected emit, for, if, let, send, or return statement"))
+    }
+
+    fn parse_if_else_statement(&mut self) -> Result<Statement> {
+        self.expect_keyword("if")?;
+        self.expect_symbol('(')?;
+        let condition = self.parse_value_expr()?;
+        self.expect_symbol(')')?;
+        let then_body = self.parse_if_else_statement_branch()?;
+        self.expect_keyword("else")?;
+        let else_body = self.parse_if_else_statement_branch()?;
+        Ok(Statement::IfElse {
+            condition,
+            then_body,
+            else_body,
+        })
+    }
+
+    fn parse_if_else_statement_branch(&mut self) -> Result<Vec<Statement>> {
+        self.expect_symbol('{')?;
+        let mut statements = Vec::new();
+        while !self.peek_symbol('}') {
+            if self.peek_keyword("return") {
+                return Err(self.error_here(
+                    "statement-level if branches must not return in this source slice",
+                ));
+            }
+            if self.peek_keyword("if") {
+                return Err(self.error_here(
+                    "nested statement-level if branches are not supported in this source slice",
+                ));
+            }
+            if self.peek_keyword("for") {
+                return Err(self.error_here("statement-level if branches cannot contain for loops"));
+            }
+            if self.peek_keyword("let") {
+                return Err(
+                    self.error_here("statement-level if branches cannot bind process references")
+                );
+            }
+            statements.push(self.parse_function_statement()?);
+        }
+        self.expect_symbol('}')?;
+        if statements.is_empty() {
+            return Err(self.error_previous(
+                "statement-level if branches must contain at least one effect statement",
+            ));
+        }
+        Ok(statements)
     }
 
     fn parse_for_each_statement(&mut self) -> Result<Statement> {
@@ -742,7 +795,7 @@ impl Parser {
         self.expect_symbol('{')?;
         let mut body = Vec::new();
         while !self.peek_symbol('}') {
-            if self.peek_keyword("return") || self.peek_keyword("if") {
+            if self.peek_keyword("return") {
                 return Err(
                     self.error_here("for loop bodies are statement-only in this source slice")
                 );
@@ -1211,6 +1264,75 @@ impl Parser {
                 self.tokens.get(self.index + 1).map(|token| &token.kind),
                 Some(TokenKind::Symbol(value)) if *value == symbol
             )
+    }
+
+    fn if_starts_return_expr(&self) -> bool {
+        if !self.peek_keyword("if") {
+            return false;
+        }
+        let Some(condition_start) = self.index.checked_add(1) else {
+            return false;
+        };
+        if !matches!(
+            self.tokens.get(condition_start).map(|token| &token.kind),
+            Some(TokenKind::Symbol('('))
+        ) {
+            return false;
+        }
+
+        let Some(condition_end) = self.matching_symbol_index(condition_start, '(', ')') else {
+            return false;
+        };
+        let branch_start = condition_end + 1;
+        if !matches!(
+            self.tokens.get(branch_start).map(|token| &token.kind),
+            Some(TokenKind::Symbol('{'))
+        ) {
+            return false;
+        }
+        self.block_contains_top_level_return(branch_start)
+    }
+
+    fn block_contains_top_level_return(&self, block_start: usize) -> bool {
+        let mut depth = 0usize;
+        let mut index = block_start;
+        while let Some(token) = self.tokens.get(index) {
+            match &token.kind {
+                TokenKind::Symbol('{') => depth = depth.saturating_add(1),
+                TokenKind::Symbol('}') => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        return false;
+                    }
+                }
+                TokenKind::Ident(value) if value == "return" && depth == 1 => return true,
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        false
+    }
+
+    fn matching_symbol_index(&self, start: usize, open: char, close: char) -> Option<usize> {
+        let mut depth = 0usize;
+        for (index, token) in self.tokens.iter().enumerate().skip(start) {
+            match &token.kind {
+                TokenKind::Symbol(value) if *value == open => depth = depth.checked_add(1)?,
+                TokenKind::Symbol(value) if *value == close => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                TokenKind::Eof => return None,
+                _ => {}
+            }
+        }
+        None
     }
 
     fn advance(&mut self) {

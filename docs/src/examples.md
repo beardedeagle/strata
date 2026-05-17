@@ -41,24 +41,26 @@ Read them in this order:
    payload.
 22. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-23. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-24. `actor_payload_match.str` for the same payload binding through a whole-body
+23. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+   bounded loop bodies.
+24. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+25. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-25. `actor_payload_split_match.str` for payload-sensitive same-message
+26. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-26. `actor_payload_split_signature.str` for payload-sensitive same-message
+27. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-27. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+28. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-28. `actor_payload_state_match_split.str` for payload-sensitive same-message
+29. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-29. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+30. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-30. `nested_patterns.str` for nested immutable constructor, record, list, and
+31. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-31. `actor_reply.str` for transporting typed process references through message
+32. `actor_reply.str` for transporting typed process references through message
    payloads.
-32. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+33. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -540,6 +542,24 @@ Key source ideas:
 - The loop body sends `Branch(item)` in collection order.
 - The runtime trace records `loop_started`, one `loop_iteration` per item, and
   `loop_completed`.
+
+`examples/runtime_for_each_if.str` extends the same runtime loop with
+statement-level branch control inside the loop body.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_for_each_if.str
+cargo run -p strata --bin strata -- build examples/runtime_for_each_if.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_if.mta
+```
+
+Key source ideas:
+
+- `if (item) { ... } else { ... }` runs in Mantle for each loop iteration.
+- The branch condition and branch payload use the admitted typed loop element ID.
+- Branches can emit and send, but they cannot return, spawn, loop, or nest
+  another statement-level branch in this slice.
+- The runtime trace records `loop_iteration`, `branch_selected`, branch effects,
+  and `loop_completed` in deterministic collection order.
 
 ## Actor Payload Match
 

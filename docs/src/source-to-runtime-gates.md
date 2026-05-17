@@ -67,6 +67,9 @@ Mantle execution:
 cargo run -p strata --bin strata -- check examples/runtime_for_each.str
 cargo run -p strata --bin strata -- build examples/runtime_for_each.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta
+cargo run -p strata --bin strata -- check examples/runtime_for_each_if.str
+cargo run -p strata --bin strata -- build examples/runtime_for_each_if.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_if.mta
 ```
 
 A source rejection gate must fail during checking and must not create a target

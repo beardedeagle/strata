@@ -73,6 +73,11 @@ pub(super) fn validate_next_state(
             )?;
             validate_value_template_payload_labels(condition)?;
             reject_process_ref_template_in_next_state(condition)?;
+            validate_static_bool_condition_value(
+                process,
+                condition,
+                current_state_payload(process, current_state)?,
+            )?;
             validate_next_state(process, current_message, current_state, then_state)?;
             validate_next_state(process, current_message, current_state, else_state)
         }
@@ -92,13 +97,66 @@ pub(super) fn validate_bool_condition_template(
     let is_bool_contract = enum_variants.len() == 2
         && enum_variants[0].as_str() == "False"
         && enum_variants[1].as_str() == "True";
-    if is_bool_contract {
-        Ok(())
-    } else {
-        Err(Error::new(format!(
+    if !is_bool_contract {
+        return Err(Error::new(format!(
             "process {} if condition requires enum Bool {{ False, True }}",
             process.debug_name()
-        )))
+        )));
+    }
+    validate_bool_condition_template_shape(process, condition)
+}
+
+pub(super) fn validate_static_bool_condition_value(
+    process: &CheckedProcess,
+    condition: &CheckedValueTemplate,
+    current_state_payload: Option<&CheckedPayloadValue>,
+) -> Result<()> {
+    if checked_template_depends_on_received_payload(condition)
+        || checked_template_depends_on_loop_element(condition)
+    {
+        return Ok(());
+    }
+
+    let value = evaluate_checked_template(condition, None, current_state_payload)?;
+    let Some(value) = value.value() else {
+        return Err(Error::new(format!(
+            "process {} if condition produced a process reference payload",
+            process.debug_name()
+        )));
+    };
+    match value {
+        ArtifactValue::Atom(label) if label == "False" || label == "True" => Ok(()),
+        _ => Err(Error::new(format!(
+            "process {} if condition must evaluate to unit Bool value False or True",
+            process.debug_name()
+        ))),
+    }
+}
+
+fn validate_bool_condition_template_shape(
+    process: &CheckedProcess,
+    condition: &CheckedValueTemplate,
+) -> Result<()> {
+    match condition {
+        CheckedValueTemplate::Literal(_)
+        | CheckedValueTemplate::ReceivedPayload { .. }
+        | CheckedValueTemplate::CurrentStatePayload { .. }
+        | CheckedValueTemplate::EnumPayload { .. }
+        | CheckedValueTemplate::RecordField { .. }
+        | CheckedValueTemplate::ListElement { .. }
+        | CheckedValueTemplate::ListPrefixElement { .. }
+        | CheckedValueTemplate::MapValue { .. }
+        | CheckedValueTemplate::LoopElement { .. } => Ok(()),
+        CheckedValueTemplate::ListRest { .. }
+        | CheckedValueTemplate::MapRest { .. }
+        | CheckedValueTemplate::ProcessRef { .. }
+        | CheckedValueTemplate::EnumVariant { .. }
+        | CheckedValueTemplate::Record { .. }
+        | CheckedValueTemplate::List { .. }
+        | CheckedValueTemplate::Map { .. } => Err(Error::new(format!(
+            "process {} if condition must evaluate to unit Bool value False or True",
+            process.debug_name()
+        ))),
     }
 }
 
@@ -120,6 +178,26 @@ pub(super) fn current_state_payload_type(
             ))
         })?;
     Ok(state.payload().map(CheckedPayloadValue::ty))
+}
+
+fn current_state_payload(
+    process: &CheckedProcess,
+    current_state: Option<CheckedStateId>,
+) -> Result<Option<&CheckedPayloadValue>> {
+    let Some(current_state) = current_state else {
+        return Ok(None);
+    };
+    let state = process
+        .state_values()
+        .get(current_state.index())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} current_state id {} is not a valid state value",
+                process.debug_name(),
+                current_state.as_u32()
+            ))
+        })?;
+    Ok(state.payload())
 }
 
 pub(super) fn validate_value_template_binding_types(
@@ -814,6 +892,42 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
         CheckedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
             checked_template_depends_on_received_payload(entry.key())
                 || checked_template_depends_on_received_payload(entry.value())
+        }),
+    }
+}
+
+fn checked_template_depends_on_loop_element(template: &CheckedValueTemplate) -> bool {
+    match template {
+        CheckedValueTemplate::LoopElement { .. } => true,
+        CheckedValueTemplate::Literal(_)
+        | CheckedValueTemplate::ReceivedPayload { .. }
+        | CheckedValueTemplate::CurrentStatePayload { .. }
+        | CheckedValueTemplate::ProcessRef { .. } => false,
+        CheckedValueTemplate::EnumPayload { value, .. } => {
+            checked_template_depends_on_loop_element(value)
+        }
+        CheckedValueTemplate::RecordField { record, .. } => {
+            checked_template_depends_on_loop_element(record)
+        }
+        CheckedValueTemplate::ListElement { list, .. }
+        | CheckedValueTemplate::ListPrefixElement { list, .. }
+        | CheckedValueTemplate::ListRest { list, .. } => {
+            checked_template_depends_on_loop_element(list)
+        }
+        CheckedValueTemplate::MapValue { map, .. } => checked_template_depends_on_loop_element(map),
+        CheckedValueTemplate::MapRest { map, .. } => checked_template_depends_on_loop_element(map),
+        CheckedValueTemplate::EnumVariant { payload, .. } => {
+            checked_template_depends_on_loop_element(payload)
+        }
+        CheckedValueTemplate::Record { fields, .. } => fields
+            .iter()
+            .any(|field| checked_template_depends_on_loop_element(field.value())),
+        CheckedValueTemplate::List { items, .. } => {
+            items.iter().any(checked_template_depends_on_loop_element)
+        }
+        CheckedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
+            checked_template_depends_on_loop_element(entry.key())
+                || checked_template_depends_on_loop_element(entry.value())
         }),
     }
 }

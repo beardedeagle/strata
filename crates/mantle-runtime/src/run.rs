@@ -28,13 +28,30 @@ mod templates;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BranchDecisionPath {
+    scope: u16,
     depth: u8,
     bits: u64,
 }
 
 impl BranchDecisionPath {
     const fn root() -> Self {
-        Self { depth: 0, bits: 0 }
+        Self {
+            scope: 0,
+            depth: 0,
+            bits: 0,
+        }
+    }
+
+    fn action(index: usize) -> Result<Self> {
+        let scope = u16::try_from(index)
+            .ok()
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| Error::new("runtime action branch scope overflowed"))?;
+        Ok(Self {
+            scope,
+            depth: 0,
+            bits: 0,
+        })
     }
 
     fn child(self, branch: ArtifactBranch) -> Result<Self> {
@@ -48,6 +65,7 @@ impl BranchDecisionPath {
             ArtifactBranch::Else => 1,
         };
         Ok(Self {
+            scope: self.scope,
             depth: self.depth + 1,
             bits: self.bits | (bit << self.depth),
         })
@@ -80,6 +98,27 @@ struct BranchSelection<'a> {
     path: BranchDecisionPath,
     mode: BranchDecisionMode,
     loop_elements: &'a [RuntimeLoopElement],
+}
+
+fn action_reuses_next_state_decision(
+    action: &LoadedAction,
+    next_state: &LoadedNextState,
+    action_index: usize,
+    action_count: usize,
+) -> bool {
+    if action_index + 1 != action_count {
+        return false;
+    }
+    matches!(
+        (action, next_state),
+        (
+            LoadedAction::IfElse { condition, .. },
+            LoadedNextState::IfElse {
+                condition: next_condition,
+                ..
+            },
+        ) if condition == next_condition
+    )
 }
 
 pub fn run_artifact_with_host<H: RuntimeHost>(
@@ -399,13 +438,23 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             BranchDecisionPath::root(),
         )?;
 
-        for action in &transition.actions {
+        for (action_index, action) in transition.actions.iter().enumerate() {
+            let action_branch_path = if action_reuses_next_state_decision(
+                action,
+                &next_state,
+                action_index,
+                transition.actions.len(),
+            ) {
+                BranchDecisionPath::root()
+            } else {
+                BranchDecisionPath::action(action_index)?
+            };
             self.execute_action(
                 &mut local_process_refs,
                 &mut branch_decisions,
                 &step,
                 action,
-                BranchDecisionPath::root(),
+                action_branch_path,
                 &[],
             )?;
         }

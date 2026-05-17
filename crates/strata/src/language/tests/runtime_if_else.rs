@@ -104,3 +104,18 @@ fn runtime_if_else_rejects_branch_effect_without_declared_authority() {
         "{error}"
     );
 }
+
+#[test]
+fn runtime_if_else_rejects_nested_statement_branch_inside_final_branch() {
+    let source = RUNTIME_IF_ELSE.replace(
+        "emit \"worker took warm branch\";",
+        "if (flag) { emit \"nested warm\"; } else { emit \"nested cold\"; }",
+    );
+    let error = check_source(&source).expect_err("nested runtime branch must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("nested statement-level if branches are not supported"),
+        "{error}"
+    );
+}

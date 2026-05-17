@@ -21,6 +21,39 @@ struct ActiveArtifactLoopElement {
     ty: TypeId,
 }
 
+#[derive(Clone, Copy)]
+struct ActionReferenceScope<'a> {
+    active_loop_elements: &'a [ActiveArtifactLoopElement],
+    inside_loop: bool,
+    inside_runtime_if_branch: bool,
+}
+
+impl<'a> ActionReferenceScope<'a> {
+    const fn root() -> Self {
+        Self {
+            active_loop_elements: &[],
+            inside_loop: false,
+            inside_runtime_if_branch: false,
+        }
+    }
+
+    const fn loop_body(active_loop_elements: &'a [ActiveArtifactLoopElement]) -> Self {
+        Self {
+            active_loop_elements,
+            inside_loop: true,
+            inside_runtime_if_branch: false,
+        }
+    }
+
+    const fn if_branch(self) -> Self {
+        Self {
+            active_loop_elements: self.active_loop_elements,
+            inside_loop: self.inside_loop,
+            inside_runtime_if_branch: true,
+        }
+    }
+}
+
 impl ArtifactProcess {
     pub(super) fn validate_identity(&self, artifact: &MantleArtifact) -> Result<()> {
         validate_ident_field("process debug_name", &self.debug_name)?;
@@ -467,8 +500,7 @@ impl ArtifactProcess {
                     transition,
                     &mut spawned_refs,
                     action,
-                    &[],
-                    false,
+                    ActionReferenceScope::root(),
                 )?;
             }
             for declared_effect in &declared_effects {
@@ -490,8 +522,7 @@ impl ArtifactProcess {
         transition: &ArtifactTransition,
         spawned_refs: &mut BTreeSet<ProcessRefId>,
         action: &ArtifactAction,
-        active_loop_elements: &[ActiveArtifactLoopElement],
-        inside_loop: bool,
+        scope: ActionReferenceScope<'_>,
     ) -> Result<()> {
         match action {
             ArtifactAction::Emit { output } => {
@@ -507,7 +538,14 @@ impl ArtifactProcess {
                 target,
                 process_ref,
             } => {
-                if inside_loop {
+                if scope.inside_runtime_if_branch {
+                    return Err(Error::new(format!(
+                        "process {} transition {} runtime if branch cannot bind process references in this artifact slice",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
+                if scope.inside_loop {
                     return Err(Error::new(format!(
                         "process {} transition {} for loop body cannot bind process references",
                         self.debug_name,
@@ -586,7 +624,7 @@ impl ArtifactProcess {
                         validate_template_loop_elements(
                             artifact,
                             payload,
-                            active_loop_elements,
+                            scope.active_loop_elements,
                             &format!(
                                 "process {} transition {} send payload",
                                 self.debug_name,
@@ -619,9 +657,21 @@ impl ArtifactProcess {
                 then_actions,
                 else_actions,
             } => {
-                if inside_loop {
+                if scope.inside_runtime_if_branch {
+                    let branch_scope = if scope.inside_loop {
+                        "for loop branch"
+                    } else {
+                        "runtime if branch"
+                    };
                     return Err(Error::new(format!(
-                        "process {} transition {} for loop body cannot contain runtime if actions in this artifact slice",
+                        "process {} transition {} {branch_scope} cannot contain nested runtime if actions in this artifact slice",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
+                if scope.inside_loop && (then_actions.is_empty() || else_actions.is_empty()) {
+                    return Err(Error::new(format!(
+                        "process {} transition {} for loop branch actions must not be empty in this artifact slice",
                         self.debug_name,
                         transition.message.as_u32()
                     )));
@@ -645,13 +695,14 @@ impl ArtifactProcess {
                 validate_template_loop_elements(
                     artifact,
                     condition,
-                    active_loop_elements,
+                    scope.active_loop_elements,
                     &format!(
                         "process {} transition {} if condition",
                         self.debug_name,
                         transition.message.as_u32()
                     ),
                 )?;
+                let branch_scope = scope.if_branch();
                 let mut then_refs = spawned_refs.clone();
                 for action in then_actions {
                     self.validate_action_reference(
@@ -659,8 +710,7 @@ impl ArtifactProcess {
                         transition,
                         &mut then_refs,
                         action,
-                        active_loop_elements,
-                        false,
+                        branch_scope,
                     )?;
                 }
                 let mut else_refs = spawned_refs.clone();
@@ -670,8 +720,7 @@ impl ArtifactProcess {
                         transition,
                         &mut else_refs,
                         action,
-                        active_loop_elements,
-                        false,
+                        branch_scope,
                     )?;
                 }
                 then_refs.retain(|process_ref| else_refs.contains(process_ref));
@@ -683,7 +732,14 @@ impl ArtifactProcess {
                 max_items,
                 body,
             } => {
-                if inside_loop {
+                if scope.inside_runtime_if_branch {
+                    return Err(Error::new(format!(
+                        "process {} transition {} runtime if branch cannot contain for loop actions in this artifact slice",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
+                if scope.inside_loop {
                     return Err(Error::new(format!(
                         "process {} transition {} nested for loops are not supported in this artifact slice",
                         self.debug_name,
@@ -706,7 +762,7 @@ impl ArtifactProcess {
                 validate_template_loop_elements(
                     artifact,
                     collection,
-                    active_loop_elements,
+                    scope.active_loop_elements,
                     &format!(
                         "process {} transition {} for collection",
                         self.debug_name,
@@ -763,8 +819,7 @@ impl ArtifactProcess {
                         transition,
                         spawned_refs,
                         body_action,
-                        &active,
-                        true,
+                        ActionReferenceScope::loop_body(&active),
                     )?;
                 }
             }
@@ -1033,6 +1088,7 @@ fn validate_bool_condition_template(
             "{field} must have type enum Bool {{ False, True }}"
         )));
     }
+    validate_bool_condition_template_shape(field, condition)?;
     condition.validate_for_received_payload(
         artifact,
         field,
@@ -1044,13 +1100,39 @@ fn validate_bool_condition_template(
     validate_static_bool_condition_value(artifact, field, condition, current_state_payload)
 }
 
+fn validate_bool_condition_template_shape(
+    field: &str,
+    condition: &ArtifactValueTemplate,
+) -> Result<()> {
+    match condition {
+        ArtifactValueTemplate::Literal { .. }
+        | ArtifactValueTemplate::ReceivedPayload { .. }
+        | ArtifactValueTemplate::CurrentStatePayload { .. }
+        | ArtifactValueTemplate::EnumPayload { .. }
+        | ArtifactValueTemplate::RecordField { .. }
+        | ArtifactValueTemplate::ListElement { .. }
+        | ArtifactValueTemplate::ListPrefixElement { .. }
+        | ArtifactValueTemplate::MapValue { .. }
+        | ArtifactValueTemplate::LoopElement { .. } => Ok(()),
+        ArtifactValueTemplate::ListRest { .. }
+        | ArtifactValueTemplate::MapRest { .. }
+        | ArtifactValueTemplate::ProcessRef { .. }
+        | ArtifactValueTemplate::EnumVariant { .. }
+        | ArtifactValueTemplate::Record { .. }
+        | ArtifactValueTemplate::List { .. }
+        | ArtifactValueTemplate::Map { .. } => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
+    }
+}
+
 fn validate_static_bool_condition_value(
     artifact: &MantleArtifact,
     field: &str,
     condition: &ArtifactValueTemplate,
     current_state_payload: Option<&ArtifactPayload>,
 ) -> Result<()> {
-    if condition.depends_on_received_payload() {
+    if condition.depends_on_received_payload() || condition.depends_on_loop_element() {
         return Ok(());
     }
 

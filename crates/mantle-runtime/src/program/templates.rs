@@ -25,6 +25,26 @@ pub(super) fn validate_loaded_bool_condition(
     received_payload_type: Option<TypeId>,
     current_state_payload: Option<&RuntimePayload>,
 ) -> Result<()> {
+    validate_loaded_bool_condition_with_loop_elements(
+        program,
+        process,
+        field,
+        condition,
+        received_payload_type,
+        current_state_payload,
+        &[],
+    )
+}
+
+pub(super) fn validate_loaded_bool_condition_with_loop_elements(
+    program: &LoadedProgram,
+    process: &LoadedProcess,
+    field: &str,
+    condition: &LoadedValueTemplate,
+    received_payload_type: Option<TypeId>,
+    current_state_payload: Option<&RuntimePayload>,
+    loop_elements: &[LoadedLoopElement],
+) -> Result<()> {
     let bool_type = condition.result_type();
     let ty = program.type_entry(bool_type)?;
     let is_bool_contract = matches!(ty.kind, ArtifactTypeKind::Value)
@@ -36,18 +56,45 @@ pub(super) fn validate_loaded_bool_condition(
             "{field} must have type enum Bool {{ False, True }}"
         )));
     }
+    validate_loaded_bool_condition_shape(field, condition)?;
     LoadedTemplateAdmission {
         expected_type: Some(bool_type),
         received_payload_type,
         current_state_payload_type: current_state_payload.map(|payload| payload.ty),
         allow_direct_process_ref: false,
-        loop_elements: &[],
+        loop_elements,
         program,
         process,
         spawned_refs: &[],
     }
     .validate(field, condition)?;
     validate_loaded_static_bool_condition_value(program, field, condition, current_state_payload)
+}
+
+fn validate_loaded_bool_condition_shape(
+    field: &str,
+    condition: &LoadedValueTemplate,
+) -> Result<()> {
+    match condition {
+        LoadedValueTemplate::Literal { .. }
+        | LoadedValueTemplate::ReceivedPayload { .. }
+        | LoadedValueTemplate::CurrentStatePayload { .. }
+        | LoadedValueTemplate::EnumPayload { .. }
+        | LoadedValueTemplate::RecordField { .. }
+        | LoadedValueTemplate::ListElement { .. }
+        | LoadedValueTemplate::ListPrefixElement { .. }
+        | LoadedValueTemplate::MapValue { .. }
+        | LoadedValueTemplate::LoopElement { .. } => Ok(()),
+        LoadedValueTemplate::ListRest { .. }
+        | LoadedValueTemplate::MapRest { .. }
+        | LoadedValueTemplate::ProcessRef { .. }
+        | LoadedValueTemplate::EnumVariant { .. }
+        | LoadedValueTemplate::Record { .. }
+        | LoadedValueTemplate::List { .. }
+        | LoadedValueTemplate::Map { .. } => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
+    }
 }
 
 fn validate_loaded_static_bool_condition_value(

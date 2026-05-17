@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use super::templates::LoadedTemplateAdmission;
 use super::templates::validate_loaded_bool_condition;
+use super::templates::validate_loaded_bool_condition_with_loop_elements;
 use super::*;
 use mantle_artifact::ArtifactEffect;
 
@@ -45,6 +46,34 @@ pub(crate) enum LoadedSendTarget {
         ty: TypeId,
         target_process: ProcessId,
     },
+}
+
+#[derive(Clone, Copy)]
+struct LoopBodyAdmissionScope<'a> {
+    current_state_payload: Option<&'a RuntimePayload>,
+    loop_elements: &'a [LoadedLoopElement],
+    inside_loop_if: bool,
+}
+
+impl<'a> LoopBodyAdmissionScope<'a> {
+    const fn new(
+        current_state_payload: Option<&'a RuntimePayload>,
+        loop_elements: &'a [LoadedLoopElement],
+    ) -> Self {
+        Self {
+            current_state_payload,
+            loop_elements,
+            inside_loop_if: false,
+        }
+    }
+
+    const fn if_branch(self) -> Self {
+        Self {
+            current_state_payload: self.current_state_payload,
+            loop_elements: self.loop_elements,
+            inside_loop_if: true,
+        }
+    }
 }
 
 impl LoadedAction {
@@ -284,7 +313,7 @@ impl LoadedAction {
                 )?;
                 let mut then_refs = spawned_refs.to_vec();
                 for action in then_actions {
-                    action.validate_admission(
+                    action.validate_runtime_if_branch_admission(
                         program,
                         process,
                         message,
@@ -294,7 +323,7 @@ impl LoadedAction {
                 }
                 let mut else_refs = spawned_refs.to_vec();
                 for action in else_actions {
-                    action.validate_admission(
+                    action.validate_runtime_if_branch_admission(
                         program,
                         process,
                         message,
@@ -349,24 +378,50 @@ impl LoadedAction {
                 )?;
                 let active = [element.clone()];
                 for action in body {
-                    if matches!(action, Self::Spawn { .. }) {
-                        return Err(Error::new(format!(
-                            "process {} transition {} for loop body cannot bind process references",
-                            process.debug_name,
-                            message.as_u32()
-                        )));
-                    }
                     action.validate_loop_body_admission(
                         program,
                         process,
                         message,
-                        current_state_payload,
                         spawned_refs,
-                        &active,
+                        LoopBodyAdmissionScope::new(current_state_payload, &active),
                     )?;
                 }
                 Ok(())
             }
+        }
+    }
+
+    fn validate_runtime_if_branch_admission(
+        &self,
+        program: &LoadedProgram,
+        process: &LoadedProcess,
+        message: MessageId,
+        current_state_payload: Option<&RuntimePayload>,
+        spawned_refs: &mut [bool],
+    ) -> Result<()> {
+        match self {
+            Self::Spawn { .. } => Err(Error::new(format!(
+                "process {} transition {} runtime if branch cannot bind process references in this artifact slice",
+                process.debug_name,
+                message.as_u32()
+            ))),
+            Self::ForEach { .. } => Err(Error::new(format!(
+                "process {} transition {} runtime if branch cannot contain for loop actions in this artifact slice",
+                process.debug_name,
+                message.as_u32()
+            ))),
+            Self::IfElse { .. } => Err(Error::new(format!(
+                "process {} transition {} runtime if branch cannot contain nested runtime if actions in this artifact slice",
+                process.debug_name,
+                message.as_u32()
+            ))),
+            Self::Emit { .. } | Self::Send { .. } => self.validate_admission(
+                program,
+                process,
+                message,
+                current_state_payload,
+                spawned_refs,
+            ),
         }
     }
 
@@ -375,24 +430,87 @@ impl LoadedAction {
         program: &LoadedProgram,
         process: &LoadedProcess,
         message: MessageId,
-        current_state_payload: Option<&RuntimePayload>,
         spawned_refs: &mut [bool],
-        loop_elements: &[LoadedLoopElement],
+        scope: LoopBodyAdmissionScope<'_>,
     ) -> Result<()> {
-        let current_state_payload_type = current_state_payload.map(|payload| payload.ty);
+        let current_state_payload_type = scope.current_state_payload.map(|payload| payload.ty);
         match self {
-            Self::Spawn { .. } | Self::ForEach { .. } | Self::IfElse { .. } => {
-                Err(Error::new(format!(
-                    "process {} transition {} for loop body supports only linear effects in this artifact slice",
-                    process.debug_name,
-                    message.as_u32()
-                )))
+            Self::Spawn { .. } => Err(Error::new(format!(
+                "process {} transition {} for loop body cannot bind process references",
+                process.debug_name,
+                message.as_u32()
+            ))),
+            Self::ForEach { .. } => Err(Error::new(format!(
+                "process {} transition {} nested for loops are not supported in this artifact slice",
+                process.debug_name,
+                message.as_u32()
+            ))),
+            Self::IfElse {
+                condition,
+                then_actions,
+                else_actions,
+            } => {
+                if scope.inside_loop_if {
+                    return Err(Error::new(format!(
+                        "process {} transition {} for loop branch cannot contain nested runtime if actions in this artifact slice",
+                        process.debug_name,
+                        message.as_u32()
+                    )));
+                }
+                if then_actions.is_empty() || else_actions.is_empty() {
+                    return Err(Error::new(format!(
+                        "process {} transition {} for loop branch actions must not be empty in this artifact slice",
+                        process.debug_name,
+                        message.as_u32()
+                    )));
+                }
+                validate_loaded_bool_condition_with_loop_elements(
+                    program,
+                    process,
+                    &format!(
+                        "process {} transition {} if condition",
+                        process.debug_name,
+                        message.as_u32()
+                    ),
+                    condition,
+                    process.message_variants[message.index()].payload_type,
+                    scope.current_state_payload,
+                    scope.loop_elements,
+                )?;
+                let branch_scope = scope.if_branch();
+                let mut then_refs = spawned_refs.to_vec();
+                for action in then_actions {
+                    action.validate_loop_body_admission(
+                        program,
+                        process,
+                        message,
+                        &mut then_refs,
+                        branch_scope,
+                    )?;
+                }
+                let mut else_refs = spawned_refs.to_vec();
+                for action in else_actions {
+                    action.validate_loop_body_admission(
+                        program,
+                        process,
+                        message,
+                        &mut else_refs,
+                        branch_scope,
+                    )?;
+                }
+                for (spawned, (then_spawned, else_spawned)) in spawned_refs
+                    .iter_mut()
+                    .zip(then_refs.into_iter().zip(else_refs))
+                {
+                    *spawned = *spawned || (then_spawned && else_spawned);
+                }
+                Ok(())
             }
             Self::Emit { .. } => self.validate_admission(
                 program,
                 process,
                 message,
-                current_state_payload,
+                scope.current_state_payload,
                 spawned_refs,
             ),
             Self::Send {
@@ -421,7 +539,7 @@ impl LoadedAction {
                             .payload_type,
                         current_state_payload_type,
                         allow_direct_process_ref: false,
-                        loop_elements,
+                        loop_elements: scope.loop_elements,
                         program,
                         process,
                         spawned_refs,

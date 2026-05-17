@@ -179,6 +179,129 @@ fn runtime_rejects_loaded_if_else_static_projection_that_is_not_bool_value_befor
 }
 
 #[test]
+fn runtime_rejects_loaded_if_else_dynamic_non_unit_bool_shape_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    artifact.processes[1].message_variants[0].payload_type = Some(bool_type);
+    artifact.processes[1].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::ReceivedPayload { ty: bool_type },
+        then_state: Box::new(NextState::Current),
+        else_state: Box::new(NextState::Current),
+    };
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[1].transitions[0].next_state = LoadedNextState::IfElse {
+        condition: LoadedValueTemplate::List {
+            ty: bool_type,
+            items: vec![LoadedValueTemplate::ReceivedPayload { ty: bool_type }],
+        },
+        then_state: Box::new(LoadedNextState::Current),
+        else_state: Box::new(LoadedNextState::Current),
+    };
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Worker message id 0 next_state_condition must evaluate to unit Bool value False or True",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_nested_if_else_inside_runtime_if_branch_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let condition = LoadedValueTemplate::Literal {
+        ty: bool_type,
+        value: RuntimeValue::Atom("True".to_string()),
+    };
+    program.processes[0].transitions[0].actions = vec![LoadedAction::IfElse {
+        condition: condition.clone(),
+        then_actions: vec![LoadedAction::IfElse {
+            condition,
+            then_actions: Vec::new(),
+            else_actions: Vec::new(),
+        }],
+        else_actions: Vec::new(),
+    }];
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main transition 0 runtime if branch cannot contain nested runtime if actions",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_spawn_inside_runtime_if_branch_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].effect_authority =
+        crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Spawn]);
+    program.processes[0].transitions[0].actions = vec![LoadedAction::IfElse {
+        condition: LoadedValueTemplate::Literal {
+            ty: bool_type,
+            value: RuntimeValue::Atom("True".to_string()),
+        },
+        then_actions: vec![LoadedAction::Spawn {
+            target: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+        }],
+        else_actions: Vec::new(),
+    }];
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main transition 0 runtime if branch cannot bind process references",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_for_each_inside_runtime_if_branch_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].actions = vec![LoadedAction::IfElse {
+        condition: LoadedValueTemplate::Literal {
+            ty: bool_type,
+            value: RuntimeValue::Atom("True".to_string()),
+        },
+        then_actions: vec![LoadedAction::ForEach {
+            element: crate::program::LoadedLoopElement {
+                id: LoopElementId::new(0),
+                ty: bool_type,
+            },
+            collection: LoadedValueTemplate::Literal {
+                ty: bool_type,
+                value: RuntimeValue::List(vec![RuntimeValue::Atom("True".to_string())]),
+            },
+            max_items: 1,
+            body: Vec::new(),
+        }],
+        else_actions: Vec::new(),
+    }];
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main transition 0 runtime if branch cannot contain for loop actions",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_invalid_literal_template_shape_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

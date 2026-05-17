@@ -70,6 +70,136 @@ fn runtime_for_each_checks_and_lowers_to_mantle_loop_control_flow() {
 }
 
 #[test]
+fn runtime_for_each_if_checks_and_lowers_to_mantle_loop_branch_control_flow() {
+    let checked = check_source(RUNTIME_FOR_EACH_IF).expect("runtime for-if source should check");
+    let batch_worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "BatchWorker")
+        .expect("BatchWorker should be checked");
+    let transition = only_transition(batch_worker);
+    assert_eq!(transition.step_result(), CheckedStepResult::Stop);
+    assert!(matches!(
+        transition.actions(),
+        [
+            CheckedAction::Spawn { .. },
+            CheckedAction::ForEach {
+                collection: CheckedValueTemplate::ReceivedPayload { .. },
+                max_items: 2,
+                body,
+                ..
+            },
+        ] if matches!(
+            body.as_slice(),
+            [CheckedAction::IfElse {
+                condition: CheckedValueTemplate::LoopElement { .. },
+                then_actions,
+                else_actions,
+            }] if matches!(
+                then_actions.as_slice(),
+                [
+                    CheckedAction::Emit { .. },
+                    CheckedAction::Send {
+                        payload: Some(payload),
+                        ..
+                    },
+                ] if matches!(payload.as_ref(), CheckedValueTemplate::LoopElement { .. })
+            ) && matches!(
+                else_actions.as_slice(),
+                [
+                    CheckedAction::Emit { .. },
+                    CheckedAction::Send {
+                        payload: Some(payload),
+                        ..
+                    },
+                ] if matches!(payload.as_ref(), CheckedValueTemplate::LoopElement { .. })
+            )
+        )
+    ));
+
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    assert!(matches!(
+        only_transition(worker).actions(),
+        [CheckedAction::IfElse {
+            condition: CheckedValueTemplate::ReceivedPayload { .. },
+            then_actions,
+            else_actions,
+        }] if matches!(then_actions.as_slice(), [CheckedAction::Emit { .. }])
+            && matches!(else_actions.as_slice(), [CheckedAction::Emit { .. }])
+    ));
+
+    let artifact =
+        lower_to_artifact(&checked, RUNTIME_FOR_EACH_IF).expect("runtime for-if should lower");
+    let batch_worker_artifact = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "BatchWorker")
+        .expect("BatchWorker artifact should exist");
+    let artifact_transition = batch_worker_artifact
+        .transitions
+        .first()
+        .expect("BatchWorker transition should exist");
+    assert!(matches!(
+        artifact_transition.actions.as_slice(),
+        [
+            ArtifactAction::Spawn { .. },
+            ArtifactAction::ForEach {
+                element,
+                collection: ArtifactValueTemplate::ReceivedPayload { .. },
+                max_items: 2,
+                body,
+            },
+        ] if matches!(
+            body.as_slice(),
+            [ArtifactAction::IfElse {
+                condition: ArtifactValueTemplate::LoopElement { element: condition_element, .. },
+                then_actions,
+                else_actions,
+            }] if *condition_element == element.id
+                && matches!(
+                    then_actions.as_slice(),
+                    [
+                        ArtifactAction::Emit { .. },
+                        ArtifactAction::Send {
+                            payload: Some(ArtifactValueTemplate::LoopElement {
+                                element: payload_element,
+                                ..
+                            }),
+                            ..
+                        },
+                    ] if *payload_element == element.id
+                )
+                && matches!(
+                    else_actions.as_slice(),
+                    [
+                        ArtifactAction::Emit { .. },
+                        ArtifactAction::Send {
+                            payload: Some(ArtifactValueTemplate::LoopElement {
+                                element: payload_element,
+                                ..
+                            }),
+                            ..
+                        },
+                    ] if *payload_element == element.id
+                )
+        )
+    ));
+    let encoded = artifact.encode();
+    assert!(encoded.contains(".kind=if_else"));
+    assert!(encoded.contains(".kind=loop_element"));
+    assert!(
+        !encoded
+            .lines()
+            .any(|line| line.ends_with("=item") || line.contains("debug_name=item")),
+        "loop branch dispatch must not lower the source binding name"
+    );
+}
+
+#[test]
 fn runtime_for_each_rejects_non_list_collection() {
     let source = RUNTIME_FOR_EACH
         .replace("Batch(List<Bool,2>)", "Batch(Bool)")
@@ -91,6 +221,94 @@ fn runtime_for_each_rejects_static_collection_source_folding() {
         error
             .to_string()
             .contains("for loop collection must be an identifier binding"),
+        "{error}"
+    );
+}
+
+#[test]
+fn runtime_for_each_if_rejects_non_bool_loop_condition() {
+    let source = RUNTIME_FOR_EACH_IF.replace("if (item)", "if (state)");
+    let error = check_source(&source).expect_err("loop branch condition must be Bool");
+    assert!(
+        error
+            .to_string()
+            .contains("if condition must have type Bool"),
+        "{error}"
+    );
+}
+
+#[test]
+fn runtime_for_each_if_rejects_missing_bool_contract() {
+    let source = RUNTIME_FOR_EACH_IF
+        .replace(
+            "enum Bool {\n    False,\n    True,\n}",
+            "enum Bool {\n    No,\n    Yes,\n}",
+        )
+        .replace("List<Bool,2>[True, False]", "List<Bool,2>[Yes, No]");
+    let error =
+        check_source(&source).expect_err("loop branch condition must require Bool contract");
+    assert!(
+        error
+            .to_string()
+            .contains("if condition requires enum Bool { False, True }"),
+        "{error}"
+    );
+}
+
+#[test]
+fn runtime_for_each_if_rejects_return_inside_statement_branch() {
+    let source =
+        RUNTIME_FOR_EACH_IF.replace("emit \"batch selected true\";", "return Stop(state);");
+    let error = check_source(&source).expect_err("statement if branch return must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("statement-level if branches must not return"),
+        "{error}"
+    );
+}
+
+#[test]
+fn runtime_for_each_if_rejects_spawn_inside_loop_branch() {
+    let source = RUNTIME_FOR_EACH_IF.replace(
+        "emit \"batch selected true\";",
+        "let other: ProcessRef<Worker> = spawn Worker;",
+    );
+    let error = check_source(&source).expect_err("loop branch spawn must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("statement-level if branches cannot bind process references"),
+        "{error}"
+    );
+}
+
+#[test]
+fn runtime_for_each_if_rejects_nested_statement_branch() {
+    let source = RUNTIME_FOR_EACH_IF.replace(
+        "emit \"batch selected true\";",
+        "if (item) { emit \"nested true\"; } else { emit \"nested false\"; }",
+    );
+    let error = check_source(&source).expect_err("nested statement if must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("nested statement-level if branches are not supported"),
+        "{error}"
+    );
+}
+
+#[test]
+fn runtime_for_each_if_rejects_branch_effect_without_declared_authority() {
+    let source = RUNTIME_FOR_EACH_IF.replace(
+        "fn step(state: BatchState, Batch(items: List<Bool,2>)) -> ProcResult<BatchState> ! [spawn, emit, send] ~ [] @det",
+        "fn step(state: BatchState, Batch(items: List<Bool,2>)) -> ProcResult<BatchState> ! [spawn, send] ~ [] @det",
+    );
+    let error = check_source(&source).expect_err("branch emit authority must be declared");
+    assert!(
+        error
+            .to_string()
+            .contains("step uses effect emit but does not declare it"),
         "{error}"
     );
 }

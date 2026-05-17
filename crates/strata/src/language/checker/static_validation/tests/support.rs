@@ -100,6 +100,10 @@ pub(super) fn checked_message_id(index: usize) -> CheckedMessageId {
     CheckedMessageId::from_index(index).expect("valid checked message id")
 }
 
+pub(super) fn checked_output_id(index: usize) -> CheckedOutputId {
+    CheckedOutputId::from_index(index).expect("valid checked output id")
+}
+
 pub(super) fn checked_enum_variant_id(index: usize) -> CheckedEnumVariantId {
     CheckedEnumVariantId::from_index(index).expect("valid checked enum variant id")
 }

@@ -139,6 +139,10 @@ ID for the checked `Bool` condition, and `condition` is trace metadata for the
 evaluated value. Runtime branch selection uses the admitted typed condition,
 not source strings, helper names, or debug labels.
 
+When a branch runs inside a bounded runtime loop body, `branch_selected` appears
+after that iteration's `loop_iteration` event and before the selected branch
+effects. The condition may be the evaluated active loop element value.
+
 ## Runtime Loop Events
 
 Example shape:

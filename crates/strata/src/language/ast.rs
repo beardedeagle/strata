@@ -290,6 +290,11 @@ pub enum Statement {
         message: Identifier,
         payload: Option<ValueExpr>,
     },
+    IfElse {
+        condition: ValueExpr,
+        then_body: Vec<Statement>,
+        else_body: Vec<Statement>,
+    },
     ForEach {
         item: Identifier,
         collection: ValueExpr,

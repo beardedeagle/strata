@@ -376,6 +376,7 @@ statement =
     emit_statement
   | process_ref_statement
   | send_statement
+  | if_statement
   | for_statement
 
 emit_statement =
@@ -392,6 +393,14 @@ send_statement =
 
 payload_arg =
     "(" value_expr ")"
+
+if_statement =
+    "if" "(" value_expr ")" "{" branch_statement+ "}"
+    "else" "{" branch_statement+ "}"
+
+branch_statement =
+    emit_statement
+  | send_statement
 
 for_statement =
     "for" ident "in" ident "{" statement* "}"
@@ -416,8 +425,9 @@ variants reject payload values.
 The `for` collection source is an identifier binding, not an arbitrary
 expression. Checking requires it to be a runtime-bound `List<T,N>` value. The
 element identifier is immutable and visible only in the loop body. This slice
-does not admit nested loops, `return`, runtime `if`, or `spawn` inside loop
-bodies.
+admits statement-level runtime `if` inside loop bodies, but still rejects nested
+loops, `return`, `spawn`, branch-local process-reference binding, and nested
+statement-level branches.
 
 ## Types
 
@@ -480,9 +490,17 @@ lowering. Branch bodies cannot contain statements or effects.
 Final-position `return_if_else` is runtime control flow in `step` bodies. The
 condition must have the same `Bool` contract, but it may depend on received
 payload or current-state payload bindings. Each branch is a block body with its
-own statements and terminal return. Strata lowers the checked condition and
+own statements and terminal return. Branch statement prefixes are limited to
+`emit` and `send` in this slice. Strata lowers the checked condition and
 branches to Mantle control flow; Mantle executes only the selected branch and
 traces the branch choice.
+
+Statement-level `if_statement` is runtime control flow for effects before the
+enclosing return. Branches contain only `emit` and `send` statements in this
+slice. They cannot bind process references, return, contain loops, or contain
+nested statement-level branches. Inside `for`, the condition may use the
+immutable loop element binding; lowering emits a typed Mantle branch over the
+loop element ID, not the source binding name.
 
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,

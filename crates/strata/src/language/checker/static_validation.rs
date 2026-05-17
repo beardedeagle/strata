@@ -18,8 +18,8 @@ use process_refs::{
 use runtime_order::validate_static_runtime_order;
 use templates::{
     current_state_payload_type, validate_bool_condition_template, validate_next_state,
-    validate_value_template_binding_types, validate_value_template_payload_labels,
-    validate_value_template_process_refs,
+    validate_static_bool_condition_value, validate_value_template_binding_types,
+    validate_value_template_payload_labels, validate_value_template_process_refs,
 };
 
 type TransitionPayloadGuardKey = Option<(CheckedTypeId, ArtifactValue)>;
@@ -33,6 +33,39 @@ type TransitionCoverageKey = (
 struct ActiveCheckedLoopElement {
     id: CheckedLoopElementId,
     ty: CheckedTypeRef,
+}
+
+#[derive(Clone, Copy)]
+struct ActionReferenceScope<'a> {
+    active_loop_elements: &'a [ActiveCheckedLoopElement],
+    inside_loop: bool,
+    inside_runtime_if_branch: bool,
+}
+
+impl<'a> ActionReferenceScope<'a> {
+    const fn root() -> Self {
+        Self {
+            active_loop_elements: &[],
+            inside_loop: false,
+            inside_runtime_if_branch: false,
+        }
+    }
+
+    const fn loop_body(active_loop_elements: &'a [ActiveCheckedLoopElement]) -> Self {
+        Self {
+            active_loop_elements,
+            inside_loop: true,
+            inside_runtime_if_branch: false,
+        }
+    }
+
+    const fn if_branch(self) -> Self {
+        Self {
+            active_loop_elements: self.active_loop_elements,
+            inside_loop: self.inside_loop,
+            inside_runtime_if_branch: true,
+        }
+    }
 }
 
 struct ActionValidationContext<'a> {
@@ -167,7 +200,12 @@ fn validate_transition(
     };
 
     for action in transition.actions() {
-        validate_action_reference(&context, &mut spawned_refs, action, &[], false)?;
+        validate_action_reference(
+            &context,
+            &mut spawned_refs,
+            action,
+            ActionReferenceScope::root(),
+        )?;
     }
     Ok(())
 }
@@ -176,8 +214,7 @@ fn validate_action_reference(
     context: &ActionValidationContext<'_>,
     spawned_refs: &mut BTreeSet<CheckedProcessRefId>,
     action: &CheckedAction,
-    active_loop_elements: &[ActiveCheckedLoopElement],
-    inside_loop: bool,
+    scope: ActionReferenceScope<'_>,
 ) -> Result<()> {
     let process = context.process;
     let transition = context.transition;
@@ -187,7 +224,13 @@ fn validate_action_reference(
             target,
             process_ref,
         } => {
-            if inside_loop {
+            if scope.inside_runtime_if_branch {
+                return Err(Error::new(format!(
+                    "process {} runtime if branch cannot bind process references in this source slice",
+                    process.debug_name()
+                )));
+            }
+            if scope.inside_loop {
                 return Err(Error::new(format!(
                     "process {} for loop body cannot bind process references",
                     process.debug_name()
@@ -259,7 +302,7 @@ fn validate_action_reference(
                 *message,
                 payload.as_deref(),
                 spawned_refs,
-                active_loop_elements,
+                scope.active_loop_elements,
             )?;
         }
         CheckedAction::IfElse {
@@ -267,9 +310,15 @@ fn validate_action_reference(
             then_actions,
             else_actions,
         } => {
-            if inside_loop {
+            if scope.inside_runtime_if_branch {
                 return Err(Error::new(format!(
-                    "process {} for loop body cannot contain runtime if actions in this source slice",
+                    "process {} runtime if branch cannot contain nested runtime if actions in this source slice",
+                    process.debug_name()
+                )));
+            }
+            if scope.inside_loop && (then_actions.is_empty() || else_actions.is_empty()) {
+                return Err(Error::new(format!(
+                    "process {} for loop branch actions must not be empty in this source slice",
                     process.debug_name()
                 )));
             }
@@ -287,27 +336,21 @@ fn validate_action_reference(
                 spawned_refs,
                 false,
             )?;
-            validate_value_template_loop_elements(condition, active_loop_elements)?;
+            validate_value_template_loop_elements(condition, scope.active_loop_elements)?;
+            validate_static_bool_condition_value(
+                process,
+                condition,
+                transition_current_state_payload(process, transition)?,
+            )?;
 
+            let branch_scope = scope.if_branch();
             let mut then_refs = spawned_refs.clone();
             for action in then_actions {
-                validate_action_reference(
-                    context,
-                    &mut then_refs,
-                    action,
-                    active_loop_elements,
-                    false,
-                )?;
+                validate_action_reference(context, &mut then_refs, action, branch_scope)?;
             }
             let mut else_refs = spawned_refs.clone();
             for action in else_actions {
-                validate_action_reference(
-                    context,
-                    &mut else_refs,
-                    action,
-                    active_loop_elements,
-                    false,
-                )?;
+                validate_action_reference(context, &mut else_refs, action, branch_scope)?;
             }
             then_refs.retain(|process_ref| else_refs.contains(process_ref));
             *spawned_refs = then_refs;
@@ -318,7 +361,13 @@ fn validate_action_reference(
             body,
             ..
         } => {
-            if inside_loop {
+            if scope.inside_runtime_if_branch {
+                return Err(Error::new(format!(
+                    "process {} runtime if branch cannot contain for loop actions in this source slice",
+                    process.debug_name()
+                )));
+            }
+            if scope.inside_loop {
                 return Err(Error::new(format!(
                     "process {} nested for loops are not supported in this source slice",
                     process.debug_name()
@@ -351,13 +400,18 @@ fn validate_action_reference(
                 spawned_refs,
                 false,
             )?;
-            validate_value_template_loop_elements(collection, active_loop_elements)?;
+            validate_value_template_loop_elements(collection, scope.active_loop_elements)?;
             let active = [ActiveCheckedLoopElement {
                 id: element.id(),
                 ty: element.ty().clone(),
             }];
             for action in body {
-                validate_action_reference(context, spawned_refs, action, &active, true)?;
+                validate_action_reference(
+                    context,
+                    spawned_refs,
+                    action,
+                    ActionReferenceScope::loop_body(&active),
+                )?;
             }
         }
     }
@@ -595,6 +649,27 @@ fn validate_transition_current_state(
         }
     }
     Ok(())
+}
+
+fn transition_current_state_payload<'a>(
+    process: &'a CheckedProcess,
+    transition: &CheckedTransition,
+) -> Result<Option<&'a CheckedPayloadValue>> {
+    let Some(current_state) = transition.current_state() else {
+        return Ok(None);
+    };
+    let state = process
+        .state_values()
+        .get(current_state.index())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} message id {} current_state id {} is not a valid state value",
+                process.debug_name(),
+                transition.message().as_u32(),
+                current_state.as_u32()
+            ))
+        })?;
+    Ok(state.payload())
 }
 
 fn validate_transition_coverage(process: &CheckedProcess) -> Result<()> {

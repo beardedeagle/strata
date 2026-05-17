@@ -82,24 +82,90 @@ fn static_validation_rejects_nested_for_each_loop_body() {
 }
 
 #[test]
-fn static_validation_rejects_runtime_if_inside_for_each_loop_body() {
+fn static_validation_accepts_runtime_if_inside_for_each_loop_body() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
-    let process = process_with_single_loop_body(vec![CheckedAction::IfElse {
-        condition: CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-            bool_ty,
-            artifact_value("True"),
+    let process = process_with_single_loop_body_and_element(
+        bool_ty.clone(),
+        CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+            bool_ty.clone(),
+            artifact_value("List[True]"),
         )),
-        then_actions: Vec::new(),
-        else_actions: Vec::new(),
-    }]);
+        vec![CheckedAction::IfElse {
+            condition: CheckedValueTemplate::LoopElement {
+                ty: bool_ty,
+                element: checked_loop_element_id(0),
+            },
+            then_actions: vec![emit_action()],
+            else_actions: vec![emit_action()],
+        }],
+        vec![Effect::Emit],
+    );
+
+    validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+        .expect("runtime if over active checked loop element should validate");
+}
+
+#[test]
+fn static_validation_rejects_empty_runtime_if_branch_inside_for_each_loop_body() {
+    let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let process = process_with_single_loop_body_and_element(
+        bool_ty.clone(),
+        CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+            bool_ty.clone(),
+            artifact_value("List[True]"),
+        )),
+        vec![CheckedAction::IfElse {
+            condition: CheckedValueTemplate::LoopElement {
+                ty: bool_ty,
+                element: checked_loop_element_id(0),
+            },
+            then_actions: Vec::new(),
+            else_actions: vec![emit_action()],
+        }],
+        vec![Effect::Emit],
+    );
 
     let err =
         validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
-            .expect_err("runtime if in checked for loop should fail before lowering");
-
+            .expect_err("empty checked runtime if loop branch should fail");
     assert!(
         err.to_string()
-            .contains("for loop body cannot contain runtime if actions"),
+            .contains("for loop branch actions must not be empty"),
+        "{err}"
+    );
+}
+
+#[test]
+fn static_validation_rejects_nested_runtime_if_inside_for_each_loop_branch() {
+    let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let condition = CheckedValueTemplate::LoopElement {
+        ty: bool_ty.clone(),
+        element: checked_loop_element_id(0),
+    };
+    let process = process_with_single_loop_body_and_element(
+        bool_ty.clone(),
+        CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+            bool_ty,
+            artifact_value("List[True]"),
+        )),
+        vec![CheckedAction::IfElse {
+            condition: condition.clone(),
+            then_actions: vec![CheckedAction::IfElse {
+                condition,
+                then_actions: Vec::new(),
+                else_actions: Vec::new(),
+            }],
+            else_actions: vec![emit_action()],
+        }],
+        vec![Effect::Emit],
+    );
+
+    let err =
+        validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+            .expect_err("nested runtime if in checked for loop branch should fail");
+    assert!(
+        err.to_string()
+            .contains("runtime if branch cannot contain nested runtime if actions"),
         "{err}"
     );
 }
@@ -122,15 +188,45 @@ fn static_validation_rejects_loop_element_id_above_codec_bound() {
 }
 
 fn process_with_single_loop_body(body: Vec<CheckedAction>) -> CheckedProcess {
-    process_with_single_loop(checked_loop_element_id(0), body)
+    process_with_single_loop(
+        checked_loop_element_id(0),
+        value_type("Job"),
+        list_payload_template(),
+        Vec::new(),
+        body,
+    )
+}
+
+fn process_with_single_loop_body_and_element(
+    element_ty: CheckedTypeRef,
+    collection: CheckedValueTemplate,
+    body: Vec<CheckedAction>,
+    effects: Vec<Effect>,
+) -> CheckedProcess {
+    process_with_single_loop(
+        checked_loop_element_id(0),
+        element_ty,
+        collection,
+        effects,
+        body,
+    )
 }
 
 fn process_with_single_loop_element_id(element_id: CheckedLoopElementId) -> CheckedProcess {
-    process_with_single_loop(element_id, Vec::new())
+    process_with_single_loop(
+        element_id,
+        value_type("Job"),
+        list_payload_template(),
+        Vec::new(),
+        Vec::new(),
+    )
 }
 
 fn process_with_single_loop(
     element_id: CheckedLoopElementId,
+    element_ty: CheckedTypeRef,
+    collection: CheckedValueTemplate,
+    effects: Vec<Effect>,
     body: Vec<CheckedAction>,
 ) -> CheckedProcess {
     CheckedProcess::new(CheckedProcessParts {
@@ -154,10 +250,10 @@ fn process_with_single_loop(
             message: checked_message_id(0),
             step_result: CheckedStepResult::Stop,
             next_state: CheckedNextState::Current,
-            effects: Vec::new(),
+            effects,
             actions: vec![CheckedAction::ForEach {
-                element: CheckedLoopElement::new(element_id, value_type("Job")),
-                collection: list_payload_template(),
+                element: CheckedLoopElement::new(element_id, element_ty),
+                collection,
                 max_items: 1,
                 body,
             }],
@@ -202,4 +298,10 @@ fn list_payload_template() -> CheckedValueTemplate {
 
 fn checked_loop_element_id(index: usize) -> CheckedLoopElementId {
     CheckedLoopElementId::from_index(index).expect("valid checked loop element id")
+}
+
+fn emit_action() -> CheckedAction {
+    CheckedAction::Emit {
+        output: CheckedOutputId::from_index(0).expect("valid checked output id"),
+    }
 }
