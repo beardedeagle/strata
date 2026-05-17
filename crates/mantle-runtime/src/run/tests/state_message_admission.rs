@@ -168,7 +168,7 @@ fn runtime_rejects_loaded_if_else_literal_that_is_not_bool_value_before_artifact
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process Main message id 0 next_state_condition must evaluate to unit Bool value False or True",
+        "process Main message id 0 next_state_condition enum variant True must not carry a payload",
     );
 }
 
@@ -190,6 +190,8 @@ fn runtime_rejects_loaded_if_else_static_projection_that_is_not_bool_value_befor
         else_state: Box::new(NextState::Current),
     };
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.types[BOX.index()] =
+        ArtifactType::record("Box", vec![artifact_type_field("flag", bool_type)]);
     program.processes[0].transitions[0].next_state = LoadedNextState::IfElse {
         condition: LoadedValueTemplate::RecordField {
             ty: bool_type,
@@ -214,7 +216,7 @@ fn runtime_rejects_loaded_if_else_static_projection_that_is_not_bool_value_befor
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process Main message id 0 next_state_condition must evaluate to unit Bool value False or True",
+        "process Main message id 0 next_state_condition.record.field.flag enum variant True must not carry a payload",
     );
 }
 
@@ -362,23 +364,22 @@ fn runtime_rejects_loaded_invalid_literal_template_shape_before_artifact_loaded(
 fn runtime_rejects_loaded_invalid_enum_payload_projection_variant_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].state_type = WORKER_STATE;
+    program.processes[0].state_values = loaded_state_values(WORKER_STATE, &["Idle"]);
     program.processes[0].transitions[0].current_state = Some(StateId::new(0));
     program.processes[0].transitions[0].next_state =
         LoadedNextState::Template(LoadedValueTemplate::EnumPayload {
-            ty: MAIN_STATE,
+            ty: WORKER_STATE,
             value: Box::new(LoadedValueTemplate::Literal {
-                ty: MAIN_STATE,
-                value: RuntimeValue::EnumVariant {
-                    variant: "Route".to_string(),
-                    payload: Box::new(RuntimeValue::Atom("MainState".to_string())),
-                },
+                ty: WORKER_STATE,
+                value: RuntimeValue::Atom("Idle".to_string()),
             }),
             variant: EnumVariantId::new(99),
         });
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "next_state_template.variant_id loaded type id 0 has no enum variant id 99",
+        "next_state_template.variant_id loaded type id 2 has no enum variant id 99",
     );
 }
 
@@ -386,6 +387,13 @@ fn runtime_rejects_loaded_invalid_enum_payload_projection_variant_before_artifac
 fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.types[WORKER_STATE.index()] = worker_state_type_with_payloads(&[
+        ("Idle", None),
+        ("Handled", None),
+        ("Working", None),
+        ("Done", None),
+        ("Routed", Some(PROCESS_REF_WORKER)),
+    ]);
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
     program.processes[1].transitions[0].current_state = Some(StateId::new(0));
     program.processes[1].transitions[0].next_state =
@@ -407,15 +415,18 @@ fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_lo
 fn runtime_rejects_loaded_payload_dependent_map_template_key_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let map_ty = push_map_type(&mut program, "JobMap", JOB, JOB, 1);
+    program.processes[1].state_type = map_ty;
+    program.processes[1].state_values = loaded_state_values(map_ty, &["Map[]"]);
     program.processes[1].message_variants[0].payload_type = Some(JOB);
     program.processes[1].transitions[0].next_state =
         loaded_next_state(NextState::Template(ArtifactValueTemplate::Map {
-            ty: WORKER_STATE,
+            ty: map_ty,
             entries: vec![mantle_artifact::ArtifactValueTemplateMapEntry {
                 key: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
                 value: ArtifactValueTemplate::Literal {
                     ty: JOB,
-                    value: artifact_value("Job"),
+                    value: artifact_value("Job{phase:Ready}"),
                 },
             }],
         }));
@@ -430,28 +441,31 @@ fn runtime_rejects_loaded_payload_dependent_map_template_key_before_artifact_loa
 fn runtime_rejects_loaded_duplicate_static_map_template_key_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let map_ty = push_map_type(&mut program, "JobMap", JOB, JOB, 2);
+    program.processes[1].state_type = map_ty;
+    program.processes[1].state_values = loaded_state_values(map_ty, &["Map[]"]);
     program.processes[1].transitions[0].next_state =
         loaded_next_state(NextState::Template(ArtifactValueTemplate::Map {
-            ty: WORKER_STATE,
+            ty: map_ty,
             entries: vec![
                 mantle_artifact::ArtifactValueTemplateMapEntry {
                     key: ArtifactValueTemplate::Literal {
                         ty: JOB,
-                        value: artifact_value("Job"),
+                        value: artifact_value("Job{phase:Ready}"),
                     },
                     value: ArtifactValueTemplate::Literal {
                         ty: JOB,
-                        value: artifact_value("Ready"),
+                        value: artifact_value("Job{phase:Done}"),
                     },
                 },
                 mantle_artifact::ArtifactValueTemplateMapEntry {
                     key: ArtifactValueTemplate::Literal {
                         ty: JOB,
-                        value: artifact_value("Job"),
+                        value: artifact_value("Job{phase:Ready}"),
                     },
                     value: ArtifactValueTemplate::Literal {
                         ty: JOB,
-                        value: artifact_value("Done"),
+                        value: artifact_value("Job{phase:Ready}"),
                     },
                 },
             ],
@@ -459,7 +473,7 @@ fn runtime_rejects_loaded_duplicate_static_map_template_key_before_artifact_load
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process Worker message id 0 next_state_template duplicates key Job",
+        "process Worker message id 0 next_state_template duplicates key Job{phase:Ready}",
     );
 }
 
@@ -554,16 +568,24 @@ fn runtime_rejects_loaded_list_prefix_index_outside_prefix_before_artifact_loade
 fn runtime_rejects_loaded_unsorted_map_projection_keys_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let map_ty = push_map_type(&mut program, "JobMap", JOB, JOB, 2);
+    program.processes[0].state_type = JOB;
+    program.processes[0].state_values = loaded_state_values(JOB, &["Job{phase:Ready}"]);
     program.processes[0].transitions[0].current_state = Some(StateId::new(0));
     program.processes[0].transitions[0].next_state =
         LoadedNextState::Template(LoadedValueTemplate::MapValue {
-            ty: MAIN_STATE,
+            ty: JOB,
             map: Box::new(LoadedValueTemplate::Literal {
-                ty: MAIN_STATE,
-                value: artifact_value("Map[Done=>Done,Ready=>Ready]"),
+                ty: map_ty,
+                value: artifact_value(
+                    "Map[Job{phase:Done}=>Job{phase:Done},Job{phase:Ready}=>Job{phase:Ready}]",
+                ),
             }),
-            key: artifact_value("Ready"),
-            keys: vec![artifact_value("Ready"), artifact_value("Done")],
+            key: artifact_value("Job{phase:Ready}"),
+            keys: vec![
+                artifact_value("Job{phase:Ready}"),
+                artifact_value("Job{phase:Done}"),
+            ],
             projection: mantle_artifact::MapProjectionMode::Subset,
         });
 
@@ -577,9 +599,12 @@ fn runtime_rejects_loaded_unsorted_map_projection_keys_before_artifact_loaded() 
 fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.types[BOX.index()] = box_record_type("item", LEAF);
+    program.processes[0].state_type = BOX;
+    program.processes[0].state_values = loaded_state_values(BOX, &["Box{item:Leaf}"]);
     program.processes[0].transitions[0].next_state =
         loaded_next_state(NextState::Template(ArtifactValueTemplate::Record {
-            ty: MAIN_STATE,
+            ty: BOX,
             fields: vec![ArtifactValueTemplateField {
                 name: "item".to_string(),
                 value: ArtifactValueTemplate::Literal {
@@ -599,8 +624,10 @@ fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
 fn runtime_rejects_loaded_template_depth_overflow_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.types[MAIN_STATE.index()] = recursive_main_state_type();
+    program.processes[0].state_values = loaded_state_values(MAIN_STATE, &["Leaf"]);
     program.processes[0].transitions[0].next_state = loaded_next_state(NextState::Template(
-        record_template_with_depth(MAX_VALUE_TEMPLATE_DEPTH + 2),
+        recursive_main_state_template_with_depth(MAX_VALUE_TEMPLATE_DEPTH + 2),
     ));
 
     assert_loaded_admission_rejects_before_artifact_loaded(

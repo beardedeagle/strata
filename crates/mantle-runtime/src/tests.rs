@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactLoopElement,
-    ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue,
-    ArtifactValueTemplate, ArtifactValueTemplateField, EnumVariantId, LoopElementId,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactEnumVariant,
+    ArtifactLoopElement, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
+    ArtifactProcessRef, ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType,
+    ArtifactTypeField, ArtifactValue, ArtifactValueTemplate, EnumVariantId, LoopElementId,
     MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
     TypeId, write_artifact,
 };
@@ -22,6 +22,7 @@ const WORKER_MSG: TypeId = TypeId::new(3);
 const JOB: TypeId = TypeId::new(4);
 const HELPER_STATE: TypeId = TypeId::new(5);
 const HELPER_MSG: TypeId = TypeId::new(6);
+const JOB_LIST: TypeId = TypeId::new(7);
 
 #[test]
 fn runtime_rejects_invalid_artifact_identity() {
@@ -369,7 +370,7 @@ fn in_memory_host_runs_actor_without_filesystem_trace_sink() {
 
 #[test]
 fn in_memory_host_executes_for_each_loop_in_collection_order() {
-    let artifact = for_each_artifact("List[Ready,Done]", 2);
+    let artifact = for_each_artifact("List[Job{phase:Ready},Job{phase:Done}]", 2);
     let mut host = InMemoryRuntimeHost::default();
 
     let report = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
@@ -397,8 +398,8 @@ fn in_memory_host_executes_for_each_loop_in_collection_order() {
     assert_eq!(
         iterations,
         [
-            (LoopElementId::new(0), 0, JOB, "Ready"),
-            (LoopElementId::new(0), 1, JOB, "Done"),
+            (LoopElementId::new(0), 0, JOB, "Job{phase:Ready}"),
+            (LoopElementId::new(0), 1, JOB, "Job{phase:Done}"),
         ]
     );
 
@@ -414,7 +415,7 @@ fn in_memory_host_executes_for_each_loop_in_collection_order() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(accepted_payloads, ["Ready", "Done"]);
+    assert_eq!(accepted_payloads, ["Job{phase:Ready}", "Job{phase:Done}"]);
 
     let first_iteration = event_index(host.events(), |event| {
         matches!(event, RuntimeEvent::LoopIteration { index: 0, .. })
@@ -426,7 +427,7 @@ fn in_memory_host_executes_for_each_loop_in_collection_order() {
                 process,
                 payload: Some(payload),
                 ..
-            } if process == "Worker" && payload.label() == "Ready"
+            } if process == "Worker" && payload.label() == "Job{phase:Ready}"
         )
     });
     let second_iteration = event_index(host.events(), |event| {
@@ -439,7 +440,7 @@ fn in_memory_host_executes_for_each_loop_in_collection_order() {
                 process,
                 payload: Some(payload),
                 ..
-            } if process == "Worker" && payload.label() == "Done"
+            } if process == "Worker" && payload.label() == "Job{phase:Done}"
         )
     });
     let completed = event_index(host.events(), |event| {
@@ -504,7 +505,7 @@ fn in_memory_host_executes_empty_for_each_loop_without_body_iterations() {
 
 #[test]
 fn in_memory_host_fails_closed_when_for_each_iteration_budget_exhausts() {
-    let artifact = for_each_artifact("List[Ready,Done]", 2);
+    let artifact = for_each_artifact("List[Job{phase:Ready},Job{phase:Done}]", 2);
     let mut host = InMemoryRuntimeHost::default();
 
     let err = run_artifact_with_host(
@@ -582,7 +583,7 @@ fn in_memory_host_delivers_payload_envelopes_and_template_state() {
             .processes
             .iter()
             .any(|process| process.process == "Worker"
-                && process.state == "WorkerState{job:Job{phase:Ready}}"
+                && process.state == "Working(Job{phase:Ready})"
                 && process.status == ProcessStatus::Stopped)
     );
     assert!(host.events().iter().any(|event| matches!(
@@ -614,22 +615,21 @@ fn in_memory_host_delivers_payload_envelopes_and_template_state() {
         } if process == "Worker"
             && message == "Assign"
             && payload == &expected_payload
-            && state == "WorkerState{job:Job{phase:Ready}}"
+            && state == "Working(Job{phase:Ready})"
     )));
 }
 
 #[test]
 fn runtime_preflights_template_state_before_process_outputs() {
     let mut artifact = payload_artifact();
-    artifact.processes[1].state_values =
-        state_values(WORKER_STATE, &["WorkerState{job:Job{phase:Done}}"]);
+    artifact.processes[1].state_values = state_values(WORKER_STATE, &["Working(Job{phase:Done})"]);
     let mut host = InMemoryRuntimeHost::default();
 
     let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
         .expect_err("unadmitted dynamic template state should fail");
 
     assert!(err.to_string().contains(
-        "process Worker next_state template produced value WorkerState{job:Job{phase:Ready}} not admitted by state table"
+        "process Worker next_state template produced value Working(Job{phase:Ready}) not admitted by state table"
     ));
     assert!(
         host.stdout().is_empty(),
@@ -649,8 +649,8 @@ fn runtime_rejects_state_value_label_mismatch_before_trace() {
     let mut artifact = payload_artifact();
     artifact.processes[1].state_values[1] = ArtifactStateValue {
         ty: WORKER_STATE,
-        value: artifact_value("WorkerState{job:Job{phase:Spoofed}}"),
-        label: "WorkerState{job:Job{phase:Ready}}".to_string(),
+        value: artifact_value("Working(Job{phase:Spoofed})"),
+        label: "Working(Job{phase:Ready})".to_string(),
         payload: None,
     };
     let mut host = InMemoryRuntimeHost::default();
@@ -659,7 +659,7 @@ fn runtime_rejects_state_value_label_mismatch_before_trace() {
         .expect_err("state label mismatch should fail before runtime trace");
 
     assert!(err.to_string().contains(
-        "state value label WorkerState{job:Job{phase:Ready}} does not match ordered value label WorkerState{job:Job{phase:Spoofed}}"
+        "state value label Working(Job{phase:Ready}) does not match ordered value label Working(Job{phase:Spoofed})"
     ));
     assert!(
         host.events().is_empty(),
@@ -940,6 +940,12 @@ fn loaded_program_rejects_transition_current_state_outside_state_table() {
 #[test]
 fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
     let mut artifact = valid_artifact();
+    artifact.types[WORKER_STATE.index()] = worker_state_type_with_payloads(&[
+        ("Idle", None),
+        ("Working", Some(JOB)),
+        ("Done", Some(JOB)),
+        ("Ready", None),
+    ]);
     let mut working = state_value(WORKER_STATE, "Working(Job{phase:Ready})");
     working.payload = Some(artifact_payload(JOB, "Job{phase:Ready}"));
     artifact.processes[1].state_values = vec![state_value(WORKER_STATE, "Idle"), working];
@@ -960,7 +966,7 @@ fn loaded_program_rejects_current_state_payload_template_outside_state_table() {
             step_result: StepResult::Stop,
             next_state: NextState::Template(ArtifactValueTemplate::EnumVariant {
                 ty: WORKER_STATE,
-                variant: EnumVariantId::new(3),
+                variant: EnumVariantId::new(2),
                 payload: Box::new(ArtifactValueTemplate::CurrentStatePayload { ty: JOB }),
             }),
             effects: Vec::new(),
@@ -1153,7 +1159,16 @@ fn panic_artifact() -> MantleArtifact {
 fn payload_artifact() -> MantleArtifact {
     let mut artifact = valid_artifact();
     artifact.module = "actor_payloads".to_string();
-    artifact.types[WORKER_STATE.index()] = ArtifactType::value("WorkerState");
+    artifact.types[WORKER_STATE.index()] = worker_state_type_with_payloads(&[
+        ("Idle", None),
+        ("Handled", None),
+        ("Working", Some(JOB)),
+        ("Done", None),
+        ("Routed", None),
+        ("Ready", None),
+        ("Other", None),
+        ("Spoofed", None),
+    ]);
     artifact.outputs = vec!["worker assigned job".to_string()];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -1166,10 +1181,7 @@ fn payload_artifact() -> MantleArtifact {
     artifact.processes[1].state_type = WORKER_STATE;
     artifact.processes[1].state_values = state_values(
         WORKER_STATE,
-        &[
-            "WorkerState{job:Job{phase:Done}}",
-            "WorkerState{job:Job{phase:Ready}}",
-        ],
+        &["Working(Job{phase:Done})", "Working(Job{phase:Ready})"],
     );
     artifact.processes[1].message_type = WORKER_MSG;
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
@@ -1178,12 +1190,10 @@ fn payload_artifact() -> MantleArtifact {
         message: MessageId::new(0),
         payload_guard: None,
         step_result: StepResult::Stop,
-        next_state: NextState::Template(ArtifactValueTemplate::Record {
+        next_state: NextState::Template(ArtifactValueTemplate::EnumVariant {
             ty: WORKER_STATE,
-            fields: vec![ArtifactValueTemplateField {
-                name: "job".to_string(),
-                value: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
-            }],
+            variant: EnumVariantId::new(2),
+            payload: Box::new(ArtifactValueTemplate::ReceivedPayload { ty: JOB }),
         }),
         effects: vec![ArtifactEffect::Emit],
         actions: vec![ArtifactAction::Emit {
@@ -1208,7 +1218,7 @@ fn for_each_artifact(items: &str, max_items: usize) -> MantleArtifact {
                 ty: JOB,
             },
             collection: ArtifactValueTemplate::Literal {
-                ty: JOB,
+                ty: JOB_LIST,
                 value: artifact_value(items),
             },
             max_items,
@@ -1447,11 +1457,14 @@ fn base_types() -> Vec<ArtifactType> {
     vec![
         ArtifactType::value("MainState"),
         ArtifactType::value("MainMsg"),
-        worker_state_type(&["Idle", "Handled", "Working", "Done", "Routed"]),
+        worker_state_type(&[
+            "Idle", "Handled", "Working", "Done", "Routed", "Ready", "Other", "Spoofed",
+        ]),
         ArtifactType::value("WorkerMsg"),
-        ArtifactType::value("Job"),
+        job_record_type(),
         ArtifactType::value("HelperState"),
         ArtifactType::value("HelperMsg"),
+        ArtifactType::list("JobList", JOB, 16),
     ]
 }
 
@@ -1468,6 +1481,29 @@ fn worker_state_type(variants: &[&str]) -> ArtifactType {
             .iter()
             .map(|variant| (*variant).to_string())
             .collect(),
+    )
+}
+
+fn worker_state_type_with_payloads(variants: &[(&str, Option<TypeId>)]) -> ArtifactType {
+    ArtifactType::enum_value_with_payloads(
+        "WorkerState",
+        variants
+            .iter()
+            .map(|(label, payload_type)| ArtifactEnumVariant {
+                label: (*label).to_string(),
+                payload_type: *payload_type,
+            })
+            .collect(),
+    )
+}
+
+fn job_record_type() -> ArtifactType {
+    ArtifactType::record(
+        "Job",
+        vec![ArtifactTypeField {
+            name: "phase".to_string(),
+            ty: WORKER_STATE,
+        }],
     )
 }
 

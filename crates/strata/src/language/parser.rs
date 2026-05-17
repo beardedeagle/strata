@@ -660,7 +660,7 @@ impl Parser {
     fn parse_function_block(&mut self) -> Result<FunctionBlock> {
         let mut statements = Vec::new();
         while !(self.peek_keyword("return")
-            || self.peek_keyword("if") && self.if_starts_return_expr())
+            || (self.peek_keyword("if") && self.if_starts_return_expr()))
         {
             statements.push(self.parse_function_statement()?);
         }
@@ -821,10 +821,20 @@ impl Parser {
         let condition = self.parse_value_expr()?;
         self.expect_symbol(')')?;
         self.expect_symbol('{')?;
+        let then_branch_start = self.index.saturating_sub(1);
+        if !self.block_contains_top_level_return(then_branch_start) {
+            return Err(self
+                .error_previous("runtime return if then branch must contain a top-level return"));
+        }
         let then_branch = self.parse_function_block()?;
         self.expect_symbol('}')?;
         self.expect_keyword("else")?;
         self.expect_symbol('{')?;
+        let else_branch_start = self.index.saturating_sub(1);
+        if !self.block_contains_top_level_return(else_branch_start) {
+            return Err(self
+                .error_previous("runtime return if else branch must contain a top-level return"));
+        }
         let else_branch = self.parse_function_block()?;
         self.expect_symbol('}')?;
         Ok(ReturnExpr::IfElse {

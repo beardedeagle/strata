@@ -188,7 +188,10 @@ fn static_validation_rejects_process_ref_payload_enum_next_state_template() {
             actions: Vec::new(),
         })],
     });
-    let worker_state = enum_value_type("WorkerState", &["Idle", "Routed"]);
+    let worker_state = enum_value_type_with_payloads(
+        "WorkerState",
+        &[("Idle", None), ("Routed", Some(process_ref_type("Worker")))],
+    );
     let worker = CheckedProcess::new(CheckedProcessParts {
         debug_name: ident("Worker"),
         state_type: worker_state.clone(),
@@ -370,7 +373,10 @@ fn static_validation_rejects_payload_enum_template_next_state_outside_state_tabl
             ],
         })],
     });
-    let worker_state = enum_value_type("WorkerState", &["Idle", "Working"]);
+    let worker_state = enum_value_type_with_payloads(
+        "WorkerState",
+        &[("Idle", None), ("Working", Some(value_type("Job")))],
+    );
     let worker = CheckedProcess::new(CheckedProcessParts {
         debug_name: ident("Worker"),
         state_type: worker_state.clone(),

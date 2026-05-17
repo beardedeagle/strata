@@ -29,6 +29,25 @@ fn artifact_round_trips_and_validates_magic() {
 }
 
 #[test]
+fn encode_value_type_without_shape_does_not_panic() {
+    let mut artifact = valid_artifact();
+    artifact.types[MAIN_STATE.index()] = ArtifactType {
+        label: "MainState".to_string(),
+        kind: ArtifactTypeKind::Value,
+        shape: None,
+    };
+
+    let encoded = artifact.encode();
+    let err = MantleArtifact::decode(&encoded)
+        .expect_err("missing value type shape should decode fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("missing artifact field type.0.shape")
+    );
+}
+
+#[test]
 fn artifact_round_trips_enum_variant_metadata_above_template_field_limit() {
     let mut artifact = valid_artifact();
     let variants = (0..=MAX_VALUE_TEMPLATE_FIELDS)
@@ -63,13 +82,14 @@ fn artifact_round_trips_panic_step_result() {
 #[test]
 fn artifact_round_trips_map_rest_template_with_excluded_keys() {
     let mut artifact = valid_artifact();
-    artifact.processes[0].state_type = JOB;
-    artifact.processes[0].state_values = vec![state_value(JOB, "Map[Done=>Ready]")];
+    let job_map = append_map_type(&mut artifact, "JobMap", JOB, JOB, 2);
+    artifact.processes[0].state_type = job_map;
+    artifact.processes[0].state_values = vec![state_value(job_map, "Map[Done=>Ready]")];
     artifact.processes[0].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::MapRest {
-            ty: JOB,
+            ty: job_map,
             map: Box::new(ArtifactValueTemplate::Literal {
-                ty: JOB,
+                ty: job_map,
                 value: artifact_value("Map[Done=>Ready,Ready=>Done]"),
             }),
             excluded_keys: vec![artifact_value("Ready")],
@@ -87,13 +107,14 @@ fn artifact_round_trips_map_rest_template_with_excluded_keys() {
 #[test]
 fn artifact_round_trips_list_rest_template_with_prefix_len() {
     let mut artifact = valid_artifact();
-    artifact.processes[0].state_type = JOB;
-    artifact.processes[0].state_values = vec![state_value(JOB, "List[Done]")];
+    let job_list = append_list_type(&mut artifact, "JobList", JOB, 2);
+    artifact.processes[0].state_type = job_list;
+    artifact.processes[0].state_values = vec![state_value(job_list, "List[Done]")];
     artifact.processes[0].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::ListRest {
-            ty: JOB,
+            ty: job_list,
             list: Box::new(ArtifactValueTemplate::Literal {
-                ty: JOB,
+                ty: job_list,
                 value: artifact_value("List[Ready,Done]"),
             }),
             prefix_len: 1,
@@ -112,13 +133,14 @@ fn artifact_round_trips_list_rest_template_with_prefix_len() {
 #[test]
 fn artifact_round_trips_list_prefix_template_with_prefix_len() {
     let mut artifact = valid_artifact();
+    let job_list = append_list_type(&mut artifact, "JobList", JOB, 2);
     artifact.processes[0].state_type = JOB;
     artifact.processes[0].state_values = vec![state_value(JOB, "Ready")];
     artifact.processes[0].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::ListPrefixElement {
             ty: JOB,
             list: Box::new(ArtifactValueTemplate::Literal {
-                ty: JOB,
+                ty: job_list,
                 value: artifact_value("List[Ready,Done]"),
             }),
             index: 0,
@@ -232,7 +254,7 @@ fn admission_rejects_spawn_inside_runtime_if_branch() {
 fn admission_rejects_for_each_inside_runtime_if_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
-    let list_type = append_value_type(&mut artifact, "BoolList");
+    let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::IfElse {
         condition: ArtifactValueTemplate::Literal {
@@ -269,6 +291,7 @@ fn admission_rejects_for_each_inside_runtime_if_branch() {
 #[test]
 fn artifact_round_trips_for_each_control_flow() {
     let mut artifact = valid_artifact();
+    let job_list = append_list_type(&mut artifact, "JobList", JOB, 2);
     artifact.processes[1].message_variants[0].payload_type = Some(JOB);
     artifact.processes[0].transitions[0].actions = vec![
         ArtifactAction::Spawn {
@@ -281,7 +304,7 @@ fn artifact_round_trips_for_each_control_flow() {
                 ty: JOB,
             },
             collection: ArtifactValueTemplate::Literal {
-                ty: JOB,
+                ty: job_list,
                 value: artifact_value("List[Ready,Done]"),
             },
             max_items: 2,
@@ -313,7 +336,7 @@ fn artifact_round_trips_for_each_control_flow() {
 fn admission_accepts_if_else_inside_for_each_loop_body() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
-    let list_type = append_value_type(&mut artifact, "BoolList");
+    let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 2);
     artifact.processes[1].message_variants[0].payload_type = Some(bool_type);
     artifact.processes[0].transitions[0].effects = vec![
         ArtifactEffect::Spawn,
@@ -378,7 +401,7 @@ fn admission_rejects_loop_branch_condition_without_bool_contract() {
         "Bool",
         vec!["No".to_string(), "Yes".to_string()],
     ));
-    let list_type = append_value_type(&mut artifact, "BoolList");
+    let list_type = append_list_type(&mut artifact, "BoolList", non_contract_bool, 1);
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -418,7 +441,7 @@ fn admission_rejects_loop_branch_condition_without_bool_contract() {
 fn admission_rejects_loop_branch_condition_with_non_unit_bool_shape() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
-    let list_type = append_value_type(&mut artifact, "BoolList");
+    let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -464,7 +487,7 @@ fn admission_rejects_loop_branch_condition_with_non_unit_bool_shape() {
 fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
-    let list_type = append_value_type(&mut artifact, "BoolList");
+    let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
     let condition = ArtifactValueTemplate::LoopElement {
         ty: bool_type,
         element: LoopElementId::new(0),
@@ -507,7 +530,7 @@ fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
 fn admission_rejects_empty_if_else_branch_inside_for_each_loop_body() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
-    let list_type = append_value_type(&mut artifact, "BoolList");
+    let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -544,6 +567,7 @@ fn admission_rejects_empty_if_else_branch_inside_for_each_loop_body() {
 #[test]
 fn decode_rejects_missing_for_each_body_action() {
     let mut artifact = valid_artifact();
+    let job_list = append_list_type(&mut artifact, "JobList", JOB, 1);
     artifact.processes[1].message_variants[0].payload_type = Some(JOB);
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -551,7 +575,7 @@ fn decode_rejects_missing_for_each_body_action() {
             ty: JOB,
         },
         collection: ArtifactValueTemplate::Literal {
-            ty: JOB,
+            ty: job_list,
             value: artifact_value("List[Ready]"),
         },
         max_items: 1,
@@ -580,6 +604,7 @@ fn decode_rejects_missing_for_each_body_action() {
 #[test]
 fn admission_rejects_inactive_for_each_loop_element_payload() {
     let mut artifact = valid_artifact();
+    let job_list = append_list_type(&mut artifact, "JobList", JOB, 1);
     artifact.processes[1].message_variants[0].payload_type = Some(JOB);
     artifact.processes[0].transitions[0].actions = vec![
         ArtifactAction::Spawn {
@@ -592,7 +617,7 @@ fn admission_rejects_inactive_for_each_loop_element_payload() {
                 ty: JOB,
             },
             collection: ArtifactValueTemplate::Literal {
-                ty: JOB,
+                ty: job_list,
                 value: artifact_value("List[Ready]"),
             },
             max_items: 1,
@@ -650,7 +675,7 @@ fn admission_rejects_static_for_each_non_list_collection() {
 fn admission_rejects_static_for_each_item_outside_declared_enum_variants() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
-    let list_type = append_value_type(&mut artifact, "BoolList");
+    let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 2);
     artifact.processes[0].transitions[0].effects = Vec::new();
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -671,7 +696,7 @@ fn admission_rejects_static_for_each_item_outside_declared_enum_variants() {
 
     assert!(
         err.to_string()
-            .contains("for collection item 1 value Maybe is not a member of enum type Bool"),
+            .contains("for collection.item.1 value Maybe is not a member of enum type Bool"),
         "{err}"
     );
 }
@@ -679,6 +704,7 @@ fn admission_rejects_static_for_each_item_outside_declared_enum_variants() {
 #[test]
 fn admission_rejects_for_each_process_ref_element_type() {
     let mut artifact = valid_artifact();
+    let job_list = append_list_type(&mut artifact, "JobList", JOB, 1);
     artifact.processes[0].transitions[0].effects = Vec::new();
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -686,7 +712,7 @@ fn admission_rejects_for_each_process_ref_element_type() {
             ty: PROCESS_REF_WORKER,
         },
         collection: ArtifactValueTemplate::Literal {
-            ty: JOB,
+            ty: job_list,
             value: artifact_value("List[Ready]"),
         },
         max_items: 1,
@@ -707,6 +733,7 @@ fn admission_rejects_for_each_process_ref_element_type() {
 #[test]
 fn admission_rejects_for_each_loop_element_id_above_codec_bound() {
     let mut artifact = valid_artifact();
+    let job_list = append_list_type(&mut artifact, "JobList", JOB, 1);
     artifact.processes[0].transitions[0].effects = Vec::new();
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -714,7 +741,7 @@ fn admission_rejects_for_each_loop_element_id_above_codec_bound() {
             ty: JOB,
         },
         collection: ArtifactValueTemplate::Literal {
-            ty: JOB,
+            ty: job_list,
             value: artifact_value("List[Ready]"),
         },
         max_items: 1,

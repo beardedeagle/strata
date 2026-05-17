@@ -20,6 +20,11 @@ table and artifact records refer to entries by `TypeId`; Mantle admission and
 runtime execution do not parse source type spellings or `ProcessRef<...>` text
 to decide behavior. Type labels remain diagnostics and trace metadata only.
 
+Artifact `source_hash_fnv1a64` is a non-authoritative diagnostic fingerprint for
+correlating a lowered artifact with source text during local inspection. It is
+not an integrity, provenance, authority, or trust decision input; artifact
+admission must rely on explicit format/schema validation and typed structures.
+
 ## Admission
 
 Mantle admits artifacts through validation, not filename trust. Before

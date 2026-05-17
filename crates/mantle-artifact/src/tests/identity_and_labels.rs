@@ -93,6 +93,13 @@ fn validate_rejects_literal_payload_outside_declared_enum_variants() {
 #[test]
 fn validate_accepts_structured_state_value_labels() {
     let mut artifact = valid_artifact();
+    artifact.types[MAIN_STATE.index()] = ArtifactType::record(
+        "MainState",
+        vec![ArtifactTypeField {
+            name: "phase".to_string(),
+            ty: WORKER_STATE,
+        }],
+    );
     artifact.processes[0].state_values = state_values(
         MAIN_STATE,
         &["MainState{phase:Idle}", "MainState{phase:Handled}"],
@@ -108,6 +115,136 @@ fn validate_accepts_structured_state_value_labels() {
     assert_eq!(
         decoded.processes[0].state_values,
         artifact.processes[0].state_values
+    );
+}
+
+#[test]
+fn validate_rejects_record_field_value_with_wrong_declared_type() {
+    let mut artifact = valid_artifact();
+    artifact.types[MAIN_STATE.index()] = ArtifactType::record(
+        "MainState",
+        vec![ArtifactTypeField {
+            name: "phase".to_string(),
+            ty: WORKER_STATE,
+        }],
+    );
+    artifact.processes[0].state_values = state_values(MAIN_STATE, &["MainState{phase:MainState}"]);
+
+    let err = artifact
+        .validate()
+        .expect_err("record field with wrong typed value should fail");
+
+    assert!(
+        err.to_string().contains(
+            "state value.field.phase value MainState is not a member of enum type WorkerState"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn validate_rejects_list_element_value_with_wrong_declared_type() {
+    let mut artifact = valid_artifact();
+    artifact.types[JOB.index()] = ArtifactType::list("JobList", WORKER_STATE, 2);
+    artifact.processes[0].state_type = JOB;
+    artifact.processes[0].state_values = state_values(JOB, &["List[Idle,MainState]"]);
+
+    let err = artifact
+        .validate()
+        .expect_err("list element with wrong typed value should fail");
+
+    assert!(
+        err.to_string().contains(
+            "state value.item.1 value MainState is not a member of enum type WorkerState"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn validate_rejects_map_value_with_wrong_declared_type() {
+    let mut artifact = valid_artifact();
+    artifact.types[JOB.index()] = ArtifactType::map("JobMap", WORKER_STATE, WORKER_STATE, 2);
+    artifact.processes[0].state_type = JOB;
+    artifact.processes[0].state_values = state_values(JOB, &["Map[Idle=>MainState]"]);
+
+    let err = artifact
+        .validate()
+        .expect_err("map value with wrong typed value should fail");
+
+    assert!(
+        err.to_string().contains(
+            "state value.entry.0.value value MainState is not a member of enum type WorkerState"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn validate_rejects_duplicate_map_keys_after_typed_key_validation() {
+    let mut artifact = valid_artifact();
+    artifact.types[JOB.index()] = ArtifactType::map("JobMap", WORKER_STATE, WORKER_STATE, 2);
+    artifact.processes[0].state_type = JOB;
+    let value = ArtifactValue::Map(vec![
+        ArtifactMapEntry {
+            key: artifact_value("Idle"),
+            value: artifact_value("Handled"),
+        },
+        ArtifactMapEntry {
+            key: artifact_value("Idle"),
+            value: artifact_value("Done"),
+        },
+    ]);
+    artifact.processes[0].state_values = vec![ArtifactStateValue {
+        ty: JOB,
+        label: value.label(),
+        value,
+        payload: None,
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("duplicate typed map keys should fail");
+
+    assert!(
+        err.to_string().contains("state value duplicates key Idle"),
+        "{err}"
+    );
+}
+
+#[test]
+fn validate_rejects_enum_payload_with_wrong_declared_type() {
+    let mut artifact = valid_artifact();
+    artifact.types[JOB.index()] = ArtifactType::record(
+        "Job",
+        vec![ArtifactTypeField {
+            name: "phase".to_string(),
+            ty: WORKER_STATE,
+        }],
+    );
+    artifact.types[WORKER_STATE.index()] = ArtifactType::enum_value_with_payloads(
+        "WorkerState",
+        vec![
+            ArtifactEnumVariant {
+                label: "Idle".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Boxed".to_string(),
+                payload_type: Some(JOB),
+            },
+        ],
+    );
+    artifact.processes[1].state_values = state_values(WORKER_STATE, &["Boxed(MainState)", "Idle"]);
+
+    let err = artifact
+        .validate()
+        .expect_err("enum payload with wrong typed value should fail");
+
+    assert!(
+        err.to_string()
+            .contains("state value.payload value MainState does not match record type Job"),
+        "{err}"
     );
 }
 
@@ -563,8 +700,8 @@ fn validate_rejects_programmatic_invalid_enum_payload_template_variant() {
         NextState::Template(ArtifactValueTemplate::EnumPayload {
             ty: MAIN_STATE,
             value: Box::new(ArtifactValueTemplate::Literal {
-                ty: MAIN_STATE,
-                value: artifact_value("Route(MainState)"),
+                ty: WORKER_STATE,
+                value: artifact_value("Idle"),
             }),
             variant: EnumVariantId::new(99),
         });
@@ -575,7 +712,7 @@ fn validate_rejects_programmatic_invalid_enum_payload_template_variant() {
 
     assert!(
         err.to_string().contains(
-            "next_state_template.variant_id artifact type id 0 has no enum variant id 99"
+            "next_state_template.variant_id artifact type id 2 has no enum variant id 99"
         ),
         "unexpected error: {err}"
     );

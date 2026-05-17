@@ -139,7 +139,39 @@ impl ArtifactTypeKind {
 pub struct ArtifactType {
     pub label: String,
     pub kind: ArtifactTypeKind,
-    pub enum_variants: Vec<String>,
+    pub shape: Option<ArtifactValueShape>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArtifactValueShape {
+    Atom,
+    Record {
+        fields: Vec<ArtifactTypeField>,
+    },
+    Enum {
+        variants: Vec<ArtifactEnumVariant>,
+    },
+    List {
+        element: TypeId,
+        capacity: usize,
+    },
+    Map {
+        key: TypeId,
+        value: TypeId,
+        capacity: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactTypeField {
+    pub name: String,
+    pub ty: TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactEnumVariant {
+    pub label: String,
+    pub payload_type: Option<TypeId>,
 }
 
 impl ArtifactType {
@@ -147,15 +179,59 @@ impl ArtifactType {
         Self {
             label: label.into(),
             kind: ArtifactTypeKind::Value,
-            enum_variants: Vec::new(),
+            shape: Some(ArtifactValueShape::Atom),
         }
     }
 
     pub fn enum_value(label: impl Into<String>, enum_variants: Vec<String>) -> Self {
+        Self::enum_value_with_payloads(
+            label,
+            enum_variants
+                .into_iter()
+                .map(|label| ArtifactEnumVariant {
+                    label,
+                    payload_type: None,
+                })
+                .collect(),
+        )
+    }
+
+    pub fn enum_value_with_payloads(
+        label: impl Into<String>,
+        variants: Vec<ArtifactEnumVariant>,
+    ) -> Self {
         Self {
             label: label.into(),
             kind: ArtifactTypeKind::Value,
-            enum_variants,
+            shape: Some(ArtifactValueShape::Enum { variants }),
+        }
+    }
+
+    pub fn record(label: impl Into<String>, fields: Vec<ArtifactTypeField>) -> Self {
+        Self {
+            label: label.into(),
+            kind: ArtifactTypeKind::Value,
+            shape: Some(ArtifactValueShape::Record { fields }),
+        }
+    }
+
+    pub fn list(label: impl Into<String>, element: TypeId, capacity: usize) -> Self {
+        Self {
+            label: label.into(),
+            kind: ArtifactTypeKind::Value,
+            shape: Some(ArtifactValueShape::List { element, capacity }),
+        }
+    }
+
+    pub fn map(label: impl Into<String>, key: TypeId, value: TypeId, capacity: usize) -> Self {
+        Self {
+            label: label.into(),
+            kind: ArtifactTypeKind::Value,
+            shape: Some(ArtifactValueShape::Map {
+                key,
+                value,
+                capacity,
+            }),
         }
     }
 
@@ -163,7 +239,25 @@ impl ArtifactType {
         Self {
             label: label.into(),
             kind: ArtifactTypeKind::ProcessRef { target },
-            enum_variants: Vec::new(),
+            shape: None,
+        }
+    }
+
+    pub fn value_shape(&self) -> Result<&ArtifactValueShape> {
+        match (&self.kind, &self.shape) {
+            (ArtifactTypeKind::Value, Some(shape)) => Ok(shape),
+            (ArtifactTypeKind::Value, None) => Err(Error::new(format!(
+                "value type {} must declare a value shape",
+                self.label
+            ))),
+            (ArtifactTypeKind::ProcessRef { .. }, Some(_)) => Err(Error::new(format!(
+                "process reference type {} must not declare a value shape",
+                self.label
+            ))),
+            (ArtifactTypeKind::ProcessRef { .. }, None) => Err(Error::new(format!(
+                "process reference type {} does not have a value shape",
+                self.label
+            ))),
         }
     }
 }
@@ -250,17 +344,16 @@ impl MantleArtifact {
 
     pub fn enum_variant_label(&self, ty: TypeId, variant: EnumVariantId) -> Result<&str> {
         let type_entry = self.type_entry(ty)?;
-        type_entry
-            .enum_variants
-            .get(variant.index())
-            .map(String::as_str)
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "artifact type id {} has no enum variant id {}",
-                    ty.as_u32(),
-                    variant.as_u32()
-                ))
-            })
+        enum_variant_entry(ty, type_entry, variant).map(|variant| variant.label.as_str())
+    }
+
+    pub fn enum_variant_payload_type(
+        &self,
+        ty: TypeId,
+        variant: EnumVariantId,
+    ) -> Result<Option<TypeId>> {
+        let type_entry = self.type_entry(ty)?;
+        enum_variant_entry(ty, type_entry, variant).map(|variant| variant.payload_type)
     }
 
     pub fn validate_value_type(&self, field: &str, ty: TypeId) -> Result<()> {
@@ -275,8 +368,7 @@ impl MantleArtifact {
     ) -> Result<()> {
         let type_entry = self.type_entry(ty)?;
         validate_value_type_entry(field, ty, type_entry)?;
-        value.validate_without_process_ref(field)?;
-        validate_value_enum_membership(field, ty, type_entry, value)
+        self.validate_value_matches_type_at_depth(field, ty, value, 0)
     }
 
     pub fn process_ref_target_for_type_id(&self, field: &str, ty: TypeId) -> Result<ProcessId> {
@@ -338,15 +430,358 @@ impl MantleArtifact {
     fn validate_type_table(&self) -> Result<()> {
         for (type_index, ty) in self.types.iter().enumerate() {
             validate_ident_field(&format!("type.{type_index}.label"), &ty.label)?;
-            validate_type_enum_variants(type_index, ty)?;
-            if let ArtifactTypeKind::ProcessRef { target } = ty.kind {
-                if target.index() >= self.processes.len() {
-                    return Err(Error::new(format!(
-                        "type id {type_index} targets undefined process id {}",
-                        target.as_u32()
-                    )));
+            match ty.kind {
+                ArtifactTypeKind::Value => {
+                    let Some(shape) = &ty.shape else {
+                        return Err(Error::new(format!(
+                            "type.{type_index} value type must declare a value shape"
+                        )));
+                    };
+                    self.validate_value_shape(type_index, shape)?;
+                }
+                ArtifactTypeKind::ProcessRef { target } => {
+                    if ty.shape.is_some() {
+                        return Err(Error::new(format!(
+                            "type.{type_index} process reference type must not declare a value shape"
+                        )));
+                    }
+                    if target.index() >= self.processes.len() {
+                        return Err(Error::new(format!(
+                            "type id {type_index} targets undefined process id {}",
+                            target.as_u32()
+                        )));
+                    }
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn validate_value_shape(&self, type_index: usize, shape: &ArtifactValueShape) -> Result<()> {
+        match shape {
+            ArtifactValueShape::Atom => Ok(()),
+            ArtifactValueShape::Record { fields } => {
+                validate_count(
+                    &format!("type.{type_index}.field_count"),
+                    fields.len(),
+                    1,
+                    MAX_VALUE_TEMPLATE_FIELDS,
+                )?;
+                let mut seen = BTreeSet::new();
+                for (field_index, field) in fields.iter().enumerate() {
+                    validate_ident_field(
+                        &format!("type.{type_index}.field.{field_index}.name"),
+                        &field.name,
+                    )?;
+                    if !seen.insert(field.name.as_str()) {
+                        return Err(Error::new(format!(
+                            "type.{type_index} duplicates field {}",
+                            field.name
+                        )));
+                    }
+                    validate_value_type_entry(
+                        &format!("type.{type_index}.field.{field_index}.type_id"),
+                        field.ty,
+                        self.type_entry(field.ty)?,
+                    )?;
+                }
+                Ok(())
+            }
+            ArtifactValueShape::Enum { variants } => {
+                validate_count(
+                    &format!("type.{type_index}.enum_variant_count"),
+                    variants.len(),
+                    1,
+                    MAX_ENUM_VARIANTS_PER_TYPE,
+                )?;
+                let mut seen = BTreeSet::new();
+                for (variant_index, variant) in variants.iter().enumerate() {
+                    validate_ident_field(
+                        &format!("type.{type_index}.enum_variant.{variant_index}"),
+                        &variant.label,
+                    )?;
+                    if !seen.insert(variant.label.as_str()) {
+                        return Err(Error::new(format!(
+                            "type.{type_index} duplicates enum variant {}",
+                            variant.label
+                        )));
+                    }
+                    if let Some(payload_type) = variant.payload_type {
+                        self.type_entry(payload_type)?;
+                    }
+                }
+                Ok(())
+            }
+            ArtifactValueShape::List { element, capacity } => {
+                validate_count(
+                    &format!("type.{type_index}.capacity"),
+                    *capacity,
+                    0,
+                    MAX_VALUE_TEMPLATE_FIELDS,
+                )?;
+                validate_value_type_entry(
+                    &format!("type.{type_index}.element_type_id"),
+                    *element,
+                    self.type_entry(*element)?,
+                )
+            }
+            ArtifactValueShape::Map {
+                key,
+                value,
+                capacity,
+            } => {
+                validate_count(
+                    &format!("type.{type_index}.capacity"),
+                    *capacity,
+                    0,
+                    MAX_VALUE_TEMPLATE_FIELDS,
+                )?;
+                validate_value_type_entry(
+                    &format!("type.{type_index}.key_type_id"),
+                    *key,
+                    self.type_entry(*key)?,
+                )?;
+                validate_value_type_entry(
+                    &format!("type.{type_index}.value_type_id"),
+                    *value,
+                    self.type_entry(*value)?,
+                )
+            }
+        }
+    }
+
+    fn validate_value_matches_type_at_depth(
+        &self,
+        field: &str,
+        ty: TypeId,
+        value: &ArtifactValue,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return Err(Error::new(format!(
+                "{field} exceeds maximum typed value depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+            )));
+        }
+        let type_entry = self.type_entry(ty)?;
+        validate_value_type_entry(field, ty, type_entry)?;
+        value.validate_without_process_ref(field)?;
+        match type_entry.value_shape()? {
+            ArtifactValueShape::Atom => validate_atom_value(field, ty, type_entry, value),
+            ArtifactValueShape::Enum { variants } => {
+                self.validate_enum_value(field, ty, variants, value, depth)
+            }
+            ArtifactValueShape::Record { fields } => {
+                self.validate_record_value(field, ty, type_entry, fields, value, depth)
+            }
+            ArtifactValueShape::List { element, capacity } => {
+                self.validate_list_value(field, *element, *capacity, value, depth)
+            }
+            ArtifactValueShape::Map {
+                key,
+                value: item,
+                capacity,
+            } => self.validate_map_value(field, *key, *item, *capacity, value, depth),
+        }
+    }
+
+    fn validate_enum_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        variants: &[ArtifactEnumVariant],
+        value: &ArtifactValue,
+        depth: usize,
+    ) -> Result<()> {
+        match value {
+            ArtifactValue::Atom(label) => {
+                let Some(variant) = variants.iter().find(|variant| variant.label == *label) else {
+                    return Err(value_not_member_error(
+                        field,
+                        ty,
+                        self.type_entry(ty)?,
+                        value,
+                    ));
+                };
+                if variant.payload_type.is_some() {
+                    return Err(Error::new(format!(
+                        "{field} enum variant {label} requires a payload"
+                    )));
+                }
+                Ok(())
+            }
+            ArtifactValue::EnumVariant { variant, payload } => {
+                let Some(entry) = variants.iter().find(|entry| entry.label == *variant) else {
+                    return Err(value_not_member_error(
+                        field,
+                        ty,
+                        self.type_entry(ty)?,
+                        value,
+                    ));
+                };
+                let Some(payload_type) = entry.payload_type else {
+                    return Err(Error::new(format!(
+                        "{field} enum variant {variant} must not carry a payload"
+                    )));
+                };
+                self.validate_value_matches_type_at_depth(
+                    &format!("{field}.payload"),
+                    payload_type,
+                    payload,
+                    depth + 1,
+                )
+            }
+            ArtifactValue::Record { .. }
+            | ArtifactValue::List(_)
+            | ArtifactValue::Map(_)
+            | ArtifactValue::ProcessRef { .. } => Err(value_not_member_error(
+                field,
+                ty,
+                self.type_entry(ty)?,
+                value,
+            )),
+        }
+    }
+
+    fn validate_record_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        type_entry: &ArtifactType,
+        expected_fields: &[ArtifactTypeField],
+        value: &ArtifactValue,
+        depth: usize,
+    ) -> Result<()> {
+        let ArtifactValue::Record {
+            constructor,
+            fields,
+        } = value
+        else {
+            return Err(Error::new(format!(
+                "{field} value {} does not match record type {} (type id {})",
+                value.label(),
+                type_entry.label,
+                ty.as_u32()
+            )));
+        };
+        if constructor != &type_entry.label {
+            return Err(Error::new(format!(
+                "{field} record constructor {constructor} does not match type {} (type id {})",
+                type_entry.label,
+                ty.as_u32()
+            )));
+        }
+        if fields.len() != expected_fields.len() {
+            return Err(Error::new(format!(
+                "{field} record field_count is {}, expected {} for type {} (type id {})",
+                fields.len(),
+                expected_fields.len(),
+                type_entry.label,
+                ty.as_u32()
+            )));
+        }
+        let mut seen = BTreeSet::new();
+        for actual in fields {
+            if !seen.insert(actual.name.as_str()) {
+                return Err(Error::new(format!(
+                    "{field} record duplicates field {}",
+                    actual.name
+                )));
+            }
+            let Some(expected) = expected_fields
+                .iter()
+                .find(|expected| expected.name == actual.name)
+            else {
+                return Err(Error::new(format!(
+                    "{field} record field {} is not declared by type {} (type id {})",
+                    actual.name,
+                    type_entry.label,
+                    ty.as_u32()
+                )));
+            };
+            self.validate_value_matches_type_at_depth(
+                &format!("{field}.field.{}", actual.name),
+                expected.ty,
+                &actual.value,
+                depth + 1,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_list_value(
+        &self,
+        field: &str,
+        element: TypeId,
+        capacity: usize,
+        value: &ArtifactValue,
+        depth: usize,
+    ) -> Result<()> {
+        let ArtifactValue::List(items) = value else {
+            return Err(Error::new(format!(
+                "{field} value {} does not match list type",
+                value.label()
+            )));
+        };
+        if items.len() > capacity {
+            return Err(Error::new(format!(
+                "{field} list item_count is {}, capacity is {}",
+                items.len(),
+                capacity
+            )));
+        }
+        for (index, item) in items.iter().enumerate() {
+            self.validate_value_matches_type_at_depth(
+                &format!("{field}.item.{index}"),
+                element,
+                item,
+                depth + 1,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_map_value(
+        &self,
+        field: &str,
+        key: TypeId,
+        item: TypeId,
+        capacity: usize,
+        value: &ArtifactValue,
+        depth: usize,
+    ) -> Result<()> {
+        let ArtifactValue::Map(entries) = value else {
+            return Err(Error::new(format!(
+                "{field} value {} does not match map type",
+                value.label()
+            )));
+        };
+        if entries.len() > capacity {
+            return Err(Error::new(format!(
+                "{field} map entry_count is {}, capacity is {}",
+                entries.len(),
+                capacity
+            )));
+        }
+        let mut seen = BTreeSet::new();
+        for (index, entry) in entries.iter().enumerate() {
+            self.validate_value_matches_type_at_depth(
+                &format!("{field}.entry.{index}.key"),
+                key,
+                &entry.key,
+                depth + 1,
+            )?;
+            if !seen.insert(&entry.key) {
+                return Err(Error::new(format!(
+                    "{field} duplicates map key {}",
+                    entry.key.label()
+                )));
+            }
+            self.validate_value_matches_type_at_depth(
+                &format!("{field}.entry.{index}.value"),
+                item,
+                &entry.value,
+                depth + 1,
+            )?;
         }
         Ok(())
     }
@@ -362,41 +797,83 @@ fn validate_value_type_entry(field: &str, ty: TypeId, type_entry: &ArtifactType)
     }
 }
 
+fn enum_variant_entry(
+    ty: TypeId,
+    type_entry: &ArtifactType,
+    variant: EnumVariantId,
+) -> Result<&ArtifactEnumVariant> {
+    let ArtifactValueShape::Enum { variants } = type_entry.value_shape()? else {
+        return Err(Error::new(format!(
+            "artifact type id {} is not an enum type",
+            ty.as_u32()
+        )));
+    };
+    variants.get(variant.index()).ok_or_else(|| {
+        Error::new(format!(
+            "artifact type id {} has no enum variant id {}",
+            ty.as_u32(),
+            variant.as_u32()
+        ))
+    })
+}
+
+fn validate_atom_value(
+    field: &str,
+    ty: TypeId,
+    type_entry: &ArtifactType,
+    value: &ArtifactValue,
+) -> Result<()> {
+    if matches!(value, ArtifactValue::Atom(_)) {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "{field} value {} does not match atom type {} (type id {})",
+        value.label(),
+        type_entry.label,
+        ty.as_u32()
+    )))
+}
+
+fn value_not_member_error(
+    field: &str,
+    ty: TypeId,
+    type_entry: &ArtifactType,
+    value: &ArtifactValue,
+) -> Error {
+    Error::new(format!(
+        "{field} value {} is not a member of enum type {} (type id {})",
+        value.label(),
+        type_entry.label,
+        ty.as_u32()
+    ))
+}
+
 pub fn validate_value_enum_membership(
     field: &str,
     ty: TypeId,
     type_entry: &ArtifactType,
     value: &ArtifactValue,
 ) -> Result<()> {
-    if type_entry.enum_variants.is_empty() {
+    let ArtifactValueShape::Enum { variants } = type_entry.value_shape()? else {
         return Ok(());
-    }
-
-    let matches_variant = match value {
-        ArtifactValue::Atom(label) => type_entry
-            .enum_variants
-            .iter()
-            .any(|variant| variant == label),
-        ArtifactValue::EnumVariant { variant, .. } => type_entry
-            .enum_variants
-            .iter()
-            .any(|declared| declared == variant),
-        ArtifactValue::Record { .. }
-        | ArtifactValue::List(_)
-        | ArtifactValue::Map(_)
-        | ArtifactValue::ProcessRef { .. } => false,
     };
-
-    if matches_variant {
-        return Ok(());
+    match value {
+        ArtifactValue::Atom(label)
+            if variants
+                .iter()
+                .any(|variant| variant.label == *label && variant.payload_type.is_none()) =>
+        {
+            Ok(())
+        }
+        ArtifactValue::EnumVariant { variant, .. }
+            if variants
+                .iter()
+                .any(|declared| declared.label == *variant && declared.payload_type.is_some()) =>
+        {
+            Ok(())
+        }
+        _ => Err(value_not_member_error(field, ty, type_entry, value)),
     }
-
-    Err(Error::new(format!(
-        "{field} value {} is not a member of enum type {} (type id {})",
-        value.label(),
-        type_entry.label,
-        ty.as_u32()
-    )))
 }
 
 fn validate_artifact_identity(format: &str, schema_version: &str) -> Result<()> {
@@ -423,33 +900,6 @@ fn validate_unique_process_ref_list(process_refs: &[ArtifactProcessRef]) -> Resu
                 process_ref.debug_name
             )));
         }
-    }
-    Ok(())
-}
-
-fn validate_type_enum_variants(type_index: usize, ty: &ArtifactType) -> Result<()> {
-    validate_count(
-        &format!("type.{type_index}.enum_variant_count"),
-        ty.enum_variants.len(),
-        0,
-        MAX_ENUM_VARIANTS_PER_TYPE,
-    )?;
-    let mut seen = BTreeSet::new();
-    for (variant_index, variant) in ty.enum_variants.iter().enumerate() {
-        validate_ident_field(
-            &format!("type.{type_index}.enum_variant.{variant_index}"),
-            variant,
-        )?;
-        if !seen.insert(variant.as_str()) {
-            return Err(Error::new(format!(
-                "type.{type_index} duplicates enum variant {variant}"
-            )));
-        }
-    }
-    if matches!(ty.kind, ArtifactTypeKind::ProcessRef { .. }) && !ty.enum_variants.is_empty() {
-        return Err(Error::new(format!(
-            "type.{type_index} process reference type must not declare enum variants"
-        )));
     }
     Ok(())
 }

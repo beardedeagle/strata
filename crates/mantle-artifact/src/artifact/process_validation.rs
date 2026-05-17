@@ -1090,10 +1090,15 @@ fn validate_bool_condition_template(
 ) -> Result<()> {
     let bool_type = condition.result_type();
     let ty = artifact.type_entry(bool_type)?;
-    let is_bool_contract = matches!(ty.kind, ArtifactTypeKind::Value)
-        && ty.enum_variants.len() == 2
-        && ty.enum_variants[0] == "False"
-        && ty.enum_variants[1] == "True";
+    let is_bool_contract = matches!(
+        ty.value_shape(),
+        Ok(ArtifactValueShape::Enum { variants })
+            if variants.len() == 2
+                && variants[0].label == "False"
+                && variants[0].payload_type.is_none()
+                && variants[1].label == "True"
+                && variants[1].payload_type.is_none()
+    );
     if !is_bool_contract {
         return Err(Error::new(format!(
             "{field} must have type enum Bool {{ False, True }}"

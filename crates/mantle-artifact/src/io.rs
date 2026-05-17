@@ -1,15 +1,17 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{Error, MAX_ARTIFACT_BYTES, MantleArtifact, Result};
 
 pub fn write_artifact(path: &Path, artifact: &MantleArtifact) -> Result<()> {
     artifact.validate()?;
+    reject_symlink_path_components(path)?;
     reject_non_regular_artifact_output_path_before_open(path)?;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
+            reject_symlink_path_components(parent)?;
         }
     }
     let mut file = open_artifact_output_file(path)?;
@@ -20,7 +22,8 @@ pub fn write_artifact(path: &Path, artifact: &MantleArtifact) -> Result<()> {
 }
 
 pub fn read_artifact(path: &Path) -> Result<MantleArtifact> {
-    let metadata = fs::metadata(path)?;
+    reject_symlink_path_components(path)?;
+    let metadata = fs::symlink_metadata(path)?;
     validate_artifact_file_metadata(path, &metadata)?;
     if metadata.len() > MAX_ARTIFACT_BYTES as u64 {
         return Err(Error::new(format!(
@@ -50,11 +53,12 @@ pub fn read_artifact(path: &Path) -> Result<MantleArtifact> {
 }
 
 pub fn source_hash_fnv1a64(source: &str) -> String {
+    // Diagnostic correlation only; never use FNV as authority or integrity proof.
     format!("{:016x}", fnv1a64(source.as_bytes()))
 }
 
 fn reject_non_regular_artifact_output_path_before_open(path: &Path) -> Result<()> {
-    match fs::metadata(path) {
+    match fs::symlink_metadata(path) {
         Ok(metadata) => validate_artifact_file_metadata(path, &metadata),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
@@ -68,7 +72,7 @@ fn open_artifact_input_file(path: &Path) -> std::io::Result<fs::File> {
 
     fs::OpenOptions::new()
         .read(true)
-        .custom_flags(OFlag::O_NONBLOCK.bits())
+        .custom_flags((OFlag::O_NONBLOCK | OFlag::O_NOFOLLOW).bits())
         .open(path)
 }
 
@@ -86,7 +90,7 @@ fn open_artifact_output_file(path: &Path) -> std::io::Result<fs::File> {
         .create(true)
         .truncate(true)
         .write(true)
-        .custom_flags(OFlag::O_NONBLOCK.bits())
+        .custom_flags((OFlag::O_NONBLOCK | OFlag::O_NOFOLLOW).bits())
         .open(path)
 }
 
@@ -105,6 +109,26 @@ fn validate_artifact_file_metadata(path: &Path, metadata: &fs::Metadata) -> Resu
     } else {
         Err(non_regular_artifact_path_error(path))
     }
+}
+
+fn reject_symlink_path_components(path: &Path) -> Result<()> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(Error::new(format!(
+                    "artifact path {} must not include symbolic link component {}",
+                    path.display(),
+                    current.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => break,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
 }
 
 fn non_regular_artifact_path_error(path: &Path) -> Error {

@@ -61,7 +61,7 @@ proc Sink mailbox bounded(1) {
         .types()
         .iter()
         .find(|ty| {
-            ty.kind()
+            *ty.kind()
                 == (CheckedTypeKind::ProcessRef {
                     target: checked_process_id(2),
                 })
@@ -70,7 +70,7 @@ proc Sink mailbox bounded(1) {
     assert_eq!(checked_sink_ref.label(), "__strata_checked_process_ref_2");
     assert_eq!(
         checked_sink_ref.kind(),
-        CheckedTypeKind::ProcessRef {
+        &CheckedTypeKind::ProcessRef {
             target: checked_process_id(2)
         }
     );
@@ -172,7 +172,7 @@ proc {target} mailbox bounded(1) {{
         .types()
         .iter()
         .find(|ty| {
-            ty.kind()
+            *ty.kind()
                 == (CheckedTypeKind::ProcessRef {
                     target: checked_process_id(2),
                 })

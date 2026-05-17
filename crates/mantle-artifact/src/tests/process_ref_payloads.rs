@@ -145,6 +145,13 @@ fn validate_rejects_received_payload_send_target_type_mismatch() {
 #[test]
 fn validate_rejects_nested_process_ref_payload_template() {
     let mut artifact = valid_artifact();
+    artifact.types[BOX.index()] = ArtifactType::record(
+        "Box",
+        vec![ArtifactTypeField {
+            name: "reply_to".to_string(),
+            ty: MAIN_STATE,
+        }],
+    );
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", BOX)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -167,7 +174,7 @@ fn validate_rejects_nested_process_ref_payload_template() {
         .expect_err("nested process reference template should fail");
 
     assert!(err.to_string().contains(
-        "process Main transition 0 send payload.field.reply_to process reference template must be a direct message payload"
+        "process Main transition 0 send payload.field.reply_to has type id 9, expected 0"
     ));
 }
 
@@ -222,6 +229,31 @@ fn validate_rejects_received_payload_template_without_payload_message() {
 #[test]
 fn validate_rejects_process_ref_payload_enum_next_state_template() {
     let mut artifact = valid_artifact();
+    artifact.types[WORKER_STATE.index()] = ArtifactType::enum_value_with_payloads(
+        "WorkerState",
+        vec![
+            ArtifactEnumVariant {
+                label: "Idle".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Handled".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Working".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Done".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Routed".to_string(),
+                payload_type: Some(PROCESS_REF_WORKER),
+            },
+        ],
+    );
     artifact.processes[1].message_variants[0] =
         ArtifactMessageVariant::payload("Route", PROCESS_REF_WORKER);
     artifact.processes[1].transitions[0].next_state =

@@ -138,10 +138,85 @@ pub(super) fn append_bool_type(artifact: &mut MantleArtifact) -> TypeId {
     ty
 }
 
-pub(super) fn append_value_type(artifact: &mut MantleArtifact, label: &str) -> TypeId {
+pub(super) fn append_list_type(
+    artifact: &mut MantleArtifact,
+    label: &str,
+    element: TypeId,
+    capacity: usize,
+) -> TypeId {
     let ty = TypeId::from_index(artifact.types.len()).expect("test type index should fit");
-    artifact.types.push(ArtifactType::value(label));
+    artifact
+        .types
+        .push(ArtifactType::list(label, element, capacity));
     ty
+}
+
+pub(super) fn append_map_type(
+    artifact: &mut MantleArtifact,
+    label: &str,
+    key: TypeId,
+    value: TypeId,
+    capacity: usize,
+) -> TypeId {
+    let ty = TypeId::from_index(artifact.types.len()).expect("test type index should fit");
+    artifact
+        .types
+        .push(ArtifactType::map(label, key, value, capacity));
+    ty
+}
+
+pub(super) fn declare_job_record_types(artifact: &mut MantleArtifact) {
+    artifact.types[WORKER_STATE.index()] = ArtifactType::enum_value_with_payloads(
+        "WorkerState",
+        vec![
+            ArtifactEnumVariant {
+                label: "Idle".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Handled".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Working".to_string(),
+                payload_type: Some(JOB),
+            },
+            ArtifactEnumVariant {
+                label: "Done".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Routed".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Ready".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Other".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Spoofed".to_string(),
+                payload_type: None,
+            },
+        ],
+    );
+    artifact.types[JOB.index()] = ArtifactType::record(
+        "Job",
+        vec![ArtifactTypeField {
+            name: "phase".to_string(),
+            ty: WORKER_STATE,
+        }],
+    );
+    artifact.types[OTHER_JOB.index()] = ArtifactType::record(
+        "OtherJob",
+        vec![ArtifactTypeField {
+            name: "phase".to_string(),
+            ty: WORKER_STATE,
+        }],
+    );
 }
 
 pub(super) fn nested_if_else_action(depth: usize, bool_type: TypeId) -> ArtifactAction {

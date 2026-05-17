@@ -1268,46 +1268,14 @@ fn runtime_for_each_if_preflights_malformed_loop_bool_before_branch_effects() {
 
     let run = gate.run_mantle_failure(invalid_artifact_path);
 
+    let stdout = String::from_utf8_lossy(&run.stdout);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("mantle: error: process BatchWorker for loop element 0 item 1 value Maybe is not a member of enum type Bool"),
-        "unexpected diagnostic\nstdout:\n{}\nstderr:\n{stderr}",
-        String::from_utf8_lossy(&run.stdout)
+        stderr.contains("mantle: error: process Main transition 0 send payload.item.1 value Maybe is not a member of enum type Bool"),
+        "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-
-    let trace = gate.read_trace(invalid_trace_stem);
-    assert!(trace.contains(r#""event":"artifact_loaded""#));
-    assert_trace_event(
-        &trace,
-        &[
-            r#""event":"message_accepted""#,
-            r#""process":"BatchWorker""#,
-            r#""message":"Batch""#,
-            r#""payload":"List[True,Maybe]""#,
-        ],
-    );
-    assert!(
-        !trace.contains(r#""event":"loop_started","pid":2,"process_id":1,"process":"BatchWorker""#),
-        "malformed loop Bool must be rejected before BatchWorker loop body starts\n{trace}"
-    );
-    assert!(
-        !trace.contains(
-            r#""event":"branch_selected","pid":2,"process_id":1,"process":"BatchWorker""#
-        ),
-        "malformed loop Bool must be rejected before BatchWorker branch selection is traced\n{trace}"
-    );
-    assert!(
-        !trace.contains(r#""text":"batch selected true""#),
-        "malformed loop Bool must be rejected before then-branch emit effects\n{trace}"
-    );
-    assert!(
-        !trace.contains(r#""text":"batch selected false""#),
-        "malformed loop Bool must be rejected before else-branch emit effects\n{trace}"
-    );
-    assert!(
-        !trace.contains(r#""event":"message_accepted","pid":3,"process_id":2,"process":"Worker""#),
-        "malformed loop Bool must be rejected before branch send effects\n{trace}"
-    );
+    assert!(!stdout.contains("mantle: loaded"));
+    assert!(!gate.trace_exists(invalid_trace_stem));
 }
 
 #[test]
@@ -1460,22 +1428,16 @@ fn runtime_for_each_rejects_malformed_runtime_collection_value_fail_closed() {
 
     let run = gate.run_mantle_failure(invalid_artifact_path);
 
+    let stdout = String::from_utf8_lossy(&run.stdout);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains(
-            "mantle: error: process BatchWorker for loop collection produced non-list value True"
+            "mantle: error: process Main transition 0 send payload value True does not match list type"
         ),
-        "unexpected diagnostic\nstdout:\n{}\nstderr:\n{stderr}",
-        String::from_utf8_lossy(&run.stdout)
+        "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    let trace = gate.read_trace(invalid_trace_stem);
-    assert!(trace.contains(r#""event":"artifact_loaded""#));
-    assert!(trace.contains(
-        r#""event":"message_accepted","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch""#
-    ));
-    assert!(trace.contains(r#""payload":"True""#));
-    assert!(!trace.contains(r#""event":"loop_started""#));
-    assert!(!trace.contains(r#""event":"loop_completed""#));
+    assert!(!stdout.contains("mantle: loaded"));
+    assert!(!gate.trace_exists(invalid_trace_stem));
 }
 
 fn trace_line_index(trace: &str, needle: &str) -> usize {

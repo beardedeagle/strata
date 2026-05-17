@@ -9,7 +9,7 @@ use super::process_refs::{
 };
 use crate::language::checked::{
     CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess, CheckedProcessRefId,
-    CheckedStateId, CheckedTypeKind, CheckedTypeRef, CheckedValueTemplate,
+    CheckedStateId, CheckedTypeKind, CheckedTypeRef, CheckedValueShape, CheckedValueTemplate,
     CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
 use crate::language::diagnostic::{Error, Result};
@@ -88,15 +88,20 @@ pub(super) fn validate_bool_condition_template(
     process: &CheckedProcess,
     condition: &CheckedValueTemplate,
 ) -> Result<()> {
-    let CheckedTypeKind::Value { enum_variants } = condition.result_type().kind() else {
+    let CheckedTypeKind::Value {
+        shape: CheckedValueShape::Enum { variants },
+    } = condition.result_type().kind()
+    else {
         return Err(Error::new(format!(
             "process {} if condition requires enum Bool {{ False, True }}",
             process.debug_name()
         )));
     };
-    let is_bool_contract = enum_variants.len() == 2
-        && enum_variants[0].as_str() == "False"
-        && enum_variants[1].as_str() == "True";
+    let is_bool_contract = variants.len() == 2
+        && variants[0].name.as_str() == "False"
+        && variants[0].payload_type.is_none()
+        && variants[1].name.as_str() == "True"
+        && variants[1].payload_type.is_none();
     if !is_bool_contract {
         return Err(Error::new(format!(
             "process {} if condition requires enum Bool {{ False, True }}",
@@ -236,11 +241,14 @@ pub(super) fn validate_value_template_binding_types(
             Ok(())
         }
         CheckedValueTemplate::LoopElement { .. } => Ok(()),
-        CheckedValueTemplate::EnumPayload { value, .. } => validate_value_template_binding_types(
-            value,
-            received_payload_type,
-            current_state_payload_type,
-        ),
+        CheckedValueTemplate::EnumPayload { ty, value, variant } => {
+            validate_checked_enum_payload_projection(ty, value.result_type(), *variant)?;
+            validate_value_template_binding_types(
+                value,
+                received_payload_type,
+                current_state_payload_type,
+            )
+        }
         CheckedValueTemplate::RecordField { record, .. } => validate_value_template_binding_types(
             record,
             received_payload_type,
@@ -274,11 +282,18 @@ pub(super) fn validate_value_template_binding_types(
             current_state_payload_type,
         ),
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
-        CheckedValueTemplate::EnumVariant { payload, .. } => validate_value_template_binding_types(
+        CheckedValueTemplate::EnumVariant {
+            ty,
+            variant,
             payload,
-            received_payload_type,
-            current_state_payload_type,
-        ),
+        } => {
+            validate_checked_enum_variant_payload(ty, *variant, payload.result_type())?;
+            validate_value_template_binding_types(
+                payload,
+                received_payload_type,
+                current_state_payload_type,
+            )
+        }
         CheckedValueTemplate::Record { fields, .. } => {
             for field in fields {
                 validate_value_template_binding_types(
@@ -314,6 +329,52 @@ pub(super) fn validate_value_template_binding_types(
             }
             Ok(())
         }
+    }
+}
+
+fn validate_checked_enum_payload_projection(
+    projected_ty: &CheckedTypeRef,
+    enum_ty: &CheckedTypeRef,
+    variant: crate::language::checked::CheckedEnumVariantId,
+) -> Result<()> {
+    let payload_type = enum_ty.enum_variant_payload_type(variant)?;
+    match payload_type {
+        Some(expected) if expected == projected_ty.id() => Ok(()),
+        Some(expected) => Err(Error::new(format!(
+            "enum payload projection has type {}, expected checked type id {} from {} variant id {}",
+            projected_ty,
+            expected.as_u32(),
+            enum_ty,
+            variant.as_u32()
+        ))),
+        None => Err(Error::new(format!(
+            "enum payload projection requires payload-bearing variant id {} of {}",
+            variant.as_u32(),
+            enum_ty
+        ))),
+    }
+}
+
+fn validate_checked_enum_variant_payload(
+    enum_ty: &CheckedTypeRef,
+    variant: crate::language::checked::CheckedEnumVariantId,
+    payload_ty: &CheckedTypeRef,
+) -> Result<()> {
+    let expected = enum_ty.enum_variant_payload_type(variant)?;
+    match expected {
+        Some(expected) if expected == payload_ty.id() => Ok(()),
+        Some(expected) => Err(Error::new(format!(
+            "enum variant template payload has type {}, expected checked type id {} for {} variant id {}",
+            payload_ty,
+            expected.as_u32(),
+            enum_ty,
+            variant.as_u32()
+        ))),
+        None => Err(Error::new(format!(
+            "enum variant template requires payload-bearing variant id {} of {}",
+            variant.as_u32(),
+            enum_ty
+        ))),
     }
 }
 

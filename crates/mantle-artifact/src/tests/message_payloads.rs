@@ -3,6 +3,7 @@ use super::support::*;
 #[test]
 fn validate_accepts_payload_message_metadata() {
     let mut artifact = valid_artifact();
+    declare_job_record_types(&mut artifact);
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -28,6 +29,7 @@ fn validate_accepts_payload_message_metadata() {
 #[test]
 fn validate_accepts_payload_guarded_transitions_as_typed_artifact_metadata() {
     let mut artifact = valid_artifact();
+    declare_job_record_types(&mut artifact);
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -96,6 +98,7 @@ fn validate_rejects_unknown_message_payload_type_id() {
 #[test]
 fn validate_rejects_payload_guard_type_mismatch() {
     let mut artifact = valid_artifact();
+    declare_job_record_types(&mut artifact);
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -120,6 +123,7 @@ fn validate_rejects_payload_guard_type_mismatch() {
 #[test]
 fn validate_rejects_process_ref_payload_guard_sidecar() {
     let mut artifact = valid_artifact();
+    declare_job_record_types(&mut artifact);
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -150,6 +154,7 @@ fn validate_rejects_process_ref_payload_guard_sidecar() {
 #[test]
 fn validate_rejects_mixed_payload_guarded_and_unguarded_transitions_for_same_base() {
     let mut artifact = valid_artifact();
+    declare_job_record_types(&mut artifact);
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -196,6 +201,7 @@ fn validate_rejects_missing_required_send_payload() {
 #[test]
 fn validate_rejects_payload_for_unit_message_variant() {
     let mut artifact = valid_artifact();
+    declare_job_record_types(&mut artifact);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -217,6 +223,7 @@ fn validate_rejects_payload_for_unit_message_variant() {
 #[test]
 fn validate_rejects_send_payload_type_mismatch() {
     let mut artifact = valid_artifact();
+    declare_job_record_types(&mut artifact);
     artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),

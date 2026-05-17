@@ -1,10 +1,10 @@
 use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactLoopElement,
-    ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactSendTarget,
-    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, LoopElementId,
-    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
-    TypeId, source_hash_fnv1a64,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactEnumVariant,
+    ArtifactLoopElement, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
+    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField,
+    ArtifactTypeKind, ArtifactValueShape, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, EnumVariantId, LoopElementId, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
@@ -13,7 +13,7 @@ use super::checked::{
     CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget, CheckedStateId,
     CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId, CheckedTypeKind,
-    CheckedTypeRef, CheckedValueTemplate,
+    CheckedTypeRef, CheckedValueShape, CheckedValueTemplate,
 };
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
@@ -40,25 +40,21 @@ impl ArtifactTypeMap {
                         ty.id().as_u32()
                     )));
                 }
-                let (kind, enum_variants) = match ty.kind() {
-                    CheckedTypeKind::Value { enum_variants } => (
-                        ArtifactTypeKind::Value,
-                        enum_variants
-                            .iter()
-                            .map(|variant| variant.to_string())
-                            .collect(),
-                    ),
+                let (kind, shape) = match ty.kind() {
+                    CheckedTypeKind::Value { shape } => {
+                        (ArtifactTypeKind::Value, Some(lower_value_shape(shape)))
+                    }
                     CheckedTypeKind::ProcessRef { target } => (
                         ArtifactTypeKind::ProcessRef {
-                            target: lower_process_id(target),
+                            target: lower_process_id(*target),
                         },
-                        Vec::new(),
+                        None,
                     ),
                 };
                 Ok(ArtifactType {
                     label: ty.label().to_string(),
                     kind,
-                    enum_variants,
+                    shape,
                 })
             })
             .collect::<mantle_artifact::Result<Vec<_>>>()?;
@@ -77,6 +73,43 @@ impl ArtifactTypeMap {
 
     fn into_artifact_types(self) -> Vec<ArtifactType> {
         self.artifacts
+    }
+}
+
+fn lower_value_shape(shape: &CheckedValueShape) -> ArtifactValueShape {
+    match shape {
+        CheckedValueShape::Atom => ArtifactValueShape::Atom,
+        CheckedValueShape::Record { fields } => ArtifactValueShape::Record {
+            fields: fields
+                .iter()
+                .map(|field| ArtifactTypeField {
+                    name: field.name.to_string(),
+                    ty: lower_type_id(field.ty),
+                })
+                .collect(),
+        },
+        CheckedValueShape::Enum { variants } => ArtifactValueShape::Enum {
+            variants: variants
+                .iter()
+                .map(|variant| ArtifactEnumVariant {
+                    label: variant.name.to_string(),
+                    payload_type: variant.payload_type.map(lower_type_id),
+                })
+                .collect(),
+        },
+        CheckedValueShape::List { element, capacity } => ArtifactValueShape::List {
+            element: lower_type_id(*element),
+            capacity: *capacity,
+        },
+        CheckedValueShape::Map {
+            key,
+            value,
+            capacity,
+        } => ArtifactValueShape::Map {
+            key: lower_type_id(*key),
+            value: lower_type_id(*value),
+            capacity: *capacity,
+        },
     }
 }
 
@@ -480,6 +513,10 @@ fn lower_step_result(step_result: CheckedStepResult) -> StepResult {
 
 fn lower_process_id(id: CheckedProcessId) -> ProcessId {
     ProcessId::new(id.as_u32())
+}
+
+fn lower_type_id(id: CheckedTypeId) -> TypeId {
+    TypeId::new(id.as_u32())
 }
 
 fn lower_process_ref_id(id: CheckedProcessRefId) -> ProcessRefId {

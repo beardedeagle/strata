@@ -92,11 +92,11 @@ pub(super) fn validate_process_ref_type_target(
     match ty.kind() {
         CheckedTypeKind::ProcessRef {
             target: type_target,
-        } if type_target == target => Ok(()),
+        } if *type_target == target => Ok(()),
         CheckedTypeKind::ProcessRef {
             target: type_target,
         } => {
-            let type_process = process_by_id(processes, type_target)?;
+            let type_process = process_by_id(processes, *type_target)?;
             let type_name = checked_type_diagnostic(processes, ty)?;
             Err(Error::new(format!(
                 "process reference payload type {type_name} targets {} (process id {}), expected {} (process id {})",
@@ -119,7 +119,7 @@ fn checked_type_diagnostic(processes: &[CheckedProcess], ty: &CheckedTypeRef) ->
     match ty.kind() {
         CheckedTypeKind::Value { .. } => Ok(ty.label().to_string()),
         CheckedTypeKind::ProcessRef { target } => {
-            let process = process_by_id(processes, target)?;
+            let process = process_by_id(processes, *target)?;
             Ok(format!("ProcessRef<{}>", process.debug_name()))
         }
     }
