@@ -117,6 +117,16 @@ impl GateHarness {
             .unwrap_or_else(|err| panic!("expected artifact {artifact}: {err}"))
     }
 
+    fn write_target_source(&self, stem: &str, source: &str) -> PathBuf {
+        let path = self.root.join("target/strata").join(format!("{stem}.str"));
+        fs::create_dir_all(path.parent().expect("target source should have a parent"))
+            .unwrap_or_else(|err| panic!("could not create target source directory: {err}"));
+        fs::write(&path, source).unwrap_or_else(|err| {
+            panic!("could not write target source {}: {err}", path.display())
+        });
+        path
+    }
+
     fn write_unvalidated_encoded_artifact(&self, artifact: &str, encoded_artifact: &str) {
         fs::write(self.root.join(artifact), encoded_artifact)
             .unwrap_or_else(|err| panic!("could not write artifact {artifact}: {err}"));
@@ -712,6 +722,119 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
 }
 
 #[test]
+fn statement_if_before_final_runtime_if_traces_branch_at_action_position() {
+    let gate = GateHarness::new();
+    const STEM: &str = "runtime_if_statement_trace_order";
+    const ARTIFACT: &str = "target/strata/runtime_if_statement_trace_order.mta";
+    let source = gate.write_target_source(
+        STEM,
+        r#"
+module runtime_if_statement_trace_order;
+
+record MainState;
+enum Bool { False, True }
+enum MainMsg { Start }
+enum WorkerState { Idle, WarmReady, ColdReady }
+enum WorkerMsg { Branch(Bool) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let warm: ProcessRef<Worker> = spawn Worker;
+        let cold: ProcessRef<Worker> = spawn Worker;
+        send warm Branch(True);
+        send cold Branch(False);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "prefix";
+        if (flag) {
+            emit "statement true";
+        } else {
+            emit "statement false";
+        }
+        if (flag) {
+            return Stop(WarmReady);
+        } else {
+            return Stop(ColdReady);
+        }
+    }
+}
+"#,
+    );
+    let source = source
+        .to_str()
+        .expect("target source path should be valid UTF-8");
+    gate.remove_trace(STEM);
+    let run = gate.check_build_run(source, ARTIFACT);
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("prefix"));
+    assert!(stdout.contains("statement true"));
+    assert!(stdout.contains("statement false"));
+
+    let trace = gate.read_trace(STEM);
+    let warm_branches = trace_line_indexes(
+        &trace,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then""#,
+    );
+    let cold_branches = trace_line_indexes(
+        &trace,
+        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"else""#,
+    );
+    assert_eq!(
+        warm_branches.len(),
+        2,
+        "Worker true path should trace both final next-state and statement branch selections"
+    );
+    assert_eq!(
+        cold_branches.len(),
+        2,
+        "Worker false path should trace both final next-state and statement branch selections"
+    );
+
+    let warm_prefix = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":0,"text":"prefix""#,
+    );
+    let warm_statement = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":1,"text":"statement true""#,
+    );
+    assert!(warm_branches[0] < warm_prefix);
+    assert!(warm_prefix < warm_branches[1]);
+    assert!(warm_branches[1] < warm_statement);
+
+    let cold_prefix = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":3,"process_id":1,"process":"Worker","stream":"stdout","output_id":0,"text":"prefix""#,
+    );
+    let cold_statement = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":3,"process_id":1,"process":"Worker","stream":"stdout","output_id":2,"text":"statement false""#,
+    );
+    assert!(cold_branches[0] < cold_prefix);
+    assert!(cold_prefix < cold_branches[1]);
+    assert!(cold_branches[1] < cold_statement);
+}
+
+#[test]
 fn runtime_for_each_iterates_over_payload_at_mantle_runtime() {
     let gate = GateHarness::new();
     gate.remove_trace("runtime_for_each");
@@ -1270,6 +1393,19 @@ fn trace_line_index(trace: &str, needle: &str) -> usize {
         .lines()
         .position(|line| line.contains(needle))
         .unwrap_or_else(|| panic!("trace should contain {needle:?}\n{trace}"))
+}
+
+fn trace_line_indexes(trace: &str, needle: &str) -> Vec<usize> {
+    let indexes = trace
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| line.contains(needle).then_some(index))
+        .collect::<Vec<_>>();
+    assert!(
+        !indexes.is_empty(),
+        "trace should contain {needle:?}\n{trace}"
+    );
+    indexes
 }
 
 #[test]

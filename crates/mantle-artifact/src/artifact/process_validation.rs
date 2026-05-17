@@ -703,28 +703,24 @@ impl ArtifactProcess {
                     ),
                 )?;
                 let branch_scope = scope.if_branch();
-                let mut then_refs = spawned_refs.clone();
                 for action in then_actions {
                     self.validate_action_reference(
                         artifact,
                         transition,
-                        &mut then_refs,
+                        spawned_refs,
                         action,
                         branch_scope,
                     )?;
                 }
-                let mut else_refs = spawned_refs.clone();
                 for action in else_actions {
                     self.validate_action_reference(
                         artifact,
                         transition,
-                        &mut else_refs,
+                        spawned_refs,
                         action,
                         branch_scope,
                     )?;
                 }
-                then_refs.retain(|process_ref| else_refs.contains(process_ref));
-                *spawned_refs = then_refs;
             }
             ArtifactAction::ForEach {
                 element,

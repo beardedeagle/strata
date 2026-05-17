@@ -311,31 +311,23 @@ impl LoadedAction {
                     process.message_variants[message.index()].payload_type,
                     current_state_payload,
                 )?;
-                let mut then_refs = spawned_refs.to_vec();
                 for action in then_actions {
                     action.validate_runtime_if_branch_admission(
                         program,
                         process,
                         message,
                         current_state_payload,
-                        &mut then_refs,
+                        spawned_refs,
                     )?;
                 }
-                let mut else_refs = spawned_refs.to_vec();
                 for action in else_actions {
                     action.validate_runtime_if_branch_admission(
                         program,
                         process,
                         message,
                         current_state_payload,
-                        &mut else_refs,
+                        spawned_refs,
                     )?;
-                }
-                for (spawned, (then_spawned, else_spawned)) in spawned_refs
-                    .iter_mut()
-                    .zip(then_refs.into_iter().zip(else_refs))
-                {
-                    *spawned = *spawned || (then_spawned && else_spawned);
                 }
                 Ok(())
             }
@@ -478,31 +470,23 @@ impl LoadedAction {
                     scope.loop_elements,
                 )?;
                 let branch_scope = scope.if_branch();
-                let mut then_refs = spawned_refs.to_vec();
                 for action in then_actions {
                     action.validate_loop_body_admission(
                         program,
                         process,
                         message,
-                        &mut then_refs,
+                        spawned_refs,
                         branch_scope,
                     )?;
                 }
-                let mut else_refs = spawned_refs.to_vec();
                 for action in else_actions {
                     action.validate_loop_body_admission(
                         program,
                         process,
                         message,
-                        &mut else_refs,
+                        spawned_refs,
                         branch_scope,
                     )?;
-                }
-                for (spawned, (then_spawned, else_spawned)) in spawned_refs
-                    .iter_mut()
-                    .zip(then_refs.into_iter().zip(else_refs))
-                {
-                    *spawned = *spawned || (then_spawned && else_spawned);
                 }
                 Ok(())
             }
