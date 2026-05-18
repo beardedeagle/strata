@@ -522,6 +522,30 @@ fn runtime_rejects_loaded_nested_if_else_inside_runtime_if_branch_before_artifac
 }
 
 #[test]
+fn runtime_rejects_loaded_both_empty_if_else_action_branches_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].actions = vec![LoadedAction::IfElse {
+        condition: LoadedValueTemplate::Literal {
+            ty: bool_type,
+            value: RuntimeValue::Atom("True".to_string()),
+        },
+        then_actions: Vec::new(),
+        else_actions: Vec::new(),
+    }];
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main transition 0 runtime if action branches cannot both be empty",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_spawn_inside_runtime_if_branch_before_artifact_loaded() {
     let mut artifact = artifact_with_unbound_worker_process_ref();
     let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");

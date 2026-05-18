@@ -316,12 +316,6 @@ fn validate_action_reference(
                     process.debug_name()
                 )));
             }
-            if scope.inside_loop && (then_actions.is_empty() || else_actions.is_empty()) {
-                return Err(Error::new(format!(
-                    "process {} for loop branch actions must not be empty in this source slice",
-                    process.debug_name()
-                )));
-            }
             validate_bool_condition_template(process, condition)?;
             validate_value_template_binding_types(
                 condition,
@@ -342,6 +336,12 @@ fn validate_action_reference(
                 condition,
                 transition_current_state_payload(process, transition)?,
             )?;
+            if then_actions.is_empty() && else_actions.is_empty() {
+                return Err(Error::new(format!(
+                    "process {} runtime if action branches cannot both be empty",
+                    process.debug_name()
+                )));
+            }
 
             let branch_scope = scope.if_branch();
             for action in then_actions {

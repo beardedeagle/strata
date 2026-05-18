@@ -53,11 +53,11 @@ result of the first invalid shape.
 | `statement-level if branches cannot bind process references` | A branch tries to introduce branch-local authority with `spawn`. | Bind process references before the branch and use only admitted branch effects. |
 | `statement-level if branches cannot contain for loops` | A branch tries to introduce nested loop control flow. | Keep bounded loops outside the branch for this slice. |
 | `nested statement-level if branches are not supported` | A statement-level runtime branch contains another branch. | Split the behavior into separate steps or keep one branch level for this slice. |
-| `statement-level if branches must contain at least one effect statement` | A branch is empty. | Add an `emit` or `send` branch effect, or remove the no-op branch until no-op branches are admitted. |
+| `statement-level if branches cannot both be empty` | A statement-level runtime branch has no admitted effects on either side. | Put an `emit` or `send` in one branch. Omitted `else` and explicit `else {}` are allowed only when the other branch has admitted effects. |
 | `runtime if branch cannot bind process references` | A checked or admitted runtime branch tries to introduce branch-local authority. | Bind process references before the branch and keep branch bodies to declared effects. |
 | `runtime if branch cannot contain nested runtime if actions` | A checked runtime branch contains another runtime branch. | Keep runtime branch actions single-level for this slice. |
 | `runtime if branch cannot contain for loop actions` | A checked or admitted runtime branch contains loop control flow. | Move the loop outside the branch for this slice. |
-| `for loop branch actions must not be empty` | A decoded or constructed artifact tries to admit a no-op branch inside a runtime loop. | Emit a real branch effect or keep the no-op branch out of the artifact until no-op loop branches are admitted. |
+| `runtime if action branches cannot both be empty` | A decoded or constructed artifact tries to admit a runtime branch action with no actions in either branch. | Keep no-op branches explicit in the typed artifact, but ensure the sibling branch has at least one admitted action. |
 
 ## Source Function Errors
 

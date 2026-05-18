@@ -395,8 +395,8 @@ payload_arg =
     "(" value_expr ")"
 
 if_statement =
-    "if" "(" value_expr ")" "{" branch_statement+ "}"
-    "else" "{" branch_statement+ "}"
+    "if" "(" value_expr ")" "{" branch_statement* "}"
+    ("else" "{" branch_statement* "}")?
 
 branch_statement =
     emit_statement
@@ -537,10 +537,13 @@ traces the branch choice.
 
 Statement-level `if_statement` is runtime control flow for effects before the
 enclosing return. Branches contain only `emit` and `send` statements in this
-slice. They cannot bind process references, return, contain loops, or contain
-nested statement-level branches. Inside `for`, the condition may use the
-immutable loop element binding; lowering emits a typed Mantle branch over the
-loop element ID, not the source binding name.
+slice. The `else` branch may be omitted, and one branch body may be empty when
+the sibling branch has at least one admitted effect statement; both branches
+empty are rejected. An omitted `else` lowers as an explicit empty branch in the
+typed Mantle artifact. Branches cannot bind process references, return, contain
+loops, or contain nested statement-level branches. Inside `for`, the condition
+may use the immutable loop element binding; lowering emits a typed Mantle branch
+over the loop element ID, not the source binding name.
 
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,

@@ -39,30 +39,32 @@ Read them in this order:
    bindings in actor step parameter patterns.
 21. `runtime_if_else.str` for Mantle-backed runtime branching over a message
    payload.
-22. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+22. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+   branch behavior.
+23. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-23. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+24. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-24. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-25. `actor_payload_match.str` for the same payload binding through a whole-body
+25. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+26. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-26. `actor_payload_split_match.str` for payload-sensitive same-message
+27. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-27. `actor_payload_split_signature.str` for payload-sensitive same-message
+28. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-28. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+29. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-29. `actor_payload_state_match_split.str` for payload-sensitive same-message
+30. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-30. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+31. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-31. `nested_patterns.str` for nested immutable constructor, record, list, and
+32. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-32. `actor_reply.str` for transporting typed process references through message
+33. `actor_reply.str` for transporting typed process references through message
    payloads.
-33. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+34. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-34. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+35. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -513,6 +515,28 @@ Key source ideas:
 - Each branch emits its own declared output and returns a whole immutable state.
 - The runtime trace records `branch_selected` for both `then` and `else` paths.
 
+## Runtime Guard Noop
+
+`examples/runtime_guard_noop.str` shows statement-level runtime branches where
+one selected branch intentionally performs no effects. The conditions are still
+checked `Bool` predicates and lower into typed Mantle branch actions.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_guard_noop.str
+cargo run -p strata --bin strata -- build examples/runtime_guard_noop.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guard_noop.mta
+```
+
+Key source ideas:
+
+- `if (flag == True) { ... }` lowers an omitted `else` as an explicit empty
+  Mantle branch.
+- `else {}` is an explicit no-op branch; `{}` on one side is allowed when the
+  sibling branch has an admitted effect.
+- Empty selected branches do not emit, send, acquire authority, or change state,
+  but they still record `branch_selected`.
+- Both branches empty are rejected before runnable behavior is admitted.
+
 ## Runtime For Each
 
 `examples/runtime_for_each.str` iterates inside `BatchWorker.step` over a
@@ -561,7 +585,8 @@ Key source ideas:
   Mantle for each loop iteration through typed Boolean predicate templates.
 - The branch condition uses the admitted typed loop element ID; branch payloads
   remain typed loop element values.
-- Branches can emit and send, but they cannot return, spawn, loop, or nest
+- One branch may be empty when the sibling branch has admitted effects.
+  Branches can emit and send, but they cannot return, spawn, loop, or nest
   another statement-level branch in this slice.
 - The runtime trace records `loop_iteration`, `branch_selected`, branch effects,
   and `loop_completed` in deterministic collection order.

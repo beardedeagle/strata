@@ -740,8 +740,12 @@ impl Parser {
         let condition = self.parse_value_expr()?;
         self.expect_symbol(')')?;
         let then_body = self.parse_if_else_statement_branch()?;
-        self.expect_keyword("else")?;
-        let else_body = self.parse_if_else_statement_branch()?;
+        let else_body = if self.peek_keyword("else") {
+            self.expect_keyword("else")?;
+            self.parse_if_else_statement_branch()?
+        } else {
+            Vec::new()
+        };
         Ok(Statement::IfElse {
             condition,
             then_body,
@@ -774,11 +778,6 @@ impl Parser {
             statements.push(self.parse_function_statement()?);
         }
         self.expect_symbol('}')?;
-        if statements.is_empty() {
-            return Err(self.error_previous(
-                "statement-level if branches must contain at least one effect statement",
-            ));
-        }
         Ok(statements)
     }
 

@@ -878,7 +878,7 @@ fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
 }
 
 #[test]
-fn admission_rejects_empty_if_else_branch_inside_for_each_loop_body() {
+fn admission_accepts_one_empty_if_else_branch_inside_for_each_loop_body() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
     let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
@@ -905,12 +905,43 @@ fn admission_rejects_empty_if_else_branch_inside_for_each_loop_body() {
         }],
     }];
 
+    artifact
+        .validate()
+        .expect("one empty loop if_else branch should admit");
+}
+
+#[test]
+fn admission_rejects_both_empty_if_else_branches_inside_for_each_loop_body() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
+    artifact.processes[0].transitions[0].effects = Vec::new();
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
+        element: ArtifactLoopElement {
+            id: LoopElementId::new(0),
+            ty: bool_type,
+        },
+        collection: ArtifactValueTemplate::Literal {
+            ty: list_type,
+            value: artifact_value("List[True]"),
+        },
+        max_items: 1,
+        body: vec![ArtifactAction::IfElse {
+            condition: ArtifactValueTemplate::LoopElement {
+                ty: bool_type,
+                element: LoopElementId::new(0),
+            },
+            then_actions: Vec::new(),
+            else_actions: Vec::new(),
+        }],
+    }];
+
     let err = artifact
         .validate()
-        .expect_err("empty if_else loop branch should fail admission");
+        .expect_err("both empty loop if_else branches should fail admission");
     assert!(
         err.to_string()
-            .contains("for loop branch actions must not be empty"),
+            .contains("runtime if action branches cannot both be empty"),
         "{err}"
     );
 }

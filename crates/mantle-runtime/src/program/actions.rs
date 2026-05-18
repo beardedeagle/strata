@@ -311,6 +311,13 @@ impl LoadedAction {
                     process.message_variants[message.index()].payload_type,
                     current_state_payload,
                 )?;
+                if then_actions.is_empty() && else_actions.is_empty() {
+                    return Err(Error::new(format!(
+                        "process {} transition {} runtime if action branches cannot both be empty",
+                        process.debug_name,
+                        message.as_u32()
+                    )));
+                }
                 for action in then_actions {
                     action.validate_runtime_if_branch_admission(
                         program,
@@ -449,13 +456,6 @@ impl LoadedAction {
                         message.as_u32()
                     )));
                 }
-                if then_actions.is_empty() || else_actions.is_empty() {
-                    return Err(Error::new(format!(
-                        "process {} transition {} for loop branch actions must not be empty in this artifact slice",
-                        process.debug_name,
-                        message.as_u32()
-                    )));
-                }
                 validate_loaded_bool_condition_with_loop_elements(
                     program,
                     process,
@@ -469,6 +469,13 @@ impl LoadedAction {
                     scope.current_state_payload,
                     scope.loop_elements,
                 )?;
+                if then_actions.is_empty() && else_actions.is_empty() {
+                    return Err(Error::new(format!(
+                        "process {} transition {} runtime if action branches cannot both be empty",
+                        process.debug_name,
+                        message.as_u32()
+                    )));
+                }
                 let branch_scope = scope.if_branch();
                 for action in then_actions {
                     action.validate_loop_body_admission(

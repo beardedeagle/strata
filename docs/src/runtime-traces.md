@@ -144,7 +144,8 @@ checked `Bool` condition, and `condition` is trace metadata for the evaluated
 value. Runtime branch selection uses the admitted typed condition, not source
 strings, helper names, or debug labels. For composed predicates, this metadata
 is still only the final evaluated Bool value; the branch path remains the trace
-identity for the admitted artifact node.
+identity for the admitted artifact node. Statement-level branches record this
+event even when the selected branch is an admitted no-op branch with no actions.
 
 When a branch runs inside a bounded runtime loop body, `branch_selected` appears
 after that iteration's `loop_iteration` event and before the selected branch

@@ -133,6 +133,7 @@ The runnable examples are:
 - `examples/actor_instances.str`;
 - `examples/actor_payloads.str`;
 - `examples/runtime_if_else.str`;
+- `examples/runtime_guard_noop.str`;
 - `examples/runtime_for_each.str`;
 - `examples/runtime_for_each_if.str`;
 - `examples/runtime_for_each_empty.str`;

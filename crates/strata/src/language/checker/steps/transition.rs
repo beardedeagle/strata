@@ -391,9 +391,9 @@ fn checked_if_else_statement_action(
         branch_scope,
         else_body,
     )?;
-    if then_actions.is_empty() || else_actions.is_empty() {
+    if then_actions.is_empty() && else_actions.is_empty() {
         return Err(Error::new(format!(
-            "process {} statement-level if branches must contain at least one effect action",
+            "process {} statement-level if branches cannot both be empty",
             context.process.name
         )));
     }
