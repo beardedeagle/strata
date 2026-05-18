@@ -60,7 +60,9 @@ Read them in this order:
    map payload destructuring.
 32. `actor_reply.str` for transporting typed process references through message
    payloads.
-33. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+33. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+   and send authority.
+34. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -736,6 +738,30 @@ Key source ideas:
 - `Work(reply_to: ProcessRef<Sink>)` binds the received reference immutably.
 - `send reply_to Done;` routes by the transported runtime process ID and
   admitted target process ID, not by source labels.
+
+## Actor Emit Spawn Send
+
+`examples/actor_emit_spawn_send.str` combines `emit`, `spawn`, and `send` in
+one admitted transition. `Main` declares each effect, spawns `Worker`, sends
+`Ping` through the typed process reference, and stops with a whole replacement
+state.
+
+```sh
+cargo run -p strata --bin strata -- check examples/actor_emit_spawn_send.str
+cargo run -p strata --bin strata -- build examples/actor_emit_spawn_send.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_emit_spawn_send.mta
+```
+
+Key source ideas:
+
+- `fn step(...) -> ProcResult<MainState> ! [emit, spawn, send]` declares the
+  exact authority used by the body.
+- `let worker: ProcessRef<Worker> = spawn Worker;` creates a typed process
+  reference.
+- `send worker Ping;` dispatches by the admitted process-reference target and
+  message ID after lowering, not by source text.
+- `return Stop(MainState { phase: Done });` preserves immutable whole-state
+  transition semantics.
 
 ## Actor Panic No Replay
 

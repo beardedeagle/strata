@@ -1,6 +1,6 @@
 [book]
 title = "Strata And Mantle"
-description = "Product documentation for Strata source programs and Mantle runtime artifacts."
+description = "Documentation for Strata source programs and Mantle runtime artifacts."
 src = "src"
 language = "en"
 
