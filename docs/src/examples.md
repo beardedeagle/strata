@@ -557,8 +557,8 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_i
 
 Key source ideas:
 
-- `if (item != False) { ... } else { ... }` runs in Mantle for each loop
-  iteration through a typed equality template.
+- `if ((item != False) && !(item == False)) { ... } else { ... }` runs in
+  Mantle for each loop iteration through typed Boolean predicate templates.
 - The branch condition uses the admitted typed loop element ID; branch payloads
   remain typed loop element values.
 - Branches can emit and send, but they cannot return, spawn, loop, or nest

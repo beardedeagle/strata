@@ -784,6 +784,21 @@ fn substitute_step_return_bindings(
             left: Box::new(substitute_step_return_bindings(*left, bindings)),
             right: Box::new(substitute_step_return_bindings(*right, bindings)),
         },
+        ValueExpr::BooleanNot { operand } => ValueExpr::BooleanNot {
+            operand: Box::new(substitute_step_return_bindings(*operand, bindings)),
+        },
+        ValueExpr::BooleanBinary {
+            operator,
+            left,
+            right,
+        } => ValueExpr::BooleanBinary {
+            operator,
+            left: Box::new(substitute_step_return_bindings(*left, bindings)),
+            right: Box::new(substitute_step_return_bindings(*right, bindings)),
+        },
+        ValueExpr::Grouped { value } => ValueExpr::Grouped {
+            value: Box::new(substitute_step_return_bindings(*value, bindings)),
+        },
         ValueExpr::IfElse {
             condition,
             then_branch,

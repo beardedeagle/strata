@@ -9,6 +9,8 @@ pub(super) enum TokenKind {
     Symbol(char),
     EqualEqual,
     BangEqual,
+    AmpAmp,
+    PipePipe,
     DotDot,
     Arrow,
     FatArrow,
@@ -72,6 +74,18 @@ impl<'a> Lexer<'a> {
                 self.bump_char();
                 self.bump_char();
                 push_source_token(&mut tokens, TokenKind::BangEqual, offset)?;
+                continue;
+            }
+            if ch == '&' && self.peek_next_char() == Some('&') {
+                self.bump_char();
+                self.bump_char();
+                push_source_token(&mut tokens, TokenKind::AmpAmp, offset)?;
+                continue;
+            }
+            if ch == '|' && self.peek_next_char() == Some('|') {
+                self.bump_char();
+                self.bump_char();
+                push_source_token(&mut tokens, TokenKind::PipePipe, offset)?;
                 continue;
             }
             if ch == '.' && self.peek_next_char() == Some('.') {

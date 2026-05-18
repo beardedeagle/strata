@@ -2,9 +2,10 @@ use std::collections::BTreeSet;
 
 use mantle_artifact::{
     ArtifactPayload, ArtifactProcessRefPayload, ArtifactStateValue, ArtifactValue,
-    ArtifactValueEqualityOperator, ArtifactValueTemplate, ArtifactValueTemplateMapEntry,
-    EnumVariantId, Error, LoopElementId, MAX_VALUE_TEMPLATE_FIELDS, MapProjectionMode, ProcessId,
-    ProcessRefId, Result, TypeId, validate_state_value_identity_label,
+    ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueTemplate,
+    ArtifactValueTemplateMapEntry, EnumVariantId, Error, LoopElementId, MAX_VALUE_TEMPLATE_FIELDS,
+    MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
+    validate_state_value_identity_label,
 };
 
 use crate::event::RuntimeProcessId;
@@ -270,6 +271,16 @@ pub(crate) enum LoadedValueTemplate {
         left: Box<LoadedValueTemplate>,
         right: Box<LoadedValueTemplate>,
     },
+    BooleanNot {
+        ty: TypeId,
+        operand: Box<LoadedValueTemplate>,
+    },
+    BooleanBinary {
+        ty: TypeId,
+        operator: ArtifactValueBooleanOperator,
+        left: Box<LoadedValueTemplate>,
+        right: Box<LoadedValueTemplate>,
+    },
 }
 
 impl LoadedValueTemplate {
@@ -422,6 +433,21 @@ impl LoadedValueTemplate {
                 left: Box::new(Self::from_artifact(left)?),
                 right: Box::new(Self::from_artifact(right)?),
             }),
+            ArtifactValueTemplate::BooleanNot { ty, operand } => Ok(Self::BooleanNot {
+                ty: *ty,
+                operand: Box::new(Self::from_artifact(operand)?),
+            }),
+            ArtifactValueTemplate::BooleanBinary {
+                ty,
+                operator,
+                left,
+                right,
+            } => Ok(Self::BooleanBinary {
+                ty: *ty,
+                operator: *operator,
+                left: Box::new(Self::from_artifact(left)?),
+                right: Box::new(Self::from_artifact(right)?),
+            }),
         }
     }
 
@@ -443,7 +469,9 @@ impl LoadedValueTemplate {
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
             | Self::Map { ty, .. }
-            | Self::Equality { ty, .. } => *ty,
+            | Self::Equality { ty, .. }
+            | Self::BooleanNot { ty, .. }
+            | Self::BooleanBinary { ty, .. } => *ty,
         }
     }
 }

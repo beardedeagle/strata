@@ -235,6 +235,12 @@ impl<'module> StateSpace<'module> {
             ValueExpr::Equality { .. } => Err(Error::new(
                 "equality expression must be resolved before checking state value",
             )),
+            ValueExpr::BooleanNot { .. } | ValueExpr::BooleanBinary { .. } => Err(Error::new(
+                "boolean predicate expression must be resolved before checking state value",
+            )),
+            ValueExpr::Grouped { .. } => Err(Error::new(
+                "parenthesized predicate expression must be resolved before checking state value",
+            )),
             ValueExpr::IfElse { .. } => Err(Error::new(
                 "if expression must be resolved before checking state value",
             )),

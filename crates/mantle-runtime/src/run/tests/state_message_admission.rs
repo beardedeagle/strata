@@ -403,6 +403,96 @@ fn runtime_rejects_loaded_equality_operand_result_type_mismatch_before_artifact_
 }
 
 #[test]
+fn runtime_rejects_loaded_boolean_predicate_non_bool_operand_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    artifact.processes[0].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::BooleanBinary {
+            ty: bool_type,
+            operator: ArtifactValueBooleanOperator::And,
+            left: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+            right: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+        },
+        then_state: Box::new(NextState::Current),
+        else_state: Box::new(NextState::Current),
+    };
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state = LoadedNextState::IfElse {
+        condition: LoadedValueTemplate::BooleanBinary {
+            ty: bool_type,
+            operator: ArtifactValueBooleanOperator::And,
+            left: Box::new(LoadedValueTemplate::Literal {
+                ty: MAIN_STATE,
+                value: RuntimeValue::Atom("MainState".to_string()),
+            }),
+            right: Box::new(LoadedValueTemplate::Literal {
+                ty: bool_type,
+                value: RuntimeValue::Atom("True".to_string()),
+            }),
+        },
+        then_state: Box::new(LoadedNextState::Current),
+        else_state: Box::new(LoadedNextState::Current),
+    };
+    let expected = format!(
+        "process Main message id 0 next_state_condition.left has type id {}, expected {}",
+        MAIN_STATE.as_u32(),
+        bool_type.as_u32()
+    );
+
+    assert_loaded_admission_rejects_before_artifact_loaded(&program, &expected);
+}
+
+#[test]
+fn runtime_rejects_loaded_boolean_not_non_bool_operand_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    artifact.processes[0].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::BooleanNot {
+            ty: bool_type,
+            operand: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+        },
+        then_state: Box::new(NextState::Current),
+        else_state: Box::new(NextState::Current),
+    };
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state = LoadedNextState::IfElse {
+        condition: LoadedValueTemplate::BooleanNot {
+            ty: bool_type,
+            operand: Box::new(LoadedValueTemplate::Literal {
+                ty: MAIN_STATE,
+                value: RuntimeValue::Atom("MainState".to_string()),
+            }),
+        },
+        then_state: Box::new(LoadedNextState::Current),
+        else_state: Box::new(LoadedNextState::Current),
+    };
+    let expected = format!(
+        "process Main message id 0 next_state_condition.operand has type id {}, expected {}",
+        MAIN_STATE.as_u32(),
+        bool_type.as_u32()
+    );
+
+    assert_loaded_admission_rejects_before_artifact_loaded(&program, &expected);
+}
+
+#[test]
 fn runtime_rejects_loaded_nested_if_else_inside_runtime_if_branch_before_artifact_loaded() {
     let mut artifact = artifact_with_unbound_worker_process_ref();
     let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");

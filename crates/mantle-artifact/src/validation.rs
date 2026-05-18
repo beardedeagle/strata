@@ -701,6 +701,23 @@ fn add_value_template_bytes(
             add_value_template_bytes(total, &format!("{prefix}.left"), left)?;
             add_value_template_bytes(total, &format!("{prefix}.right"), right)?;
         }
+        ArtifactValueTemplate::BooleanNot { ty, operand } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "boolean_not")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_value_template_bytes(total, &format!("{prefix}.operand"), operand)?;
+        }
+        ArtifactValueTemplate::BooleanBinary {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "boolean_binary")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, &format!("{prefix}.operator"), operator.as_str())?;
+            add_value_template_bytes(total, &format!("{prefix}.left"), left)?;
+            add_value_template_bytes(total, &format!("{prefix}.right"), right)?;
+        }
     }
     Ok(())
 }

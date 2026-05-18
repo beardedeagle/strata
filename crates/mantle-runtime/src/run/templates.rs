@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactValueEqualityOperator, Error, ProcessRefId,
-    Result,
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValueBooleanOperator,
+    ArtifactValueEqualityOperator, Error, ProcessRefId, Result,
 };
 
 use super::RuntimeLoopElement;
@@ -354,6 +354,70 @@ pub(super) fn evaluate_runtime_template(
                 RuntimeValue::Atom(bool_atom(selected)),
             )
         }
+        LoadedValueTemplate::BooleanNot { ty, operand } => {
+            let value = evaluate_runtime_template(
+                program,
+                operand,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            program.runtime_payload_value(
+                "boolean predicate template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(!runtime_bool_value(&value.value)?)),
+            )
+        }
+        LoadedValueTemplate::BooleanBinary {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_runtime_template(
+                program,
+                left,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            let left = runtime_bool_value(&left.value)?;
+            let selected = match operator {
+                ArtifactValueBooleanOperator::And => {
+                    left && runtime_bool_value(
+                        &evaluate_runtime_template(
+                            program,
+                            right,
+                            received_payload,
+                            step,
+                            process_refs,
+                            loop_elements,
+                        )?
+                        .value,
+                    )?
+                }
+                ArtifactValueBooleanOperator::Or => {
+                    left || runtime_bool_value(
+                        &evaluate_runtime_template(
+                            program,
+                            right,
+                            received_payload,
+                            step,
+                            process_refs,
+                            loop_elements,
+                        )?
+                        .value,
+                    )?
+                }
+            };
+            program.runtime_payload_value(
+                "boolean predicate template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(selected)),
+            )
+        }
     }
 }
 
@@ -362,5 +426,16 @@ fn bool_atom(value: bool) -> String {
         "True".to_string()
     } else {
         "False".to_string()
+    }
+}
+
+fn runtime_bool_value(value: &RuntimeValue) -> Result<bool> {
+    match value {
+        RuntimeValue::Atom(label) if label == "True" => Ok(true),
+        RuntimeValue::Atom(label) if label == "False" => Ok(false),
+        _ => Err(Error::new(format!(
+            "boolean predicate operand produced non-Bool value {}",
+            value.label()
+        ))),
     }
 }

@@ -53,7 +53,7 @@ proc BatchWorker mailbox bounded(1) {
     fn step(state: BatchState, Batch(items: List<Bool,2>)) -> ProcResult<BatchState> ! [spawn, emit, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         for item in items {
-            if (item != False) {
+            if ((item != False) && !(item == False)) {
                 emit "batch selected true";
                 send worker Branch(item);
             } else {

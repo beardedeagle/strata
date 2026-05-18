@@ -3,8 +3,8 @@ use super::ast::{
     Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
     MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm,
     Module, OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordPatternField,
-    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueEqualityOperator,
-    ValueExpr,
+    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueBooleanOperator,
+    ValueEqualityOperator, ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
@@ -954,9 +954,45 @@ impl Parser {
     }
 
     fn parse_value_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
-        let left = self.parse_value_primary_expr_with_depth(depth)?;
+        self.parse_value_or_expr_with_depth(depth)
+    }
+
+    fn parse_value_or_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
+        let mut value = self.parse_value_and_expr_with_depth(depth)?;
+        let mut composition_depth = depth;
+        while matches!(self.peek_kind(), TokenKind::PipePipe) {
+            self.advance();
+            composition_depth = self.next_value_depth(composition_depth)?;
+            let right = self.parse_value_and_expr_with_depth(composition_depth)?;
+            value = ValueExpr::BooleanBinary {
+                operator: ValueBooleanOperator::Or,
+                left: Box::new(value),
+                right: Box::new(right),
+            };
+        }
+        Ok(value)
+    }
+
+    fn parse_value_and_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
+        let mut value = self.parse_value_equality_expr_with_depth(depth)?;
+        let mut composition_depth = depth;
+        while matches!(self.peek_kind(), TokenKind::AmpAmp) {
+            self.advance();
+            composition_depth = self.next_value_depth(composition_depth)?;
+            let right = self.parse_value_equality_expr_with_depth(composition_depth)?;
+            value = ValueExpr::BooleanBinary {
+                operator: ValueBooleanOperator::And,
+                left: Box::new(value),
+                right: Box::new(right),
+            };
+        }
+        Ok(value)
+    }
+
+    fn parse_value_equality_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
+        let left = self.parse_value_unary_expr_with_depth(depth)?;
         if let Some(operator) = self.consume_value_equality_operator() {
-            let right = self.parse_value_primary_expr_with_depth(depth + 1)?;
+            let right = self.parse_value_unary_expr_with_depth(self.next_value_depth(depth)?)?;
             if self.peek_value_equality_operator() {
                 return Err(self.error_here(
                     "chained equality expressions are not supported in this source slice",
@@ -971,11 +1007,28 @@ impl Parser {
         Ok(left)
     }
 
+    fn parse_value_unary_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
+        if self.consume_symbol('!') {
+            let operand = self.parse_value_unary_expr_with_depth(self.next_value_depth(depth)?)?;
+            return Ok(ValueExpr::BooleanNot {
+                operand: Box::new(operand),
+            });
+        }
+        self.parse_value_primary_expr_with_depth(depth)
+    }
+
     fn parse_value_primary_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
         if depth > MAX_VALUE_NESTING {
             return Err(self.error_here(format!(
                 "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
             )));
+        }
+        if self.consume_symbol('(') {
+            let value = self.parse_value_expr_with_depth(self.next_value_depth(depth)?)?;
+            self.expect_symbol(')')?;
+            return Ok(ValueExpr::Grouped {
+                value: Box::new(value),
+            });
         }
         if self.peek_keyword("match") {
             return Err(self.error_here(
@@ -1414,5 +1467,19 @@ impl Parser {
             .map(|token| token.offset)
             .unwrap_or(0);
         Error::new(format!("{} at byte {offset}", message.into()))
+    }
+
+    fn next_value_depth(&self, depth: usize) -> Result<usize> {
+        let next = depth.checked_add(1).ok_or_else(|| {
+            self.error_here(format!(
+                "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+            ))
+        })?;
+        if next > MAX_VALUE_NESTING {
+            return Err(self.error_here(format!(
+                "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+            )));
+        }
+        Ok(next)
     }
 }

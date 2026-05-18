@@ -4,12 +4,13 @@ use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
 
 use super::super::super::MAX_VALUE_NESTING;
 use super::super::super::ast::{
-    Identifier, ListValue, MapValue, Module, Record, TypeRef, ValueEqualityOperator, ValueExpr,
+    Identifier, ListValue, MapValue, Module, Record, TypeRef, ValueBooleanOperator,
+    ValueEqualityOperator, ValueExpr,
 };
 use super::super::super::checked::{
     CheckedEnumVariantId, CheckedLoopElementId, CheckedPayloadValue, CheckedTypeRef,
-    CheckedValueEqualityOperator, CheckedValueTemplate, CheckedValueTemplateField,
-    CheckedValueTemplateMapEntry,
+    CheckedValueBooleanOperator, CheckedValueEqualityOperator, CheckedValueTemplate,
+    CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::CheckedTypeInterner;
@@ -103,6 +104,46 @@ fn checked_value_template(
             *operator,
             left,
             right,
+            bindings,
+            depth + 1,
+        );
+    }
+    if let ValueExpr::BooleanNot { operand } = value {
+        return checked_boolean_not_template(
+            module,
+            semantic_index,
+            types,
+            expected_type,
+            operand,
+            bindings,
+            depth + 1,
+        );
+    }
+    if let ValueExpr::BooleanBinary {
+        operator,
+        left,
+        right,
+    } = value
+    {
+        return checked_boolean_binary_template(
+            module,
+            semantic_index,
+            types,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+            depth + 1,
+        );
+    }
+    if let ValueExpr::Grouped { value } = value {
+        return checked_grouped_template(
+            module,
+            semantic_index,
+            types,
+            expected_type,
+            value,
             bindings,
             depth + 1,
         );
@@ -295,6 +336,113 @@ fn checked_equality_operator(operator: ValueEqualityOperator) -> CheckedValueEqu
     }
 }
 
+fn checked_boolean_not_template(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    types: &mut CheckedTypeInterner<'_>,
+    expected_type: &TypeRef,
+    operand: &ValueExpr,
+    bindings: &[ValueTemplateBinding<'_>],
+    depth: usize,
+) -> Result<CheckedValueTemplate> {
+    let bool_type = semantic_index.bool_type(module)?;
+    validate_boolean_template_result_type(semantic_index, expected_type, &bool_type)?;
+    let ty = types.intern(&bool_type)?;
+    Ok(CheckedValueTemplate::BooleanNot {
+        ty,
+        operand: Box::new(checked_value_template(
+            module,
+            semantic_index,
+            types,
+            &bool_type,
+            operand,
+            bindings,
+            depth + 1,
+        )?),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checked_boolean_binary_template(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    types: &mut CheckedTypeInterner<'_>,
+    expected_type: &TypeRef,
+    operator: ValueBooleanOperator,
+    left: &ValueExpr,
+    right: &ValueExpr,
+    bindings: &[ValueTemplateBinding<'_>],
+    depth: usize,
+) -> Result<CheckedValueTemplate> {
+    let bool_type = semantic_index.bool_type(module)?;
+    validate_boolean_template_result_type(semantic_index, expected_type, &bool_type)?;
+    let ty = types.intern(&bool_type)?;
+    Ok(CheckedValueTemplate::BooleanBinary {
+        ty,
+        operator: checked_boolean_operator(operator),
+        left: Box::new(checked_value_template(
+            module,
+            semantic_index,
+            types,
+            &bool_type,
+            left,
+            bindings,
+            depth + 1,
+        )?),
+        right: Box::new(checked_value_template(
+            module,
+            semantic_index,
+            types,
+            &bool_type,
+            right,
+            bindings,
+            depth + 1,
+        )?),
+    })
+}
+
+fn validate_boolean_template_result_type(
+    semantic_index: &SemanticIndex,
+    expected_type: &TypeRef,
+    bool_type: &TypeRef,
+) -> Result<()> {
+    if semantic_index.same_type(expected_type, bool_type) {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "boolean predicate expression produces {bool_type}, expected {expected_type}"
+    )))
+}
+
+fn checked_boolean_operator(operator: ValueBooleanOperator) -> CheckedValueBooleanOperator {
+    match operator {
+        ValueBooleanOperator::And => CheckedValueBooleanOperator::And,
+        ValueBooleanOperator::Or => CheckedValueBooleanOperator::Or,
+    }
+}
+
+fn checked_grouped_template(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    types: &mut CheckedTypeInterner<'_>,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[ValueTemplateBinding<'_>],
+    depth: usize,
+) -> Result<CheckedValueTemplate> {
+    let bool_type = semantic_index.bool_type(module)?;
+    validate_boolean_template_result_type(semantic_index, expected_type, &bool_type)?;
+    checked_value_template(
+        module,
+        semantic_index,
+        types,
+        &bool_type,
+        value,
+        bindings,
+        depth + 1,
+    )
+}
+
 fn equality_template_operand_pair_type(
     module: &Module,
     semantic_index: &SemanticIndex,
@@ -426,7 +574,10 @@ fn equality_template_operand_type(
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
         | ValueExpr::IfElse { .. }
-        | ValueExpr::Equality { .. } => Err(Error::new(
+        | ValueExpr::Equality { .. }
+        | ValueExpr::BooleanNot { .. }
+        | ValueExpr::BooleanBinary { .. }
+        | ValueExpr::Grouped { .. } => Err(Error::new(
             "equality operands must be Bool or fieldless enum values",
         )),
     }
@@ -808,7 +959,9 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. }
         | CheckedValueTemplate::LoopElement { .. }
-        | CheckedValueTemplate::Equality { .. } => None,
+        | CheckedValueTemplate::Equality { .. }
+        | CheckedValueTemplate::BooleanNot { .. }
+        | CheckedValueTemplate::BooleanBinary { .. } => None,
         CheckedValueTemplate::EnumVariant {
             ty,
             variant,

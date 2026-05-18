@@ -3,7 +3,10 @@ use super::values::{
     validate_map_rest_keys,
 };
 use super::*;
-use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, ArtifactValueEqualityOperator};
+use mantle_artifact::{
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValueBooleanOperator,
+    ArtifactValueEqualityOperator,
+};
 use std::collections::BTreeSet;
 
 pub(super) fn evaluate_loaded_state_value(
@@ -90,7 +93,9 @@ fn validate_loaded_bool_condition_shape(
         | LoadedValueTemplate::ListPrefixElement { .. }
         | LoadedValueTemplate::MapValue { .. }
         | LoadedValueTemplate::LoopElement { .. }
-        | LoadedValueTemplate::Equality { .. } => Ok(()),
+        | LoadedValueTemplate::Equality { .. }
+        | LoadedValueTemplate::BooleanNot { .. }
+        | LoadedValueTemplate::BooleanBinary { .. } => Ok(()),
         LoadedValueTemplate::ListRest { .. }
         | LoadedValueTemplate::MapRest { .. }
         | LoadedValueTemplate::ProcessRef { .. }
@@ -413,6 +418,62 @@ fn evaluate_loaded_payload_value(
                 RuntimeValue::Atom(bool_atom(selected)),
             )
         }
+        LoadedValueTemplate::BooleanNot { ty, operand } => {
+            let value = evaluate_loaded_payload_value(
+                program,
+                operand,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "boolean predicate template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(!runtime_bool_value(&value.value)?)),
+            )
+        }
+        LoadedValueTemplate::BooleanBinary {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_loaded_payload_value(
+                program,
+                left,
+                received_payload,
+                current_state_payload,
+            )?;
+            let left = runtime_bool_value(&left.value)?;
+            let selected = match operator {
+                ArtifactValueBooleanOperator::And => {
+                    left && runtime_bool_value(
+                        &evaluate_loaded_payload_value(
+                            program,
+                            right,
+                            received_payload,
+                            current_state_payload,
+                        )?
+                        .value,
+                    )?
+                }
+                ArtifactValueBooleanOperator::Or => {
+                    left || runtime_bool_value(
+                        &evaluate_loaded_payload_value(
+                            program,
+                            right,
+                            received_payload,
+                            current_state_payload,
+                        )?
+                        .value,
+                    )?
+                }
+            };
+            program.runtime_payload_value(
+                "boolean predicate template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(selected)),
+            )
+        }
     }
 }
 
@@ -421,6 +482,17 @@ fn bool_atom(value: bool) -> String {
         "True".to_string()
     } else {
         "False".to_string()
+    }
+}
+
+fn runtime_bool_value(value: &RuntimeValue) -> Result<bool> {
+    match value {
+        RuntimeValue::Atom(label) if label == "True" => Ok(true),
+        RuntimeValue::Atom(label) if label == "False" => Ok(false),
+        _ => Err(Error::new(format!(
+            "boolean predicate operand produced non-Bool value {}",
+            value.label()
+        ))),
     }
 }
 
@@ -656,6 +728,30 @@ impl LoadedTemplateAdmission<'_> {
                 self.validate_equality_operand_template(field, "right", *operand_ty, right)?;
                 let nested = Self {
                     expected_type: Some(*operand_ty),
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.left"), left, depth + 1)?;
+                nested.validate_with_depth(&format!("{field}.right"), right, depth + 1)
+            }
+            LoadedValueTemplate::BooleanNot { ty, operand } => {
+                self.validate_bool_contract_type(&format!("{field}.type"), *ty)?;
+                self.validate_boolean_operand_template(field, "operand", *ty, operand)?;
+                let nested = Self {
+                    expected_type: Some(*ty),
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.operand"), operand, depth + 1)
+            }
+            LoadedValueTemplate::BooleanBinary {
+                ty, left, right, ..
+            } => {
+                self.validate_bool_contract_type(&format!("{field}.type"), *ty)?;
+                self.validate_boolean_operand_template(field, "left", *ty, left)?;
+                self.validate_boolean_operand_template(field, "right", *ty, right)?;
+                let nested = Self {
+                    expected_type: Some(*ty),
                     allow_direct_process_ref: false,
                     ..*self
                 };
@@ -1249,6 +1345,23 @@ impl LoadedTemplateAdmission<'_> {
         }
         Ok(())
     }
+
+    fn validate_boolean_operand_template(
+        &self,
+        field: &str,
+        side: &str,
+        bool_ty: TypeId,
+        operand: &LoadedValueTemplate,
+    ) -> Result<()> {
+        if operand.result_type() != bool_ty {
+            return Err(Error::new(format!(
+                "{field}.{side} has type id {}, expected {}",
+                operand.result_type().as_u32(),
+                bool_ty.as_u32()
+            )));
+        }
+        Ok(())
+    }
 }
 
 fn is_bool_contract_shape(shape: &ArtifactValueShape) -> bool {
@@ -1284,7 +1397,9 @@ fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) -> bool {
         | LoadedValueTemplate::MapRest { .. }
         | LoadedValueTemplate::ProcessRef { .. }
         | LoadedValueTemplate::LoopElement { .. }
-        | LoadedValueTemplate::Equality { .. } => false,
+        | LoadedValueTemplate::Equality { .. }
+        | LoadedValueTemplate::BooleanNot { .. }
+        | LoadedValueTemplate::BooleanBinary { .. } => false,
         LoadedValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_is_static_map_key(payload)
         }
@@ -1342,6 +1457,13 @@ pub(super) fn loaded_template_depends_on_received_payload(template: &LoadedValue
             loaded_template_depends_on_received_payload(left)
                 || loaded_template_depends_on_received_payload(right)
         }
+        LoadedValueTemplate::BooleanNot { operand, .. } => {
+            loaded_template_depends_on_received_payload(operand)
+        }
+        LoadedValueTemplate::BooleanBinary { left, right, .. } => {
+            loaded_template_depends_on_received_payload(left)
+                || loaded_template_depends_on_received_payload(right)
+        }
     }
 }
 
@@ -1379,6 +1501,13 @@ fn loaded_template_depends_on_loop_element(template: &LoadedValueTemplate) -> bo
                 || loaded_template_depends_on_loop_element(&entry.value)
         }),
         LoadedValueTemplate::Equality { left, right, .. } => {
+            loaded_template_depends_on_loop_element(left)
+                || loaded_template_depends_on_loop_element(right)
+        }
+        LoadedValueTemplate::BooleanNot { operand, .. } => {
+            loaded_template_depends_on_loop_element(operand)
+        }
+        LoadedValueTemplate::BooleanBinary { left, right, .. } => {
             loaded_template_depends_on_loop_element(left)
                 || loaded_template_depends_on_loop_element(right)
         }

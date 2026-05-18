@@ -92,19 +92,16 @@ fn runtime_for_each_if_checks_and_lowers_to_mantle_loop_branch_control_flow() {
         ] if matches!(
             body.as_slice(),
             [CheckedAction::IfElse {
-                condition: CheckedValueTemplate::Equality {
-                    operator: CheckedValueEqualityOperator::NotEqual,
+                condition: CheckedValueTemplate::BooleanBinary {
+                    operator: CheckedValueBooleanOperator::And,
                     left,
                     right,
                     ..
                 },
                 then_actions,
                 else_actions,
-            }] if matches!(left.as_ref(), CheckedValueTemplate::LoopElement { .. })
-                && matches!(
-                    right.as_ref(),
-                    CheckedValueTemplate::Literal(value) if value.label() == "False"
-                )
+            }] if matches!(left.as_ref(), CheckedValueTemplate::Equality { .. })
+                && matches!(right.as_ref(), CheckedValueTemplate::BooleanNot { .. })
                 && matches!(
                 then_actions.as_slice(),
                 [
@@ -176,27 +173,41 @@ fn runtime_for_each_if_checks_and_lowers_to_mantle_loop_branch_control_flow() {
         ] if matches!(
             body.as_slice(),
             [ArtifactAction::IfElse {
-                condition: ArtifactValueTemplate::Equality {
+                condition: ArtifactValueTemplate::BooleanBinary {
                     ty,
-                    operand_ty,
-                    operator: ArtifactValueEqualityOperator::NotEqual,
+                    operator: ArtifactValueBooleanOperator::And,
                     left,
                     right,
                 },
                 then_actions,
                 else_actions,
             }] if *ty == element.ty
-                && *operand_ty == element.ty
                 && matches!(
                     left.as_ref(),
-                    ArtifactValueTemplate::LoopElement {
-                        element: condition_element,
-                        ..
-                    } if *condition_element == element.id
+                    ArtifactValueTemplate::Equality {
+                        ty,
+                        operand_ty,
+                        operator: ArtifactValueEqualityOperator::NotEqual,
+                        left,
+                        right,
+                    } if *ty == element.ty
+                        && *operand_ty == element.ty
+                        && matches!(
+                            left.as_ref(),
+                            ArtifactValueTemplate::LoopElement {
+                                element: condition_element,
+                                ..
+                            } if *condition_element == element.id
+                        )
+                        && matches!(
+                            right.as_ref(),
+                            ArtifactValueTemplate::Literal { ty, value } if *ty == element.ty && value == &artifact_value("False")
+                        )
                 )
                 && matches!(
                     right.as_ref(),
-                    ArtifactValueTemplate::Literal { ty, value } if *ty == element.ty && value == &artifact_value("False")
+                    ArtifactValueTemplate::BooleanNot { ty, operand }
+                        if *ty == element.ty && matches!(operand.as_ref(), ArtifactValueTemplate::Equality { .. })
                 )
                 && matches!(
                     then_actions.as_slice(),
@@ -228,6 +239,8 @@ fn runtime_for_each_if_checks_and_lowers_to_mantle_loop_branch_control_flow() {
     ));
     let encoded = artifact.encode();
     assert!(encoded.contains(".kind=if_else"));
+    assert!(encoded.contains(".kind=boolean_binary"));
+    assert!(encoded.contains(".kind=boolean_not"));
     assert!(encoded.contains(".kind=equality"));
     assert!(encoded.contains(".kind=loop_element"));
     assert!(
@@ -266,7 +279,8 @@ fn runtime_for_each_rejects_static_collection_source_folding() {
 
 #[test]
 fn runtime_for_each_if_rejects_non_bool_loop_condition() {
-    let source = RUNTIME_FOR_EACH_IF.replace("if (item != False)", "if (state)");
+    let source =
+        RUNTIME_FOR_EACH_IF.replace("if ((item != False) && !(item == False))", "if (state)");
     let error = check_source(&source).expect_err("loop branch condition must be Bool");
     assert!(
         error
@@ -285,6 +299,7 @@ fn runtime_for_each_if_rejects_missing_bool_contract() {
         )
         .replace("List<Bool,2>[True, False]", "List<Bool,2>[Yes, No]")
         .replace("item != False", "item != No")
+        .replace("item == False", "item == No")
         .replace("flag == True", "flag == Yes");
     let error =
         check_source(&source).expect_err("loop branch condition must require Bool contract");

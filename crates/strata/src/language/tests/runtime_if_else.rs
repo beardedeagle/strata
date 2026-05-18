@@ -143,6 +143,138 @@ fn runtime_if_else_accepts_not_equal_payload_predicate() {
 }
 
 #[test]
+fn runtime_if_else_accepts_composed_payload_predicate() {
+    let source = RUNTIME_IF_ELSE.replace(
+        "if (flag == True)",
+        "if (((flag == True) && !(flag == False)) || (flag != False))",
+    );
+    let checked = check_source(&source).expect("composed runtime predicate should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    let transition = only_transition(worker);
+    assert!(matches!(
+        transition.next_state(),
+        CheckedNextState::IfElse {
+            condition: CheckedValueTemplate::BooleanBinary {
+                operator: CheckedValueBooleanOperator::Or,
+                left,
+                right,
+                ..
+            },
+            ..
+        } if matches!(
+                left.as_ref(),
+                CheckedValueTemplate::BooleanBinary {
+                    operator: CheckedValueBooleanOperator::And,
+                    ..
+                }
+            )
+            && matches!(
+                right.as_ref(),
+                CheckedValueTemplate::Equality {
+                    operator: CheckedValueEqualityOperator::NotEqual,
+                    ..
+                }
+            )
+    ));
+
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("composed runtime predicate should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker artifact should exist");
+    let condition = match &worker.transitions[0].next_state {
+        NextState::IfElse { condition, .. } => condition,
+        other => panic!("expected if/else next state, got {other:?}"),
+    };
+    let bool_type = artifact_type_id(&artifact, "Bool");
+    assert!(matches!(
+        condition,
+        ArtifactValueTemplate::BooleanBinary {
+            ty,
+            operator: ArtifactValueBooleanOperator::Or,
+            left,
+            right,
+        } if *ty == bool_type
+            && matches!(
+                left.as_ref(),
+                ArtifactValueTemplate::BooleanBinary {
+                    operator: ArtifactValueBooleanOperator::And,
+                    ..
+                }
+            )
+            && matches!(
+                right.as_ref(),
+                ArtifactValueTemplate::Equality {
+                    operator: ArtifactValueEqualityOperator::NotEqual,
+                    ..
+                }
+            )
+    ));
+    assert!(
+        !artifact
+            .encode()
+            .lines()
+            .any(|line| line.ends_with("=flag") || line.contains("debug_name=flag")),
+        "composed predicate artifact must not dispatch through the source binding name"
+    );
+}
+
+#[test]
+fn runtime_if_else_accepts_direct_bool_payload_composition() {
+    let source = RUNTIME_IF_ELSE.replace("if (flag == True)", "if (flag && !(flag == False))");
+    let checked = check_source(&source).expect("direct Bool runtime predicate should check");
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("direct Bool runtime predicate should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker artifact should exist");
+    let condition = match &worker.transitions[0].next_state {
+        NextState::IfElse { condition, .. } => condition,
+        other => panic!("expected if/else next state, got {other:?}"),
+    };
+    let bool_type = artifact_type_id(&artifact, "Bool");
+    assert!(matches!(
+        condition,
+        ArtifactValueTemplate::BooleanBinary {
+            ty,
+            operator: ArtifactValueBooleanOperator::And,
+            left,
+            right,
+        } if *ty == bool_type
+            && matches!(left.as_ref(), ArtifactValueTemplate::ReceivedPayload { ty } if *ty == bool_type)
+            && matches!(
+                right.as_ref(),
+                ArtifactValueTemplate::BooleanNot { ty, operand }
+                    if *ty == bool_type
+                        && matches!(
+                            operand.as_ref(),
+                            ArtifactValueTemplate::Equality {
+                                ty,
+                                operand_ty,
+                                operator: ArtifactValueEqualityOperator::Equal,
+                                left,
+                                right,
+                            } if *ty == bool_type
+                                && *operand_ty == bool_type
+                                && matches!(left.as_ref(), ArtifactValueTemplate::ReceivedPayload { ty } if *ty == bool_type)
+                                && matches!(
+                                    right.as_ref(),
+                                    ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("False")
+                                )
+                        )
+            )
+    ));
+}
+
+#[test]
 fn runtime_if_else_disambiguates_fieldless_variant_from_payload_type() {
     let source = RUNTIME_IF_ELSE.replace(
         "enum MainMsg {\n    Start,\n}",

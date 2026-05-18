@@ -930,6 +930,13 @@ impl ArtifactProcess {
                 self.validate_template_process_refs(artifact, left, spawned_refs)?;
                 self.validate_template_process_refs(artifact, right, spawned_refs)
             }
+            ArtifactValueTemplate::BooleanNot { operand, .. } => {
+                self.validate_template_process_refs(artifact, operand, spawned_refs)
+            }
+            ArtifactValueTemplate::BooleanBinary { left, right, .. } => {
+                self.validate_template_process_refs(artifact, left, spawned_refs)?;
+                self.validate_template_process_refs(artifact, right, spawned_refs)
+            }
             ArtifactValueTemplate::ProcessRef {
                 ty,
                 target_process,
@@ -1064,6 +1071,26 @@ fn validate_template_loop_elements(
                 &format!("{field}.right"),
             )
         }
+        ArtifactValueTemplate::BooleanNot { operand, .. } => validate_template_loop_elements(
+            artifact,
+            operand,
+            active_loop_elements,
+            &format!("{field}.operand"),
+        ),
+        ArtifactValueTemplate::BooleanBinary { left, right, .. } => {
+            validate_template_loop_elements(
+                artifact,
+                left,
+                active_loop_elements,
+                &format!("{field}.left"),
+            )?;
+            validate_template_loop_elements(
+                artifact,
+                right,
+                active_loop_elements,
+                &format!("{field}.right"),
+            )
+        }
         ArtifactValueTemplate::EnumVariant { payload, .. } => {
             validate_template_loop_elements(artifact, payload, active_loop_elements, field)
         }
@@ -1161,7 +1188,9 @@ fn validate_bool_condition_template_shape(
         | ArtifactValueTemplate::ListPrefixElement { .. }
         | ArtifactValueTemplate::MapValue { .. }
         | ArtifactValueTemplate::LoopElement { .. }
-        | ArtifactValueTemplate::Equality { .. } => Ok(()),
+        | ArtifactValueTemplate::Equality { .. }
+        | ArtifactValueTemplate::BooleanNot { .. }
+        | ArtifactValueTemplate::BooleanBinary { .. } => Ok(()),
         ArtifactValueTemplate::ListRest { .. }
         | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. }
