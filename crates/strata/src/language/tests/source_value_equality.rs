@@ -161,8 +161,8 @@ proc Main mailbox bounded(1) {
 fn rejects_boolean_predicate_non_bool_operands() {
     for (expr, expected) in [
         ("!Cold", "boolean ! operand must produce Bool"),
-        ("Cold && True", "left boolean operand must produce Bool"),
-        ("True || Cold", "right boolean operand must produce Bool"),
+        ("Cold && True", "left operand of && must produce Bool"),
+        ("True || Cold", "right operand of || must produce Bool"),
     ] {
         let source = source_with_equality_expr(expr);
         let err = check_source(&source).expect_err("non-Bool boolean operand should fail");

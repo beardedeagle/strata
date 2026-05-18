@@ -288,7 +288,7 @@ fn validate_source_boolean_not_expr(
 fn validate_source_boolean_binary_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
-    _operator: ValueBooleanOperator,
+    operator: ValueBooleanOperator,
     left: &ValueExpr,
     right: &ValueExpr,
     bindings: &[SourceValueBinding<'_>],
@@ -297,12 +297,14 @@ fn validate_source_boolean_binary_expr(
     validate_source_boolean_result_type(scope, expected_type, &bool_type)?;
     validate_source_function_value_expr(scope, &bool_type, left, bindings).map_err(|err| {
         Error::new(format!(
-            "left boolean operand must produce {bool_type}: {err}"
+            "left operand of {} must produce {bool_type}: {err}",
+            operator.as_str()
         ))
     })?;
     validate_source_function_value_expr(scope, &bool_type, right, bindings).map_err(|err| {
         Error::new(format!(
-            "right boolean operand must produce {bool_type}: {err}"
+            "right operand of {} must produce {bool_type}: {err}",
+            operator.as_str()
         ))
     })
 }
