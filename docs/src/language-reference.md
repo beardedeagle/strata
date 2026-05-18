@@ -19,6 +19,7 @@ Mantle artifact internals.
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
+| Boolean predicates | `!`, `&&`, and `||` over admitted Bool-producing predicates. |
 | Pure conditionals | Source-time expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`. |
 | Runtime branching | Final-position `if (condition) { ... return ...; } else { ... return ...; }` and statement-level effect branches in `step` bodies, lowered to Mantle control flow. |
 | Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, step return-match expressions with optional uniform action prefixes, and `_` wildcards. |
@@ -530,6 +531,31 @@ This slice does not admit string equality, structural record/list/map equality,
 payload enum equality, process-reference equality, ordering, arithmetic,
 assignment, or mutation.
 
+## Boolean Predicate Composition
+
+Bool-producing predicates can be composed with grouping, unary `!`, binary
+`&&`, and binary `||`:
+
+```strata
+if ((flag == True) && !(status == Done)) {
+    emit "still active";
+} else {
+    emit "complete";
+}
+```
+
+Every composed operand must have the exact `Bool` contract. The admitted
+operands are direct `Bool` values or templates, typed equality predicates, and
+nested Boolean predicate composition. Fully concrete source predicates fold
+during checking. Runtime-dependent predicates lower into typed Mantle value
+templates; Mantle admits the typed tree, validates all operands, evaluates it
+from admitted runtime values, and records the selected branch through the
+existing `branch_selected` trace event.
+
+Predicate composition does not add arithmetic, ordering, string equality,
+structural equality, payload enum equality, process-reference equality,
+assignment, mutation, or authority.
+
 ## Runtime Branching
 
 Step bodies can use a final-position runtime `if` whose condition is a checked
@@ -619,7 +645,7 @@ let worker: ProcessRef<Worker> = spawn Worker;
 send worker Ping;
 if (flag == True) { emit "true"; } else { emit "false"; }
 for item in items { send worker Branch(item); }
-for item in items { if (item != False) { send worker Branch(item); } else { emit "skip"; } }
+for item in items { if ((item != False) && !(item == False)) { send worker Branch(item); } else { emit "skip"; } }
 return Stop(state);
 return Continue(next_state);
 return Panic(failed_state);

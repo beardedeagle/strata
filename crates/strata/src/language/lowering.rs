@@ -2,10 +2,10 @@ use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactEnumVariant,
     ArtifactLoopElement, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
     ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField,
-    ArtifactTypeKind, ArtifactValueEqualityOperator, ArtifactValueShape, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, LoopElementId,
-    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult,
-    TypeId, source_hash_fnv1a64,
+    ArtifactTypeKind, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
+    ArtifactValueShape, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, EnumVariantId, LoopElementId, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
@@ -14,7 +14,8 @@ use super::checked::{
     CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget, CheckedStateId,
     CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId, CheckedTypeKind,
-    CheckedTypeRef, CheckedValueEqualityOperator, CheckedValueShape, CheckedValueTemplate,
+    CheckedTypeRef, CheckedValueBooleanOperator, CheckedValueEqualityOperator, CheckedValueShape,
+    CheckedValueTemplate,
 };
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
@@ -497,6 +498,21 @@ fn lower_value_template(
             left: Box::new(lower_value_template(left, types)?),
             right: Box::new(lower_value_template(right, types)?),
         }),
+        CheckedValueTemplate::BooleanNot { ty, operand } => Ok(ArtifactValueTemplate::BooleanNot {
+            ty: types.artifact_id(ty)?,
+            operand: Box::new(lower_value_template(operand, types)?),
+        }),
+        CheckedValueTemplate::BooleanBinary {
+            ty,
+            operator,
+            left,
+            right,
+        } => Ok(ArtifactValueTemplate::BooleanBinary {
+            ty: types.artifact_id(ty)?,
+            operator: lower_value_boolean_operator(*operator),
+            left: Box::new(lower_value_template(left, types)?),
+            right: Box::new(lower_value_template(right, types)?),
+        }),
     }
 }
 
@@ -506,6 +522,15 @@ fn lower_value_equality_operator(
     match operator {
         CheckedValueEqualityOperator::Equal => ArtifactValueEqualityOperator::Equal,
         CheckedValueEqualityOperator::NotEqual => ArtifactValueEqualityOperator::NotEqual,
+    }
+}
+
+fn lower_value_boolean_operator(
+    operator: CheckedValueBooleanOperator,
+) -> ArtifactValueBooleanOperator {
+    match operator {
+        CheckedValueBooleanOperator::And => ArtifactValueBooleanOperator::And,
+        CheckedValueBooleanOperator::Or => ArtifactValueBooleanOperator::Or,
     }
 }
 

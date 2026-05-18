@@ -459,6 +459,17 @@ pub enum ValueExpr {
         left: Box<ValueExpr>,
         right: Box<ValueExpr>,
     },
+    BooleanNot {
+        operand: Box<ValueExpr>,
+    },
+    BooleanBinary {
+        operator: ValueBooleanOperator,
+        left: Box<ValueExpr>,
+        right: Box<ValueExpr>,
+    },
+    Grouped {
+        value: Box<ValueExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -472,6 +483,21 @@ impl ValueEqualityOperator {
         match self {
             Self::Equal => "==",
             Self::NotEqual => "!=",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueBooleanOperator {
+    And,
+    Or,
+}
+
+impl ValueBooleanOperator {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::And => "&&",
+            Self::Or => "||",
         }
     }
 }
@@ -528,6 +554,13 @@ impl fmt::Display for ValueExpr {
                 left,
                 right,
             } => write!(f, "{left}{}{}", operator.as_str(), right),
+            Self::BooleanNot { operand } => write!(f, "!({operand})"),
+            Self::BooleanBinary {
+                operator,
+                left,
+                right,
+            } => write!(f, "({left}){}({right})", operator.as_str()),
+            Self::Grouped { value } => write!(f, "({value})"),
         }
     }
 }

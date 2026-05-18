@@ -684,6 +684,27 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
             encode_value_template(encoded, &format!("{prefix}.left"), left);
             encode_value_template(encoded, &format!("{prefix}.right"), right);
         }
+        ArtifactValueTemplate::BooleanNot { ty, operand } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=boolean_not\n{prefix}.type_id={}\n",
+                ty.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.operand"), operand);
+        }
+        ArtifactValueTemplate::BooleanBinary {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=boolean_binary\n{prefix}.type_id={}\n{prefix}.operator={}\n",
+                ty.as_u32(),
+                operator.as_str()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.left"), left);
+            encode_value_template(encoded, &format!("{prefix}.right"), right);
+        }
     }
 }
 
@@ -983,6 +1004,34 @@ fn decode_value_template(
                 ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
                 operand_ty: fields.take_type_id(&format!("{prefix}.operand_type_id"))?,
                 operator: ArtifactValueEqualityOperator::parse(
+                    &operator_field,
+                    &fields.take_required(&operator_field)?,
+                )?,
+                left: Box::new(decode_value_template(
+                    fields,
+                    &format!("{prefix}.left"),
+                    depth + 1,
+                )?),
+                right: Box::new(decode_value_template(
+                    fields,
+                    &format!("{prefix}.right"),
+                    depth + 1,
+                )?),
+            })
+        }
+        "boolean_not" => Ok(ArtifactValueTemplate::BooleanNot {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            operand: Box::new(decode_value_template(
+                fields,
+                &format!("{prefix}.operand"),
+                depth + 1,
+            )?),
+        }),
+        "boolean_binary" => {
+            let operator_field = format!("{prefix}.operator");
+            Ok(ArtifactValueTemplate::BooleanBinary {
+                ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+                operator: ArtifactValueBooleanOperator::parse(
                     &operator_field,
                     &fields.take_required(&operator_field)?,
                 )?,

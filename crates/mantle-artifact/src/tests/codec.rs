@@ -226,6 +226,55 @@ fn artifact_round_trips_equality_condition_template() {
 }
 
 #[test]
+fn artifact_round_trips_boolean_predicate_condition_template() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    let equality = ArtifactValueTemplate::Equality {
+        ty: bool_type,
+        operand_ty: bool_type,
+        operator: ArtifactValueEqualityOperator::Equal,
+        left: Box::new(ArtifactValueTemplate::ReceivedPayload { ty: bool_type }),
+        right: Box::new(ArtifactValueTemplate::Literal {
+            ty: bool_type,
+            value: artifact_value("True"),
+        }),
+    };
+    artifact.processes[1].message_variants[0].payload_type = Some(bool_type);
+    match &mut artifact.processes[0].transitions[0].actions[1] {
+        ArtifactAction::Send { payload, .. } => {
+            *payload = Some(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            });
+        }
+        action => panic!("expected test fixture send action, got {action:?}"),
+    }
+    artifact.processes[1].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::BooleanBinary {
+            ty: bool_type,
+            operator: ArtifactValueBooleanOperator::And,
+            left: Box::new(equality.clone()),
+            right: Box::new(ArtifactValueTemplate::BooleanNot {
+                ty: bool_type,
+                operand: Box::new(equality),
+            }),
+        },
+        then_state: Box::new(NextState::Value(StateId::new(1))),
+        else_state: Box::new(NextState::Current),
+    };
+
+    let encoded = artifact.encode();
+    let decoded =
+        MantleArtifact::decode(&encoded).expect("boolean predicate artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains("process.1.transition.0.next_state_condition.kind=boolean_binary"));
+    assert!(encoded.contains("process.1.transition.0.next_state_condition.operator=and"));
+    assert!(encoded.contains("process.1.transition.0.next_state_condition.left.kind=equality"));
+    assert!(encoded.contains("process.1.transition.0.next_state_condition.right.kind=boolean_not"));
+}
+
+#[test]
 fn admission_rejects_malformed_equality_operand_type() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
@@ -320,6 +369,71 @@ fn admission_rejects_equality_left_operand_result_type_mismatch() {
     assert!(
         err.to_string().contains(&format!(
             "left has type id {}, expected {}",
+            WORKER_STATE.as_u32(),
+            bool_type.as_u32()
+        )),
+        "{err}"
+    );
+}
+
+#[test]
+fn admission_rejects_boolean_predicate_non_bool_operand() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::BooleanBinary {
+            ty: bool_type,
+            operator: ArtifactValueBooleanOperator::And,
+            left: Box::new(ArtifactValueTemplate::Literal {
+                ty: WORKER_STATE,
+                value: artifact_value("Handled"),
+            }),
+            right: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+        },
+        then_state: Box::new(NextState::Value(StateId::new(1))),
+        else_state: Box::new(NextState::Current),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("boolean predicate operands must be Bool");
+
+    assert!(
+        err.to_string().contains(&format!(
+            "next_state_condition.left has type id {}, expected {}",
+            WORKER_STATE.as_u32(),
+            bool_type.as_u32()
+        )),
+        "{err}"
+    );
+}
+
+#[test]
+fn admission_rejects_boolean_not_non_bool_operand() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::BooleanNot {
+            ty: bool_type,
+            operand: Box::new(ArtifactValueTemplate::Literal {
+                ty: WORKER_STATE,
+                value: artifact_value("Handled"),
+            }),
+        },
+        then_state: Box::new(NextState::Value(StateId::new(1))),
+        else_state: Box::new(NextState::Current),
+    };
+
+    let err = artifact
+        .validate()
+        .expect_err("boolean ! predicate operand must be Bool");
+
+    assert!(
+        err.to_string().contains(&format!(
+            "next_state_condition.operand has type id {}, expected {}",
             WORKER_STATE.as_u32(),
             bool_type.as_u32()
         )),

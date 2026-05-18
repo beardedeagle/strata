@@ -396,6 +396,16 @@ fn collect_source_value_expr_calls<'a>(value: &'a ValueExpr, calls: &mut BTreeSe
             collect_source_value_expr_calls(left, calls);
             collect_source_value_expr_calls(right, calls);
         }
+        ValueExpr::BooleanNot { operand } => {
+            collect_source_value_expr_calls(operand, calls);
+        }
+        ValueExpr::BooleanBinary { left, right, .. } => {
+            collect_source_value_expr_calls(left, calls);
+            collect_source_value_expr_calls(right, calls);
+        }
+        ValueExpr::Grouped { value } => {
+            collect_source_value_expr_calls(value, calls);
+        }
     }
 }
 

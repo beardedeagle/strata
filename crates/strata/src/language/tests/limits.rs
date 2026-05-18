@@ -326,6 +326,41 @@ fn rejects_excessive_value_nesting_while_parsing() {
 }
 
 #[test]
+fn rejects_excessive_unary_predicate_nesting_while_parsing() {
+    let value = format!("{}False", "!".repeat(MAX_VALUE_NESTING + 1));
+    let source = r#"
+module excessive_unary_predicate_nesting;
+
+enum Bool { False, True }
+record MainState { flag: Bool }
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { flag: VALUE };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#
+    .replace("VALUE", &value);
+
+    let err = parse_source(&source).expect_err("excessive unary predicate nesting should fail");
+
+    let message = err.to_string();
+    assert!(message.contains("value nesting exceeds maximum depth"));
+    assert!(
+        message.contains(" at byte "),
+        "expected byte-offset context in diagnostic: {message}"
+    );
+}
+
+#[test]
 fn rejects_emit_output_too_large_for_artifacts() {
     let output = "a".repeat(MAX_FIELD_VALUE_BYTES + 1);
     let source = HELLO.replace("hello from Strata", &output);

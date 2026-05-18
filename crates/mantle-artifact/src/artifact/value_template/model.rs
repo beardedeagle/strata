@@ -121,6 +121,16 @@ pub enum ArtifactValueTemplate {
         left: Box<ArtifactValueTemplate>,
         right: Box<ArtifactValueTemplate>,
     },
+    BooleanNot {
+        ty: TypeId,
+        operand: Box<ArtifactValueTemplate>,
+    },
+    BooleanBinary {
+        ty: TypeId,
+        operator: ArtifactValueBooleanOperator,
+        left: Box<ArtifactValueTemplate>,
+        right: Box<ArtifactValueTemplate>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +153,31 @@ impl ArtifactValueEqualityOperator {
             "ne" => Ok(Self::NotEqual),
             _ => Err(crate::Error::new(format!(
                 "{field} has invalid equality operator {value:?}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactValueBooleanOperator {
+    And,
+    Or,
+}
+
+impl ArtifactValueBooleanOperator {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::And => "and",
+            Self::Or => "or",
+        }
+    }
+
+    pub fn parse(field: &str, value: &str) -> crate::Result<Self> {
+        match value {
+            "and" => Ok(Self::And),
+            "or" => Ok(Self::Or),
+            _ => Err(crate::Error::new(format!(
+                "{field} has invalid boolean operator {value:?}"
             ))),
         }
     }

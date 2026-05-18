@@ -82,6 +82,10 @@ result of the first invalid shape.
 | `list and map equality are not supported in this source slice` | A `==` or `!=` expression tries to compare a collection type. | Compare an explicit `Bool` or payload-free enum predicate instead. |
 | `record equality is not supported in this source slice` | A `==` or `!=` expression tries to compare a record value. | Compare an explicit `Bool` or payload-free enum predicate instead. |
 | `equality type ... must not declare payload-bearing enum variants` | A `==` or `!=` expression targets an enum that can carry payload data. | Use a payload-free enum for equality, or add an explicit helper/match shape rather than payload equality. |
+| `boolean ! operand must produce Bool` | A `!` predicate operand resolves to a non-Bool value. | Apply `!` only to `Bool`, typed equality, or nested Boolean predicate expressions. |
+| `left boolean operand must produce Bool` / `right boolean operand must produce Bool` | A `&&` or `||` operand resolves to a non-Bool value. | Compose only `Bool`, typed equality, or nested Boolean predicate expressions. |
+| `boolean predicate expression produces Bool, expected ...` | A composed predicate is used where a non-Bool value is required. | Use predicate composition only in Bool positions such as conditions or Bool fields. |
+| `parenthesized predicate grouping produces Bool, expected ...` | Parentheses are used as value grouping around a non-Bool expression. | Use parenthesized grouping only for Bool predicates. |
 | `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
 | `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |
 | `function ... wildcard pattern is unreachable` | Explicit source function clauses already cover every variant. | Remove the wildcard clause or remove the explicit clauses it should cover. |

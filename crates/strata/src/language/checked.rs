@@ -493,12 +493,28 @@ pub(in crate::language) enum CheckedValueTemplate {
         left: Box<CheckedValueTemplate>,
         right: Box<CheckedValueTemplate>,
     },
+    BooleanNot {
+        ty: CheckedTypeRef,
+        operand: Box<CheckedValueTemplate>,
+    },
+    BooleanBinary {
+        ty: CheckedTypeRef,
+        operator: CheckedValueBooleanOperator,
+        left: Box<CheckedValueTemplate>,
+        right: Box<CheckedValueTemplate>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::language) enum CheckedValueEqualityOperator {
     Equal,
     NotEqual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) enum CheckedValueBooleanOperator {
+    And,
+    Or,
 }
 
 impl CheckedValueTemplate {
@@ -520,7 +536,9 @@ impl CheckedValueTemplate {
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
             | Self::Map { ty, .. }
-            | Self::Equality { ty, .. } => ty,
+            | Self::Equality { ty, .. }
+            | Self::BooleanNot { ty, .. }
+            | Self::BooleanBinary { ty, .. } => ty,
         }
     }
 }

@@ -610,6 +610,13 @@ fn validate_value_template_loop_elements(
             validate_value_template_loop_elements(left, active_loop_elements)?;
             validate_value_template_loop_elements(right, active_loop_elements)
         }
+        CheckedValueTemplate::BooleanNot { operand, .. } => {
+            validate_value_template_loop_elements(operand, active_loop_elements)
+        }
+        CheckedValueTemplate::BooleanBinary { left, right, .. } => {
+            validate_value_template_loop_elements(left, active_loop_elements)?;
+            validate_value_template_loop_elements(right, active_loop_elements)
+        }
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             validate_value_template_loop_elements(payload, active_loop_elements)
         }

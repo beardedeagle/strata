@@ -5,8 +5,8 @@ use super::super::{
     MantleArtifact,
 };
 use super::model::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, ArtifactValueEqualityOperator,
-    ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, ArtifactValueBooleanOperator,
+    ArtifactValueEqualityOperator, ArtifactValueTemplate, ArtifactValueTemplateField,
 };
 use super::payload::ArtifactPayload;
 use super::projection::{
@@ -73,7 +73,9 @@ impl ArtifactValueTemplate {
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
             | Self::Map { ty, .. }
-            | Self::Equality { ty, .. } => *ty,
+            | Self::Equality { ty, .. }
+            | Self::BooleanNot { ty, .. }
+            | Self::BooleanBinary { ty, .. } => *ty,
         }
     }
 
@@ -335,6 +337,52 @@ impl ArtifactValueTemplate {
                 };
                 ArtifactStateValue::from_value(*ty, ArtifactValue::Atom(bool_atom(selected)))
             }
+            Self::BooleanNot { ty, operand } => {
+                let value = operand.evaluate_state_value(
+                    received_payload,
+                    current_state_payload,
+                    type_entry,
+                )?;
+                ArtifactStateValue::from_value(
+                    *ty,
+                    ArtifactValue::Atom(bool_atom(!artifact_bool_value(&value.value)?)),
+                )
+            }
+            Self::BooleanBinary {
+                ty,
+                operator,
+                left,
+                right,
+            } => {
+                let left =
+                    left.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
+                let left = artifact_bool_value(&left.value)?;
+                let selected = match operator {
+                    ArtifactValueBooleanOperator::And => {
+                        left && artifact_bool_value(
+                            &right
+                                .evaluate_state_value(
+                                    received_payload,
+                                    current_state_payload,
+                                    type_entry,
+                                )?
+                                .value,
+                        )?
+                    }
+                    ArtifactValueBooleanOperator::Or => {
+                        left || artifact_bool_value(
+                            &right
+                                .evaluate_state_value(
+                                    received_payload,
+                                    current_state_payload,
+                                    type_entry,
+                                )?
+                                .value,
+                        )?
+                    }
+                };
+                ArtifactStateValue::from_value(*ty, ArtifactValue::Atom(bool_atom(selected)))
+            }
         }
     }
 
@@ -363,6 +411,10 @@ impl ArtifactValueTemplate {
             Self::Equality { left, right, .. } => {
                 left.depends_on_received_payload() || right.depends_on_received_payload()
             }
+            Self::BooleanNot { operand, .. } => operand.depends_on_received_payload(),
+            Self::BooleanBinary { left, right, .. } => {
+                left.depends_on_received_payload() || right.depends_on_received_payload()
+            }
         }
     }
 
@@ -389,6 +441,10 @@ impl ArtifactValueTemplate {
                 entry.key.depends_on_loop_element() || entry.value.depends_on_loop_element()
             }),
             Self::Equality { left, right, .. } => {
+                left.depends_on_loop_element() || right.depends_on_loop_element()
+            }
+            Self::BooleanNot { operand, .. } => operand.depends_on_loop_element(),
+            Self::BooleanBinary { left, right, .. } => {
                 left.depends_on_loop_element() || right.depends_on_loop_element()
             }
         }
@@ -805,6 +861,36 @@ impl ArtifactValueTemplate {
                     depth + 1,
                 )
             }
+            Self::BooleanNot { ty, operand } => {
+                validate_bool_contract_type(artifact, &format!("{field}.type_id"), *ty)?;
+                validate_boolean_operand_template(field, "operand", *ty, operand)?;
+                operand.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.operand"),
+                    validation.nested().with_expected_type(Some(*ty)),
+                    depth + 1,
+                )
+            }
+            Self::BooleanBinary {
+                ty, left, right, ..
+            } => {
+                validate_bool_contract_type(artifact, &format!("{field}.type_id"), *ty)?;
+                validate_boolean_operand_template(field, "left", *ty, left)?;
+                validate_boolean_operand_template(field, "right", *ty, right)?;
+                let nested = validation.nested().with_expected_type(Some(*ty));
+                left.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.left"),
+                    nested,
+                    depth + 1,
+                )?;
+                right.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.right"),
+                    nested,
+                    depth + 1,
+                )
+            }
         }
     }
 }
@@ -814,6 +900,17 @@ fn bool_atom(value: bool) -> String {
         "True".to_string()
     } else {
         "False".to_string()
+    }
+}
+
+fn artifact_bool_value(value: &ArtifactValue) -> Result<bool> {
+    match value {
+        ArtifactValue::Atom(label) if label == "True" => Ok(true),
+        ArtifactValue::Atom(label) if label == "False" => Ok(false),
+        _ => Err(Error::new(format!(
+            "boolean predicate operand produced non-Bool value {}",
+            value.label()
+        ))),
     }
 }
 
@@ -875,6 +972,22 @@ fn validate_equality_operand_template(
             "{field}.{side} has type id {}, expected {}",
             operand.result_type().as_u32(),
             operand_ty.as_u32()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_boolean_operand_template(
+    field: &str,
+    side: &str,
+    bool_ty: TypeId,
+    operand: &ArtifactValueTemplate,
+) -> Result<()> {
+    if operand.result_type() != bool_ty {
+        return Err(Error::new(format!(
+            "{field}.{side} has type id {}, expected {}",
+            operand.result_type().as_u32(),
+            bool_ty.as_u32()
         )));
     }
     Ok(())
@@ -1234,7 +1347,9 @@ fn is_static_map_key_template(template: &ArtifactValueTemplate) -> bool {
         | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. }
         | ArtifactValueTemplate::LoopElement { .. }
-        | ArtifactValueTemplate::Equality { .. } => false,
+        | ArtifactValueTemplate::Equality { .. }
+        | ArtifactValueTemplate::BooleanNot { .. }
+        | ArtifactValueTemplate::BooleanBinary { .. } => false,
         ArtifactValueTemplate::EnumVariant { payload, .. } => is_static_map_key_template(payload),
         ArtifactValueTemplate::Record { fields, .. } => fields
             .iter()

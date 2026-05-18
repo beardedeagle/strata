@@ -569,7 +569,10 @@ fn concrete_source_enum_value<'a>(
         ValueExpr::Call { .. }
         | ValueExpr::Record(_)
         | ValueExpr::IfElse { .. }
-        | ValueExpr::Equality { .. } => Err(Error::new(format!(
+        | ValueExpr::Equality { .. }
+        | ValueExpr::BooleanNot { .. }
+        | ValueExpr::BooleanBinary { .. }
+        | ValueExpr::Grouped { .. } => Err(Error::new(format!(
             "function {function_name} {usage} requires a concrete enum constructor argument"
         ))),
         ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
@@ -589,7 +592,10 @@ fn concrete_source_record_value<'a>(
         | ValueExpr::Call { .. }
         | ValueExpr::EnumVariant { .. }
         | ValueExpr::IfElse { .. }
-        | ValueExpr::Equality { .. } => Err(Error::new(format!(
+        | ValueExpr::Equality { .. }
+        | ValueExpr::BooleanNot { .. }
+        | ValueExpr::BooleanBinary { .. }
+        | ValueExpr::Grouped { .. } => Err(Error::new(format!(
             "function {function_name} {usage} requires a concrete record value argument"
         ))),
         ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
@@ -665,6 +671,21 @@ fn substitute_source_value_bindings(
             operator,
             left: Box::new(substitute_source_value_bindings(*left, bindings)),
             right: Box::new(substitute_source_value_bindings(*right, bindings)),
+        },
+        ValueExpr::BooleanNot { operand } => ValueExpr::BooleanNot {
+            operand: Box::new(substitute_source_value_bindings(*operand, bindings)),
+        },
+        ValueExpr::BooleanBinary {
+            operator,
+            left,
+            right,
+        } => ValueExpr::BooleanBinary {
+            operator,
+            left: Box::new(substitute_source_value_bindings(*left, bindings)),
+            right: Box::new(substitute_source_value_bindings(*right, bindings)),
+        },
+        ValueExpr::Grouped { value } => ValueExpr::Grouped {
+            value: Box::new(substitute_source_value_bindings(*value, bindings)),
         },
     }
 }

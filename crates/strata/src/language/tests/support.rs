@@ -2,14 +2,16 @@ pub(super) use super::super::ast::EnumVariant;
 pub(super) use super::super::checked::{
     CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedTypeKind, CheckedValueEqualityOperator, CheckedValueTemplate,
+    CheckedTransition, CheckedTypeKind, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
+    CheckedValueTemplate,
 };
 pub(super) use super::super::lexer::{Lexer, TokenKind};
 pub(super) use super::super::*;
 pub(super) use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget, ArtifactTypeKind,
-    ArtifactValue, ArtifactValueEqualityOperator, ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS,
-    MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
+    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
+    ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_ENUM_VARIANTS_PER_TYPE,
+    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
     MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState, ProcessId,
     ProcessRefId, StepResult, TypeId,

@@ -5,7 +5,8 @@ use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
 use super::super::super::checked::{
     CheckedAction, CheckedLoopElementId, CheckedMessageId, CheckedPayloadValue, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedValueEqualityOperator, CheckedValueTemplate,
+    CheckedTransition, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
+    CheckedValueTemplate,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
@@ -369,6 +370,62 @@ fn evaluate_checked_runtime_template(
                 ArtifactValue::Atom(bool_atom(selected)),
             ))
         }
+        CheckedValueTemplate::BooleanNot { ty, operand } => {
+            let value = evaluate_checked_runtime_template(
+                operand,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Atom(bool_atom(!checked_runtime_bool_value(&value)?)),
+            ))
+        }
+        CheckedValueTemplate::BooleanBinary {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_checked_runtime_template(
+                left,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            let left = checked_runtime_bool_value(&left)?;
+            let selected = match operator {
+                CheckedValueBooleanOperator::And => {
+                    left && checked_runtime_bool_value(&evaluate_checked_runtime_template(
+                        right,
+                        received_payload,
+                        current_state_payload,
+                        process,
+                        process_refs,
+                        loop_elements,
+                    )?)?
+                }
+                CheckedValueBooleanOperator::Or => {
+                    left || checked_runtime_bool_value(&evaluate_checked_runtime_template(
+                        right,
+                        received_payload,
+                        current_state_payload,
+                        process,
+                        process_refs,
+                        loop_elements,
+                    )?)?
+                }
+            };
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Atom(bool_atom(selected)),
+            ))
+        }
     }
 }
 
@@ -384,6 +441,18 @@ fn checked_payload_value_ref(payload: &CheckedPayloadValue) -> Result<&ArtifactV
     payload
         .value()
         .ok_or_else(|| Error::new("process reference payloads are not valid state values"))
+}
+
+fn checked_runtime_bool_value(payload: &CheckedPayloadValue) -> Result<bool> {
+    let value = checked_payload_value_ref(payload)?;
+    match value {
+        ArtifactValue::Atom(label) if label == "True" => Ok(true),
+        ArtifactValue::Atom(label) if label == "False" => Ok(false),
+        _ => Err(Error::new(format!(
+            "boolean predicate operand produced non-Bool value {}",
+            value.label()
+        ))),
+    }
 }
 
 fn checked_payload_value(payload: &CheckedPayloadValue) -> Result<ArtifactValue> {

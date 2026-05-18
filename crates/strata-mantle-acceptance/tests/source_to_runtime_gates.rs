@@ -7,9 +7,9 @@ use std::sync::Once;
 
 use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactSendTarget, ArtifactTypeKind,
-    ArtifactValue, ArtifactValueEqualityOperator, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, EnumVariantId, MantleArtifact,
-    MessageId, NextState, ProcessId, TypeId, read_artifact,
+    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
+    EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -846,6 +846,96 @@ fn runtime_if_else_not_equal_branches_on_payload_at_mantle_runtime() {
 }
 
 #[test]
+fn runtime_if_else_composed_predicate_branches_on_payload_at_mantle_runtime() {
+    let gate = GateHarness::new();
+    const STEM: &str = "runtime_if_else_composed_predicate";
+    const ARTIFACT: &str = "target/strata/runtime_if_else_composed_predicate.mta";
+    let source = include_str!("../../../examples/runtime_if_else.str")
+        .replace(
+            "module runtime_if_else;",
+            "module runtime_if_else_composed_predicate;",
+        )
+        .replace(
+            "if (flag == True)",
+            "if (((flag == True) && !(flag == False)) || (flag != False))",
+        );
+    let source = gate.write_target_source(STEM, &source);
+    let source = source
+        .to_str()
+        .expect("target source path should be valid UTF-8");
+    gate.remove_trace(STEM);
+    gate.check_build_run(source, ARTIFACT);
+
+    let artifact = gate.read_artifact(ARTIFACT);
+    let bool_type = value_type_id(&artifact, "Bool");
+    let worker = artifact_process(&artifact, "Worker");
+    let transition = worker
+        .transitions
+        .first()
+        .expect("Worker should have a Branch transition");
+    assert!(matches!(
+        &transition.next_state,
+        NextState::IfElse {
+            condition: ArtifactValueTemplate::BooleanBinary {
+                ty,
+                operator: ArtifactValueBooleanOperator::Or,
+                left,
+                right,
+            },
+            ..
+        } if *ty == bool_type
+            && matches!(
+                left.as_ref(),
+                ArtifactValueTemplate::BooleanBinary {
+                    ty,
+                    operator: ArtifactValueBooleanOperator::And,
+                    ..
+                } if *ty == bool_type
+            )
+            && matches!(
+                right.as_ref(),
+                ArtifactValueTemplate::Equality {
+                    ty,
+                    operand_ty,
+                    operator: ArtifactValueEqualityOperator::NotEqual,
+                    ..
+                } if *ty == bool_type && *operand_ty == bool_type
+            )
+    ));
+    assert!(
+        !artifact
+            .encode()
+            .lines()
+            .any(|line| line.ends_with("=flag") || line.contains("debug_name=flag")),
+        "composed predicate artifact must not dispatch through the source binding name"
+    );
+
+    let trace = gate.read_trace(STEM);
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":2"#,
+            r#""process":"Worker""#,
+            r#""branch":"then""#,
+            r#""scope":"next_state""#,
+            r#""condition":"True""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":3"#,
+            r#""process":"Worker""#,
+            r#""branch":"else""#,
+            r#""scope":"next_state""#,
+            r#""condition":"False""#,
+        ],
+    );
+}
+
+#[test]
 fn runtime_fieldless_enum_equality_branches_at_mantle_runtime() {
     let gate = GateHarness::new();
     const STEM: &str = "runtime_enum_equality";
@@ -1065,6 +1155,63 @@ fn runtime_if_else_rejects_malformed_equality_operand_type_before_runtime() {
     );
     assert!(!stdout.contains("mantle: loaded"));
     assert!(!gate.trace_exists(invalid_trace_stem));
+}
+
+#[test]
+fn runtime_if_else_rejects_malformed_composed_predicate_operand_before_runtime() {
+    let gate = GateHarness::new();
+    const STEM: &str = "runtime_if_else_bad_composed_predicate";
+    let seed_artifact_path = "target/strata/runtime_if_else_bad_composed_predicate_seed.mta";
+    let invalid_artifact_path = "target/strata/runtime_if_else_bad_composed_predicate.mta";
+    let source = include_str!("../../../examples/runtime_if_else.str")
+        .replace(
+            "module runtime_if_else;",
+            "module runtime_if_else_bad_composed_predicate;",
+        )
+        .replace(
+            "if (flag == True)",
+            "if ((flag == True) && !(flag == False))",
+        );
+    let source = gate.write_target_source(STEM, &source);
+    let source = source
+        .to_str()
+        .expect("target source path should be valid UTF-8");
+
+    gate.check(source);
+    gate.build(source, seed_artifact_path);
+    gate.remove_artifact(invalid_artifact_path);
+    gate.remove_trace(STEM);
+
+    let artifact = gate.read_artifact(seed_artifact_path);
+    let bool_type = value_type_id(&artifact, "Bool");
+    let main_state_type = value_type_id(&artifact, "MainState");
+    let encoded = replace_exactly_once(
+        &artifact.encode(),
+        &format!(
+            "process.1.transition.0.next_state_condition.right.operand.right.type_id={}\n",
+            bool_type.as_u32()
+        ),
+        &format!(
+            "process.1.transition.0.next_state_condition.right.operand.right.type_id={}\n",
+            main_state_type.as_u32()
+        ),
+    );
+    gate.write_unvalidated_encoded_artifact(invalid_artifact_path, &encoded);
+
+    let run = gate.run_mantle_failure(invalid_artifact_path);
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "mantle: error: process Worker message id 0 next_state_condition.right.operand.right has type id {}, expected {}",
+            main_state_type.as_u32(),
+            bool_type.as_u32()
+        )),
+        "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(!stdout.contains("mantle: loaded"));
+    assert!(!gate.trace_exists(STEM));
 }
 
 #[test]
@@ -1344,27 +1491,65 @@ fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
             && matches!(
                 body.as_slice(),
                 [ArtifactAction::IfElse {
-                    condition: ArtifactValueTemplate::Equality {
+                    condition: ArtifactValueTemplate::BooleanBinary {
                         ty,
-                        operand_ty,
-                        operator: ArtifactValueEqualityOperator::NotEqual,
+                        operator: ArtifactValueBooleanOperator::And,
                         left,
                         right,
                     },
                     then_actions,
                     else_actions,
                 }] if *ty == bool_type
-                    && *operand_ty == bool_type
                     && matches!(
                         left.as_ref(),
-                        ArtifactValueTemplate::LoopElement {
+                        ArtifactValueTemplate::Equality {
                             ty,
-                            element: condition_element,
-                        } if *ty == bool_type && *condition_element == element.id
+                            operand_ty,
+                            operator: ArtifactValueEqualityOperator::NotEqual,
+                            left,
+                            right,
+                        } if *ty == bool_type
+                            && *operand_ty == bool_type
+                            && matches!(
+                                left.as_ref(),
+                                ArtifactValueTemplate::LoopElement {
+                                    ty,
+                                    element: condition_element,
+                                } if *ty == bool_type && *condition_element == element.id
+                            )
+                            && matches!(
+                                right.as_ref(),
+                                ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("False")
+                            )
                     )
                     && matches!(
                         right.as_ref(),
-                        ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("False")
+                        ArtifactValueTemplate::BooleanNot {
+                            ty,
+                            operand,
+                        } if *ty == bool_type
+                            && matches!(
+                                operand.as_ref(),
+                                ArtifactValueTemplate::Equality {
+                                    ty,
+                                    operand_ty,
+                                    operator: ArtifactValueEqualityOperator::Equal,
+                                    left,
+                                    right,
+                                } if *ty == bool_type
+                                    && *operand_ty == bool_type
+                                    && matches!(
+                                        left.as_ref(),
+                                        ArtifactValueTemplate::LoopElement {
+                                            ty,
+                                            element: condition_element,
+                                        } if *ty == bool_type && *condition_element == element.id
+                                    )
+                                    && matches!(
+                                        right.as_ref(),
+                                        ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("False")
+                                    )
+                            )
                     )
                     && matches!(
                         then_actions.as_slice(),
@@ -1535,8 +1720,8 @@ fn runtime_for_each_if_rejects_inactive_branch_condition_loop_element_before_run
     let artifact = gate.read_artifact(seed_artifact_path);
     let encoded = replace_exactly_once(
         &artifact.encode(),
-        "process.1.transition.0.action.1.body_action.0.condition.left.loop_element=0\n",
-        "process.1.transition.0.action.1.body_action.0.condition.left.loop_element=1\n",
+        "process.1.transition.0.action.1.body_action.0.condition.left.left.loop_element=0\n",
+        "process.1.transition.0.action.1.body_action.0.condition.left.left.loop_element=1\n",
     );
     gate.write_unvalidated_encoded_artifact(invalid_artifact_path, &encoded);
 
@@ -1546,7 +1731,7 @@ fn runtime_for_each_if_rejects_inactive_branch_condition_loop_element_before_run
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains(
-            "mantle: error: process BatchWorker transition 0 if condition.left references inactive loop element id 1"
+            "mantle: error: process BatchWorker transition 0 if condition.left.left references inactive loop element id 1"
         ),
         "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );

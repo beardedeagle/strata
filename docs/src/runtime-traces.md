@@ -142,7 +142,9 @@ assigned from the admitted runtime artifact structure; it is trace identity, not
 source syntax. `condition_type_id` is the admitted artifact type ID for the
 checked `Bool` condition, and `condition` is trace metadata for the evaluated
 value. Runtime branch selection uses the admitted typed condition, not source
-strings, helper names, or debug labels.
+strings, helper names, or debug labels. For composed predicates, this metadata
+is still only the final evaluated Bool value; the branch path remains the trace
+identity for the admitted artifact node.
 
 When a branch runs inside a bounded runtime loop body, `branch_selected` appears
 after that iteration's `loop_iteration` event and before the selected branch

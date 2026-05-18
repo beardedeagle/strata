@@ -5,7 +5,7 @@ use super::value_resolution::{
     resolve_pattern_source_function_call, resolve_record_pattern_source_function_call,
 };
 use super::*;
-use crate::language::ast::ValueEqualityOperator;
+use crate::language::ast::{ValueBooleanOperator, ValueEqualityOperator};
 
 mod body_matches;
 mod return_matches;
@@ -85,6 +85,24 @@ pub(in crate::language::checker) fn validate_source_function_value_expr(
             left,
             right,
         } => validate_source_equality_expr(scope, expected_type, *operator, left, right, bindings),
+        ValueExpr::BooleanNot { operand } => {
+            validate_source_boolean_not_expr(scope, expected_type, operand, bindings)
+        }
+        ValueExpr::BooleanBinary {
+            operator,
+            left,
+            right,
+        } => validate_source_boolean_binary_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+        ),
+        ValueExpr::Grouped { value } => {
+            validate_source_grouped_value_expr(scope, expected_type, value, bindings)
+        }
         ValueExpr::Call { name, arg } => {
             validate_source_function_call_or_constructor(scope, expected_type, name, arg, bindings)
         }
@@ -255,6 +273,72 @@ fn validate_source_equality_expr(
     })
 }
 
+fn validate_source_boolean_not_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    operand: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    validate_source_boolean_result_type(scope, expected_type, &bool_type)?;
+    validate_source_function_value_expr(scope, &bool_type, operand, bindings)
+        .map_err(|err| Error::new(format!("boolean ! operand must produce {bool_type}: {err}")))
+}
+
+fn validate_source_boolean_binary_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    _operator: ValueBooleanOperator,
+    left: &ValueExpr,
+    right: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    validate_source_boolean_result_type(scope, expected_type, &bool_type)?;
+    validate_source_function_value_expr(scope, &bool_type, left, bindings).map_err(|err| {
+        Error::new(format!(
+            "left boolean operand must produce {bool_type}: {err}"
+        ))
+    })?;
+    validate_source_function_value_expr(scope, &bool_type, right, bindings).map_err(|err| {
+        Error::new(format!(
+            "right boolean operand must produce {bool_type}: {err}"
+        ))
+    })
+}
+
+fn validate_source_boolean_result_type(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    bool_type: &TypeRef,
+) -> Result<()> {
+    if scope.semantic_index.same_type(expected_type, bool_type) {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "boolean predicate expression produces {bool_type}, expected {expected_type}"
+    )))
+}
+
+fn validate_source_grouped_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    if !scope.semantic_index.same_type(expected_type, &bool_type) {
+        return Err(Error::new(format!(
+            "parenthesized predicate grouping produces {bool_type}, expected {expected_type}"
+        )));
+    }
+    validate_source_function_value_expr(scope, &bool_type, value, bindings).map_err(|err| {
+        Error::new(format!(
+            "parenthesized predicate operand must produce {bool_type}: {err}"
+        ))
+    })
+}
+
 fn source_equality_operand_pair_type(
     scope: &SourceFunctionScope<'_>,
     left: &ValueExpr,
@@ -356,7 +440,10 @@ fn source_equality_operand_type(
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
         | ValueExpr::IfElse { .. }
-        | ValueExpr::Equality { .. } => Err(Error::new(
+        | ValueExpr::Equality { .. }
+        | ValueExpr::BooleanNot { .. }
+        | ValueExpr::BooleanBinary { .. }
+        | ValueExpr::Grouped { .. } => Err(Error::new(
             "equality operands must be Bool or fieldless enum values",
         )),
     }
@@ -544,6 +631,8 @@ fn source_value_requires_resolution(value: &ValueExpr) -> bool {
         }),
         ValueExpr::IfElse { .. } => true,
         ValueExpr::Equality { .. } => true,
+        ValueExpr::BooleanNot { .. } | ValueExpr::BooleanBinary { .. } => true,
+        ValueExpr::Grouped { .. } => true,
     }
 }
 
@@ -715,6 +804,29 @@ pub(in crate::language::checker) fn resolve_source_value_expr(
             bindings,
             depth + 1,
         ),
+        ValueExpr::BooleanNot { operand } => resolve_source_boolean_not_value_expr(
+            scope,
+            expected_type,
+            operand,
+            bindings,
+            depth + 1,
+        ),
+        ValueExpr::BooleanBinary {
+            operator,
+            left,
+            right,
+        } => resolve_source_boolean_binary_value_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+            depth + 1,
+        ),
+        ValueExpr::Grouped { value } => {
+            resolve_source_grouped_value_expr(scope, expected_type, value, bindings, depth + 1)
+        }
     }
 }
 
@@ -808,6 +920,85 @@ fn resolve_source_equality_value_expr(
         left: Box::new(left),
         right: Box::new(right),
     })
+}
+
+fn resolve_source_boolean_not_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    operand: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    validate_source_boolean_not_expr(scope, expected_type, operand, bindings)?;
+    let operand = resolve_source_value_expr(scope, &bool_type, operand, bindings, depth + 1)?;
+    if let Some(value) = concrete_bool_value_option(scope, &bool_type, &operand, bindings)? {
+        return Ok(ValueExpr::Identifier(bool_identifier(!value)?));
+    }
+    Ok(ValueExpr::BooleanNot {
+        operand: Box::new(operand),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_source_boolean_binary_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    operator: ValueBooleanOperator,
+    left: &ValueExpr,
+    right: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    validate_source_boolean_binary_expr(scope, expected_type, operator, left, right, bindings)?;
+    let left = resolve_source_value_expr(scope, &bool_type, left, bindings, depth + 1)?;
+    let right = resolve_source_value_expr(scope, &bool_type, right, bindings, depth + 1)?;
+    let left_value = concrete_bool_value_option(scope, &bool_type, &left, bindings)?;
+    let right_value = concrete_bool_value_option(scope, &bool_type, &right, bindings)?;
+    if let (Some(left_value), Some(right_value)) = (left_value, right_value) {
+        return Ok(ValueExpr::Identifier(bool_identifier(boolean_result(
+            operator,
+            left_value,
+            right_value,
+        ))?));
+    }
+    Ok(ValueExpr::BooleanBinary {
+        operator,
+        left: Box::new(left),
+        right: Box::new(right),
+    })
+}
+
+fn concrete_bool_value_option(
+    scope: &SourceFunctionScope<'_>,
+    bool_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<Option<bool>> {
+    if source_value_uses_any_binding(value, bindings) || source_value_requires_resolution(value) {
+        return Ok(None);
+    }
+    Ok(Some(concrete_source_bool_value(scope, bool_type, value)?))
+}
+
+fn boolean_result(operator: ValueBooleanOperator, left: bool, right: bool) -> bool {
+    match operator {
+        ValueBooleanOperator::And => left && right,
+        ValueBooleanOperator::Or => left || right,
+    }
+}
+
+fn resolve_source_grouped_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    validate_source_grouped_value_expr(scope, expected_type, value, bindings)?;
+    resolve_source_value_expr(scope, &bool_type, value, bindings, depth + 1)
 }
 
 fn equality_result(
@@ -1185,6 +1376,27 @@ fn check_source_value_type_inner(
             bindings,
         );
     }
+    if let ValueExpr::BooleanNot { operand } = value {
+        return validate_source_boolean_not_expr(scope, expected_type, operand, bindings);
+    }
+    if let ValueExpr::BooleanBinary {
+        operator,
+        left,
+        right,
+    } = value
+    {
+        return validate_source_boolean_binary_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+        );
+    }
+    if let ValueExpr::Grouped { value } = value {
+        return validate_source_grouped_value_expr(scope, expected_type, value, bindings);
+    }
     if !source_value_uses_any_binding(value, bindings) {
         canonical_source_value_with_bindings(
             scope.module,
@@ -1400,6 +1612,9 @@ fn check_enum_source_value_type(
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
         | ValueExpr::Equality { .. }
+        | ValueExpr::BooleanNot { .. }
+        | ValueExpr::BooleanBinary { .. }
+        | ValueExpr::Grouped { .. }
         | ValueExpr::IfElse { .. } => Err(Error::new(format!(
             "expected enum variant value for enum {}",
             enum_decl.name

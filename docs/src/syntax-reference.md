@@ -456,12 +456,27 @@ return_expr =
   | match_body
 
 value_expr =
-    value_primary_expr
-  | value_primary_expr equality_op value_primary_expr
+    value_or_expr
+
+value_or_expr =
+    value_and_expr
+  | value_or_expr "||" value_and_expr
+
+value_and_expr =
+    value_equality_expr
+  | value_and_expr "&&" value_equality_expr
+
+value_equality_expr =
+    value_unary_expr
+  | value_unary_expr equality_op value_unary_expr
 
 equality_op =
     "=="
   | "!="
+
+value_unary_expr =
+    value_primary_expr
+  | "!" value_unary_expr
 
 value_primary_expr =
     ident
@@ -469,6 +484,7 @@ value_primary_expr =
   | ident "{" record_value_field ("," record_value_field)* ","? "}"
   | "List" list_type_args? "[" value_expr_list? "]"
   | "Map" map_type_args? "[" map_value_entries? "]"
+  | "(" value_expr ")"
   | "if" "(" value_expr ")" "{" value_expr "}" "else" "{" value_expr "}"
 
 record_value_field =
@@ -482,9 +498,10 @@ map_value_entries =
     ("," value_expr "=>" value_expr)* ","?
 ```
 
-The parenthesized value expression is typed during checking. It is a helper call
-when `ident` names a visible source helper and a payload-bearing enum value when
-`ident` names a constructor of the expected enum type.
+Parenthesized value expressions are admitted only as Bool predicate grouping.
+`ident(value)` is a helper call when `ident` names a visible source helper and a
+payload-bearing enum value when `ident` names a constructor of the expected enum
+type.
 
 List and map constructors are explicit. Optional type and capacity arguments are
 admitted for readability; the checker still validates each value against the
@@ -497,6 +514,13 @@ equality folds during checking. Runtime-bound equality lowers as a typed Mantle
 value template; operands are not runtime dispatch strings. Ordering, arithmetic,
 string equality, record/list/map structural equality, process-reference
 equality, and payload enum equality remain unsupported.
+
+Boolean predicate composition is also narrow. `!`, `&&`, and `||` are admitted
+only over `Bool` values, typed equality predicates, or nested composed
+predicates. `!` binds tighter than `&&`, and `&&` binds tighter than `||`; use
+parentheses for explicit grouping. Fully concrete predicates fold during
+checking. Runtime-bound predicates lower as typed Mantle value templates over
+admitted Bool-producing operands, not as source strings or helper names.
 
 Pure conditionals require the exact fieldless source contract
 `enum Bool { False, True }`. Both branches are value expressions checked against

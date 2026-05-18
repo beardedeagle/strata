@@ -104,6 +104,108 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn folds_concrete_boolean_predicate_composition() {
+    let source = r#"
+module source_boolean_predicates;
+
+enum Bool { False, True }
+record MainState {
+    all_true: Bool,
+    false_and: Bool,
+    true_or: Bool,
+    not_false: Bool,
+    grouped: Bool,
+    precedence: Bool,
+}
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            all_true: True && True,
+            false_and: True && False,
+            true_or: False || True,
+            not_false: !(False),
+            grouped: !(False || False),
+            precedence: True || False && False,
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("concrete boolean predicates should check");
+    assert_eq!(
+        checked_state_labels(&checked.processes()[0]),
+        [
+            "MainState{all_true:True,false_and:False,true_or:True,not_false:True,grouped:True,precedence:True}"
+        ]
+    );
+
+    let artifact =
+        lower_to_artifact(&checked, source).expect("concrete boolean predicates should lower");
+    let encoded = artifact.encode();
+    assert!(
+        !encoded.contains(".kind=boolean_"),
+        "fully concrete boolean predicate composition should fold before lowering"
+    );
+}
+
+#[test]
+fn rejects_boolean_predicate_non_bool_operands() {
+    for (expr, expected) in [
+        ("!Cold", "boolean ! operand must produce Bool"),
+        ("Cold && True", "left boolean operand must produce Bool"),
+        ("True || Cold", "right boolean operand must produce Bool"),
+    ] {
+        let source = source_with_equality_expr(expr);
+        let err = check_source(&source).expect_err("non-Bool boolean operand should fail");
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err} for {expr}"
+        );
+    }
+}
+
+#[test]
+fn rejects_parenthesized_non_bool_value_grouping() {
+    let source = r#"
+module source_grouping_rejects_non_bool;
+
+enum Bool { False, True }
+enum Mode { Cold, Warm }
+record MainState { mode: Mode }
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { mode: (Cold) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("parenthesized non-Bool value should fail");
+    assert!(
+        err.to_string()
+            .contains("parenthesized predicate grouping produces Bool, expected Mode"),
+        "{err}"
+    );
+}
+
+#[test]
 fn infers_ambiguous_fieldless_variant_from_typed_equality_peer() {
     let source = r#"
 module source_value_equality_context;

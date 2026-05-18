@@ -13,9 +13,9 @@ pub use artifact::{
     ArtifactMapEntry, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
     ArtifactProcessRefPayload, ArtifactRecordField, ArtifactSendTarget, ArtifactStateValue,
     ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind, ArtifactValue,
-    ArtifactValueEqualityOperator, ArtifactValueShape, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode,
-    NextState, StepResult, validate_value_enum_membership,
+    ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
+    MantleArtifact, MapProjectionMode, NextState, StepResult, validate_value_enum_membership,
 };
 pub use constants::*;
 pub use error::{Error, Result};

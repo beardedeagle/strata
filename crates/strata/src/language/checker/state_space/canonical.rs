@@ -86,6 +86,11 @@ pub(in crate::language::checker) fn source_value_uses_binding(
         ValueExpr::Equality { left, right, .. } => {
             source_value_uses_binding(left, binding) || source_value_uses_binding(right, binding)
         }
+        ValueExpr::BooleanNot { operand } => source_value_uses_binding(operand, binding),
+        ValueExpr::BooleanBinary { left, right, .. } => {
+            source_value_uses_binding(left, binding) || source_value_uses_binding(right, binding)
+        }
+        ValueExpr::Grouped { value } => source_value_uses_binding(value, binding),
     }
 }
 
@@ -136,6 +141,19 @@ pub(super) fn canonical_value(
     if matches!(value, ValueExpr::Equality { .. }) {
         return Err(Error::new(format!(
             "equality expression must be resolved before checking value of type {expected_type}"
+        )));
+    }
+    if matches!(
+        value,
+        ValueExpr::BooleanNot { .. } | ValueExpr::BooleanBinary { .. }
+    ) {
+        return Err(Error::new(format!(
+            "boolean predicate expression must be resolved before checking value of type {expected_type}"
+        )));
+    }
+    if matches!(value, ValueExpr::Grouped { .. }) {
+        return Err(Error::new(format!(
+            "parenthesized predicate expression must be resolved before checking value of type {expected_type}"
         )));
     }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
@@ -239,7 +257,10 @@ fn canonical_enum_value(
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
         | ValueExpr::IfElse { .. }
-        | ValueExpr::Equality { .. } => Err(Error::new(format!(
+        | ValueExpr::Equality { .. }
+        | ValueExpr::BooleanNot { .. }
+        | ValueExpr::BooleanBinary { .. }
+        | ValueExpr::Grouped { .. } => Err(Error::new(format!(
             "expected enum variant value for enum {}",
             enum_decl.name
         ))),
