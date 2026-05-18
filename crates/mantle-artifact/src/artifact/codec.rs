@@ -668,6 +668,22 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
                 encode_value_template(encoded, &format!("{entry_prefix}.value"), &entry.value);
             }
         }
+        ArtifactValueTemplate::Equality {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=equality\n{prefix}.type_id={}\n{prefix}.operand_type_id={}\n{prefix}.operator={}\n",
+                ty.as_u32(),
+                operand_ty.as_u32(),
+                operator.as_str()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.left"), left);
+            encode_value_template(encoded, &format!("{prefix}.right"), right);
+        }
     }
 }
 
@@ -960,6 +976,27 @@ fn decode_value_template(
                 });
             }
             Ok(ArtifactValueTemplate::Map { ty, entries })
+        }
+        "equality" => {
+            let operator_field = format!("{prefix}.operator");
+            Ok(ArtifactValueTemplate::Equality {
+                ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+                operand_ty: fields.take_type_id(&format!("{prefix}.operand_type_id"))?,
+                operator: ArtifactValueEqualityOperator::parse(
+                    &operator_field,
+                    &fields.take_required(&operator_field)?,
+                )?,
+                left: Box::new(decode_value_template(
+                    fields,
+                    &format!("{prefix}.left"),
+                    depth + 1,
+                )?),
+                right: Box::new(decode_value_template(
+                    fields,
+                    &format!("{prefix}.right"),
+                    depth + 1,
+                )?),
+            })
         }
         value => Err(Error::new(format!("invalid {kind_key} value {value:?}"))),
     }

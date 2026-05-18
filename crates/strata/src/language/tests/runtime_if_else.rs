@@ -22,17 +22,36 @@ fn runtime_if_else_checks_and_lowers_to_mantle_control_flow() {
     assert!(matches!(
         transition.next_state(),
         CheckedNextState::IfElse {
-            condition: CheckedValueTemplate::ReceivedPayload { .. },
+            condition: CheckedValueTemplate::Equality {
+                operator: CheckedValueEqualityOperator::Equal,
+                left,
+                right,
+                ..
+            },
             ..
-        }
+        } if matches!(left.as_ref(), CheckedValueTemplate::ReceivedPayload { .. })
+            && matches!(
+                right.as_ref(),
+                CheckedValueTemplate::Literal(value) if value.label() == "True"
+            )
     ));
     assert!(matches!(
         transition.actions(),
         [CheckedAction::IfElse {
-            condition: CheckedValueTemplate::ReceivedPayload { .. },
+            condition: CheckedValueTemplate::Equality {
+                operator: CheckedValueEqualityOperator::Equal,
+                left,
+                right,
+                ..
+            },
             then_actions,
             else_actions,
-        }] if matches!(then_actions.as_slice(), [CheckedAction::Emit { .. }])
+        }] if matches!(left.as_ref(), CheckedValueTemplate::ReceivedPayload { .. })
+            && matches!(
+                right.as_ref(),
+                CheckedValueTemplate::Literal(value) if value.label() == "True"
+            )
+            && matches!(then_actions.as_slice(), [CheckedAction::Emit { .. }])
             && matches!(else_actions.as_slice(), [CheckedAction::Emit { .. }])
     ));
 
@@ -50,25 +69,119 @@ fn runtime_if_else_checks_and_lowers_to_mantle_control_flow() {
     assert!(matches!(
         &artifact_transition.next_state,
         NextState::IfElse {
-            condition: ArtifactValueTemplate::ReceivedPayload { ty },
+            condition: ArtifactValueTemplate::Equality {
+                ty,
+                operand_ty,
+                operator: ArtifactValueEqualityOperator::Equal,
+                left,
+                right,
+            },
             ..
         } if *ty == bool_type
+            && *operand_ty == bool_type
+            && matches!(left.as_ref(), ArtifactValueTemplate::ReceivedPayload { ty } if *ty == bool_type)
+            && matches!(
+                right.as_ref(),
+                ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("True")
+            )
     ));
     assert!(matches!(
         artifact_transition.actions.as_slice(),
         [ArtifactAction::IfElse {
-            condition: ArtifactValueTemplate::ReceivedPayload { ty },
+            condition: ArtifactValueTemplate::Equality {
+                ty,
+                operand_ty,
+                operator: ArtifactValueEqualityOperator::Equal,
+                left,
+                right,
+            },
             then_actions,
             else_actions,
         }] if *ty == bool_type
+            && *operand_ty == bool_type
+            && matches!(left.as_ref(), ArtifactValueTemplate::ReceivedPayload { ty } if *ty == bool_type)
+            && matches!(
+                right.as_ref(),
+                ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("True")
+            )
             && matches!(then_actions.as_slice(), [ArtifactAction::Emit { .. }])
             && matches!(else_actions.as_slice(), [ArtifactAction::Emit { .. }])
     ));
 }
 
 #[test]
+fn runtime_if_else_accepts_not_equal_payload_predicate() {
+    let source = RUNTIME_IF_ELSE.replace("if (flag == True)", "if (flag != False)");
+    let checked = check_source(&source).expect("runtime != predicate source should check");
+    let artifact = lower_to_artifact(&checked, &source).expect("runtime != predicate should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker artifact should exist");
+    let condition = match &worker.transitions[0].next_state {
+        NextState::IfElse { condition, .. } => condition,
+        other => panic!("expected if/else next state, got {other:?}"),
+    };
+    let bool_type = artifact_type_id(&artifact, "Bool");
+    assert!(matches!(
+        condition,
+        ArtifactValueTemplate::Equality {
+            ty,
+            operand_ty,
+            operator: ArtifactValueEqualityOperator::NotEqual,
+            left,
+            right,
+        } if *ty == bool_type
+            && *operand_ty == bool_type
+            && matches!(left.as_ref(), ArtifactValueTemplate::ReceivedPayload { ty } if *ty == bool_type)
+            && matches!(
+                right.as_ref(),
+                ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("False")
+            )
+    ));
+}
+
+#[test]
+fn runtime_if_else_disambiguates_fieldless_variant_from_payload_type() {
+    let source = RUNTIME_IF_ELSE.replace(
+        "enum MainMsg {\n    Start,\n}",
+        "enum OtherBool {\n    True,\n}\nenum MainMsg {\n    Start,\n}",
+    );
+    let checked = check_source(&source).expect("typed payload should disambiguate True");
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("disambiguated runtime equality should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker artifact should exist");
+    let condition = match &worker.transitions[0].next_state {
+        NextState::IfElse { condition, .. } => condition,
+        other => panic!("expected if/else next state, got {other:?}"),
+    };
+    let bool_type = artifact_type_id(&artifact, "Bool");
+    assert!(matches!(
+        condition,
+        ArtifactValueTemplate::Equality {
+            ty,
+            operand_ty,
+            operator: ArtifactValueEqualityOperator::Equal,
+            left,
+            right,
+        } if *ty == bool_type
+            && *operand_ty == bool_type
+            && matches!(left.as_ref(), ArtifactValueTemplate::ReceivedPayload { ty } if *ty == bool_type)
+            && matches!(
+                right.as_ref(),
+                ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("True")
+            )
+    ));
+}
+
+#[test]
 fn runtime_if_else_rejects_non_bool_condition() {
-    let source = RUNTIME_IF_ELSE.replace("if (flag)", "if (state)");
+    let source = RUNTIME_IF_ELSE.replace("if (flag == True)", "if (state)");
     let error = check_source(&source).expect_err("runtime if condition must be Bool");
     assert!(
         error

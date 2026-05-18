@@ -606,6 +606,10 @@ fn validate_value_template_loop_elements(
         CheckedValueTemplate::MapRest { map, .. } => {
             validate_value_template_loop_elements(map, active_loop_elements)
         }
+        CheckedValueTemplate::Equality { left, right, .. } => {
+            validate_value_template_loop_elements(left, active_loop_elements)?;
+            validate_value_template_loop_elements(right, active_loop_elements)
+        }
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             validate_value_template_loop_elements(payload, active_loop_elements)
         }

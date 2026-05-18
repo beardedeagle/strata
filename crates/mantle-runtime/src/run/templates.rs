@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, Error, ProcessRefId, Result};
+use mantle_artifact::{
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValueEqualityOperator, Error, ProcessRefId,
+    Result,
+};
 
 use super::RuntimeLoopElement;
 use super::model::ActiveStep;
@@ -303,5 +306,61 @@ pub(super) fn evaluate_runtime_template(
             }
             program.runtime_payload_value("map template value", *ty, RuntimeValue::Map(values))
         }
+        LoadedValueTemplate::Equality {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_runtime_template(
+                program,
+                left,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            if left.ty != *operand_ty {
+                return Err(Error::new(format!(
+                    "equality left operand has type id {}, expected {}",
+                    left.ty.as_u32(),
+                    operand_ty.as_u32()
+                )));
+            }
+            let right = evaluate_runtime_template(
+                program,
+                right,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            if right.ty != *operand_ty {
+                return Err(Error::new(format!(
+                    "equality right operand has type id {}, expected {}",
+                    right.ty.as_u32(),
+                    operand_ty.as_u32()
+                )));
+            }
+            let is_equal = left.value == right.value;
+            let selected = match operator {
+                ArtifactValueEqualityOperator::Equal => is_equal,
+                ArtifactValueEqualityOperator::NotEqual => !is_equal,
+            };
+            program.runtime_payload_value(
+                "equality template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(selected)),
+            )
+        }
+    }
+}
+
+fn bool_atom(value: bool) -> String {
+    if value {
+        "True".to_string()
+    } else {
+        "False".to_string()
     }
 }

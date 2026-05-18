@@ -6,8 +6,9 @@ mod template;
 mod value;
 
 pub use model::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MapProjectionMode,
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, ArtifactValueEqualityOperator,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
+    MapProjectionMode,
 };
 pub use payload::{ArtifactPayload, ArtifactProcessRefPayload};
 pub(in crate::artifact) use template::ValueTemplatePayloadValidation;

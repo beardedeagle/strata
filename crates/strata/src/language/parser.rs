@@ -3,7 +3,8 @@ use super::ast::{
     Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
     MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm,
     Module, OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordPatternField,
-    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueExpr,
+    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueEqualityOperator,
+    ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};
@@ -953,6 +954,24 @@ impl Parser {
     }
 
     fn parse_value_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
+        let left = self.parse_value_primary_expr_with_depth(depth)?;
+        if let Some(operator) = self.consume_value_equality_operator() {
+            let right = self.parse_value_primary_expr_with_depth(depth + 1)?;
+            if self.peek_value_equality_operator() {
+                return Err(self.error_here(
+                    "chained equality expressions are not supported in this source slice",
+                ));
+            }
+            return Ok(ValueExpr::Equality {
+                operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            });
+        }
+        Ok(left)
+    }
+
+    fn parse_value_primary_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
         if depth > MAX_VALUE_NESTING {
             return Err(self.error_here(format!(
                 "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
@@ -1227,6 +1246,27 @@ impl Parser {
         } else {
             Err(self.error_here("expected =>"))
         }
+    }
+
+    fn consume_value_equality_operator(&mut self) -> Option<ValueEqualityOperator> {
+        match self.peek_kind() {
+            TokenKind::EqualEqual => {
+                self.advance();
+                Some(ValueEqualityOperator::Equal)
+            }
+            TokenKind::BangEqual => {
+                self.advance();
+                Some(ValueEqualityOperator::NotEqual)
+            }
+            _ => None,
+        }
+    }
+
+    fn peek_value_equality_operator(&self) -> bool {
+        matches!(
+            self.peek_kind(),
+            TokenKind::EqualEqual | TokenKind::BangEqual
+        )
     }
 
     fn expect_symbol(&mut self, symbol: char) -> Result<()> {

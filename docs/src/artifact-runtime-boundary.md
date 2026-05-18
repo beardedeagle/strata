@@ -71,7 +71,9 @@ effect authority, and must exactly match the action effects that execute.
 Runtime `if` conditions are admitted as typed `Bool` value templates. Mantle
 validates both branch bodies before execution, executes only the selected
 branch, rejects branch-local process-reference binding for this slice, and
-records branch selection in the runtime trace.
+records branch selection in the runtime trace. Equality conditions are admitted
+as typed value templates over `Bool` or payload-free enum operands; Mantle
+evaluates admitted typed values, not source strings or debug labels.
 
 The action set covers:
 

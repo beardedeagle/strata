@@ -926,6 +926,10 @@ impl ArtifactProcess {
             ArtifactValueTemplate::MapRest { map, .. } => {
                 self.validate_template_process_refs(artifact, map, spawned_refs)
             }
+            ArtifactValueTemplate::Equality { left, right, .. } => {
+                self.validate_template_process_refs(artifact, left, spawned_refs)?;
+                self.validate_template_process_refs(artifact, right, spawned_refs)
+            }
             ArtifactValueTemplate::ProcessRef {
                 ty,
                 target_process,
@@ -1046,6 +1050,20 @@ fn validate_template_loop_elements(
         ArtifactValueTemplate::MapRest { map, .. } => {
             validate_template_loop_elements(artifact, map, active_loop_elements, field)
         }
+        ArtifactValueTemplate::Equality { left, right, .. } => {
+            validate_template_loop_elements(
+                artifact,
+                left,
+                active_loop_elements,
+                &format!("{field}.left"),
+            )?;
+            validate_template_loop_elements(
+                artifact,
+                right,
+                active_loop_elements,
+                &format!("{field}.right"),
+            )
+        }
         ArtifactValueTemplate::EnumVariant { payload, .. } => {
             validate_template_loop_elements(artifact, payload, active_loop_elements, field)
         }
@@ -1142,7 +1160,8 @@ fn validate_bool_condition_template_shape(
         | ArtifactValueTemplate::ListElement { .. }
         | ArtifactValueTemplate::ListPrefixElement { .. }
         | ArtifactValueTemplate::MapValue { .. }
-        | ArtifactValueTemplate::LoopElement { .. } => Ok(()),
+        | ArtifactValueTemplate::LoopElement { .. }
+        | ArtifactValueTemplate::Equality { .. } => Ok(()),
         ArtifactValueTemplate::ListRest { .. }
         | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. }

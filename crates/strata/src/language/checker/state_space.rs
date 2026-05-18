@@ -232,6 +232,9 @@ impl<'module> StateSpace<'module> {
                 self.checked_state_type.clone(),
                 state_value,
             )),
+            ValueExpr::Equality { .. } => Err(Error::new(
+                "equality expression must be resolved before checking state value",
+            )),
             ValueExpr::IfElse { .. } => Err(Error::new(
                 "if expression must be resolved before checking state value",
             )),

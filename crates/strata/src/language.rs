@@ -14,7 +14,7 @@ pub use ast::{
     FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue, MapPattern,
     MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module,
     OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordValue, RecordValueField,
-    ReturnExpr, Statement, TypeRef, ValueExpr,
+    ReturnExpr, Statement, TypeRef, ValueEqualityOperator, ValueExpr,
 };
 pub use checked::CheckedProgram;
 pub use checker::check_module;

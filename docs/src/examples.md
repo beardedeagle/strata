@@ -508,7 +508,8 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_if_else.mt
 Key source ideas:
 
 - `Branch(True)` and `Branch(False)` send two different runtime payloads.
-- `if (flag) { ... } else { ... }` lowers to Mantle branch control flow.
+- `if (flag == True) { ... } else { ... }` lowers to Mantle branch control
+  flow through a typed equality template.
 - Each branch emits its own declared output and returns a whole immutable state.
 - The runtime trace records `branch_selected` for both `then` and `else` paths.
 
@@ -556,8 +557,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_i
 
 Key source ideas:
 
-- `if (item) { ... } else { ... }` runs in Mantle for each loop iteration.
-- The branch condition and branch payload use the admitted typed loop element ID.
+- `if (item != False) { ... } else { ... }` runs in Mantle for each loop
+  iteration through a typed equality template.
+- The branch condition uses the admitted typed loop element ID; branch payloads
+  remain typed loop element values.
 - Branches can emit and send, but they cannot return, spawn, loop, or nest
   another statement-level branch in this slice.
 - The runtime trace records `loop_iteration`, `branch_selected`, branch effects,

@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 
 use mantle_artifact::{
     ArtifactPayload, ArtifactProcessRefPayload, ArtifactStateValue, ArtifactValue,
-    ArtifactValueTemplate, ArtifactValueTemplateMapEntry, EnumVariantId, Error, LoopElementId,
-    MAX_VALUE_TEMPLATE_FIELDS, MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
-    validate_state_value_identity_label,
+    ArtifactValueEqualityOperator, ArtifactValueTemplate, ArtifactValueTemplateMapEntry,
+    EnumVariantId, Error, LoopElementId, MAX_VALUE_TEMPLATE_FIELDS, MapProjectionMode, ProcessId,
+    ProcessRefId, Result, TypeId, validate_state_value_identity_label,
 };
 
 use crate::event::RuntimeProcessId;
@@ -263,6 +263,13 @@ pub(crate) enum LoadedValueTemplate {
         ty: TypeId,
         entries: Vec<LoadedValueTemplateMapEntry>,
     },
+    Equality {
+        ty: TypeId,
+        operand_ty: TypeId,
+        operator: ArtifactValueEqualityOperator,
+        left: Box<LoadedValueTemplate>,
+        right: Box<LoadedValueTemplate>,
+    },
 }
 
 impl LoadedValueTemplate {
@@ -402,6 +409,19 @@ impl LoadedValueTemplate {
                     .map(LoadedValueTemplateMapEntry::from_artifact)
                     .collect::<Result<Vec<_>>>()?,
             }),
+            ArtifactValueTemplate::Equality {
+                ty,
+                operand_ty,
+                operator,
+                left,
+                right,
+            } => Ok(Self::Equality {
+                ty: *ty,
+                operand_ty: *operand_ty,
+                operator: *operator,
+                left: Box::new(Self::from_artifact(left)?),
+                right: Box::new(Self::from_artifact(right)?),
+            }),
         }
     }
 
@@ -422,7 +442,8 @@ impl LoadedValueTemplate {
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
-            | Self::Map { ty, .. } => *ty,
+            | Self::Map { ty, .. }
+            | Self::Equality { ty, .. } => *ty,
         }
     }
 }

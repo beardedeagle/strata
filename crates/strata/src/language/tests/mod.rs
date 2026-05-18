@@ -17,6 +17,7 @@ mod source_function_core;
 mod source_function_if_else;
 mod source_function_patterns;
 mod source_function_record_patterns;
+mod source_value_equality;
 mod state_match_payload_split;
 mod state_match_success;
 mod state_match_validation;

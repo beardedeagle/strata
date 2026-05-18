@@ -566,11 +566,12 @@ fn concrete_source_enum_value<'a>(
     match value {
         ValueExpr::Identifier(name) => Ok((name, None)),
         ValueExpr::EnumVariant { name, payload } => Ok((name, Some(payload.as_ref()))),
-        ValueExpr::Call { .. } | ValueExpr::Record(_) | ValueExpr::IfElse { .. } => {
-            Err(Error::new(format!(
-                "function {function_name} {usage} requires a concrete enum constructor argument"
-            )))
-        }
+        ValueExpr::Call { .. }
+        | ValueExpr::Record(_)
+        | ValueExpr::IfElse { .. }
+        | ValueExpr::Equality { .. } => Err(Error::new(format!(
+            "function {function_name} {usage} requires a concrete enum constructor argument"
+        ))),
         ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
             "function {function_name} {usage} requires a concrete enum constructor argument"
         ))),
@@ -587,7 +588,8 @@ fn concrete_source_record_value<'a>(
         ValueExpr::Identifier(_)
         | ValueExpr::Call { .. }
         | ValueExpr::EnumVariant { .. }
-        | ValueExpr::IfElse { .. } => Err(Error::new(format!(
+        | ValueExpr::IfElse { .. }
+        | ValueExpr::Equality { .. } => Err(Error::new(format!(
             "function {function_name} {usage} requires a concrete record value argument"
         ))),
         ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
@@ -654,6 +656,15 @@ fn substitute_source_value_bindings(
             condition: Box::new(substitute_source_value_bindings(*condition, bindings)),
             then_branch: Box::new(substitute_source_value_bindings(*then_branch, bindings)),
             else_branch: Box::new(substitute_source_value_bindings(*else_branch, bindings)),
+        },
+        ValueExpr::Equality {
+            operator,
+            left,
+            right,
+        } => ValueExpr::Equality {
+            operator,
+            left: Box::new(substitute_source_value_bindings(*left, bindings)),
+            right: Box::new(substitute_source_value_bindings(*right, bindings)),
         },
     }
 }
