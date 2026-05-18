@@ -537,6 +537,21 @@ pub struct MapValueEntry {
 
 impl fmt::Display for ValueExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_with_min_precedence(f, 0)
+    }
+}
+
+impl ValueExpr {
+    fn fmt_with_min_precedence(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        min_precedence: u8,
+    ) -> fmt::Result {
+        let precedence = self.display_precedence();
+        let needs_parens = precedence < min_precedence;
+        if needs_parens {
+            f.write_str("(")?;
+        }
         match self {
             Self::Identifier(name) => write!(f, "{name}"),
             Self::Call { name, arg } => write!(f, "{name}({arg})"),
@@ -553,14 +568,56 @@ impl fmt::Display for ValueExpr {
                 operator,
                 left,
                 right,
-            } => write!(f, "{left}{}{}", operator.as_str(), right),
-            Self::BooleanNot { operand } => write!(f, "!({operand})"),
+            } => {
+                left.fmt_with_min_precedence(f, precedence)?;
+                write!(f, " {} ", operator.as_str())?;
+                right.fmt_with_min_precedence(f, precedence + 1)
+            }
+            Self::BooleanNot { operand } => {
+                f.write_str("!")?;
+                operand.fmt_with_min_precedence(f, precedence)
+            }
             Self::BooleanBinary {
                 operator,
                 left,
                 right,
-            } => write!(f, "({left}){}({right})", operator.as_str()),
-            Self::Grouped { value } => write!(f, "({value})"),
+            } => {
+                left.fmt_with_min_precedence(f, precedence)?;
+                write!(f, " {} ", operator.as_str())?;
+                right.fmt_with_min_precedence(f, precedence + 1)
+            }
+            Self::Grouped { value } => {
+                f.write_str("(")?;
+                value.fmt_with_min_precedence(f, 0)?;
+                f.write_str(")")
+            }
+        }?;
+        if needs_parens {
+            f.write_str(")")?;
+        }
+        Ok(())
+    }
+
+    fn display_precedence(&self) -> u8 {
+        match self {
+            Self::BooleanBinary {
+                operator: ValueBooleanOperator::Or,
+                ..
+            } => 1,
+            Self::BooleanBinary {
+                operator: ValueBooleanOperator::And,
+                ..
+            } => 2,
+            Self::Equality { .. } => 3,
+            Self::BooleanNot { .. } => 4,
+            Self::Identifier(_)
+            | Self::Call { .. }
+            | Self::EnumVariant { .. }
+            | Self::Record(_)
+            | Self::List(_)
+            | Self::Map(_)
+            | Self::IfElse { .. }
+            | Self::Grouped { .. } => 5,
         }
     }
 }

@@ -158,6 +158,40 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn boolean_predicate_display_uses_readable_precedence() {
+    let and_inside_or = ValueExpr::BooleanBinary {
+        operator: ValueBooleanOperator::Or,
+        left: Box::new(ValueExpr::BooleanBinary {
+            operator: ValueBooleanOperator::And,
+            left: Box::new(ValueExpr::Identifier(ident("flag"))),
+            right: Box::new(ValueExpr::Identifier(ident("ready"))),
+        }),
+        right: Box::new(ValueExpr::Identifier(ident("open"))),
+    };
+    assert_eq!(and_inside_or.to_string(), "flag && ready || open");
+
+    let or_inside_and = ValueExpr::BooleanBinary {
+        operator: ValueBooleanOperator::And,
+        left: Box::new(ValueExpr::BooleanBinary {
+            operator: ValueBooleanOperator::Or,
+            left: Box::new(ValueExpr::Identifier(ident("flag"))),
+            right: Box::new(ValueExpr::Identifier(ident("ready"))),
+        }),
+        right: Box::new(ValueExpr::BooleanNot {
+            operand: Box::new(ValueExpr::BooleanBinary {
+                operator: ValueBooleanOperator::And,
+                left: Box::new(ValueExpr::Identifier(ident("open"))),
+                right: Box::new(ValueExpr::Identifier(ident("enabled"))),
+            }),
+        }),
+    };
+    assert_eq!(
+        or_inside_and.to_string(),
+        "(flag || ready) && !(open && enabled)"
+    );
+}
+
+#[test]
 fn rejects_boolean_predicate_non_bool_operands() {
     for (expr, expected) in [
         ("!Cold", "boolean ! operand must produce Bool"),
