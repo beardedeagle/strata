@@ -505,7 +505,8 @@ fn static_validation_rejects_nested_process_ref_payload_template() {
 
 #[test]
 fn static_validation_rejects_projected_process_ref_payload_template() {
-    let route = enum_value_type("Route", &["Reply"]);
+    let route =
+        enum_value_type_with_payloads("Route", &[("Reply", Some(process_ref_type("Worker")))]);
     let main = CheckedProcess::new(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
@@ -589,7 +590,8 @@ fn static_validation_rejects_projected_process_ref_payload_template() {
 
 #[test]
 fn static_validation_rejects_received_process_ref_nested_in_enum_payload_template() {
-    let route = enum_value_type("Route", &["Reply"]);
+    let route =
+        enum_value_type_with_payloads("Route", &[("Reply", Some(process_ref_type("Worker")))]);
     let main = CheckedProcess::new(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),

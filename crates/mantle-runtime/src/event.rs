@@ -2,8 +2,8 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 use mantle_artifact::{
-    ArtifactBranch, Error, LoopElementId, MessageId, OutputId, ProcessId, Result, StateId,
-    StepResult, TypeId,
+    ArtifactBranch, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH,
+    MessageId, OutputId, ProcessId, Result, StateId, StepResult, TypeId,
 };
 
 use crate::program::RuntimePayload;
@@ -39,6 +39,106 @@ impl fmt::Display for RuntimeProcessId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
+}
+
+const RUNTIME_BRANCH_PATH_CAPACITY: usize = MAX_VALUE_TEMPLATE_DEPTH + 1;
+const BRANCH_PATH_INDEX_MASK: u16 = 0x0fff;
+const BRANCH_PATH_THEN_ACTION: u16 = 0x1000;
+const BRANCH_PATH_ELSE_ACTION: u16 = 0x2000;
+const BRANCH_PATH_LOOP_BODY_ACTION: u16 = 0x3000;
+const BRANCH_PATH_THEN_STATE: u16 = 0x4000;
+const BRANCH_PATH_ELSE_STATE: u16 = 0x4001;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RuntimeBranchPath {
+    segments: [u16; RUNTIME_BRANCH_PATH_CAPACITY],
+    len: u8,
+}
+
+impl RuntimeBranchPath {
+    pub const fn root() -> Self {
+        Self {
+            segments: [0; RUNTIME_BRANCH_PATH_CAPACITY],
+            len: 0,
+        }
+    }
+
+    pub fn segments(&self) -> &[u16] {
+        &self.segments[..usize::from(self.len)]
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub(crate) fn child(self, segment: RuntimeBranchPathSegment) -> Result<Self> {
+        let len = usize::from(self.len);
+        if len >= RUNTIME_BRANCH_PATH_CAPACITY {
+            return Err(Error::new(format!(
+                "runtime branch path exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+            )));
+        }
+
+        let mut segments = self.segments;
+        segments[len] = segment.0;
+        Ok(Self {
+            segments,
+            len: self
+                .len
+                .checked_add(1)
+                .ok_or_else(|| Error::new("runtime branch path length overflowed"))?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeBranchPathSegment(u16);
+
+impl RuntimeBranchPathSegment {
+    pub(crate) fn action(index: usize) -> Result<Self> {
+        Self::indexed(index, 0)
+    }
+
+    pub(crate) fn branch_action(branch: ArtifactBranch, index: usize) -> Result<Self> {
+        let prefix = match branch {
+            ArtifactBranch::Then => BRANCH_PATH_THEN_ACTION,
+            ArtifactBranch::Else => BRANCH_PATH_ELSE_ACTION,
+        };
+        Self::indexed(index, prefix)
+    }
+
+    pub(crate) fn loop_body_action(index: usize) -> Result<Self> {
+        Self::indexed(index, BRANCH_PATH_LOOP_BODY_ACTION)
+    }
+
+    pub(crate) const fn next_state_branch(branch: ArtifactBranch) -> Self {
+        match branch {
+            ArtifactBranch::Then => Self(BRANCH_PATH_THEN_STATE),
+            ArtifactBranch::Else => Self(BRANCH_PATH_ELSE_STATE),
+        }
+    }
+
+    fn indexed(index: usize, prefix: u16) -> Result<Self> {
+        if index >= MAX_ACTIONS_PER_PROCESS {
+            return Err(Error::new(format!(
+                "runtime branch path action index {index} exceeds maximum index {}",
+                MAX_ACTIONS_PER_PROCESS - 1
+            )));
+        }
+        let segment = u16::try_from(index)
+            .map_err(|_| Error::new("runtime branch path action index overflowed"))?;
+        Ok(Self(prefix | (segment & BRANCH_PATH_INDEX_MASK)))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeLoopContext {
+    pub element_id: LoopElementId,
+    pub index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +196,9 @@ pub enum RuntimeEvent {
         message_id: MessageId,
         message: String,
         branch: ArtifactBranch,
+        scope: RuntimeBranchScope,
+        branch_path: RuntimeBranchPath,
+        loop_context: Option<RuntimeLoopContext>,
         condition_type_id: mantle_artifact::TypeId,
         condition: String,
     },
@@ -164,6 +267,21 @@ pub enum RuntimeEvent {
         state: String,
         reason: RuntimeFailureReason,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeBranchScope {
+    NextState,
+    Action,
+}
+
+impl RuntimeBranchScope {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::NextState => "next_state",
+            Self::Action => "action",
+        }
+    }
 }
 
 #[derive(Debug)]

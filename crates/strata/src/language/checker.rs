@@ -23,12 +23,13 @@ use super::ast::{
     Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
-    CheckedAction, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,
-    CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
-    CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef,
-    CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedSendTarget, CheckedStateId,
-    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeId, CheckedTypeKind,
-    CheckedTypeRef, CheckedValueTemplate, checked_action_count,
+    CheckedAction, CheckedEnumVariant, CheckedEnumVariantId, CheckedLoopElement,
+    CheckedLoopElementId, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId,
+    CheckedNextState, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts,
+    CheckedProcessRef, CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedSendTarget,
+    CheckedStateId, CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeField,
+    CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueShape, CheckedValueTemplate,
+    checked_action_count,
 };
 use super::diagnostic::{Error, Result};
 use super::{LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
@@ -95,25 +96,95 @@ impl<'a> CheckedTypeInterner<'a> {
         }
         let id = CheckedTypeId::from_index(self.entries.len())?;
         let process_ref_target = self.semantic_index.process_ref_target_type(ty)?;
+        let label = checked_type_label(ty, process_ref_target)?;
+        let placeholder_kind = match process_ref_target {
+            Some(target) => CheckedTypeKind::ProcessRef { target },
+            None => CheckedTypeKind::Value {
+                shape: CheckedValueShape::Atom,
+            },
+        };
+        self.entries.push((
+            ty.clone(),
+            CheckedTypeRef::new(id, label.clone(), placeholder_kind),
+        ));
+
         let kind = match process_ref_target {
             Some(target) => CheckedTypeKind::ProcessRef { target },
             None => CheckedTypeKind::Value {
-                enum_variants: self
-                    .semantic_index
-                    .enum_decl(self.module, ty)
-                    .map(|enum_decl| {
-                        enum_decl
-                            .variants
-                            .iter()
-                            .map(|variant| variant.name.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                shape: self.value_shape(ty)?,
             },
         };
-        let checked = CheckedTypeRef::new(id, checked_type_label(ty, process_ref_target)?, kind);
-        self.entries.push((ty.clone(), checked.clone()));
+        let checked = CheckedTypeRef::new(id, label, kind);
+        self.entries[id.index()].1 = checked.clone();
         Ok(checked)
+    }
+
+    fn value_shape(&mut self, ty: &TypeRef) -> Result<CheckedValueShape> {
+        if let Some(collection) = self.semantic_index.collection_type(ty)? {
+            return match collection {
+                CollectionType::List { element, capacity } => {
+                    let element = self.intern(element)?.id();
+                    Ok(CheckedValueShape::List { element, capacity })
+                }
+                CollectionType::Map {
+                    key,
+                    value,
+                    capacity,
+                } => {
+                    let key = self.intern(key)?.id();
+                    let value = self.intern(value)?.id();
+                    Ok(CheckedValueShape::Map {
+                        key,
+                        value,
+                        capacity,
+                    })
+                }
+            };
+        }
+
+        if let Ok(record_decl) = self.semantic_index.record_decl(self.module, ty) {
+            if record_decl.fields.is_empty() {
+                return Ok(CheckedValueShape::Atom);
+            }
+            let fields = record_decl
+                .fields
+                .iter()
+                .map(|field| (field.name.clone(), field.ty.clone()))
+                .collect::<Vec<_>>();
+            let fields = fields
+                .into_iter()
+                .map(|(name, field_ty)| {
+                    Ok(CheckedTypeField {
+                        name,
+                        ty: self.intern(&field_ty)?.id(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(CheckedValueShape::Record { fields });
+        }
+
+        if let Ok(enum_decl) = self.semantic_index.enum_decl(self.module, ty) {
+            let variants = enum_decl
+                .variants
+                .iter()
+                .map(|variant| (variant.name.clone(), variant.payload_type.clone()))
+                .collect::<Vec<_>>();
+            let variants = variants
+                .into_iter()
+                .map(|(name, payload_type)| {
+                    let payload_type = payload_type
+                        .as_ref()
+                        .map(|payload_type| self.intern(payload_type).map(|ty| ty.id()))
+                        .transpose()?;
+                    Ok(CheckedEnumVariant { name, payload_type })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(CheckedValueShape::Enum { variants });
+        }
+
+        Err(Error::new(format!(
+            "type {ty} is not declared as a source value type"
+        )))
     }
 
     fn source_type(&self, checked_ty: &CheckedTypeRef) -> Result<&TypeRef> {

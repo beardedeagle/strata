@@ -1,6 +1,6 @@
 use super::values::{
     validate_list_prefix_projection, validate_list_rest_prefix_len, validate_map_projection_keys,
-    validate_map_rest_keys, validate_non_process_ref_value,
+    validate_map_rest_keys,
 };
 use super::*;
 use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField};
@@ -25,29 +25,81 @@ pub(super) fn validate_loaded_bool_condition(
     received_payload_type: Option<TypeId>,
     current_state_payload: Option<&RuntimePayload>,
 ) -> Result<()> {
+    validate_loaded_bool_condition_with_loop_elements(
+        program,
+        process,
+        field,
+        condition,
+        received_payload_type,
+        current_state_payload,
+        &[],
+    )
+}
+
+pub(super) fn validate_loaded_bool_condition_with_loop_elements(
+    program: &LoadedProgram,
+    process: &LoadedProcess,
+    field: &str,
+    condition: &LoadedValueTemplate,
+    received_payload_type: Option<TypeId>,
+    current_state_payload: Option<&RuntimePayload>,
+    loop_elements: &[LoadedLoopElement],
+) -> Result<()> {
     let bool_type = condition.result_type();
     let ty = program.type_entry(bool_type)?;
-    let is_bool_contract = matches!(ty.kind, ArtifactTypeKind::Value)
-        && ty.enum_variants.len() == 2
-        && ty.enum_variants[0] == "False"
-        && ty.enum_variants[1] == "True";
+    let is_bool_contract = matches!(
+        ty.value_shape(),
+        Ok(ArtifactValueShape::Enum { variants })
+            if variants.len() == 2
+                && variants[0].label == "False"
+                && variants[0].payload_type.is_none()
+                && variants[1].label == "True"
+                && variants[1].payload_type.is_none()
+    );
     if !is_bool_contract {
         return Err(Error::new(format!(
             "{field} must have type enum Bool {{ False, True }}"
         )));
     }
+    validate_loaded_bool_condition_shape(field, condition)?;
     LoadedTemplateAdmission {
         expected_type: Some(bool_type),
         received_payload_type,
         current_state_payload_type: current_state_payload.map(|payload| payload.ty),
         allow_direct_process_ref: false,
-        loop_elements: &[],
+        loop_elements,
         program,
         process,
         spawned_refs: &[],
     }
     .validate(field, condition)?;
     validate_loaded_static_bool_condition_value(program, field, condition, current_state_payload)
+}
+
+fn validate_loaded_bool_condition_shape(
+    field: &str,
+    condition: &LoadedValueTemplate,
+) -> Result<()> {
+    match condition {
+        LoadedValueTemplate::Literal { .. }
+        | LoadedValueTemplate::ReceivedPayload { .. }
+        | LoadedValueTemplate::CurrentStatePayload { .. }
+        | LoadedValueTemplate::EnumPayload { .. }
+        | LoadedValueTemplate::RecordField { .. }
+        | LoadedValueTemplate::ListElement { .. }
+        | LoadedValueTemplate::ListPrefixElement { .. }
+        | LoadedValueTemplate::MapValue { .. }
+        | LoadedValueTemplate::LoopElement { .. } => Ok(()),
+        LoadedValueTemplate::ListRest { .. }
+        | LoadedValueTemplate::MapRest { .. }
+        | LoadedValueTemplate::ProcessRef { .. }
+        | LoadedValueTemplate::EnumVariant { .. }
+        | LoadedValueTemplate::Record { .. }
+        | LoadedValueTemplate::List { .. }
+        | LoadedValueTemplate::Map { .. } => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
+    }
 }
 
 fn validate_loaded_static_bool_condition_value(
@@ -82,31 +134,21 @@ fn evaluate_loaded_payload_value(
     current_state_payload: Option<&RuntimePayload>,
 ) -> Result<RuntimePayload> {
     match template {
-        LoadedValueTemplate::Literal { ty, value } => RuntimePayload::value(*ty, value.clone()),
+        LoadedValueTemplate::Literal { ty, value } => {
+            program.runtime_payload_value("literal value template", *ty, value.clone())
+        }
         LoadedValueTemplate::ReceivedPayload { ty } => {
             let payload = received_payload.ok_or_else(|| {
                 Error::new("received payload template requires a payload-bearing message")
             })?;
-            if payload.ty != *ty {
-                return Err(Error::new(format!(
-                    "received payload has type id {}, expected {}",
-                    payload.ty.as_u32(),
-                    ty.as_u32()
-                )));
-            }
+            program.validate_runtime_payload_matches_type("received payload", *ty, payload)?;
             Ok(payload.clone())
         }
         LoadedValueTemplate::CurrentStatePayload { ty } => {
             let payload = current_state_payload.ok_or_else(|| {
                 Error::new("current state payload template requires a payload-bearing state")
             })?;
-            if payload.ty != *ty {
-                return Err(Error::new(format!(
-                    "current state payload has type id {}, expected {}",
-                    payload.ty.as_u32(),
-                    ty.as_u32()
-                )));
-            }
+            program.validate_runtime_payload_matches_type("current state payload", *ty, payload)?;
             Ok(payload.clone())
         }
         LoadedValueTemplate::EnumPayload { ty, value, variant } => {
@@ -117,7 +159,11 @@ fn evaluate_loaded_payload_value(
                 current_state_payload,
             )?;
             let variant = program.enum_variant_label(value.ty, *variant)?;
-            RuntimePayload::value(*ty, value.value.project_enum_payload(variant)?)
+            program.runtime_payload_value(
+                "enum payload projection value",
+                *ty,
+                value.value.project_enum_payload(variant)?,
+            )
         }
         LoadedValueTemplate::RecordField { ty, record, field } => {
             let record = evaluate_loaded_payload_value(
@@ -126,7 +172,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, record.value.project_record_field(field)?)
+            program.runtime_payload_value(
+                "record field projection value",
+                *ty,
+                record.value.project_record_field(field)?,
+            )
         }
         LoadedValueTemplate::ListElement {
             ty,
@@ -140,7 +190,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, list.value.project_list_element(*index, *len)?)
+            program.runtime_payload_value(
+                "list element projection value",
+                *ty,
+                list.value.project_list_element(*index, *len)?,
+            )
         }
         LoadedValueTemplate::ListPrefixElement {
             ty,
@@ -154,7 +208,8 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(
+            program.runtime_payload_value(
+                "list prefix projection value",
                 *ty,
                 list.value
                     .project_list_prefix_element(*index, *prefix_len)?,
@@ -171,7 +226,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, list.value.project_list_rest(*prefix_len)?)
+            program.runtime_payload_value(
+                "list rest projection value",
+                *ty,
+                list.value.project_list_rest(*prefix_len)?,
+            )
         }
         LoadedValueTemplate::MapValue {
             ty,
@@ -186,7 +245,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, map.value.project_map_value(key, keys, *projection)?)
+            program.runtime_payload_value(
+                "map value projection value",
+                *ty,
+                map.value.project_map_value(key, keys, *projection)?,
+            )
         }
         LoadedValueTemplate::MapRest {
             ty,
@@ -199,7 +262,11 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(*ty, map.value.project_map_rest(excluded_keys)?)
+            program.runtime_payload_value(
+                "map rest projection value",
+                *ty,
+                map.value.project_map_rest(excluded_keys)?,
+            )
         }
         LoadedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference template requires runtime process reference bindings",
@@ -218,7 +285,8 @@ fn evaluate_loaded_payload_value(
                 received_payload,
                 current_state_payload,
             )?;
-            RuntimePayload::value(
+            program.runtime_payload_value(
+                "enum variant template value",
                 *ty,
                 RuntimeValue::EnumVariant {
                     variant: program.enum_variant_label(*ty, *variant)?.to_string(),
@@ -247,7 +315,8 @@ fn evaluate_loaded_payload_value(
                     value: value.value,
                 });
             }
-            RuntimePayload::value(
+            program.runtime_payload_value(
+                "record template value",
                 *ty,
                 RuntimeValue::Record {
                     constructor: program.type_label(*ty)?.to_string(),
@@ -268,7 +337,7 @@ fn evaluate_loaded_payload_value(
                     .value,
                 );
             }
-            RuntimePayload::value(*ty, RuntimeValue::List(values))
+            program.runtime_payload_value("list template value", *ty, RuntimeValue::List(values))
         }
         LoadedValueTemplate::Map { ty, entries } => {
             let mut values = Vec::with_capacity(entries.len());
@@ -297,7 +366,7 @@ fn evaluate_loaded_payload_value(
                     value: value.value,
                 });
             }
-            RuntimePayload::value(*ty, RuntimeValue::Map(values))
+            program.runtime_payload_value("map template value", *ty, RuntimeValue::Map(values))
         }
     }
 }
@@ -343,9 +412,7 @@ impl LoadedTemplateAdmission<'_> {
 
         match template {
             LoadedValueTemplate::Literal { ty, value } => {
-                self.program
-                    .validate_value_type(&format!("{field}.type"), *ty)?;
-                validate_non_process_ref_value(field, value)
+                self.program.validate_value_matches_type(field, *ty, value)
             }
             LoadedValueTemplate::ReceivedPayload { ty } => {
                 self.validate_received_payload(field, *ty)
@@ -357,7 +424,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.reject_projected_process_ref_type(field, *ty)?;
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
-                self.validate_enum_variant_projection(field, value.result_type(), *variant)?;
+                self.validate_enum_payload_projection(field, value.result_type(), *variant, *ty)?;
                 let nested = Self {
                     expected_type: None,
                     allow_direct_process_ref: false,
@@ -374,6 +441,12 @@ impl LoadedTemplateAdmission<'_> {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 validate_loaded_ident_field(&format!("{field}.field_name"), field_name)?;
+                self.validate_record_field_projection(
+                    field,
+                    record.result_type(),
+                    field_name,
+                    *ty,
+                )?;
                 let nested = Self {
                     expected_type: None,
                     allow_direct_process_ref: false,
@@ -390,6 +463,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.reject_projected_process_ref_type(field, *ty)?;
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_list_element_projection(field, list.result_type(), *ty)?;
                 if *len == 0 || *len > MAX_VALUE_TEMPLATE_FIELDS {
                     return Err(Error::new(format!(
                         "{field}.len must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
@@ -416,6 +490,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.reject_projected_process_ref_type(field, *ty)?;
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_list_element_projection(field, list.result_type(), *ty)?;
                 validate_list_prefix_projection(field, *index, *prefix_len)?;
                 let nested = Self {
                     expected_type: None,
@@ -432,6 +507,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.reject_projected_process_ref_type(field, *ty)?;
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_list_rest_projection(field, list.result_type(), *ty)?;
                 validate_list_rest_prefix_len(field, *prefix_len)?;
                 let nested = Self {
                     expected_type: None,
@@ -450,6 +526,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.reject_projected_process_ref_type(field, *ty)?;
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_map_value_projection(field, map.result_type(), key, keys, *ty)?;
                 validate_map_projection_keys(field, key, keys)?;
                 let nested = Self {
                     expected_type: None,
@@ -466,6 +543,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.reject_projected_process_ref_type(field, *ty)?;
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_map_rest_projection(field, map.result_type(), excluded_keys, *ty)?;
                 validate_map_rest_keys(field, excluded_keys)?;
                 let nested = Self {
                     expected_type: None,
@@ -489,7 +567,7 @@ impl LoadedTemplateAdmission<'_> {
             } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
-                self.validate_enum_variant_projection(field, *ty, *variant)?;
+                self.validate_enum_variant_payload(field, *ty, *variant, payload.result_type())?;
                 let nested = Self {
                     expected_type: None,
                     allow_direct_process_ref: false,
@@ -500,17 +578,17 @@ impl LoadedTemplateAdmission<'_> {
             LoadedValueTemplate::Record { ty, fields } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
-                self.validate_record(field, fields, depth)
+                self.validate_record(field, *ty, fields, depth)
             }
             LoadedValueTemplate::List { ty, items } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
-                self.validate_list(field, items, depth)
+                self.validate_list(field, *ty, items, depth)
             }
             LoadedValueTemplate::Map { ty, entries } => {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
-                self.validate_map(field, entries, depth)
+                self.validate_map(field, *ty, entries, depth)
             }
         }
     }
@@ -527,17 +605,236 @@ impl LoadedTemplateAdmission<'_> {
         Ok(())
     }
 
-    fn validate_enum_variant_projection(
+    fn validate_enum_payload_projection(
         &self,
         field: &str,
         enum_ty: TypeId,
         variant: EnumVariantId,
+        projected_ty: TypeId,
     ) -> Result<()> {
         self.program
             .validate_value_type(&format!("{field}.enum_type"), enum_ty)?;
-        self.program
-            .enum_variant_label(enum_ty, variant)
+        let payload_type = self
+            .program
+            .enum_variant_payload_type(enum_ty, variant)
             .map_err(|err| Error::new(format!("{field}.variant_id {}", err)))?;
+        match payload_type {
+            Some(expected) if expected == projected_ty => Ok(()),
+            Some(expected) => Err(Error::new(format!(
+                "{field}.type has type id {}, expected enum payload type id {}",
+                projected_ty.as_u32(),
+                expected.as_u32()
+            ))),
+            None => Err(Error::new(format!(
+                "{field}.variant_id {} does not carry a payload",
+                variant.as_u32()
+            ))),
+        }
+    }
+
+    fn validate_enum_variant_payload(
+        &self,
+        field: &str,
+        enum_ty: TypeId,
+        variant: EnumVariantId,
+        payload_ty: TypeId,
+    ) -> Result<()> {
+        self.program
+            .validate_value_type(&format!("{field}.enum_type"), enum_ty)?;
+        let expected = self
+            .program
+            .enum_variant_payload_type(enum_ty, variant)
+            .map_err(|err| Error::new(format!("{field}.variant_id {}", err)))?;
+        match expected {
+            Some(expected) if expected == payload_ty => Ok(()),
+            Some(expected) => Err(Error::new(format!(
+                "{field}.payload has type id {}, expected {}",
+                payload_ty.as_u32(),
+                expected.as_u32()
+            ))),
+            None => Err(Error::new(format!(
+                "{field}.variant_id {} does not carry a payload",
+                variant.as_u32()
+            ))),
+        }
+    }
+
+    fn validate_record_field_projection(
+        &self,
+        field: &str,
+        record_ty: TypeId,
+        field_name: &str,
+        projected_ty: TypeId,
+    ) -> Result<()> {
+        let record_type = self.program.type_entry(record_ty)?;
+        let ArtifactValueShape::Record { fields } = record_type.value_shape()? else {
+            return Err(Error::new(format!(
+                "{field}.record type id {} must be a record type",
+                record_ty.as_u32()
+            )));
+        };
+        let expected = fields
+            .iter()
+            .find(|expected| expected.name == field_name)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "{field}.field_name {field_name} is not declared by type id {}",
+                    record_ty.as_u32()
+                ))
+            })?;
+        if expected.ty != projected_ty {
+            return Err(Error::new(format!(
+                "{field}.type has type id {}, expected record field type id {}",
+                projected_ty.as_u32(),
+                expected.ty.as_u32()
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_list_element_projection(
+        &self,
+        field: &str,
+        list_ty: TypeId,
+        projected_ty: TypeId,
+    ) -> Result<()> {
+        let list_type = self.program.type_entry(list_ty)?;
+        let ArtifactValueShape::List { element, .. } = list_type.value_shape()? else {
+            return Err(Error::new(format!(
+                "{field}.list type id {} must be a list type",
+                list_ty.as_u32()
+            )));
+        };
+        if *element != projected_ty {
+            return Err(Error::new(format!(
+                "{field}.type has type id {}, expected list element type id {}",
+                projected_ty.as_u32(),
+                element.as_u32()
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_list_rest_projection(
+        &self,
+        field: &str,
+        list_ty: TypeId,
+        projected_ty: TypeId,
+    ) -> Result<()> {
+        let list_type = self.program.type_entry(list_ty)?;
+        let ArtifactValueShape::List { element, .. } = list_type.value_shape()? else {
+            return Err(Error::new(format!(
+                "{field}.list type id {} must be a list type",
+                list_ty.as_u32()
+            )));
+        };
+        let projected_type = self.program.type_entry(projected_ty)?;
+        let ArtifactValueShape::List {
+            element: projected_element,
+            ..
+        } = projected_type.value_shape()?
+        else {
+            return Err(Error::new(format!(
+                "{field}.type id {} must be a list type",
+                projected_ty.as_u32()
+            )));
+        };
+        if element != projected_element {
+            return Err(Error::new(format!(
+                "{field}.type has list element type id {}, expected {}",
+                projected_element.as_u32(),
+                element.as_u32()
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_map_value_projection(
+        &self,
+        field: &str,
+        map_ty: TypeId,
+        key: &RuntimeValue,
+        keys: &[RuntimeValue],
+        projected_ty: TypeId,
+    ) -> Result<()> {
+        let map_type = self.program.type_entry(map_ty)?;
+        let ArtifactValueShape::Map {
+            key: key_type,
+            value,
+            ..
+        } = map_type.value_shape()?
+        else {
+            return Err(Error::new(format!(
+                "{field}.map type id {} must be a map type",
+                map_ty.as_u32()
+            )));
+        };
+        if *value != projected_ty {
+            return Err(Error::new(format!(
+                "{field}.type has type id {}, expected map value type id {}",
+                projected_ty.as_u32(),
+                value.as_u32()
+            )));
+        }
+        self.program
+            .validate_value_matches_type(&format!("{field}.key"), *key_type, key)?;
+        for (index, expected_key) in keys.iter().enumerate() {
+            self.program.validate_value_matches_type(
+                &format!("{field}.expected_key.{index}"),
+                *key_type,
+                expected_key,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_map_rest_projection(
+        &self,
+        field: &str,
+        map_ty: TypeId,
+        excluded_keys: &[RuntimeValue],
+        projected_ty: TypeId,
+    ) -> Result<()> {
+        let map_type = self.program.type_entry(map_ty)?;
+        let ArtifactValueShape::Map { key, value, .. } = map_type.value_shape()? else {
+            return Err(Error::new(format!(
+                "{field}.map type id {} must be a map type",
+                map_ty.as_u32()
+            )));
+        };
+        let projected_type = self.program.type_entry(projected_ty)?;
+        let ArtifactValueShape::Map {
+            key: projected_key,
+            value: projected_value,
+            ..
+        } = projected_type.value_shape()?
+        else {
+            return Err(Error::new(format!(
+                "{field}.type id {} must be a map type",
+                projected_ty.as_u32()
+            )));
+        };
+        if key != projected_key {
+            return Err(Error::new(format!(
+                "{field}.type has map key type id {}, expected {}",
+                projected_key.as_u32(),
+                key.as_u32()
+            )));
+        }
+        if value != projected_value {
+            return Err(Error::new(format!(
+                "{field}.type has map value type id {}, expected {}",
+                projected_value.as_u32(),
+                value.as_u32()
+            )));
+        }
+        for (index, excluded_key) in excluded_keys.iter().enumerate() {
+            self.program.validate_value_matches_type(
+                &format!("{field}.excluded_key.{index}"),
+                *key,
+                excluded_key,
+            )?;
+        }
         Ok(())
     }
 
@@ -590,6 +887,15 @@ impl LoadedTemplateAdmission<'_> {
         target_process: ProcessId,
         process_ref: ProcessRefId,
     ) -> Result<()> {
+        if let Some(expected_type) = self.expected_type
+            && ty != expected_type
+        {
+            return Err(Error::new(format!(
+                "{field} has type id {}, expected {}",
+                ty.as_u32(),
+                expected_type.as_u32()
+            )));
+        }
         if !self.allow_direct_process_ref {
             return Err(Error::new(format!(
                 "{field} process reference template must be a direct message payload"
@@ -658,9 +964,27 @@ impl LoadedTemplateAdmission<'_> {
     fn validate_record(
         &self,
         field: &str,
+        ty: TypeId,
         fields: &[LoadedValueTemplateField],
         depth: usize,
     ) -> Result<()> {
+        let type_entry = self.program.type_entry(ty)?;
+        let ArtifactValueShape::Record {
+            fields: expected_fields,
+        } = type_entry.value_shape()?
+        else {
+            return Err(Error::new(format!(
+                "{field}.type id {} must be a record type",
+                ty.as_u32()
+            )));
+        };
+        if fields.len() != expected_fields.len() {
+            return Err(Error::new(format!(
+                "{field}.field_count is {}, expected {}",
+                fields.len(),
+                expected_fields.len()
+            )));
+        }
         if fields.is_empty() || fields.len() > MAX_VALUE_TEMPLATE_FIELDS {
             return Err(Error::new(format!(
                 "{field}.field_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
@@ -675,8 +999,18 @@ impl LoadedTemplateAdmission<'_> {
                     record_field.name
                 )));
             }
+            let expected = expected_fields
+                .iter()
+                .find(|expected| expected.name == record_field.name)
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "{field}.field {} is not declared by type id {}",
+                        record_field.name,
+                        ty.as_u32()
+                    ))
+                })?;
             let nested = Self {
-                expected_type: None,
+                expected_type: Some(expected.ty),
                 allow_direct_process_ref: false,
                 ..*self
             };
@@ -692,16 +1026,31 @@ impl LoadedTemplateAdmission<'_> {
     fn validate_list(
         &self,
         field: &str,
+        ty: TypeId,
         items: &[LoadedValueTemplate],
         depth: usize,
     ) -> Result<()> {
+        let type_entry = self.program.type_entry(ty)?;
+        let ArtifactValueShape::List { element, capacity } = type_entry.value_shape()? else {
+            return Err(Error::new(format!(
+                "{field}.type id {} must be a list type",
+                ty.as_u32()
+            )));
+        };
         if items.len() > MAX_VALUE_TEMPLATE_FIELDS {
             return Err(Error::new(format!(
                 "{field}.item_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
             )));
         }
+        if items.len() > *capacity {
+            return Err(Error::new(format!(
+                "{field}.item_count is {}, capacity is {}",
+                items.len(),
+                capacity
+            )));
+        }
         let nested = Self {
-            expected_type: None,
+            expected_type: Some(*element),
             allow_direct_process_ref: false,
             ..*self
         };
@@ -714,19 +1063,34 @@ impl LoadedTemplateAdmission<'_> {
     fn validate_map(
         &self,
         field: &str,
+        ty: TypeId,
         entries: &[LoadedValueTemplateMapEntry],
         depth: usize,
     ) -> Result<()> {
+        let type_entry = self.program.type_entry(ty)?;
+        let ArtifactValueShape::Map {
+            key: key_type,
+            value: value_type,
+            capacity,
+        } = type_entry.value_shape()?
+        else {
+            return Err(Error::new(format!(
+                "{field}.type id {} must be a map type",
+                ty.as_u32()
+            )));
+        };
         if entries.len() > MAX_VALUE_TEMPLATE_FIELDS {
             return Err(Error::new(format!(
                 "{field}.entry_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
             )));
         }
-        let nested = Self {
-            expected_type: None,
-            allow_direct_process_ref: false,
-            ..*self
-        };
+        if entries.len() > *capacity {
+            return Err(Error::new(format!(
+                "{field}.entry_count is {}, capacity is {}",
+                entries.len(),
+                capacity
+            )));
+        }
         let mut keys = BTreeSet::new();
         for (index, entry) in entries.iter().enumerate() {
             if !loaded_template_is_static_map_key(&entry.key) {
@@ -734,19 +1098,30 @@ impl LoadedTemplateAdmission<'_> {
                     "{field}.entry.{index}.key must be a static value template"
                 )));
             }
-            nested.validate_with_depth(
+            Self {
+                expected_type: Some(*key_type),
+                allow_direct_process_ref: false,
+                ..*self
+            }
+            .validate_with_depth(
                 &format!("{field}.entry.{index}.key"),
                 &entry.key,
                 depth + 1,
             )?;
             let key = loaded_static_map_key_value(self.program, &entry.key)?;
-            if !keys.insert(key.clone()) {
+            if keys.contains(&key) {
                 return Err(Error::new(format!(
                     "{field} duplicates key {}",
                     key.label()
                 )));
             }
-            nested.validate_with_depth(
+            keys.insert(key);
+            Self {
+                expected_type: Some(*value_type),
+                allow_direct_process_ref: false,
+                ..*self
+            }
+            .validate_with_depth(
                 &format!("{field}.entry.{index}.value"),
                 &entry.value,
                 depth + 1,

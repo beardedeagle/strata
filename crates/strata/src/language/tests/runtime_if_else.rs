@@ -91,6 +91,20 @@ fn runtime_if_else_rejects_step_result_mismatch() {
 }
 
 #[test]
+fn runtime_if_else_rejects_missing_else_branch_return_with_precise_diagnostic() {
+    let source = RUNTIME_IF_ELSE.replace("return Stop(ColdReady);", "emit \"missing return\";");
+
+    let error = parse_source(&source).expect_err("runtime if else branch must return");
+
+    assert!(
+        error
+            .to_string()
+            .contains("runtime return if else branch must contain a top-level return"),
+        "{error}"
+    );
+}
+
+#[test]
 fn runtime_if_else_rejects_branch_effect_without_declared_authority() {
     let source = RUNTIME_IF_ELSE.replace(
         "fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det",
@@ -101,6 +115,21 @@ fn runtime_if_else_rejects_branch_effect_without_declared_authority() {
         error
             .to_string()
             .contains("step uses effect emit but does not declare it"),
+        "{error}"
+    );
+}
+
+#[test]
+fn runtime_if_else_rejects_nested_statement_branch_inside_final_branch() {
+    let source = RUNTIME_IF_ELSE.replace(
+        "emit \"worker took warm branch\";",
+        "if (flag) { emit \"nested warm\"; } else { emit \"nested cold\"; }",
+    );
+    let error = check_source(&source).expect_err("nested runtime branch must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("nested statement-level if branches are not supported"),
         "{error}"
     );
 }

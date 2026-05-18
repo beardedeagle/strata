@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::support::*;
-use crate::{ProcessStatus, RuntimeEvent, RuntimeProcessId};
+use crate::{ProcessStatus, RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeProcessId};
 use mantle_artifact::ArtifactBranch;
 
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
@@ -237,16 +237,14 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
         run.processes[worker_index].status = ProcessStatus::Stopped;
 
         let mut process_refs = worker_ref_binding(worker_pid);
-        let mut branch_decisions = Vec::new();
         let step = main_step(main_pid);
         let action = failing_current_state_payload_send();
         let err = run
             .execute_action(
                 &mut process_refs,
-                &mut branch_decisions,
                 &step,
                 &action,
-                BranchDecisionPath::root(),
+                RuntimeBranchPath::root(),
                 &[],
             )
             .expect_err("stopped target should reject before payload template evaluation");
@@ -278,16 +276,14 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
         run.processes[worker_index].status = ProcessStatus::Failed;
 
         let mut process_refs = worker_ref_binding(worker_pid);
-        let mut branch_decisions = Vec::new();
         let step = main_step(main_pid);
         let action = failing_current_state_payload_send();
         let err = run
             .execute_action(
                 &mut process_refs,
-                &mut branch_decisions,
                 &step,
                 &action,
-                BranchDecisionPath::root(),
+                RuntimeBranchPath::root(),
                 &[],
             )
             .expect_err("failed target should reject before payload template evaluation");
@@ -325,16 +321,14 @@ fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation()
         .expect("first send should fill worker mailbox");
 
         let mut process_refs = worker_ref_binding(worker_pid);
-        let mut branch_decisions = Vec::new();
         let step = main_step(main_pid);
         let action = failing_current_state_payload_send();
         let err = run
             .execute_action(
                 &mut process_refs,
-                &mut branch_decisions,
                 &step,
                 &action,
-                BranchDecisionPath::root(),
+                RuntimeBranchPath::root(),
                 &[],
             )
             .expect_err("full mailbox should reject before payload template evaluation");
@@ -411,32 +405,89 @@ fn runtime_traces_distinct_nested_branches_with_identical_conditions() {
             .expect("worker should process nested branch");
     }
 
-    let selected_branches = host
+    let selected_branch_paths = host
         .events()
         .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                RuntimeEvent::BranchSelected {
-                    process_id,
-                    process,
-                    message_id,
-                    branch,
-                    condition,
-                    ..
-                } if *process_id == WORKER_PROCESS
-                    && process == "Worker"
-                    && *message_id == PING_MESSAGE
-                    && *branch == ArtifactBranch::Then
-                    && condition == "True"
-            )
+        .filter_map(|event| match event {
+            RuntimeEvent::BranchSelected {
+                process_id,
+                process,
+                message_id,
+                branch,
+                scope,
+                branch_path,
+                condition,
+                ..
+            } if *process_id == WORKER_PROCESS
+                && process == "Worker"
+                && *message_id == PING_MESSAGE
+                && *branch == ArtifactBranch::Then
+                && *scope == RuntimeBranchScope::NextState
+                && condition == "True" =>
+            {
+                Some(*branch_path)
+            }
+            _ => None,
         })
-        .count();
+        .collect::<Vec<_>>();
 
     assert_eq!(
-        selected_branches, 2,
+        selected_branch_paths.len(),
+        2,
         "outer and nested branch nodes should each record branch_selected"
     );
+    assert_eq!(selected_branch_paths[0], RuntimeBranchPath::root());
+    assert_eq!(
+        selected_branch_paths[1].segments(),
+        [0x4000],
+        "nested then-state branch should carry a stable typed branch path"
+    );
+
+    let distinct_paths = selected_branch_paths
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+
+    assert_eq!(
+        distinct_paths, 2,
+        "branch_selected events with identical scope and condition must remain distinguishable"
+    );
+}
+
+#[test]
+fn runtime_rejects_message_payload_outside_declared_enum_before_acceptance() {
+    let artifact = artifact_with_nested_worker_bool_branch();
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program
+        .validate_admission()
+        .expect("Bool payload artifact should admit");
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = {
+        let mut run = new_test_run(&program, &mut host);
+        let worker_pid = run
+            .spawn_process(WORKER_PROCESS, None)
+            .expect("worker process should spawn");
+        run.send_message(
+            worker_pid,
+            RuntimeMessageEnvelope::new(
+                PING_MESSAGE,
+                Some(
+                    RuntimePayload::value(BOOL, RuntimeValue::Atom("Maybe".to_string()))
+                        .expect("test malformed Bool payload should construct"),
+                ),
+            ),
+            None,
+        )
+        .expect_err("payload outside enum variants should fail before acceptance")
+        .to_string()
+    };
+
+    assert!(
+        err.contains("payload value Maybe is not a member of enum type Bool"),
+        "{err}"
+    );
+    assert_no_worker_ping_accepted_event(host.events());
 }
 
 fn artifact_with_worker_process_ref_payload() -> MantleArtifact {
@@ -454,7 +505,7 @@ fn artifact_with_nested_worker_bool_branch() -> MantleArtifact {
         "Bool",
         vec!["False".to_string(), "True".to_string()],
     ));
-    artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Warm", "Cold"]);
+    artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Handled", "Done"]);
     artifact.processes[1].message_variants =
         vec![ArtifactMessageVariant::payload("Ping", bool_type)];
     let condition = ArtifactValueTemplate::ReceivedPayload { ty: bool_type };

@@ -82,6 +82,24 @@ impl RuntimePayload {
         })
     }
 
+    pub(crate) fn validate_process_ref_value(field: &str, payload: &Self) -> Result<()> {
+        let Some(process_ref) = payload.process_ref else {
+            return Err(Error::new(format!(
+                "{field} requires process reference metadata"
+            )));
+        };
+        let pid = RuntimeProcessId::from_u64(process_ref.pid)?;
+        let expected_value = RuntimeValue::process_ref(payload.ty, pid.as_u64());
+        if payload.value != expected_value {
+            return Err(Error::new(format!(
+                "{field} process reference payload value {} does not match metadata label {}",
+                payload.value.label(),
+                expected_value.label()
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn value(ty: TypeId, value: RuntimeValue) -> Result<Self> {
         value.validate("payload value")?;
         if value.contains_process_ref() {

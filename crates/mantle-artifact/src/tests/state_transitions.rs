@@ -52,7 +52,7 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Literal {
             ty: WORKER_STATE,
-            value: artifact_value("Missing"),
+            value: artifact_value("Done"),
         });
 
     let err = artifact
@@ -60,7 +60,7 @@ fn validate_rejects_static_next_state_template_outside_state_table() {
         .expect_err("static next-state template outside state table should fail");
 
     assert!(err.to_string().contains(
-        "process Worker message id 0 next_state_template produced value Missing not admitted by state table"
+        "process Worker message id 0 next_state_template produced value Done not admitted by state table"
     ));
 }
 
@@ -86,7 +86,7 @@ fn validate_rejects_state_value_type_mismatch() {
 #[test]
 fn validate_rejects_next_state_template_when_identity_is_not_admitted() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].state_values[1] = state_value(WORKER_STATE, "Spoofed");
+    artifact.processes[1].state_values[1] = state_value(WORKER_STATE, "Done");
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Literal {
             ty: WORKER_STATE,
@@ -129,7 +129,7 @@ fn validate_rejects_if_else_next_state_literal_that_is_not_bool_value() {
     artifact.processes[1].transitions[0].next_state = NextState::IfElse {
         condition: ArtifactValueTemplate::Literal {
             ty: bool_type,
-            value: artifact_value("Maybe"),
+            value: artifact_value("True(Payload)"),
         },
         then_state: Box::new(NextState::Value(StateId::new(1))),
         else_state: Box::new(NextState::Current),
@@ -140,7 +140,7 @@ fn validate_rejects_if_else_next_state_literal_that_is_not_bool_value() {
         .expect_err("invalid literal Bool branch condition should fail admission");
 
     assert!(err.to_string().contains(
-        "process Worker message id 0 next_state_condition must evaluate to unit Bool value False or True"
+        "process Worker message id 0 next_state_condition enum variant True must not carry a payload"
     ));
 }
 
@@ -148,6 +148,13 @@ fn validate_rejects_if_else_next_state_literal_that_is_not_bool_value() {
 fn validate_rejects_if_else_next_state_static_projection_that_is_not_bool_value() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
+    artifact.types[BOX.index()] = ArtifactType::record(
+        "Box",
+        vec![ArtifactTypeField {
+            name: "flag".to_string(),
+            ty: bool_type,
+        }],
+    );
     artifact.processes[1].transitions[0].next_state = NextState::IfElse {
         condition: ArtifactValueTemplate::RecordField {
             ty: bool_type,
@@ -166,17 +173,20 @@ fn validate_rejects_if_else_next_state_static_projection_that_is_not_bool_value(
         .expect_err("invalid static projection Bool branch condition should fail admission");
 
     assert!(err.to_string().contains(
-        "process Worker message id 0 next_state_condition must evaluate to unit Bool value False or True"
+        "process Worker message id 0 next_state_condition.record.field.flag value Maybe is not a member of enum type Bool"
     ));
 }
 
 #[test]
 fn validate_rejects_payload_dependent_map_template_key() {
     let mut artifact = valid_artifact();
+    let job_map = append_map_type(&mut artifact, "JobMap", JOB, JOB, 1);
+    artifact.processes[1].state_type = job_map;
+    artifact.processes[1].state_values = vec![state_value(job_map, "Map[Job=>Job]")];
     artifact.processes[1].message_variants[0] = ArtifactMessageVariant::payload("Ping", JOB);
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Map {
-            ty: WORKER_STATE,
+            ty: job_map,
             entries: vec![ArtifactValueTemplateMapEntry {
                 key: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
                 value: ArtifactValueTemplate::Literal {
@@ -199,9 +209,12 @@ fn validate_rejects_payload_dependent_map_template_key() {
 #[test]
 fn validate_rejects_duplicate_static_map_template_key() {
     let mut artifact = valid_artifact();
+    let job_map = append_map_type(&mut artifact, "JobMap", JOB, JOB, 2);
+    artifact.processes[1].state_type = job_map;
+    artifact.processes[1].state_values = vec![state_value(job_map, "Map[Job=>Ready]")];
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Map {
-            ty: WORKER_STATE,
+            ty: job_map,
             entries: vec![
                 ArtifactValueTemplateMapEntry {
                     key: ArtifactValueTemplate::Literal {
@@ -240,6 +253,36 @@ fn validate_rejects_duplicate_static_map_template_key() {
 #[test]
 fn validate_rejects_current_state_payload_template_outside_state_table() {
     let mut artifact = valid_artifact();
+    declare_job_record_types(&mut artifact);
+    artifact.types[WORKER_STATE.index()] = ArtifactType::enum_value_with_payloads(
+        "WorkerState",
+        vec![
+            ArtifactEnumVariant {
+                label: "Idle".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Handled".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Working".to_string(),
+                payload_type: Some(JOB),
+            },
+            ArtifactEnumVariant {
+                label: "Done".to_string(),
+                payload_type: Some(JOB),
+            },
+            ArtifactEnumVariant {
+                label: "Routed".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Ready".to_string(),
+                payload_type: None,
+            },
+        ],
+    );
     let mut working = state_value(WORKER_STATE, "Working(Job{phase:Ready})");
     working.payload = Some(artifact_payload(JOB, "Job{phase:Ready}"));
     artifact.processes[1].state_values = vec![state_value(WORKER_STATE, "Idle"), working];

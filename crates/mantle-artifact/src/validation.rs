@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 
 use crate::{
     ARTIFACT_MAGIC, ArtifactAction, ArtifactMessageVariant, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate, Error, MAX_ARTIFACT_BYTES,
-    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MantleArtifact, NextState, Result, TypeId,
+    ArtifactTypeKind, ArtifactValue, ArtifactValueShape, ArtifactValueTemplate, Error,
+    MAX_ARTIFACT_BYTES, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MantleArtifact, NextState,
+    Result, TypeId,
 };
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
@@ -165,24 +166,20 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
             &format!("{prefix}.kind"),
             ty.kind.as_str(),
         )?;
-        add_field_bytes(
-            &mut encoded_len,
-            &format!("{prefix}.enum_variant_count"),
-            &ty.enum_variants.len().to_string(),
-        )?;
-        for (variant_index, variant) in ty.enum_variants.iter().enumerate() {
-            add_field_bytes(
-                &mut encoded_len,
-                &format!("{prefix}.enum_variant.{variant_index}"),
-                variant,
-            )?;
-        }
-        if let ArtifactTypeKind::ProcessRef { target } = ty.kind {
-            add_field_bytes(
-                &mut encoded_len,
-                &format!("{prefix}.target_process"),
-                &target.as_u32().to_string(),
-            )?;
+        match ty.kind {
+            ArtifactTypeKind::Value => {
+                let shape = ty.shape.as_ref().ok_or_else(|| {
+                    Error::new(format!("{prefix} value type must declare a value shape"))
+                })?;
+                add_type_shape_bytes(&mut encoded_len, &prefix, shape)?;
+            }
+            ArtifactTypeKind::ProcessRef { target } => {
+                add_field_bytes(
+                    &mut encoded_len,
+                    &format!("{prefix}.target_process"),
+                    &target.as_u32().to_string(),
+                )?;
+            }
         }
     }
     add_field_bytes(
@@ -370,6 +367,83 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
         &artifact.source_hash_fnv1a64,
     )?;
     Ok(())
+}
+
+fn add_type_shape_bytes(total: &mut usize, prefix: &str, shape: &ArtifactValueShape) -> Result<()> {
+    match shape {
+        ArtifactValueShape::Atom => add_field_bytes(total, &format!("{prefix}.shape"), "atom"),
+        ArtifactValueShape::Record { fields } => {
+            add_field_bytes(total, &format!("{prefix}.shape"), "record")?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.field_count"),
+                &fields.len().to_string(),
+            )?;
+            for (field_index, field) in fields.iter().enumerate() {
+                add_field_bytes(
+                    total,
+                    &format!("{prefix}.field.{field_index}.name"),
+                    &field.name,
+                )?;
+                add_field_bytes(
+                    total,
+                    &format!("{prefix}.field.{field_index}.type_id"),
+                    &type_id_string(field.ty),
+                )?;
+            }
+            Ok(())
+        }
+        ArtifactValueShape::Enum { variants } => {
+            add_field_bytes(total, &format!("{prefix}.shape"), "enum")?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.enum_variant_count"),
+                &variants.len().to_string(),
+            )?;
+            for (variant_index, variant) in variants.iter().enumerate() {
+                add_field_bytes(
+                    total,
+                    &format!("{prefix}.enum_variant.{variant_index}"),
+                    &variant.label,
+                )?;
+                if let Some(payload_type) = variant.payload_type {
+                    add_field_bytes(
+                        total,
+                        &format!("{prefix}.enum_variant.{variant_index}.payload_type_id"),
+                        &type_id_string(payload_type),
+                    )?;
+                }
+            }
+            Ok(())
+        }
+        ArtifactValueShape::List { element, capacity } => {
+            add_field_bytes(total, &format!("{prefix}.shape"), "list")?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.element_type_id"),
+                &type_id_string(*element),
+            )?;
+            add_field_bytes(total, &format!("{prefix}.capacity"), &capacity.to_string())
+        }
+        ArtifactValueShape::Map {
+            key,
+            value,
+            capacity,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.shape"), "map")?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.key_type_id"),
+                &type_id_string(*key),
+            )?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.value_type_id"),
+                &type_id_string(*value),
+            )?;
+            add_field_bytes(total, &format!("{prefix}.capacity"), &capacity.to_string())
+        }
+    }
 }
 
 pub(crate) fn validate_count(field: &str, value: usize, min: usize, max: usize) -> Result<()> {

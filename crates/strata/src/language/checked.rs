@@ -80,8 +80,40 @@ impl CheckedEnumVariantId {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) enum CheckedTypeKind {
-    Value { enum_variants: Vec<Identifier> },
+    Value { shape: CheckedValueShape },
     ProcessRef { target: CheckedProcessId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) enum CheckedValueShape {
+    Atom,
+    Record {
+        fields: Vec<CheckedTypeField>,
+    },
+    Enum {
+        variants: Vec<CheckedEnumVariant>,
+    },
+    List {
+        element: CheckedTypeId,
+        capacity: usize,
+    },
+    Map {
+        key: CheckedTypeId,
+        value: CheckedTypeId,
+        capacity: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedTypeField {
+    pub(in crate::language) name: Identifier,
+    pub(in crate::language) ty: CheckedTypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedEnumVariant {
+    pub(in crate::language) name: Identifier,
+    pub(in crate::language) payload_type: Option<CheckedTypeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,8 +140,8 @@ impl CheckedTypeRef {
         &self.label
     }
 
-    pub(in crate::language) fn kind(&self) -> CheckedTypeKind {
-        self.kind.clone()
+    pub(in crate::language) fn kind(&self) -> &CheckedTypeKind {
+        &self.kind
     }
 
     pub(in crate::language) fn enum_variant_label(
@@ -117,19 +149,49 @@ impl CheckedTypeRef {
         variant: CheckedEnumVariantId,
     ) -> Result<&Identifier> {
         match &self.kind {
-            CheckedTypeKind::Value { enum_variants } => {
-                enum_variants.get(variant.index()).ok_or_else(|| {
+            CheckedTypeKind::Value {
+                shape: CheckedValueShape::Enum { variants },
+            } => variants
+                .get(variant.index())
+                .map(|variant| &variant.name)
+                .ok_or_else(|| {
                     Error::new(format!(
                         "checked type {} has no enum variant id {}",
                         self.label,
                         variant.as_u32()
                     ))
-                })
-            }
+                }),
+            CheckedTypeKind::Value { .. } => Err(Error::new(format!(
+                "checked type {} is not an enum value type",
+                self.label
+            ))),
             CheckedTypeKind::ProcessRef { .. } => Err(Error::new(format!(
                 "checked type {} is not an enum value type",
                 self.label
             ))),
+        }
+    }
+
+    pub(in crate::language) fn enum_variant_payload_type(
+        &self,
+        variant: CheckedEnumVariantId,
+    ) -> Result<Option<CheckedTypeId>> {
+        match &self.kind {
+            CheckedTypeKind::Value {
+                shape: CheckedValueShape::Enum { variants },
+            } => variants
+                .get(variant.index())
+                .map(|variant| variant.payload_type)
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "checked type {} has no enum variant id {}",
+                        self.label,
+                        variant.as_u32()
+                    ))
+                }),
+            CheckedTypeKind::Value { .. } | CheckedTypeKind::ProcessRef { .. } => Err(Error::new(
+                format!("checked type {} is not an enum value type", self.label),
+            )),
         }
     }
 
@@ -139,7 +201,7 @@ impl CheckedTypeRef {
             test_type_id(label, None),
             label.to_string(),
             CheckedTypeKind::Value {
-                enum_variants: Vec::new(),
+                shape: CheckedValueShape::Atom,
             },
         )
     }
@@ -149,11 +211,19 @@ impl CheckedTypeRef {
         let enum_variants = enum_variants
             .iter()
             .map(|variant| Identifier::new(*variant).expect("test enum variant should be valid"))
+            .map(|name| CheckedEnumVariant {
+                name,
+                payload_type: None,
+            })
             .collect();
         Self::new(
             test_type_id(label, None),
             label.to_string(),
-            CheckedTypeKind::Value { enum_variants },
+            CheckedTypeKind::Value {
+                shape: CheckedValueShape::Enum {
+                    variants: enum_variants,
+                },
+            },
         )
     }
 

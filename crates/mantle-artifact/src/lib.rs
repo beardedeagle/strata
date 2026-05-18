@@ -9,12 +9,13 @@ mod io;
 mod validation;
 
 pub use artifact::{
-    ArtifactAction, ArtifactBranch, ArtifactEffect, ArtifactLoopElement, ArtifactMapEntry,
-    ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
+    ArtifactAction, ArtifactBranch, ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement,
+    ArtifactMapEntry, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
     ArtifactProcessRefPayload, ArtifactRecordField, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTransition, ArtifactType, ArtifactTypeKind, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode,
-    NextState, StepResult,
+    ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind, ArtifactValue,
+    ArtifactValueShape, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode, NextState, StepResult,
+    validate_value_enum_membership,
 };
 pub use constants::*;
 pub use error::{Error, Result};

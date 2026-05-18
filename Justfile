@@ -132,6 +132,18 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_collection_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_collection_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_collection_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_return_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_return_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_return_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_record_pattern.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_record_pattern.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_record_pattern.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_record_return_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_record_return_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_record_return_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_record_body_match.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_record_body_match.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_record_body_match.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/state_payload_enum.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/state_payload_enum.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
@@ -153,6 +165,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_for_each.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_for_each.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_for_each_if.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_for_each_if.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_if.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_for_each_empty.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_for_each_empty.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_empty.mta

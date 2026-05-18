@@ -108,7 +108,7 @@ fn rejects_spawn_without_process_ref() {
 
     assert!(
         err.to_string()
-            .contains("expected emit, let, send, or return statement")
+            .contains("expected emit, for, if, let, send, or return statement")
     );
 }
 

@@ -3,15 +3,17 @@ pub(super) use super::super::*;
 pub(super) use crate::host::InMemoryRuntimeHost;
 pub(super) use crate::limits::RunLimits;
 pub(super) use crate::program::{
-    LoadedNextState, LoadedProgram, LoadedValueTemplate, RuntimePayload, RuntimeValue,
+    LoadedNextState, LoadedProgram, LoadedStateValue, LoadedValueTemplate, RuntimePayload,
+    RuntimeValue,
 };
 pub(super) use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactMessageVariant,
-    ArtifactPayload, ArtifactProcess, ArtifactProcessRef, ArtifactProcessRefPayload,
-    ArtifactRecordField, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactValue,
-    ArtifactValueTemplate, ArtifactValueTemplateField, EnumVariantId, MAX_FIELD_VALUE_BYTES,
-    MAX_IDENTIFIER_BYTES, MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact,
-    MessageId, NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactEnumVariant,
+    ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
+    ArtifactProcessRefPayload, ArtifactRecordField, ArtifactStateValue, ArtifactTransition,
+    ArtifactType, ArtifactTypeField, ArtifactValue, ArtifactValueTemplate,
+    ArtifactValueTemplateField, EnumVariantId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
@@ -66,18 +68,11 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
         types: vec![
             ArtifactType::value("MainState"),
             ArtifactType::value("MainMsg"),
-            ArtifactType::enum_value(
-                "WorkerState",
-                vec![
-                    "Idle".to_string(),
-                    "Handled".to_string(),
-                    "Working".to_string(),
-                    "Done".to_string(),
-                    "Routed".to_string(),
-                ],
-            ),
+            worker_state_type(&[
+                "Idle", "Handled", "Working", "Done", "Routed", "Ready", "Other", "Spoofed",
+            ]),
             ArtifactType::value("WorkerMsg"),
-            ArtifactType::value("Job"),
+            job_record_type(),
             ArtifactType::value("Box"),
             ArtifactType::value("Leaf"),
             ArtifactType::value("StartPayload"),
@@ -156,23 +151,106 @@ pub(super) fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {
     ArtifactStateValue::new(ty, artifact_value(value)).expect("test state value should be valid")
 }
 
-pub(super) fn record_template_with_depth(depth: usize) -> ArtifactValueTemplate {
+pub(super) fn loaded_state_values(ty: TypeId, values: &[&str]) -> Vec<LoadedStateValue> {
+    state_values(ty, values)
+        .iter()
+        .map(|value| LoadedStateValue::from_artifact(value).expect("test state value should load"))
+        .collect()
+}
+
+pub(super) fn artifact_type_field(name: &str, ty: TypeId) -> ArtifactTypeField {
+    ArtifactTypeField {
+        name: name.to_string(),
+        ty,
+    }
+}
+
+pub(super) fn artifact_enum_variant(
+    label: &str,
+    payload_type: Option<TypeId>,
+) -> ArtifactEnumVariant {
+    ArtifactEnumVariant {
+        label: label.to_string(),
+        payload_type,
+    }
+}
+
+pub(super) fn worker_state_type(variants: &[&str]) -> ArtifactType {
+    ArtifactType::enum_value(
+        "WorkerState",
+        variants
+            .iter()
+            .map(|variant| (*variant).to_string())
+            .collect(),
+    )
+}
+
+pub(super) fn worker_state_type_with_payloads(variants: &[(&str, Option<TypeId>)]) -> ArtifactType {
+    ArtifactType::enum_value_with_payloads(
+        "WorkerState",
+        variants
+            .iter()
+            .map(|(label, payload_type)| artifact_enum_variant(label, *payload_type))
+            .collect(),
+    )
+}
+
+pub(super) fn job_record_type() -> ArtifactType {
+    ArtifactType::record("Job", vec![artifact_type_field("phase", WORKER_STATE)])
+}
+
+pub(super) fn box_record_type(field: &str, ty: TypeId) -> ArtifactType {
+    ArtifactType::record("Box", vec![artifact_type_field(field, ty)])
+}
+
+pub(super) fn push_map_type(
+    program: &mut LoadedProgram,
+    label: &str,
+    key: TypeId,
+    value: TypeId,
+    capacity: usize,
+) -> TypeId {
+    let ty = TypeId::from_index(program.types.len()).expect("test type id should fit");
+    program
+        .types
+        .push(ArtifactType::map(label, key, value, capacity));
+    ty
+}
+
+pub(super) fn push_list_type(
+    program: &mut LoadedProgram,
+    label: &str,
+    element: TypeId,
+    capacity: usize,
+) -> TypeId {
+    let ty = TypeId::from_index(program.types.len()).expect("test type id should fit");
+    program
+        .types
+        .push(ArtifactType::list(label, element, capacity));
+    ty
+}
+
+pub(super) fn recursive_main_state_type() -> ArtifactType {
+    ArtifactType::enum_value_with_payloads(
+        "MainState",
+        vec![
+            artifact_enum_variant("Leaf", None),
+            artifact_enum_variant("Node", Some(MAIN_STATE)),
+        ],
+    )
+}
+
+pub(super) fn recursive_main_state_template_with_depth(depth: usize) -> ArtifactValueTemplate {
     let mut template = ArtifactValueTemplate::Literal {
-        ty: LEAF,
+        ty: MAIN_STATE,
         value: artifact_value("Leaf"),
     };
     for _ in 0..depth {
-        template = ArtifactValueTemplate::Record {
-            ty: BOX,
-            fields: vec![ArtifactValueTemplateField {
-                name: "item".to_string(),
-                value: template,
-            }],
+        template = ArtifactValueTemplate::EnumVariant {
+            ty: MAIN_STATE,
+            variant: EnumVariantId::new(1),
+            payload: Box::new(template),
         };
-    }
-    match &mut template {
-        ArtifactValueTemplate::Record { ty, .. } => *ty = MAIN_STATE,
-        _ => unreachable!("depth above zero produces a record"),
     }
     template
 }

@@ -103,6 +103,7 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
 fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.types[BOX.index()] = box_record_type("reply_to", MAIN_STATE);
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
     program.processes[0].transitions[0].effect_authority =
         crate::program::LoadedEffectAuthority::from_artifact(&[
@@ -275,19 +276,21 @@ fn runtime_rejects_process_ref_payload_target_type_mismatch() {
 #[test]
 fn runtime_rejects_oversized_record_payload_template_value() {
     let artifact = artifact_with_unbound_worker_process_ref();
-    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let list_ty = push_list_type(&mut program, "LeafList", LEAF, 127);
+    program.types[BOX.index()] = box_record_type("item", list_ty);
     let template = ArtifactValueTemplate::Record {
         ty: BOX,
         fields: vec![ArtifactValueTemplateField {
             name: "item".to_string(),
-            value: ArtifactValueTemplate::ReceivedPayload { ty: JOB },
+            value: ArtifactValueTemplate::ReceivedPayload { ty: list_ty },
         }],
     };
     let long_atom = RuntimeValue::Atom(format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES - 1)));
     let short_atom = RuntimeValue::Atom(format!("A{}", "a".repeat(MAX_IDENTIFIER_BYTES - 5)));
     let mut items = vec![long_atom; 126];
     items.push(short_atom);
-    let received = RuntimePayload::value(JOB, RuntimeValue::List(items))
+    let received = RuntimePayload::value(list_ty, RuntimeValue::List(items))
         .expect("test payload should fit exactly");
     let label: &str = received.label();
     assert_eq!(label.len(), MAX_FIELD_VALUE_BYTES);

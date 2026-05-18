@@ -39,8 +39,8 @@ runs:
         set -euo pipefail
 
         if ! command -v rustup >/dev/null 2>&1; then
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "rustup must be preinstalled; refusing to run an unpinned remote installer" >&2
+          exit 1
         fi
 
         if [[ -n "${GITHUB_PATH:-}" ]]; then

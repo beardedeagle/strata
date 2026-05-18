@@ -86,7 +86,7 @@ fn validate_rejects_if_else_action_nesting_above_limit() {
 }
 
 #[test]
-fn validate_rejects_send_after_process_ref_spawned_in_only_one_branch() {
+fn validate_rejects_process_ref_spawned_in_runtime_if_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
     artifact.processes[0].transitions[0].actions = vec![
@@ -110,15 +110,17 @@ fn validate_rejects_send_after_process_ref_spawned_in_only_one_branch() {
 
     let err = artifact
         .validate()
-        .expect_err("branch-local process reference should not be available after if");
+        .expect_err("branch-local process reference binding should fail admission");
 
-    assert!(err.to_string().contains(
-        "process Main sends through unbound process reference id 0 within message transition 0"
-    ));
+    assert!(
+        err.to_string()
+            .contains("runtime if branch cannot bind process references"),
+        "{err}"
+    );
 }
 
 #[test]
-fn validate_accepts_send_after_process_ref_spawned_in_both_branches() {
+fn validate_rejects_process_ref_spawned_in_both_runtime_if_branches() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
     artifact.processes[0].transitions[0].actions = vec![
@@ -143,9 +145,15 @@ fn validate_accepts_send_after_process_ref_spawned_in_both_branches() {
         },
     ];
 
-    artifact
+    let err = artifact
         .validate()
-        .expect("process reference spawned in both branches should be available after if");
+        .expect_err("process reference binding should stay outside runtime if branches");
+
+    assert!(
+        err.to_string()
+            .contains("runtime if branch cannot bind process references"),
+        "{err}"
+    );
 }
 
 #[test]

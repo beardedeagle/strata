@@ -155,7 +155,11 @@ fn rejects_security_declarations_instead_of_erasing_source() {
 
 #[test]
 fn rejects_reserved_keywords_as_state_values() {
-    for keyword in ["as", "else", "if", "let", "mut", "var"] {
+    for keyword in [
+        "_", "as", "bounded", "else", "emit", "enum", "fn", "for", "if", "in", "let", "mailbox",
+        "match", "module", "mut", "proc", "record", "return", "security", "send", "spawn", "type",
+        "var",
+    ] {
         let source = r#"
 module reserved_keyword;
 

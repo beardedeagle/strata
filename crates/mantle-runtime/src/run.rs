@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use mantle_artifact::{
-    ArtifactBranch, ArtifactValue, Error, LoopElementId, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact,
-    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
+    ArtifactBranch, ArtifactValue, Error, LoopElementId, MantleArtifact, OutputId, ProcessId,
+    ProcessRefId, Result, StateId, StepResult, TypeId,
 };
 
 use accounting::{checked_output_bytes, checked_trace_event_bytes};
@@ -10,14 +10,15 @@ use model::{ActiveStep, ProcessInstance, RuntimeMessageEnvelope};
 use templates::evaluate_runtime_template;
 
 use crate::event::{
-    RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
-    RuntimeStepResult, RuntimeStopReason,
+    RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope, RuntimeEvent,
+    RuntimeEventRecord, RuntimeFailureReason, RuntimeLoopContext, RuntimeOutputStream,
+    RuntimeProcessId, RuntimeStepResult, RuntimeStopReason,
 };
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
 use crate::program::{
-    LoadedAction, LoadedNextState, LoadedProgram, LoadedSendTarget, LoadedValueTemplate,
-    RuntimePayload,
+    LoadedAction, LoadedLoopElement, LoadedNextState, LoadedProgram, LoadedSendTarget,
+    LoadedValueTemplate, RuntimePayload,
 };
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
@@ -26,59 +27,19 @@ mod model;
 mod process_refs;
 mod templates;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BranchDecisionPath {
-    depth: u8,
-    bits: u64,
-}
-
-impl BranchDecisionPath {
-    const fn root() -> Self {
-        Self { depth: 0, bits: 0 }
-    }
-
-    fn child(self, branch: ArtifactBranch) -> Result<Self> {
-        if usize::from(self.depth) >= MAX_VALUE_TEMPLATE_DEPTH {
-            return Err(Error::new(format!(
-                "runtime branch nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
-            )));
-        }
-        let bit = match branch {
-            ArtifactBranch::Then => 0,
-            ArtifactBranch::Else => 1,
-        };
-        Ok(Self {
-            depth: self.depth + 1,
-            bits: self.bits | (bit << self.depth),
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BranchDecision {
-    path: BranchDecisionPath,
-    condition: LoadedValueTemplate,
-    branch: ArtifactBranch,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeLoopElement {
     id: LoopElementId,
+    index: usize,
     payload: RuntimePayload,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BranchDecisionMode {
-    StoreForAction,
-    ReuseFromNextState,
 }
 
 struct BranchSelection<'a> {
     step: &'a ActiveStep,
+    scope: RuntimeBranchScope,
+    branch_path: RuntimeBranchPath,
     condition: &'a LoadedValueTemplate,
     local_process_refs: &'a BTreeMap<ProcessRefId, RuntimeProcessId>,
-    path: BranchDecisionPath,
-    mode: BranchDecisionMode,
     loop_elements: &'a [RuntimeLoopElement],
 }
 
@@ -389,23 +350,16 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
         let mut local_process_refs = BTreeMap::new();
-        let mut branch_decisions = Vec::new();
 
-        let final_state = self.resolve_next_state(
-            process_index,
-            &step,
-            &next_state,
-            &mut branch_decisions,
-            BranchDecisionPath::root(),
-        )?;
+        let final_state =
+            self.resolve_next_state(process_index, &step, &next_state, RuntimeBranchPath::root())?;
 
-        for action in &transition.actions {
+        for (action_index, action) in transition.actions.iter().enumerate() {
             self.execute_action(
                 &mut local_process_refs,
-                &mut branch_decisions,
                 &step,
                 action,
-                BranchDecisionPath::root(),
+                RuntimeBranchPath::root().child(RuntimeBranchPathSegment::action(action_index)?)?,
                 &[],
             )?;
         }
@@ -417,10 +371,9 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     fn execute_action(
         &mut self,
         local_process_refs: &mut BTreeMap<ProcessRefId, RuntimeProcessId>,
-        branch_decisions: &mut Vec<BranchDecision>,
         step: &ActiveStep,
         action: &LoadedAction,
-        branch_path: BranchDecisionPath,
+        branch_path: RuntimeBranchPath,
         loop_elements: &[RuntimeLoopElement],
     ) -> Result<()> {
         match action {
@@ -476,26 +429,24 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 then_actions,
                 else_actions,
             } => {
-                let branch = self.select_branch(
-                    BranchSelection {
-                        step,
-                        condition,
-                        local_process_refs,
-                        path: branch_path,
-                        mode: BranchDecisionMode::ReuseFromNextState,
-                        loop_elements,
-                    },
-                    branch_decisions,
-                )?;
+                let branch = self.select_branch(BranchSelection {
+                    step,
+                    scope: RuntimeBranchScope::Action,
+                    branch_path,
+                    condition,
+                    local_process_refs,
+                    loop_elements,
+                })?;
                 let selected_actions = match branch {
                     ArtifactBranch::Then => then_actions,
                     ArtifactBranch::Else => else_actions,
                 };
-                let selected_branch_path = branch_path.child(branch)?;
-                for action in selected_actions {
+                for (action_index, action) in selected_actions.iter().enumerate() {
+                    let selected_branch_path = branch_path.child(
+                        RuntimeBranchPathSegment::branch_action(branch, action_index)?,
+                    )?;
                     self.execute_action(
                         local_process_refs,
-                        branch_decisions,
                         step,
                         action,
                         selected_branch_path,
@@ -537,6 +488,22 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     )));
                 }
                 self.ensure_loop_iteration_budget(item_count)?;
+                let loop_payloads = items
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, item)| {
+                        self.program.runtime_payload_value(
+                            &format!(
+                                "process {} for loop element {} item {index}",
+                                step.process_name,
+                                element.id.as_u32()
+                            ),
+                            element.ty,
+                            item,
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                self.preflight_loop_body(local_process_refs, step, element, body, &loop_payloads)?;
                 self.record_loop_started(
                     step,
                     element.id,
@@ -544,21 +511,22 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     *max_items,
                     item_count,
                 )?;
-                for (index, item) in items.into_iter().enumerate() {
+                for (index, payload) in loop_payloads.into_iter().enumerate() {
                     self.consume_loop_iteration()?;
-                    let payload = RuntimePayload::value(element.ty, item)?;
                     self.record_loop_iteration(step, element.id, index, &payload)?;
                     let active = [RuntimeLoopElement {
                         id: element.id,
+                        index,
                         payload,
                     }];
-                    for action in body {
+                    for (action_index, action) in body.iter().enumerate() {
+                        let body_action_path = branch_path
+                            .child(RuntimeBranchPathSegment::loop_body_action(action_index)?)?;
                         self.execute_action(
                             local_process_refs,
-                            branch_decisions,
                             step,
                             action,
-                            branch_path,
+                            body_action_path,
                             &active,
                         )?;
                     }
@@ -566,6 +534,89 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 self.record_loop_completed(step, element.id, item_count)?;
                 Ok(())
             }
+        }
+    }
+
+    fn preflight_loop_body(
+        &self,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        step: &ActiveStep,
+        element: &LoadedLoopElement,
+        body: &[LoadedAction],
+        loop_payloads: &[RuntimePayload],
+    ) -> Result<()> {
+        for (index, payload) in loop_payloads.iter().enumerate() {
+            let active = [RuntimeLoopElement {
+                id: element.id,
+                index,
+                payload: payload.clone(),
+            }];
+            for action in body {
+                self.preflight_loop_action(local_process_refs, step, action, &active)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn preflight_loop_action(
+        &self,
+        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        step: &ActiveStep,
+        action: &LoadedAction,
+        loop_elements: &[RuntimeLoopElement],
+    ) -> Result<()> {
+        match action {
+            LoadedAction::Emit { .. } => Ok(()),
+            LoadedAction::Spawn { .. } => Err(Error::new(format!(
+                "process {} for loop body cannot bind process references",
+                step.process_name
+            ))),
+            LoadedAction::Send {
+                target,
+                message,
+                payload,
+            } => {
+                let pid = self.resolve_send_target(local_process_refs, step, target)?;
+                let target_process_index = self.preflight_delivery_target(pid)?;
+                let target_process_id = self.processes[target_process_index].process_id;
+                self.program
+                    .message_payload_type(target_process_id, *message)?;
+                if let Some(payload) = payload {
+                    evaluate_runtime_template(
+                        self.program,
+                        payload,
+                        step.payload.as_ref(),
+                        step,
+                        local_process_refs,
+                        loop_elements,
+                    )?;
+                }
+                Ok(())
+            }
+            LoadedAction::IfElse {
+                condition,
+                then_actions,
+                else_actions,
+            } => {
+                let (branch, _) = self.evaluate_bool_condition(
+                    step,
+                    condition,
+                    local_process_refs,
+                    loop_elements,
+                )?;
+                let selected_actions = match branch {
+                    ArtifactBranch::Then => then_actions,
+                    ArtifactBranch::Else => else_actions,
+                };
+                for action in selected_actions {
+                    self.preflight_loop_action(local_process_refs, step, action, loop_elements)?;
+                }
+                Ok(())
+            }
+            LoadedAction::ForEach { .. } => Err(Error::new(format!(
+                "process {} nested for loops are not supported in this artifact slice",
+                step.process_name
+            ))),
         }
     }
 
@@ -626,42 +677,34 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         Ok((branch, condition_value))
     }
 
-    fn select_branch(
-        &mut self,
-        selection: BranchSelection<'_>,
-        branch_decisions: &mut Vec<BranchDecision>,
-    ) -> Result<ArtifactBranch> {
-        if selection.mode == BranchDecisionMode::ReuseFromNextState {
-            if let Some(index) = branch_decisions.iter().rposition(|decision| {
-                decision.path == selection.path && decision.condition == *selection.condition
-            }) {
-                return Ok(branch_decisions.remove(index).branch);
-            }
-        }
-
+    fn select_branch(&mut self, selection: BranchSelection<'_>) -> Result<ArtifactBranch> {
         let (branch, condition_value) = self.evaluate_bool_condition(
             selection.step,
             selection.condition,
             selection.local_process_refs,
             selection.loop_elements,
         )?;
-        self.record_branch_selected(selection.step, branch, &condition_value)?;
-        if selection.mode == BranchDecisionMode::StoreForAction {
-            branch_decisions.push(BranchDecision {
-                path: selection.path,
-                condition: selection.condition.clone(),
-                branch,
-            });
-        }
+        self.record_branch_selected(
+            selection.step,
+            selection.scope,
+            selection.branch_path,
+            selection.loop_elements,
+            branch,
+            &condition_value,
+        )?;
         Ok(branch)
     }
 
     fn record_branch_selected(
         &mut self,
         step: &ActiveStep,
+        scope: RuntimeBranchScope,
+        branch_path: RuntimeBranchPath,
+        loop_elements: &[RuntimeLoopElement],
         branch: ArtifactBranch,
         condition: &RuntimePayload,
     ) -> Result<()> {
+        let loop_context = loop_elements.last();
         self.record_event(RuntimeEvent::BranchSelected {
             pid: step.pid,
             process_id: step.process_id,
@@ -669,6 +712,12 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             message_id: step.message,
             message: step.message_label.clone(),
             branch,
+            scope,
+            branch_path,
+            loop_context: loop_context.map(|element| RuntimeLoopContext {
+                element_id: element.id,
+                index: element.index,
+            }),
             condition_type_id: condition.ty,
             condition: condition.label().to_string(),
         })
@@ -919,8 +968,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         process_index: usize,
         step: &ActiveStep,
         next_state: &LoadedNextState,
-        branch_decisions: &mut Vec<BranchDecision>,
-        branch_path: BranchDecisionPath,
+        branch_path: RuntimeBranchPath,
     ) -> Result<StateId> {
         match next_state {
             LoadedNextState::Current => Ok(self.processes[process_index].state),
@@ -932,17 +980,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 else_state,
             } => {
                 let empty_process_refs = BTreeMap::new();
-                let branch = self.select_branch(
-                    BranchSelection {
-                        step,
-                        condition,
-                        local_process_refs: &empty_process_refs,
-                        path: branch_path,
-                        mode: BranchDecisionMode::StoreForAction,
-                        loop_elements: &[],
-                    },
-                    branch_decisions,
-                )?;
+                let branch = self.select_branch(BranchSelection {
+                    step,
+                    scope: RuntimeBranchScope::NextState,
+                    branch_path,
+                    condition,
+                    local_process_refs: &empty_process_refs,
+                    loop_elements: &[],
+                })?;
                 let selected_state = match branch {
                     ArtifactBranch::Then => then_state,
                     ArtifactBranch::Else => else_state,
@@ -951,8 +996,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     process_index,
                     step,
                     selected_state,
-                    branch_decisions,
-                    branch_path.child(branch)?,
+                    branch_path.child(RuntimeBranchPathSegment::next_state_branch(branch))?,
                 )
             }
         }

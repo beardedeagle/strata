@@ -343,18 +343,19 @@ fn decode_state_value(fields: &mut ArtifactFields, prefix: &str) -> Result<Artif
 fn encode_type(encoded: &mut String, type_index: usize, ty: &ArtifactType) {
     let prefix = format!("type.{type_index}");
     encoded.push_str(&format!(
-        "{prefix}.label={}\n{prefix}.kind={}\n{prefix}.enum_variant_count={}\n",
+        "{prefix}.label={}\n{prefix}.kind={}\n",
         ty.label,
         ty.kind.as_str(),
-        ty.enum_variants.len()
     ));
-    for (variant_index, variant) in ty.enum_variants.iter().enumerate() {
-        encoded.push_str(&format!(
-            "{prefix}.enum_variant.{variant_index}={variant}\n"
-        ));
-    }
-    if let ArtifactTypeKind::ProcessRef { target } = ty.kind {
-        encoded.push_str(&format!("{prefix}.target_process={}\n", target.as_u32()));
+    match ty.kind {
+        ArtifactTypeKind::Value => {
+            if let Some(shape) = &ty.shape {
+                encode_type_shape(encoded, &prefix, shape);
+            }
+        }
+        ArtifactTypeKind::ProcessRef { target } => {
+            encoded.push_str(&format!("{prefix}.target_process={}\n", target.as_u32()));
+        }
     }
 }
 
@@ -367,21 +368,128 @@ fn decode_type(fields: &mut ArtifactFields, type_index: usize) -> Result<Artifac
     } else {
         None
     };
-    let variant_count = fields.take_bounded_usize(
-        &format!("{prefix}.enum_variant_count"),
-        0,
-        MAX_ENUM_VARIANTS_PER_TYPE,
-    )?;
-    let mut enum_variants = Vec::with_capacity(variant_count);
-    for variant_index in 0..variant_count {
-        enum_variants
-            .push(fields.take_required(&format!("{prefix}.enum_variant.{variant_index}"))?);
+    let kind = ArtifactTypeKind::parse(&kind_value, target)?;
+    let shape = if matches!(kind, ArtifactTypeKind::Value) {
+        Some(decode_type_shape(fields, &prefix)?)
+    } else {
+        None
+    };
+    Ok(ArtifactType { label, kind, shape })
+}
+
+fn encode_type_shape(encoded: &mut String, prefix: &str, shape: &ArtifactValueShape) {
+    match shape {
+        ArtifactValueShape::Atom => {
+            encoded.push_str(&format!("{prefix}.shape=atom\n"));
+        }
+        ArtifactValueShape::Record { fields } => {
+            encoded.push_str(&format!(
+                "{prefix}.shape=record\n{prefix}.field_count={}\n",
+                fields.len()
+            ));
+            for (field_index, field) in fields.iter().enumerate() {
+                encoded.push_str(&format!(
+                    "{prefix}.field.{field_index}.name={}\n{prefix}.field.{field_index}.type_id={}\n",
+                    field.name,
+                    field.ty.as_u32()
+                ));
+            }
+        }
+        ArtifactValueShape::Enum { variants } => {
+            encoded.push_str(&format!(
+                "{prefix}.shape=enum\n{prefix}.enum_variant_count={}\n",
+                variants.len()
+            ));
+            for (variant_index, variant) in variants.iter().enumerate() {
+                encoded.push_str(&format!(
+                    "{prefix}.enum_variant.{variant_index}={}\n",
+                    variant.label
+                ));
+                if let Some(payload_type) = variant.payload_type {
+                    encoded.push_str(&format!(
+                        "{prefix}.enum_variant.{variant_index}.payload_type_id={}\n",
+                        payload_type.as_u32()
+                    ));
+                }
+            }
+        }
+        ArtifactValueShape::List { element, capacity } => {
+            encoded.push_str(&format!(
+                "{prefix}.shape=list\n{prefix}.element_type_id={}\n{prefix}.capacity={capacity}\n",
+                element.as_u32()
+            ));
+        }
+        ArtifactValueShape::Map {
+            key,
+            value,
+            capacity,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.shape=map\n{prefix}.key_type_id={}\n{prefix}.value_type_id={}\n{prefix}.capacity={capacity}\n",
+                key.as_u32(),
+                value.as_u32()
+            ));
+        }
     }
-    Ok(ArtifactType {
-        label,
-        kind: ArtifactTypeKind::parse(&kind_value, target)?,
-        enum_variants,
-    })
+}
+
+fn decode_type_shape(fields: &mut ArtifactFields, prefix: &str) -> Result<ArtifactValueShape> {
+    match fields.take_required(&format!("{prefix}.shape"))?.as_str() {
+        "atom" => Ok(ArtifactValueShape::Atom),
+        "record" => {
+            let field_count = fields.take_bounded_usize(
+                &format!("{prefix}.field_count"),
+                1,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?;
+            let mut fields_out = Vec::with_capacity(field_count);
+            for field_index in 0..field_count {
+                fields_out.push(ArtifactTypeField {
+                    name: fields.take_required(&format!("{prefix}.field.{field_index}.name"))?,
+                    ty: fields.take_type_id(&format!("{prefix}.field.{field_index}.type_id"))?,
+                });
+            }
+            Ok(ArtifactValueShape::Record { fields: fields_out })
+        }
+        "enum" => {
+            let variant_count = fields.take_bounded_usize(
+                &format!("{prefix}.enum_variant_count"),
+                1,
+                MAX_ENUM_VARIANTS_PER_TYPE,
+            )?;
+            let mut variants = Vec::with_capacity(variant_count);
+            for variant_index in 0..variant_count {
+                variants.push(ArtifactEnumVariant {
+                    label: fields
+                        .take_required(&format!("{prefix}.enum_variant.{variant_index}"))?,
+                    payload_type: fields.take_optional_type_id(&format!(
+                        "{prefix}.enum_variant.{variant_index}.payload_type_id"
+                    ))?,
+                });
+            }
+            Ok(ArtifactValueShape::Enum { variants })
+        }
+        "list" => Ok(ArtifactValueShape::List {
+            element: fields.take_type_id(&format!("{prefix}.element_type_id"))?,
+            capacity: fields.take_bounded_usize(
+                &format!("{prefix}.capacity"),
+                0,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?,
+        }),
+        "map" => Ok(ArtifactValueShape::Map {
+            key: fields.take_type_id(&format!("{prefix}.key_type_id"))?,
+            value: fields.take_type_id(&format!("{prefix}.value_type_id"))?,
+            capacity: fields.take_bounded_usize(
+                &format!("{prefix}.capacity"),
+                0,
+                MAX_VALUE_TEMPLATE_FIELDS,
+            )?,
+        }),
+        other => Err(Error::new(format!(
+            "invalid artifact value type shape {other:?}"
+        ))),
+    }
 }
 
 fn encode_value_template(encoded: &mut String, prefix: &str, template: &ArtifactValueTemplate) {

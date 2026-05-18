@@ -68,7 +68,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"1","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"2","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -131,13 +131,24 @@ admitted target process ID and runtime process ID:
 Example shape:
 
 ```json
-{"event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","condition_type_id":0,"condition":"True"}
+{"event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"action","branch_path":[0],"condition_type_id":0,"condition":"True"}
 ```
 
-`branch` is `then` or `else`. `condition_type_id` is the admitted artifact type
-ID for the checked `Bool` condition, and `condition` is trace metadata for the
-evaluated value. Runtime branch selection uses the admitted typed condition,
-not source strings, helper names, or debug labels.
+`branch` is `then` or `else`. `scope` is `action` for action-level branch
+execution, including statement-level branches and branch action prefixes lowered
+from final-position runtime `if`, and `next_state` for branch selection used to
+resolve the transition result state. `branch_path` is a stable numeric path
+assigned from the admitted runtime artifact structure; it is trace identity, not
+source syntax. `condition_type_id` is the admitted artifact type ID for the
+checked `Bool` condition, and `condition` is trace metadata for the evaluated
+value. Runtime branch selection uses the admitted typed condition, not source
+strings, helper names, or debug labels.
+
+When a branch runs inside a bounded runtime loop body, `branch_selected` appears
+after that iteration's `loop_iteration` event and before the selected branch
+effects. The event also includes `loop_element_id` and `loop_index` so the
+selected branch is tied directly to the active immutable loop element binding.
+The condition may be the evaluated active loop element value.
 
 ## Runtime Loop Events
 

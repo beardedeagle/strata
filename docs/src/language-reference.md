@@ -20,7 +20,7 @@ Mantle artifact internals.
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
 | Pure conditionals | Source-time expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`. |
-| Runtime branching | Final-position `if (condition) { ... return ...; } else { ... return ...; }` in `step` bodies, lowered to Mantle control flow. |
+| Runtime branching | Final-position `if (condition) { ... return ...; } else { ... return ...; }` and statement-level effect branches in `step` bodies, lowered to Mantle control flow. |
 | Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, step return-match expressions with optional uniform action prefixes, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
 | Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for helpers, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
@@ -90,8 +90,10 @@ worker-name
 _
 ```
 
-`as`, `else`, `if`, `let`, `mut`, and `var` are reserved everywhere
-identifiers are accepted.
+`_`, `as`, `bounded`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`,
+`mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`, `security`,
+`send`, `spawn`, `type`, and `var` are reserved everywhere identifiers are
+accepted.
 `ProcResult`, `ProcessRef`, `List`, and `Map` are reserved type names because
 they name built-in transition, process-reference, and collection types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
@@ -514,7 +516,8 @@ expansion, checking fails closed.
 ## Runtime Branching
 
 Step bodies can use a final-position runtime `if` whose condition is a checked
-`Bool` value template:
+`Bool` value template, or a statement-level runtime `if` whose branches contain
+effects and then continue to the enclosing final return:
 
 ```strata
 fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -528,14 +531,29 @@ fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [em
 }
 ```
 
+```strata
+fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    if (flag) {
+        emit "worker handled true";
+    } else {
+        emit "worker handled false";
+    }
+    return Continue(state);
+}
+```
+
 This is ordinary runtime branching. If the condition depends on the received
 payload or current state payload, Strata lowers the checked condition, branch
-actions, and branch next states into the Mantle artifact. Mantle admits the
-typed condition, validates both branches, executes only the selected branch,
-and records `branch_selected` trace events. Branch effects must be declared by
-the step effect list, both branches must return the same step result, and state
-changes still occur only through immutable whole-value `Continue`, `Stop`, or
-`Panic` returns.
+actions, and any branch next states into the Mantle artifact. Mantle admits the
+typed condition, validates both branches, executes only the selected branch, and
+records `branch_selected` trace events with a stable admitted-artifact
+`branch_path`. Branch effects must be declared by the step effect list. Runtime
+branch statement prefixes cannot bind process references, contain nested
+branches, or contain loops in this slice.
+Final-position runtime branches must return the same step result from both
+branches. Statement-level runtime branches cannot return; state changes still
+occur only through the enclosing immutable whole-value `Continue`, `Stop`, or
+`Panic` return.
 
 This slice does not add comparison operators, arithmetic, unbounded loops,
 imports, or a standard library.
@@ -565,10 +583,14 @@ collection length and runtime fuel limits, and records `loop_started`,
 `loop_iteration`, and `loop_completed` trace events.
 
 The loop element is immutable and may be used only as a typed value template in
-the loop body. The body is intentionally narrow in this slice: no nested loops,
-no `spawn`, no branch body, no `return`, no assignment, and no process-reference
-element type. Bind process references before the loop and declare every body
-effect in the enclosing step effect list.
+the loop body. Loop bodies may use statement-level runtime `if` over the active
+loop element or another checked `Bool` template; Mantle selects the branch during
+execution and records `branch_selected` inside the loop trace with the active
+loop element ID and iteration index. The body is still intentionally narrow in
+this slice: no nested loops, no `spawn`, no `return`, no assignment, no nested
+statement branches, and no process-reference element type. Bind process
+references before the loop and declare every body effect in the enclosing step
+effect list.
 
 ## Statements
 
@@ -578,7 +600,9 @@ The accepted statements are:
 emit "text";
 let worker: ProcessRef<Worker> = spawn Worker;
 send worker Ping;
+if (flag) { emit "true"; } else { emit "false"; }
 for item in items { send worker Branch(item); }
+for item in items { if (item) { send worker Branch(item); } else { emit "skip"; } }
 return Stop(state);
 return Continue(next_state);
 return Panic(failed_state);

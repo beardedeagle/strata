@@ -20,6 +20,11 @@ table and artifact records refer to entries by `TypeId`; Mantle admission and
 runtime execution do not parse source type spellings or `ProcessRef<...>` text
 to decide behavior. Type labels remain diagnostics and trace metadata only.
 
+Artifact `source_hash_fnv1a64` is a non-authoritative diagnostic fingerprint for
+correlating a lowered artifact with source text during local inspection. It is
+not an integrity, provenance, authority, or trust decision input; artifact
+admission must rely on explicit format/schema validation and typed structures.
+
 ## Admission
 
 Mantle admits artifacts through validation, not filename trust. Before
@@ -40,6 +45,16 @@ execution, the artifact decoder and validator check:
 Decode-time bounds must happen before allocation when counts come from the
 artifact body.
 
+## Host Path Handling
+
+Artifact and trace paths are validated before host IO. On Unix targets, Mantle
+opens artifact and trace paths with descriptor-relative parent traversal and
+`O_NOFOLLOW` so symlink parents and final symlink leaves fail closed at open
+time. On non-Unix targets, Mantle rejects symbolic-link components during
+preflight and uses the strongest standard-library open flags available on that
+platform; this is a fail-closed validation policy, not a claim of Unix-equivalent
+descriptor-relative race resistance.
+
 ## Execution
 
 Mantle loads admitted transitions into indexed runtime tables. Before emitting
@@ -55,16 +70,17 @@ Transition effect metadata is admitted with the artifact, loaded as runtime
 effect authority, and must exactly match the action effects that execute.
 Runtime `if` conditions are admitted as typed `Bool` value templates. Mantle
 validates both branch bodies before execution, executes only the selected
-branch, keeps branch-local process references unavailable after the branch
-unless both branches bind them, and records branch selection in the runtime
-trace.
+branch, rejects branch-local process-reference binding for this slice, and
+records branch selection in the runtime trace.
 
 The action set covers:
 
 - emitting declared output;
 - spawning a declared process through a process reference;
 - sending a declared message through a bound process reference;
-- selecting a typed runtime branch over admitted action blocks.
+- selecting a typed runtime branch over admitted action blocks;
+- iterating over an admitted bounded list template with a typed active loop
+  element binding.
 
 The runtime fails closed on invalid sends, unbound process references, duplicate
 process-reference bindings, mailbox exhaustion, runtime process instance budget

@@ -63,9 +63,9 @@ and BSD local runs report current RSS through `ps`. RSS budgets are enforced
 against current RSS for each measured profile; process-lifetime peak RSS is
 reported as context when available.
 
-The gate uses intentionally broad budgets. It is meant to catch severe
-regressions in compilation, runtime, CPU, or memory paths without making PR CI
-depend on microbenchmark noise from shared runners.
+The gate uses enforced resource ceilings with CI headroom for scheduler noise.
+It is meant to catch meaningful regressions in compilation, runtime, CPU, or
+memory paths without treating every small local timing fluctuation as a failure.
 
 Reviewed reference values and enforced budget ceilings live in
 `benchmarks/performance-smoke.baseline`. Local and CI runs print current

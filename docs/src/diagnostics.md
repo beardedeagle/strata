@@ -49,6 +49,15 @@ result of the first invalid shape.
 | `for loop body cannot bind process reference` | A loop body tries to create new authority with `spawn`. | Bind process references before the loop and use only admitted linear loop body effects. |
 | `nested for loops are not supported` | A loop body contains another loop. | Flatten the runtime payload shape or split the behavior into separate admitted steps for this slice. |
 | `assignment statements are not supported` | Source code uses assignment-style mutation. | Bind immutable values through declarations or return a whole replacement state value. |
+| `statement-level if branches must not return` | An effect-only runtime branch tries to terminate the step. | Put the final `return` after the statement-level branch, or use final-position runtime `if` when each branch must return. |
+| `statement-level if branches cannot bind process references` | A branch tries to introduce branch-local authority with `spawn`. | Bind process references before the branch and use only admitted branch effects. |
+| `statement-level if branches cannot contain for loops` | A branch tries to introduce nested loop control flow. | Keep bounded loops outside the branch for this slice. |
+| `nested statement-level if branches are not supported` | A statement-level runtime branch contains another branch. | Split the behavior into separate steps or keep one branch level for this slice. |
+| `statement-level if branches must contain at least one effect statement` | A branch is empty. | Add an `emit` or `send` branch effect, or remove the no-op branch until no-op branches are admitted. |
+| `runtime if branch cannot bind process references` | A checked or admitted runtime branch tries to introduce branch-local authority. | Bind process references before the branch and keep branch bodies to declared effects. |
+| `runtime if branch cannot contain nested runtime if actions` | A checked runtime branch contains another runtime branch. | Keep runtime branch actions single-level for this slice. |
+| `runtime if branch cannot contain for loop actions` | A checked or admitted runtime branch contains loop control flow. | Move the loop outside the branch for this slice. |
+| `for loop branch actions must not be empty` | A decoded or constructed artifact tries to admit a no-op branch inside a runtime loop. | Emit a real branch effect or keep the no-op branch out of the artifact until no-op loop branches are admitted. |
 
 ## Source Function Errors
 
@@ -65,7 +74,7 @@ result of the first invalid shape.
 | `if condition requires enum Bool { False, True }` | A source conditional is used without the explicit fieldless Bool contract. | Declare `enum Bool { False, True }`. |
 | `if condition must have type Bool` | A source conditional condition resolves to a non-Bool source value. | Return or pass `True` or `False` from the declared `Bool` enum. |
 | `if then branch must produce ...` / `if else branch must produce ...` | A conditional branch does not match the expected source value type. | Return the same source value type from both branches. |
-| `if condition requires a concrete Bool value` | A pure source conditional condition remains runtime-bound after helper expansion. | Use a concrete Bool value for source-level `if`, or use the admitted final-position runtime `if` form in a `step` body. |
+| `if condition requires a concrete Bool value` | A pure source conditional condition remains runtime-bound after helper expansion. | Use a concrete Bool value for source-level `if`, or use an admitted runtime `if` form in a `step` body. |
 | `if branches are pure value expressions and must not perform statements` | A conditional branch contains `emit`, `let`, `send`, or `return`. | Keep branch bodies to one source value expression and move effects to admitted `step` forms. |
 | `function ... declares duplicate pattern for variant ...` | More than one source function clause handles the same constructor. | Keep one clause per constructor. |
 | `function ... must handle variant ...` | A source function signature pattern group or match body is non-exhaustive. | Add the missing constructor clause/arm or one `_` fallback. |

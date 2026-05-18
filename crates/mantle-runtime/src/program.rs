@@ -24,9 +24,10 @@ mod transitions;
 mod values;
 
 use mantle_artifact::{
-    ArtifactAction, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactTransition, ArtifactType, ArtifactTypeKind, EnumVariantId, Error,
-    LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
+    ArtifactAction, ArtifactEnumVariant, ArtifactMessageVariant, ArtifactProcess,
+    ArtifactProcessRef, ArtifactSendTarget, ArtifactTransition, ArtifactType, ArtifactTypeField,
+    ArtifactTypeKind, ArtifactValueShape, EnumVariantId, Error, LoopElementId,
+    MAX_ACTIONS_PER_PROCESS, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
     MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
@@ -160,10 +161,39 @@ impl LoadedProgram {
 
     pub(crate) fn enum_variant_label(&self, ty: TypeId, variant: EnumVariantId) -> Result<&str> {
         let type_entry = self.type_entry(ty)?;
-        type_entry
-            .enum_variants
+        let ArtifactValueShape::Enum { variants } = type_entry.value_shape()? else {
+            return Err(Error::new(format!(
+                "loaded type id {} is not an enum type",
+                ty.as_u32()
+            )));
+        };
+        variants
             .get(variant.index())
-            .map(String::as_str)
+            .map(|variant| variant.label.as_str())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "loaded type id {} has no enum variant id {}",
+                    ty.as_u32(),
+                    variant.as_u32()
+                ))
+            })
+    }
+
+    pub(crate) fn enum_variant_payload_type(
+        &self,
+        ty: TypeId,
+        variant: EnumVariantId,
+    ) -> Result<Option<TypeId>> {
+        let type_entry = self.type_entry(ty)?;
+        let ArtifactValueShape::Enum { variants } = type_entry.value_shape()? else {
+            return Err(Error::new(format!(
+                "loaded type id {} is not an enum type",
+                ty.as_u32()
+            )));
+        };
+        variants
+            .get(variant.index())
+            .map(|variant| variant.payload_type)
             .ok_or_else(|| {
                 Error::new(format!(
                     "loaded type id {} has no enum variant id {}",
@@ -181,6 +211,67 @@ impl LoadedProgram {
                 ty.as_u32()
             ))),
         }
+    }
+
+    pub(crate) fn validate_value_matches_type(
+        &self,
+        field: &str,
+        ty: TypeId,
+        value: &RuntimeValue,
+    ) -> Result<()> {
+        self.validate_value_matches_type_at_depth(field, ty, value, 0)
+    }
+
+    pub(crate) fn validate_runtime_payload_matches_type(
+        &self,
+        field: &str,
+        expected_type: TypeId,
+        payload: &RuntimePayload,
+    ) -> Result<()> {
+        if payload.ty != expected_type {
+            return Err(Error::new(format!(
+                "{field} has type id {}, expected {}",
+                payload.ty.as_u32(),
+                expected_type.as_u32()
+            )));
+        }
+        match self.type_entry(expected_type)?.kind {
+            ArtifactTypeKind::Value => {
+                if payload.process_ref.is_some() {
+                    return Err(Error::new(format!(
+                        "{field} must not carry process reference metadata"
+                    )));
+                }
+                self.validate_value_matches_type(field, expected_type, &payload.value)
+            }
+            ArtifactTypeKind::ProcessRef { target } => {
+                let Some(process_ref) = payload.process_ref else {
+                    return Err(Error::new(format!(
+                        "{field} requires process reference metadata"
+                    )));
+                };
+                if process_ref.target_process != target {
+                    return Err(Error::new(format!(
+                        "{field} process reference metadata targets process id {}, expected {} for type id {}",
+                        process_ref.target_process.as_u32(),
+                        target.as_u32(),
+                        expected_type.as_u32()
+                    )));
+                }
+                RuntimePayload::validate_process_ref_value(field, payload)
+            }
+        }
+    }
+
+    pub(crate) fn runtime_payload_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        value: RuntimeValue,
+    ) -> Result<RuntimePayload> {
+        let payload = RuntimePayload::value(ty, value)?;
+        self.validate_runtime_payload_matches_type(field, ty, &payload)?;
+        Ok(payload)
     }
 
     pub(crate) fn process_ref_target_for_type_id(
@@ -243,10 +334,7 @@ impl LoadedProgram {
         }
         for (type_index, ty) in self.types.iter().enumerate() {
             validate_loaded_ident_field(&format!("type.{type_index}.label"), &ty.label)?;
-            self.validate_type_enum_variants(type_index, ty)?;
-            if let ArtifactTypeKind::ProcessRef { target } = ty.kind {
-                self.process(target)?;
-            }
+            self.validate_type_shape(type_index, ty)?;
         }
 
         let entry_process = self.process(self.entry_process)?;
@@ -284,31 +372,362 @@ impl LoadedProgram {
         Ok(())
     }
 
-    fn validate_type_enum_variants(&self, type_index: usize, ty: &ArtifactType) -> Result<()> {
-        if ty.enum_variants.len() > MAX_ENUM_VARIANTS_PER_TYPE {
+    fn validate_type_shape(&self, type_index: usize, ty: &ArtifactType) -> Result<()> {
+        match ty.kind {
+            ArtifactTypeKind::Value => {
+                let Some(shape) = &ty.shape else {
+                    return Err(Error::new(format!(
+                        "loaded type.{type_index} value type must declare a value shape"
+                    )));
+                };
+                self.validate_value_shape(type_index, shape)
+            }
+            ArtifactTypeKind::ProcessRef { target } => {
+                if ty.shape.is_some() {
+                    return Err(Error::new(format!(
+                        "loaded type.{type_index} process reference type must not declare a value shape"
+                    )));
+                }
+                self.process(target)?;
+                Ok(())
+            }
+        }
+    }
+
+    fn validate_value_shape(&self, type_index: usize, shape: &ArtifactValueShape) -> Result<()> {
+        match shape {
+            ArtifactValueShape::Atom => Ok(()),
+            ArtifactValueShape::Record { fields } => {
+                if fields.is_empty() || fields.len() > MAX_VALUE_TEMPLATE_FIELDS {
+                    return Err(Error::new(format!(
+                        "loaded type.{type_index}.field_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
+                    )));
+                }
+                let mut seen = BTreeSet::new();
+                for (field_index, field) in fields.iter().enumerate() {
+                    validate_loaded_ident_field(
+                        &format!("loaded type.{type_index}.field.{field_index}.name"),
+                        &field.name,
+                    )?;
+                    if !seen.insert(field.name.as_str()) {
+                        return Err(Error::new(format!(
+                            "loaded type.{type_index} duplicates field {}",
+                            field.name
+                        )));
+                    }
+                    self.validate_value_type(
+                        &format!("loaded type.{type_index}.field.{field_index}.type_id"),
+                        field.ty,
+                    )?;
+                }
+                Ok(())
+            }
+            ArtifactValueShape::Enum { variants } => {
+                if variants.is_empty() || variants.len() > MAX_ENUM_VARIANTS_PER_TYPE {
+                    return Err(Error::new(format!(
+                        "loaded type.{type_index}.enum_variant_count must be between 1 and {MAX_ENUM_VARIANTS_PER_TYPE}"
+                    )));
+                }
+                let mut seen = BTreeSet::new();
+                for (variant_index, variant) in variants.iter().enumerate() {
+                    validate_loaded_ident_field(
+                        &format!("loaded type.{type_index}.enum_variant.{variant_index}"),
+                        &variant.label,
+                    )?;
+                    if !seen.insert(variant.label.as_str()) {
+                        return Err(Error::new(format!(
+                            "loaded type.{type_index} duplicates enum variant {}",
+                            variant.label
+                        )));
+                    }
+                    if let Some(payload_type) = variant.payload_type {
+                        self.type_entry(payload_type)?;
+                    }
+                }
+                Ok(())
+            }
+            ArtifactValueShape::List { element, capacity } => {
+                if *capacity > MAX_VALUE_TEMPLATE_FIELDS {
+                    return Err(Error::new(format!(
+                        "loaded type.{type_index}.capacity must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+                    )));
+                }
+                self.validate_value_type(
+                    &format!("loaded type.{type_index}.element_type_id"),
+                    *element,
+                )
+            }
+            ArtifactValueShape::Map {
+                key,
+                value,
+                capacity,
+            } => {
+                if *capacity > MAX_VALUE_TEMPLATE_FIELDS {
+                    return Err(Error::new(format!(
+                        "loaded type.{type_index}.capacity must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+                    )));
+                }
+                self.validate_value_type(&format!("loaded type.{type_index}.key_type_id"), *key)?;
+                self.validate_value_type(&format!("loaded type.{type_index}.value_type_id"), *value)
+            }
+        }
+    }
+
+    fn validate_value_matches_type_at_depth(
+        &self,
+        field: &str,
+        ty: TypeId,
+        value: &RuntimeValue,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
             return Err(Error::new(format!(
-                "type.{type_index}.enum_variant_count must be no greater than {MAX_ENUM_VARIANTS_PER_TYPE}"
+                "{field} exceeds maximum typed value depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+            )));
+        }
+        let type_entry = self.type_entry(ty)?;
+        self.validate_value_type(field, ty)?;
+        values::validate_non_process_ref_value(field, value)?;
+        match type_entry.value_shape()? {
+            ArtifactValueShape::Atom => self.validate_atom_value(field, ty, type_entry, value),
+            ArtifactValueShape::Enum { variants } => {
+                self.validate_enum_value(field, ty, type_entry, variants, value, depth)
+            }
+            ArtifactValueShape::Record { fields } => {
+                self.validate_record_value(field, ty, type_entry, fields, value, depth)
+            }
+            ArtifactValueShape::List { element, capacity } => {
+                self.validate_list_value(field, *element, *capacity, value, depth)
+            }
+            ArtifactValueShape::Map {
+                key,
+                value: item,
+                capacity,
+            } => self.validate_map_value(field, *key, *item, *capacity, value, depth),
+        }
+    }
+
+    fn validate_atom_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        type_entry: &ArtifactType,
+        value: &RuntimeValue,
+    ) -> Result<()> {
+        if matches!(value, RuntimeValue::Atom(_)) {
+            return Ok(());
+        }
+        Err(Error::new(format!(
+            "{field} value {} does not match atom type {} (type id {})",
+            value.label(),
+            type_entry.label,
+            ty.as_u32()
+        )))
+    }
+
+    fn validate_enum_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        type_entry: &ArtifactType,
+        variants: &[ArtifactEnumVariant],
+        value: &RuntimeValue,
+        depth: usize,
+    ) -> Result<()> {
+        match value {
+            RuntimeValue::Atom(label) => {
+                let Some(variant) = variants.iter().find(|variant| variant.label == *label) else {
+                    return Err(runtime_value_not_member_error(field, ty, type_entry, value));
+                };
+                if variant.payload_type.is_some() {
+                    return Err(Error::new(format!(
+                        "{field} enum variant {label} requires a payload"
+                    )));
+                }
+                Ok(())
+            }
+            RuntimeValue::EnumVariant { variant, payload } => {
+                let Some(entry) = variants.iter().find(|entry| entry.label == *variant) else {
+                    return Err(runtime_value_not_member_error(field, ty, type_entry, value));
+                };
+                let Some(payload_type) = entry.payload_type else {
+                    return Err(Error::new(format!(
+                        "{field} enum variant {variant} must not carry a payload"
+                    )));
+                };
+                self.validate_value_matches_type_at_depth(
+                    &format!("{field}.payload"),
+                    payload_type,
+                    payload,
+                    depth + 1,
+                )
+            }
+            RuntimeValue::Record { .. }
+            | RuntimeValue::List(_)
+            | RuntimeValue::Map(_)
+            | RuntimeValue::ProcessRef { .. } => {
+                Err(runtime_value_not_member_error(field, ty, type_entry, value))
+            }
+        }
+    }
+
+    fn validate_record_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        type_entry: &ArtifactType,
+        expected_fields: &[ArtifactTypeField],
+        value: &RuntimeValue,
+        depth: usize,
+    ) -> Result<()> {
+        let RuntimeValue::Record {
+            constructor,
+            fields,
+        } = value
+        else {
+            return Err(Error::new(format!(
+                "{field} value {} does not match record type {} (type id {})",
+                value.label(),
+                type_entry.label,
+                ty.as_u32()
+            )));
+        };
+        if constructor != &type_entry.label {
+            return Err(Error::new(format!(
+                "{field} record constructor {constructor} does not match type {} (type id {})",
+                type_entry.label,
+                ty.as_u32()
+            )));
+        }
+        if fields.len() != expected_fields.len() {
+            return Err(Error::new(format!(
+                "{field} record field_count is {}, expected {} for type {} (type id {})",
+                fields.len(),
+                expected_fields.len(),
+                type_entry.label,
+                ty.as_u32()
             )));
         }
         let mut seen = BTreeSet::new();
-        for (variant_index, variant) in ty.enum_variants.iter().enumerate() {
-            validate_loaded_ident_field(
-                &format!("type.{type_index}.enum_variant.{variant_index}"),
-                variant,
-            )?;
-            if !seen.insert(variant.as_str()) {
+        for actual in fields {
+            if !seen.insert(actual.name.as_str()) {
                 return Err(Error::new(format!(
-                    "type.{type_index} duplicates enum variant {variant}"
+                    "{field} record duplicates field {}",
+                    actual.name
                 )));
             }
-        }
-        if matches!(ty.kind, ArtifactTypeKind::ProcessRef { .. }) && !ty.enum_variants.is_empty() {
-            return Err(Error::new(format!(
-                "type.{type_index} process reference type must not declare enum variants"
-            )));
+            let Some(expected) = expected_fields
+                .iter()
+                .find(|expected| expected.name == actual.name)
+            else {
+                return Err(Error::new(format!(
+                    "{field} record field {} is not declared by type {} (type id {})",
+                    actual.name,
+                    type_entry.label,
+                    ty.as_u32()
+                )));
+            };
+            self.validate_value_matches_type_at_depth(
+                &format!("{field}.field.{}", actual.name),
+                expected.ty,
+                &actual.value,
+                depth + 1,
+            )?;
         }
         Ok(())
     }
+
+    fn validate_list_value(
+        &self,
+        field: &str,
+        element: TypeId,
+        capacity: usize,
+        value: &RuntimeValue,
+        depth: usize,
+    ) -> Result<()> {
+        let RuntimeValue::List(items) = value else {
+            return Err(Error::new(format!(
+                "{field} value {} does not match list type",
+                value.label()
+            )));
+        };
+        if items.len() > capacity {
+            return Err(Error::new(format!(
+                "{field} list item_count is {}, capacity is {}",
+                items.len(),
+                capacity
+            )));
+        }
+        for (index, item) in items.iter().enumerate() {
+            self.validate_value_matches_type_at_depth(
+                &format!("{field}.item.{index}"),
+                element,
+                item,
+                depth + 1,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_map_value(
+        &self,
+        field: &str,
+        key: TypeId,
+        item: TypeId,
+        capacity: usize,
+        value: &RuntimeValue,
+        depth: usize,
+    ) -> Result<()> {
+        let RuntimeValue::Map(entries) = value else {
+            return Err(Error::new(format!(
+                "{field} value {} does not match map type",
+                value.label()
+            )));
+        };
+        if entries.len() > capacity {
+            return Err(Error::new(format!(
+                "{field} map entry_count is {}, capacity is {}",
+                entries.len(),
+                capacity
+            )));
+        }
+        let mut seen = BTreeSet::new();
+        for (index, entry) in entries.iter().enumerate() {
+            self.validate_value_matches_type_at_depth(
+                &format!("{field}.entry.{index}.key"),
+                key,
+                &entry.key,
+                depth + 1,
+            )?;
+            if !seen.insert(&entry.key) {
+                return Err(Error::new(format!(
+                    "{field} duplicates map key {}",
+                    entry.key.label()
+                )));
+            }
+            self.validate_value_matches_type_at_depth(
+                &format!("{field}.entry.{index}.value"),
+                item,
+                &entry.value,
+                depth + 1,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn runtime_value_not_member_error(
+    field: &str,
+    ty: TypeId,
+    type_entry: &ArtifactType,
+    value: &RuntimeValue,
+) -> Error {
+    Error::new(format!(
+        "{field} value {} is not a member of enum type {} (type id {})",
+        value.label(),
+        type_entry.label,
+        ty.as_u32()
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -492,15 +911,11 @@ impl LoadedProcess {
                         self.debug_name
                     ))
                 })?;
-            state.value.validate("state value").map_err(|err| {
-                Error::new(format!("process {} state value: {err}", self.debug_name))
-            })?;
-            if state.value.contains_process_ref() {
-                return Err(Error::new(format!(
-                    "process {} state value {} carries a process reference value",
-                    self.debug_name, state.label
-                )));
-            }
+            program
+                .validate_value_matches_type("state value", state.ty, &state.value)
+                .map_err(|err| {
+                    Error::new(format!("process {} state value: {err}", self.debug_name))
+                })?;
             validate_state_value_identity_label(&state.value, &state.label)
                 .map_err(|err| Error::new(format!("process {} {err}", self.debug_name)))?;
             if state.ty != self.state_type {
@@ -521,21 +936,20 @@ impl LoadedProcess {
                             self.debug_name
                         ))
                     })?;
-                payload
-                    .value
-                    .validate("state value payload")
-                    .map_err(|err| {
-                        Error::new(format!(
-                            "process {} state value payload: {err}",
-                            self.debug_name
-                        ))
-                    })?;
                 if payload.process_ref.is_some() || payload.value.contains_process_ref() {
                     return Err(Error::new(format!(
                         "process {} state value {} carries a process reference payload",
                         self.debug_name, state.label
                     )));
                 }
+                program
+                    .validate_value_matches_type("state value payload", payload.ty, &payload.value)
+                    .map_err(|err| {
+                        Error::new(format!(
+                            "process {} state value payload: {err}",
+                            self.debug_name
+                        ))
+                    })?;
             }
             if !states.insert((state.ty, state.value.clone())) {
                 return Err(Error::new(format!(
@@ -751,13 +1165,14 @@ impl LoadedTransition {
                 payload_type.as_u32()
             )));
         }
-        program.validate_value_type(
+        program.validate_value_matches_type(
             &format!(
                 "process {} message id {} payload guard",
                 process.debug_name,
                 message.as_u32()
             ),
             payload_guard.ty,
+            &payload_guard.value,
         )?;
         Ok(())
     }

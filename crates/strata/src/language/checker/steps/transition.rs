@@ -78,6 +78,33 @@ struct CheckedBlockOutcome {
     actions: Vec<CheckedAction>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ActionCheckScope {
+    in_loop_body: bool,
+    in_statement_if_branch: bool,
+}
+
+impl ActionCheckScope {
+    const TOP_LEVEL: Self = Self {
+        in_loop_body: false,
+        in_statement_if_branch: false,
+    };
+
+    const fn for_loop_body(self) -> Self {
+        Self {
+            in_loop_body: true,
+            in_statement_if_branch: self.in_statement_if_branch,
+        }
+    }
+
+    const fn for_statement_if_branch(self) -> Self {
+        Self {
+            in_loop_body: self.in_loop_body,
+            in_statement_if_branch: true,
+        }
+    }
+}
+
 #[derive(Default)]
 struct LoopElementAllocator {
     next: usize,
@@ -121,7 +148,55 @@ fn check_step_block_outcome(
         template_bindings,
         input.payload_bindings,
         loop_elements,
-        false,
+        ActionCheckScope::TOP_LEVEL,
+        &body.statements,
+    )?;
+    let outcome = checked_return_outcome(
+        context,
+        state_space,
+        outputs,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        input,
+        loop_elements,
+        body,
+    )?;
+    actions.extend(outcome.actions);
+    Ok(CheckedBlockOutcome { actions, ..outcome })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_runtime_if_branch_block_outcome(
+    context: &mut StepCheckContext<'_>,
+    state_space: &mut StateSpace<'_>,
+    outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    input: &StepTransitionInput<'_>,
+    loop_elements: &mut LoopElementAllocator,
+    body: &FunctionBlock,
+) -> Result<CheckedBlockOutcome> {
+    if matches!(body.returns, ReturnExpr::IfElse { .. }) {
+        return Err(Error::new(format!(
+            "process {} nested runtime if branches are not supported in this source slice",
+            context.process.name
+        )));
+    }
+
+    let mut actions = checked_actions_for_statements(
+        context,
+        outputs,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        input.payload_bindings,
+        loop_elements,
+        ActionCheckScope::TOP_LEVEL.for_statement_if_branch(),
         &body.statements,
     )?;
     let outcome = checked_return_outcome(
@@ -150,7 +225,7 @@ fn checked_actions_for_statements(
     template_bindings: &[ValueTemplateBinding<'_>],
     payload_bindings: &[StepPayloadBinding],
     loop_elements: &mut LoopElementAllocator,
-    inside_loop: bool,
+    scope: ActionCheckScope,
     statements: &[Statement],
 ) -> Result<Vec<CheckedAction>> {
     let mut actions = Vec::with_capacity(statements.len());
@@ -162,7 +237,13 @@ fn checked_actions_for_statements(
                 });
             }
             Statement::LetProcessRef { name, target, .. } => {
-                if inside_loop {
+                if scope.in_statement_if_branch {
+                    return Err(Error::new(format!(
+                        "process {} statement-level if branch cannot bind process reference {} in this source slice",
+                        context.process.name, name
+                    )));
+                }
+                if scope.in_loop_body {
                     return Err(Error::new(format!(
                         "process {} for loop body cannot bind process reference {} in this source slice",
                         context.process.name, name
@@ -200,12 +281,44 @@ fn checked_actions_for_statements(
                     payload: message_id.payload.map(Box::new),
                 });
             }
+            Statement::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                if scope.in_statement_if_branch {
+                    return Err(Error::new(format!(
+                        "process {} nested statement-level if branches are not supported in this source slice",
+                        context.process.name
+                    )));
+                }
+                actions.push(checked_if_else_statement_action(
+                    context,
+                    outputs,
+                    types,
+                    function_scope,
+                    source_bindings,
+                    template_bindings,
+                    payload_bindings,
+                    loop_elements,
+                    scope,
+                    condition,
+                    then_body,
+                    else_body,
+                )?);
+            }
             Statement::ForEach {
                 item,
                 collection,
                 body,
             } => {
-                if inside_loop {
+                if scope.in_statement_if_branch {
+                    return Err(Error::new(format!(
+                        "process {} statement-level if branch cannot contain for loop actions in this source slice",
+                        context.process.name
+                    )));
+                }
+                if scope.in_loop_body {
                     return Err(Error::new(format!(
                         "process {} nested for loops are not supported in this source slice",
                         context.process.name
@@ -228,6 +341,67 @@ fn checked_actions_for_statements(
         }
     }
     Ok(actions)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checked_if_else_statement_action(
+    context: &mut StepCheckContext<'_>,
+    outputs: &mut OutputPool,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_bindings: &[ValueTemplateBinding<'_>],
+    payload_bindings: &[StepPayloadBinding],
+    loop_elements: &mut LoopElementAllocator,
+    scope: ActionCheckScope,
+    condition: &ValueExpr,
+    then_body: &[Statement],
+    else_body: &[Statement],
+) -> Result<CheckedAction> {
+    let condition = checked_runtime_bool_condition(
+        context,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        condition,
+    )?;
+    let branch_scope = scope.for_statement_if_branch();
+    let then_actions = checked_actions_for_statements(
+        context,
+        outputs,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        payload_bindings,
+        loop_elements,
+        branch_scope,
+        then_body,
+    )?;
+    let else_actions = checked_actions_for_statements(
+        context,
+        outputs,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        payload_bindings,
+        loop_elements,
+        branch_scope,
+        else_body,
+    )?;
+    if then_actions.is_empty() || else_actions.is_empty() {
+        return Err(Error::new(format!(
+            "process {} statement-level if branches must contain at least one effect action",
+            context.process.name
+        )));
+    }
+    Ok(CheckedAction::IfElse {
+        condition,
+        then_actions,
+        else_actions,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -341,7 +515,7 @@ fn checked_for_each_action(
         &body_template_bindings,
         payload_bindings,
         loop_elements,
-        true,
+        ActionCheckScope::TOP_LEVEL.for_loop_body(),
         body,
     )?;
 
@@ -483,7 +657,7 @@ fn checked_if_else_return_outcome(
         template_bindings,
         condition,
     )?;
-    let then_outcome = check_step_block_outcome(
+    let then_outcome = check_runtime_if_branch_block_outcome(
         context,
         state_space,
         outputs,
@@ -495,7 +669,7 @@ fn checked_if_else_return_outcome(
         loop_elements,
         then_branch,
     )?;
-    let else_outcome = check_step_block_outcome(
+    let else_outcome = check_runtime_if_branch_block_outcome(
         context,
         state_space,
         outputs,

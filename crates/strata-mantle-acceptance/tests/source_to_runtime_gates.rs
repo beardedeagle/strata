@@ -117,6 +117,16 @@ impl GateHarness {
             .unwrap_or_else(|err| panic!("expected artifact {artifact}: {err}"))
     }
 
+    fn write_target_source(&self, stem: &str, source: &str) -> PathBuf {
+        let path = self.root.join("target/strata").join(format!("{stem}.str"));
+        fs::create_dir_all(path.parent().expect("target source should have a parent"))
+            .unwrap_or_else(|err| panic!("could not create target source directory: {err}"));
+        fs::write(&path, source).unwrap_or_else(|err| {
+            panic!("could not write target source {}: {err}", path.display())
+        });
+        path
+    }
+
     fn write_unvalidated_encoded_artifact(&self, artifact: &str, encoded_artifact: &str) {
         fs::write(self.root.join(artifact), encoded_artifact)
             .unwrap_or_else(|err| panic!("could not write artifact {artifact}: {err}"));
@@ -660,6 +670,18 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
             r#""pid":2"#,
             r#""process":"Worker""#,
             r#""branch":"then""#,
+            r#""scope":"next_state""#,
+            r#""condition":"True""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":2"#,
+            r#""process":"Worker""#,
+            r#""branch":"then""#,
+            r#""scope":"action""#,
             r#""condition":"True""#,
         ],
     );
@@ -670,6 +692,18 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
             r#""pid":3"#,
             r#""process":"Worker""#,
             r#""branch":"else""#,
+            r#""scope":"next_state""#,
+            r#""condition":"False""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":3"#,
+            r#""process":"Worker""#,
+            r#""branch":"else""#,
+            r#""scope":"action""#,
             r#""condition":"False""#,
         ],
     );
@@ -687,7 +721,7 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
 
     let warm_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker""#,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"action""#,
     );
     let warm_output = trace_line_index(
         &trace,
@@ -695,7 +729,7 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
     );
     let cold_branch = trace_line_index(
         &trace,
-        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker""#,
+        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"else","scope":"action""#,
     );
     let cold_output = trace_line_index(
         &trace,
@@ -709,6 +743,117 @@ fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
         cold_branch < cold_output,
         "else branch trace must precede its effect"
     );
+}
+
+#[test]
+fn statement_if_before_final_runtime_if_traces_branch_at_action_position() {
+    let gate = GateHarness::new();
+    const STEM: &str = "runtime_if_statement_trace_order";
+    const ARTIFACT: &str = "target/strata/runtime_if_statement_trace_order.mta";
+    let source = gate.write_target_source(
+        STEM,
+        r#"
+module runtime_if_statement_trace_order;
+
+record MainState;
+enum Bool { False, True }
+enum MainMsg { Start }
+enum WorkerState { Idle, WarmReady, ColdReady }
+enum WorkerMsg { Branch(Bool) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let warm: ProcessRef<Worker> = spawn Worker;
+        let cold: ProcessRef<Worker> = spawn Worker;
+        send warm Branch(True);
+        send cold Branch(False);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "prefix";
+        if (flag) {
+            emit "statement true";
+        } else {
+            emit "statement false";
+        }
+        if (flag) {
+            return Stop(WarmReady);
+        } else {
+            return Stop(ColdReady);
+        }
+    }
+}
+"#,
+    );
+    let source = source
+        .to_str()
+        .expect("target source path should be valid UTF-8");
+    gate.remove_trace(STEM);
+    let run = gate.check_build_run(source, ARTIFACT);
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("prefix"));
+    assert!(stdout.contains("statement true"));
+    assert!(stdout.contains("statement false"));
+
+    let trace = gate.read_trace(STEM);
+    let warm_next_state_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"next_state""#,
+    );
+    let warm_action_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"action""#,
+    );
+    let cold_next_state_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"else","scope":"next_state""#,
+    );
+    let cold_action_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Branch","branch":"else","scope":"action""#,
+    );
+
+    let warm_prefix = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":0,"text":"prefix""#,
+    );
+    let warm_statement = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":2,"process_id":1,"process":"Worker","stream":"stdout","output_id":1,"text":"statement true""#,
+    );
+    assert!(warm_next_state_branch < warm_prefix);
+    assert!(warm_prefix < warm_action_branch);
+    assert!(warm_action_branch < warm_statement);
+
+    let cold_prefix = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":3,"process_id":1,"process":"Worker","stream":"stdout","output_id":0,"text":"prefix""#,
+    );
+    let cold_statement = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":3,"process_id":1,"process":"Worker","stream":"stdout","output_id":2,"text":"statement false""#,
+    );
+    assert!(cold_next_state_branch < cold_prefix);
+    assert!(cold_prefix < cold_action_branch);
+    assert!(cold_action_branch < cold_statement);
 }
 
 #[test]
@@ -839,6 +984,407 @@ fn runtime_for_each_iterates_over_payload_at_mantle_runtime() {
     assert!(second_send < loop_complete);
     assert!(loop_complete < true_output);
     assert!(true_output < false_output);
+}
+
+#[test]
+fn runtime_for_each_if_branches_inside_loop_body_at_mantle_runtime() {
+    let gate = GateHarness::new();
+    gate.remove_trace("runtime_for_each_if");
+    let run = gate.check_build_run(
+        "examples/runtime_for_each_if.str",
+        "target/strata/runtime_for_each_if.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("batch selected true"));
+    assert!(stdout.contains("batch selected false"));
+    assert!(stdout.contains("worker handled true"));
+    assert!(stdout.contains("worker handled false"));
+
+    let artifact = gate.read_artifact("target/strata/runtime_for_each_if.mta");
+    let bool_type = value_type_id(&artifact, "Bool");
+    let batch_worker = artifact_process(&artifact, "BatchWorker");
+    let transition = batch_worker
+        .transitions
+        .first()
+        .expect("BatchWorker should have a Batch transition");
+    assert!(matches!(
+        transition.actions.as_slice(),
+        [
+            ArtifactAction::Spawn { .. },
+            ArtifactAction::ForEach {
+                element,
+                collection: ArtifactValueTemplate::ReceivedPayload { .. },
+                max_items: 2,
+                body,
+            },
+        ] if element.ty == bool_type
+            && matches!(
+                body.as_slice(),
+                [ArtifactAction::IfElse {
+                    condition: ArtifactValueTemplate::LoopElement {
+                        ty,
+                        element: condition_element,
+                    },
+                    then_actions,
+                    else_actions,
+                }] if *ty == bool_type
+                    && *condition_element == element.id
+                    && matches!(
+                        then_actions.as_slice(),
+                        [
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::Send {
+                                payload: Some(ArtifactValueTemplate::LoopElement {
+                                    ty,
+                                    element: payload_element,
+                                }),
+                                ..
+                            },
+                        ] if *ty == bool_type && *payload_element == element.id
+                    )
+                    && matches!(
+                        else_actions.as_slice(),
+                        [
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::Send {
+                                payload: Some(ArtifactValueTemplate::LoopElement {
+                                    ty,
+                                    element: payload_element,
+                                }),
+                                ..
+                            },
+                        ] if *ty == bool_type && *payload_element == element.id
+                    )
+            )
+    ));
+    assert!(
+        !artifact
+            .encode()
+            .lines()
+            .any(|line| line.ends_with("=item") || line.contains("debug_name=item")),
+        "loop branch artifact must not dispatch through the source loop binding name"
+    );
+
+    let trace = gate.read_trace("runtime_for_each_if");
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"loop_iteration""#,
+            r#""process":"BatchWorker""#,
+            r#""index":0"#,
+            r#""element":"True""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""process":"BatchWorker""#,
+            r#""branch":"then""#,
+            r#""scope":"action""#,
+            r#""branch_path":[1,12288]"#,
+            r#""loop_element_id":0"#,
+            r#""loop_index":0"#,
+            r#""condition":"True""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""process":"BatchWorker""#,
+            r#""branch":"else""#,
+            r#""scope":"action""#,
+            r#""branch_path":[1,12288]"#,
+            r#""loop_element_id":0"#,
+            r#""loop_index":1"#,
+            r#""condition":"False""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""process":"Worker""#,
+            r#""branch":"then""#,
+            r#""scope":"action""#,
+            r#""condition":"True""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""process":"Worker""#,
+            r#""branch":"else""#,
+            r#""scope":"action""#,
+            r#""condition":"False""#,
+        ],
+    );
+
+    let first_iteration = trace_line_index(&trace, r#""event":"loop_iteration","pid":2"#);
+    let batch_true_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","branch":"then","scope":"action""#,
+    );
+    let batch_true_output = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":2,"process_id":1,"process":"BatchWorker","stream":"stdout","output_id":0,"text":"batch selected true""#,
+    );
+    let true_send = trace_line_index(
+        &trace,
+        r#""event":"message_accepted","pid":3,"process_id":2,"process":"Worker","message_id":0,"message":"Branch","payload_type_id":"#,
+    );
+    let second_iteration = trace_line_index(&trace, r#""index":1,"element_type_id""#);
+    let batch_false_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch","branch":"else","scope":"action""#,
+    );
+    let batch_false_output = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":2,"process_id":1,"process":"BatchWorker","stream":"stdout","output_id":1,"text":"batch selected false""#,
+    );
+    let false_send = trace_line_index(
+        &trace,
+        r#""event":"message_accepted","pid":3,"process_id":2,"process":"Worker","message_id":0,"message":"Branch","payload_type_id":1,"payload":"False""#,
+    );
+    let loop_complete = trace_line_index(
+        &trace,
+        r#""event":"loop_completed","pid":2,"process_id":1,"process":"BatchWorker""#,
+    );
+    let worker_true_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":3,"process_id":2,"process":"Worker","message_id":0,"message":"Branch","branch":"then","scope":"action""#,
+    );
+    let worker_true_output = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":3,"process_id":2,"process":"Worker","stream":"stdout","output_id":2,"text":"worker handled true""#,
+    );
+    let worker_false_branch = trace_line_index(
+        &trace,
+        r#""event":"branch_selected","pid":3,"process_id":2,"process":"Worker","message_id":0,"message":"Branch","branch":"else","scope":"action""#,
+    );
+    let worker_false_output = trace_line_index(
+        &trace,
+        r#""event":"program_output","pid":3,"process_id":2,"process":"Worker","stream":"stdout","output_id":3,"text":"worker handled false""#,
+    );
+
+    assert!(first_iteration < batch_true_branch);
+    assert!(batch_true_branch < batch_true_output);
+    assert!(batch_true_output < true_send);
+    assert!(true_send < second_iteration);
+    assert!(second_iteration < batch_false_branch);
+    assert!(batch_false_branch < batch_false_output);
+    assert!(batch_false_output < false_send);
+    assert!(false_send < loop_complete);
+    assert!(loop_complete < worker_true_branch);
+    assert!(worker_true_branch < worker_true_output);
+    assert!(worker_true_output < worker_false_branch);
+    assert!(worker_false_branch < worker_false_output);
+}
+
+#[test]
+fn runtime_for_each_if_rejects_inactive_branch_condition_loop_element_before_runtime() {
+    let gate = GateHarness::new();
+    let seed_artifact_path = "target/strata/runtime_for_each_if_bad_condition_seed.mta";
+    let invalid_artifact_path = "target/strata/runtime_for_each_if_bad_condition.mta";
+    let invalid_trace_stem = "runtime_for_each_if_bad_condition";
+
+    gate.check("examples/runtime_for_each_if.str");
+    gate.build("examples/runtime_for_each_if.str", seed_artifact_path);
+    gate.remove_artifact(invalid_artifact_path);
+    gate.remove_trace(invalid_trace_stem);
+
+    let artifact = gate.read_artifact(seed_artifact_path);
+    let encoded = replace_exactly_once(
+        &artifact.encode(),
+        "process.1.transition.0.action.1.body_action.0.condition.loop_element=0\n",
+        "process.1.transition.0.action.1.body_action.0.condition.loop_element=1\n",
+    );
+    gate.write_unvalidated_encoded_artifact(invalid_artifact_path, &encoded);
+
+    let run = gate.run_mantle_failure(invalid_artifact_path);
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains(
+            "mantle: error: process BatchWorker transition 0 if condition references inactive loop element id 1"
+        ),
+        "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(!stdout.contains("mantle: loaded"));
+    assert!(!gate.trace_exists(invalid_trace_stem));
+}
+
+#[test]
+fn runtime_for_each_if_rejects_malformed_branch_send_target_before_runtime() {
+    let gate = GateHarness::new();
+    let seed_artifact_path = "target/strata/runtime_for_each_if_bad_target_seed.mta";
+    let invalid_artifact_path = "target/strata/runtime_for_each_if_bad_target.mta";
+    let invalid_trace_stem = "runtime_for_each_if_bad_target";
+
+    gate.check("examples/runtime_for_each_if.str");
+    gate.build("examples/runtime_for_each_if.str", seed_artifact_path);
+    gate.remove_artifact(invalid_artifact_path);
+    gate.remove_trace(invalid_trace_stem);
+
+    let artifact = gate.read_artifact(seed_artifact_path);
+    let encoded = replace_exactly_once(
+        &artifact.encode(),
+        "process.1.transition.0.action.1.body_action.0.then_action.1.target_process_ref=0\n",
+        "process.1.transition.0.action.1.body_action.0.then_action.1.target_process_ref=1\n",
+    );
+    gate.write_unvalidated_encoded_artifact(invalid_artifact_path, &encoded);
+
+    let run = gate.run_mantle_failure(invalid_artifact_path);
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains(
+            "mantle: error: process BatchWorker references undefined process reference id 1"
+        ),
+        "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(!stdout.contains("mantle: loaded"));
+    assert!(!gate.trace_exists(invalid_trace_stem));
+}
+
+#[test]
+fn runtime_for_each_if_preflights_malformed_loop_bool_before_branch_effects() {
+    let gate = GateHarness::new();
+    let seed_artifact_path = "target/strata/runtime_for_each_if_bad_loop_bool_seed.mta";
+    let invalid_artifact_path = "target/strata/runtime_for_each_if_bad_loop_bool.mta";
+    let invalid_trace_stem = "runtime_for_each_if_bad_loop_bool";
+
+    gate.check("examples/runtime_for_each_if.str");
+    gate.build("examples/runtime_for_each_if.str", seed_artifact_path);
+    gate.remove_artifact(invalid_artifact_path);
+    gate.remove_trace(invalid_trace_stem);
+
+    let artifact = gate.read_artifact(seed_artifact_path);
+    let encoded = replace_exactly_once(
+        &artifact.encode(),
+        "process.0.transition.0.action.1.payload_template.value=List[True,False]\n",
+        "process.0.transition.0.action.1.payload_template.value=List[True,Maybe]\n",
+    );
+    gate.write_unvalidated_encoded_artifact(invalid_artifact_path, &encoded);
+
+    let run = gate.run_mantle_failure(invalid_artifact_path);
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("mantle: error: process Main transition 0 send payload.item.1 value Maybe is not a member of enum type Bool"),
+        "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(!stdout.contains("mantle: loaded"));
+    assert!(!gate.trace_exists(invalid_trace_stem));
+}
+
+#[test]
+fn runtime_for_each_rejects_direct_process_ref_payload_before_build() {
+    let gate = GateHarness::new();
+    const STEM: &str = "runtime_for_each_ref_payload";
+    const ARTIFACT: &str = "target/strata/runtime_for_each_ref_payload.mta";
+    let source = gate.write_target_source(
+        STEM,
+        r#"
+module runtime_for_each_ref_payload;
+
+record MainState;
+record HubState;
+record SinkState;
+enum Bool { False, True }
+enum MainMsg { Start }
+enum WorkerState { Holding(List<Bool,2>) }
+enum WorkerMsg { Work(ProcessRef<Sink>) }
+enum HubMsg { Route(ProcessRef<Sink>) }
+enum SinkMsg { Done }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sink: ProcessRef<Sink> = spawn Sink;
+        send worker Work(sink);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Holding(List<Bool,2>[True, False]);
+    }
+
+    fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
+        match state {
+            Holding(items: List<Bool,2>) => {
+                let hub: ProcessRef<Hub> = spawn Hub;
+                for item in items {
+                    send hub Route(reply_to);
+                }
+                return Stop(Holding(items));
+            }
+        }
+    }
+}
+
+proc Hub mailbox bounded(2) {
+    type State = HubState;
+    type Msg = HubMsg;
+
+    fn init() -> HubState ! [] ~ [] @det {
+        return HubState;
+    }
+
+    fn step(state: HubState, Route(reply_to: ProcessRef<Sink>)) -> ProcResult<HubState> ! [send] ~ [] @det {
+        send reply_to Done;
+        return Continue(state);
+    }
+}
+
+proc Sink mailbox bounded(2) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Done) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+}
+"#,
+    );
+    let source = source
+        .to_str()
+        .expect("target source path should be valid UTF-8");
+    gate.remove_artifact(ARTIFACT);
+
+    let check = gate.check_failure(source);
+    let stderr = String::from_utf8_lossy(&check.stderr);
+
+    assert!(
+        stderr.contains("process reference payload templates must be direct message payloads"),
+        "unexpected diagnostic\nstderr:\n{stderr}"
+    );
+    assert!(
+        !gate.root.join(ARTIFACT).exists(),
+        "source check failure must not create {ARTIFACT}"
+    );
 }
 
 #[test]
@@ -991,22 +1537,16 @@ fn runtime_for_each_rejects_malformed_runtime_collection_value_fail_closed() {
 
     let run = gate.run_mantle_failure(invalid_artifact_path);
 
+    let stdout = String::from_utf8_lossy(&run.stdout);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains(
-            "mantle: error: process BatchWorker for loop collection produced non-list value True"
+            "mantle: error: process Main transition 0 send payload value True does not match list type"
         ),
-        "unexpected diagnostic\nstdout:\n{}\nstderr:\n{stderr}",
-        String::from_utf8_lossy(&run.stdout)
+        "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    let trace = gate.read_trace(invalid_trace_stem);
-    assert!(trace.contains(r#""event":"artifact_loaded""#));
-    assert!(trace.contains(
-        r#""event":"message_accepted","pid":2,"process_id":1,"process":"BatchWorker","message_id":0,"message":"Batch""#
-    ));
-    assert!(trace.contains(r#""payload":"True""#));
-    assert!(!trace.contains(r#""event":"loop_started""#));
-    assert!(!trace.contains(r#""event":"loop_completed""#));
+    assert!(!stdout.contains("mantle: loaded"));
+    assert!(!gate.trace_exists(invalid_trace_stem));
 }
 
 fn trace_line_index(trace: &str, needle: &str) -> usize {

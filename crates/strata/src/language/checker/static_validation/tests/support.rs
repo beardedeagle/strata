@@ -6,12 +6,13 @@ pub(super) use super::super::validate_action_references;
 pub(super) use crate::language::STATIC_RUNTIME_PROCESS_LIMIT;
 pub(super) use crate::language::ast::{Effect, Identifier};
 pub(super) use crate::language::checked::{
-    CheckedAction, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,
-    CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
-    CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts,
-    CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStateValue,
-    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeRef,
-    CheckedValueTemplate, CheckedValueTemplateField, CheckedValueTemplateMapEntry,
+    CheckedAction, CheckedEnumVariant, CheckedEnumVariantId, CheckedLoopElement,
+    CheckedLoopElementId, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId,
+    CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId,
+    CheckedProcessParts, CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedStateId,
+    CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTransitionParts,
+    CheckedTypeKind, CheckedTypeRef, CheckedValueShape, CheckedValueTemplate,
+    CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
 pub(super) use mantle_artifact::ArtifactValue;
 
@@ -50,6 +51,29 @@ pub(super) fn value_type(label: &str) -> CheckedTypeRef {
 
 pub(super) fn enum_value_type(label: &str, variants: &[&str]) -> CheckedTypeRef {
     CheckedTypeRef::test_enum_value(label, variants)
+}
+
+pub(super) fn enum_value_type_with_payloads(
+    label: &str,
+    variants: &[(&str, Option<CheckedTypeRef>)],
+) -> CheckedTypeRef {
+    let variant_entries = variants
+        .iter()
+        .map(|(name, payload_type)| CheckedEnumVariant {
+            name: ident(name),
+            payload_type: payload_type.as_ref().map(CheckedTypeRef::id),
+        })
+        .collect();
+    let id = value_type(label).id();
+    CheckedTypeRef::new(
+        id,
+        label.to_string(),
+        CheckedTypeKind::Value {
+            shape: CheckedValueShape::Enum {
+                variants: variant_entries,
+            },
+        },
+    )
 }
 
 pub(super) fn process_ref_type(target: &str) -> CheckedTypeRef {
@@ -98,6 +122,10 @@ pub(super) fn checked_state_id(index: usize) -> CheckedStateId {
 
 pub(super) fn checked_message_id(index: usize) -> CheckedMessageId {
     CheckedMessageId::from_index(index).expect("valid checked message id")
+}
+
+pub(super) fn checked_output_id(index: usize) -> CheckedOutputId {
+    CheckedOutputId::from_index(index).expect("valid checked output id")
 }
 
 pub(super) fn checked_enum_variant_id(index: usize) -> CheckedEnumVariantId {
