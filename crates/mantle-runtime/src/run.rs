@@ -247,7 +247,34 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     fn preflight_delivery_target(&self, target: RuntimeProcessId) -> Result<usize> {
         let process_index = self.process_index_for_pid(target)?;
-        let process = &self.processes[process_index];
+        self.preflight_delivery_target_index(process_index, 0)
+    }
+
+    fn preflight_delivery_target_with_queued_messages(
+        &self,
+        target: RuntimeProcessId,
+        queued_mailbox_messages: &[usize],
+    ) -> Result<usize> {
+        let process_index = self.process_index_for_pid(target)?;
+        let queued_messages = queued_mailbox_messages
+            .get(process_index)
+            .copied()
+            .ok_or_else(|| {
+                Error::new("runtime loop preflight mailbox accounting is inconsistent")
+            })?;
+        self.preflight_delivery_target_index(process_index, queued_messages)
+    }
+
+    fn preflight_delivery_target_index(
+        &self,
+        process_index: usize,
+        queued_messages: usize,
+    ) -> Result<usize> {
+        let process = self.processes.get(process_index).ok_or_else(|| {
+            Error::new(format!(
+                "runtime process index {process_index} is not available for mailbox preflight"
+            ))
+        })?;
         let process_label = self.program.process_label(process.process_id)?;
         match process.status {
             ProcessStatus::Running => {}
@@ -262,7 +289,12 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 )));
             }
         }
-        if process.mailbox.len() >= process.mailbox_bound {
+        let projected_depth = process
+            .mailbox
+            .len()
+            .checked_add(queued_messages)
+            .ok_or_else(|| Error::new("runtime mailbox preflight depth overflowed"))?;
+        if projected_depth >= process.mailbox_bound {
             return Err(Error::new(format!(
                 "mailbox for process {} is full; message was not accepted",
                 process_label
@@ -545,6 +577,11 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         body: &[LoadedAction],
         loop_payloads: &[RuntimePayload],
     ) -> Result<()> {
+        if loop_payloads.is_empty() {
+            return Ok(());
+        }
+
+        let mut queued_mailbox_messages = None;
         for (index, payload) in loop_payloads.iter().enumerate() {
             let active = [RuntimeLoopElement {
                 id: element.id,
@@ -552,7 +589,13 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 payload: payload.clone(),
             }];
             for action in body {
-                self.preflight_loop_action(local_process_refs, step, action, &active)?;
+                self.preflight_loop_action(
+                    local_process_refs,
+                    step,
+                    action,
+                    &active,
+                    &mut queued_mailbox_messages,
+                )?;
             }
         }
         Ok(())
@@ -564,6 +607,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         action: &LoadedAction,
         loop_elements: &[RuntimeLoopElement],
+        queued_mailbox_messages: &mut Option<Vec<usize>>,
     ) -> Result<()> {
         match action {
             LoadedAction::Emit { .. } => Ok(()),
@@ -577,7 +621,10 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 payload,
             } => {
                 let pid = self.resolve_send_target(local_process_refs, step, target)?;
-                let target_process_index = self.preflight_delivery_target(pid)?;
+                let queued_mailbox_messages = queued_mailbox_messages
+                    .get_or_insert_with(|| vec![0usize; self.processes.len()]);
+                let target_process_index = self
+                    .preflight_delivery_target_with_queued_messages(pid, queued_mailbox_messages)?;
                 let target_process_id = self.processes[target_process_index].process_id;
                 self.program
                     .message_payload_type(target_process_id, *message)?;
@@ -591,6 +638,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         loop_elements,
                     )?;
                 }
+                let queued_messages = queued_mailbox_messages
+                    .get_mut(target_process_index)
+                    .ok_or_else(|| {
+                        Error::new("runtime loop preflight mailbox accounting is inconsistent")
+                    })?;
+                *queued_messages = queued_messages
+                    .checked_add(1)
+                    .ok_or_else(|| Error::new("runtime mailbox preflight count overflowed"))?;
                 Ok(())
             }
             LoadedAction::IfElse {
@@ -609,7 +664,13 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     ArtifactBranch::Else => else_actions,
                 };
                 for action in selected_actions {
-                    self.preflight_loop_action(local_process_refs, step, action, loop_elements)?;
+                    self.preflight_loop_action(
+                        local_process_refs,
+                        step,
+                        action,
+                        loop_elements,
+                        queued_mailbox_messages,
+                    )?;
                 }
                 Ok(())
             }
