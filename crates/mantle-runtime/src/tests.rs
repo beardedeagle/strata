@@ -560,6 +560,103 @@ fn in_memory_host_fails_closed_when_for_each_iteration_budget_exhausts() {
 }
 
 #[test]
+fn in_memory_host_fails_closed_when_for_each_sends_exceed_mailbox_bound() {
+    let mut artifact = for_each_artifact("List[Job{phase:Ready},Job{phase:Done}]", 2);
+    artifact.processes[1].mailbox_bound = 1;
+
+    assert_for_each_mailbox_overflow_fails_before_loop(&artifact);
+}
+
+#[test]
+fn in_memory_host_fails_closed_when_selected_loop_branch_sends_exceed_mailbox_bound() {
+    let mut artifact = for_each_artifact("List[Job{phase:Ready},Job{phase:Done}]", 2);
+    artifact.processes[1].mailbox_bound = 1;
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    artifact.processes[0].transitions[0]
+        .effects
+        .push(ArtifactEffect::Emit);
+
+    let ArtifactAction::ForEach { body, .. } = &mut artifact.processes[0].transitions[0].actions[1]
+    else {
+        panic!("test artifact should keep for_each as the second action");
+    };
+    let send = body
+        .pop()
+        .expect("test for_each body should contain a send");
+    body.push(ArtifactAction::IfElse {
+        condition: ArtifactValueTemplate::Literal {
+            ty: bool_type,
+            value: artifact_value("True"),
+        },
+        then_actions: vec![send],
+        else_actions: vec![ArtifactAction::Emit {
+            output: OutputId::new(0),
+        }],
+    });
+
+    assert_for_each_mailbox_overflow_fails_before_loop(&artifact);
+}
+
+fn assert_for_each_mailbox_overflow_fails_before_loop(artifact: &MantleArtifact) {
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_artifact_with_host(artifact, &mut host, RunLimits::default())
+        .expect_err("for_each artifact should fail closed before mailbox overflow");
+
+    assert!(
+        err.to_string()
+            .contains("mailbox for process Worker is full; message was not accepted"),
+        "{err}"
+    );
+    assert!(
+        !host
+            .events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::LoopStarted { .. })),
+        "mailbox overflow preflight must fail before loop start"
+    );
+    assert!(
+        !host
+            .events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::LoopIteration { .. })),
+        "mailbox overflow preflight must fail before any iteration"
+    );
+    assert!(
+        !host
+            .events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::BranchSelected { .. })),
+        "mailbox overflow preflight must not record branch selection"
+    );
+    assert!(
+        !host.events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::MessageAccepted {
+                process,
+                ..
+            } if process == "Worker"
+        )),
+        "mailbox overflow preflight must not execute body sends"
+    );
+    assert!(
+        !host
+            .events()
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::LoopCompleted { .. })),
+        "failed loop must not record completion"
+    );
+    assert!(
+        host.stdout().is_empty(),
+        "failed loop must not run target process effects"
+    );
+}
+
+#[test]
 fn in_memory_host_delivers_payload_envelopes_and_template_state() {
     let artifact = payload_artifact();
     let expected_payload =
