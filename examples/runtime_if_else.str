@@ -43,7 +43,7 @@ proc Worker mailbox bounded(1) {
     }
 
     fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-        if (flag) {
+        if (flag == True) {
             emit "worker took warm branch";
             return Stop(WarmReady);
         } else {

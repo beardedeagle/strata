@@ -83,6 +83,9 @@ pub(in crate::language::checker) fn source_value_uses_binding(
                 || source_value_uses_binding(then_branch, binding)
                 || source_value_uses_binding(else_branch, binding)
         }
+        ValueExpr::Equality { left, right, .. } => {
+            source_value_uses_binding(left, binding) || source_value_uses_binding(right, binding)
+        }
     }
 }
 
@@ -128,6 +131,11 @@ pub(super) fn canonical_value(
     if matches!(value, ValueExpr::IfElse { .. }) {
         return Err(Error::new(format!(
             "if expression must be resolved before checking value of type {expected_type}"
+        )));
+    }
+    if matches!(value, ValueExpr::Equality { .. }) {
+        return Err(Error::new(format!(
+            "equality expression must be resolved before checking value of type {expected_type}"
         )));
     }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
@@ -230,7 +238,8 @@ fn canonical_enum_value(
         | ValueExpr::Record(_)
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
-        | ValueExpr::IfElse { .. } => Err(Error::new(format!(
+        | ValueExpr::IfElse { .. }
+        | ValueExpr::Equality { .. } => Err(Error::new(format!(
             "expected enum variant value for enum {}",
             enum_decl.name
         ))),

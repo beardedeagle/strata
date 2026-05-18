@@ -513,6 +513,23 @@ runtime dispatch entry, a source function name, or a source-string branch key.
 If the condition is not a concrete `True` or `False` value after source helper
 expansion, checking fails closed.
 
+## Typed Equality Predicates
+
+The admitted equality surface is `==` and `!=` over two operand families:
+
+- `Bool`, with the exact `enum Bool { False, True }` contract;
+- fieldless values of the same payload-free enum type.
+
+Both operands must have the same checked type. Concrete source operands fold
+during checking, so lowering sees only the selected `True` or `False` value.
+Runtime-dependent operands lower as typed Mantle value templates and Mantle
+evaluates them from admitted typed values. Equality does not dispatch through
+source names, helper names, debug labels, or parser strings.
+
+This slice does not admit string equality, structural record/list/map equality,
+payload enum equality, process-reference equality, ordering, arithmetic,
+assignment, or mutation.
+
 ## Runtime Branching
 
 Step bodies can use a final-position runtime `if` whose condition is a checked
@@ -521,7 +538,7 @@ effects and then continue to the enclosing final return:
 
 ```strata
 fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-    if (flag) {
+    if (flag == True) {
         emit "worker took warm branch";
         return Stop(WarmReady);
     } else {
@@ -533,7 +550,7 @@ fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [em
 
 ```strata
 fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-    if (flag) {
+    if (flag != False) {
         emit "worker handled true";
     } else {
         emit "worker handled false";
@@ -555,7 +572,7 @@ branches. Statement-level runtime branches cannot return; state changes still
 occur only through the enclosing immutable whole-value `Continue`, `Stop`, or
 `Panic` return.
 
-This slice does not add comparison operators, arithmetic, unbounded loops,
+This slice does not add ordering comparisons, arithmetic, unbounded loops,
 imports, or a standard library.
 
 ## Runtime Iteration
@@ -600,9 +617,9 @@ The accepted statements are:
 emit "text";
 let worker: ProcessRef<Worker> = spawn Worker;
 send worker Ping;
-if (flag) { emit "true"; } else { emit "false"; }
+if (flag == True) { emit "true"; } else { emit "false"; }
 for item in items { send worker Branch(item); }
-for item in items { if (item) { send worker Branch(item); } else { emit "skip"; } }
+for item in items { if (item != False) { send worker Branch(item); } else { emit "skip"; } }
 return Stop(state);
 return Continue(next_state);
 return Panic(failed_state);

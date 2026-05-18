@@ -114,6 +114,38 @@ pub enum ArtifactValueTemplate {
         ty: TypeId,
         entries: Vec<ArtifactValueTemplateMapEntry>,
     },
+    Equality {
+        ty: TypeId,
+        operand_ty: TypeId,
+        operator: ArtifactValueEqualityOperator,
+        left: Box<ArtifactValueTemplate>,
+        right: Box<ArtifactValueTemplate>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactValueEqualityOperator {
+    Equal,
+    NotEqual,
+}
+
+impl ArtifactValueEqualityOperator {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Equal => "eq",
+            Self::NotEqual => "ne",
+        }
+    }
+
+    pub fn parse(field: &str, value: &str) -> crate::Result<Self> {
+        match value {
+            "eq" => Ok(Self::Equal),
+            "ne" => Ok(Self::NotEqual),
+            _ => Err(crate::Error::new(format!(
+                "{field} has invalid equality operator {value:?}"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

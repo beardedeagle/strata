@@ -792,10 +792,25 @@ impl SemanticIndex {
         module: &Module,
         value: &Identifier,
     ) -> Result<TypeRef> {
+        self.fieldless_enum_variant_type_with_context(module, value, "match scrutinee")
+    }
+
+    pub(super) fn equality_fieldless_enum_variant_type(
+        &self,
+        module: &Module,
+        value: &Identifier,
+    ) -> Result<TypeRef> {
+        self.fieldless_enum_variant_type_with_context(module, value, "equality operand")
+    }
+
+    fn fieldless_enum_variant_type_with_context(
+        &self,
+        module: &Module,
+        value: &Identifier,
+        context: &str,
+    ) -> Result<TypeRef> {
         let value_symbol = self.symbols.resolve(value.as_str()).ok_or_else(|| {
-            Error::new(format!(
-                "match scrutinee {value} is not a fieldless enum variant"
-            ))
+            Error::new(format!("{context} {value} is not a fieldless enum variant"))
         })?;
         let mut matches = Vec::new();
         for (enum_index, variants) in self.enum_variants.iter().enumerate() {
@@ -818,13 +833,13 @@ impl SemanticIndex {
         match matches.as_slice() {
             [(name, false)] => Ok(TypeRef::Named(name.clone())),
             [(_, true)] => Err(Error::new(format!(
-                "match scrutinee {value} must be a fieldless enum variant"
+                "{context} {value} must be a fieldless enum variant"
             ))),
             [] => Err(Error::new(format!(
-                "match scrutinee {value} is not a fieldless enum variant"
+                "{context} {value} is not a fieldless enum variant"
             ))),
             _ => Err(Error::new(format!(
-                "match scrutinee {value} is ambiguous across enum declarations"
+                "{context} {value} is ambiguous across enum declarations"
             ))),
         }
     }

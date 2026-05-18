@@ -5,7 +5,7 @@ use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
 use super::super::super::checked::{
     CheckedAction, CheckedLoopElementId, CheckedMessageId, CheckedPayloadValue, CheckedProcess,
     CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedValueTemplate,
+    CheckedTransition, CheckedValueEqualityOperator, CheckedValueTemplate,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
@@ -320,7 +320,70 @@ fn evaluate_checked_runtime_template(
                 ArtifactValue::Map(values),
             ))
         }
+        CheckedValueTemplate::Equality {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_checked_runtime_template(
+                left,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            if left.ty() != operand_ty {
+                return Err(Error::new(format!(
+                    "equality left operand has type {}, expected {}",
+                    left.ty(),
+                    operand_ty
+                )));
+            }
+            let left_value = checked_payload_value_ref(&left)?;
+            let right = evaluate_checked_runtime_template(
+                right,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            if right.ty() != operand_ty {
+                return Err(Error::new(format!(
+                    "equality right operand has type {}, expected {}",
+                    right.ty(),
+                    operand_ty
+                )));
+            }
+            let right_value = checked_payload_value_ref(&right)?;
+            let is_equal = left_value == right_value;
+            let selected = match operator {
+                CheckedValueEqualityOperator::Equal => is_equal,
+                CheckedValueEqualityOperator::NotEqual => !is_equal,
+            };
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Atom(bool_atom(selected)),
+            ))
+        }
     }
+}
+
+fn bool_atom(value: bool) -> String {
+    if value {
+        "True".to_string()
+    } else {
+        "False".to_string()
+    }
+}
+
+fn checked_payload_value_ref(payload: &CheckedPayloadValue) -> Result<&ArtifactValue> {
+    payload
+        .value()
+        .ok_or_else(|| Error::new("process reference payloads are not valid state values"))
 }
 
 fn checked_payload_value(payload: &CheckedPayloadValue) -> Result<ArtifactValue> {

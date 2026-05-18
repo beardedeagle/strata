@@ -5,8 +5,8 @@ use super::super::{
     MantleArtifact,
 };
 use super::model::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, ArtifactValueTemplate,
-    ArtifactValueTemplateField,
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, ArtifactValueEqualityOperator,
+    ArtifactValueTemplate, ArtifactValueTemplateField,
 };
 use super::payload::ArtifactPayload;
 use super::projection::{
@@ -72,7 +72,8 @@ impl ArtifactValueTemplate {
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
-            | Self::Map { ty, .. } => *ty,
+            | Self::Map { ty, .. }
+            | Self::Equality { ty, .. } => *ty,
         }
     }
 
@@ -299,6 +300,41 @@ impl ArtifactValueTemplate {
                 validate_value_label("map template value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
             }
+            Self::Equality {
+                ty,
+                operand_ty,
+                operator,
+                left,
+                right,
+            } => {
+                let left =
+                    left.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
+                if left.ty != *operand_ty {
+                    return Err(Error::new(format!(
+                        "equality left operand has type id {}, expected {}",
+                        left.ty.as_u32(),
+                        operand_ty.as_u32()
+                    )));
+                }
+                let right = right.evaluate_state_value(
+                    received_payload,
+                    current_state_payload,
+                    type_entry,
+                )?;
+                if right.ty != *operand_ty {
+                    return Err(Error::new(format!(
+                        "equality right operand has type id {}, expected {}",
+                        right.ty.as_u32(),
+                        operand_ty.as_u32()
+                    )));
+                }
+                let is_equal = left.value == right.value;
+                let selected = match operator {
+                    ArtifactValueEqualityOperator::Equal => is_equal,
+                    ArtifactValueEqualityOperator::NotEqual => !is_equal,
+                };
+                ArtifactStateValue::from_value(*ty, ArtifactValue::Atom(bool_atom(selected)))
+            }
         }
     }
 
@@ -324,6 +360,9 @@ impl ArtifactValueTemplate {
             Self::Map { entries, .. } => entries.iter().any(|entry| {
                 entry.key.depends_on_received_payload() || entry.value.depends_on_received_payload()
             }),
+            Self::Equality { left, right, .. } => {
+                left.depends_on_received_payload() || right.depends_on_received_payload()
+            }
         }
     }
 
@@ -349,6 +388,9 @@ impl ArtifactValueTemplate {
             Self::Map { entries, .. } => entries.iter().any(|entry| {
                 entry.key.depends_on_loop_element() || entry.value.depends_on_loop_element()
             }),
+            Self::Equality { left, right, .. } => {
+                left.depends_on_loop_element() || right.depends_on_loop_element()
+            }
         }
     }
 
@@ -738,8 +780,104 @@ impl ArtifactValueTemplate {
                 }
                 Ok(())
             }
+            Self::Equality {
+                ty,
+                operand_ty,
+                left,
+                right,
+                ..
+            } => {
+                validate_bool_contract_type(artifact, &format!("{field}.type_id"), *ty)?;
+                validate_equality_operand_type(artifact, field, *operand_ty)?;
+                validate_equality_operand_template(field, "left", *operand_ty, left)?;
+                validate_equality_operand_template(field, "right", *operand_ty, right)?;
+                let nested = validation.nested().with_expected_type(Some(*operand_ty));
+                left.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.left"),
+                    nested,
+                    depth + 1,
+                )?;
+                right.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.right"),
+                    nested,
+                    depth + 1,
+                )
+            }
         }
     }
+}
+
+fn bool_atom(value: bool) -> String {
+    if value {
+        "True".to_string()
+    } else {
+        "False".to_string()
+    }
+}
+
+fn validate_bool_contract_type(artifact: &MantleArtifact, field: &str, ty: TypeId) -> Result<()> {
+    let type_entry = artifact.type_entry(ty)?;
+    if matches!(type_entry.value_shape(), Ok(shape) if is_bool_contract_shape(shape)) {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "{field} must have type enum Bool {{ False, True }}"
+    )))
+}
+
+fn is_bool_contract_shape(shape: &ArtifactValueShape) -> bool {
+    matches!(
+        shape,
+        ArtifactValueShape::Enum { variants }
+            if variants.len() == 2
+                && variants[0].label == "False"
+                && variants[0].payload_type.is_none()
+                && variants[1].label == "True"
+                && variants[1].payload_type.is_none()
+    )
+}
+
+fn validate_equality_operand_type(
+    artifact: &MantleArtifact,
+    field: &str,
+    operand_ty: TypeId,
+) -> Result<()> {
+    let type_entry = artifact.type_entry(operand_ty)?;
+    match &type_entry.kind {
+        ArtifactTypeKind::ProcessRef { .. } => Err(Error::new(format!(
+            "{field}.operand_type_id must be Bool or a fieldless enum value type"
+        ))),
+        ArtifactTypeKind::Value => match type_entry.value_shape()? {
+            ArtifactValueShape::Enum { variants }
+                if variants
+                    .iter()
+                    .all(|variant| variant.payload_type.is_none()) =>
+            {
+                Ok(())
+            }
+            _ => Err(Error::new(format!(
+                "{field}.operand_type_id must be Bool or a fieldless enum value type"
+            ))),
+        },
+    }
+}
+
+fn validate_equality_operand_template(
+    field: &str,
+    side: &str,
+    operand_ty: TypeId,
+    operand: &ArtifactValueTemplate,
+) -> Result<()> {
+    if operand.result_type() != operand_ty {
+        return Err(Error::new(format!(
+            "{field}.{side} has type id {}, expected {}",
+            operand.result_type().as_u32(),
+            operand_ty.as_u32()
+        )));
+    }
+    Ok(())
 }
 
 fn reject_projected_process_ref_type(
@@ -1095,7 +1233,8 @@ fn is_static_map_key_template(template: &ArtifactValueTemplate) -> bool {
         | ArtifactValueTemplate::MapValue { .. }
         | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. }
-        | ArtifactValueTemplate::LoopElement { .. } => false,
+        | ArtifactValueTemplate::LoopElement { .. }
+        | ArtifactValueTemplate::Equality { .. } => false,
         ArtifactValueTemplate::EnumVariant { payload, .. } => is_static_map_key_template(payload),
         ArtifactValueTemplate::Record { fields, .. } => fields
             .iter()

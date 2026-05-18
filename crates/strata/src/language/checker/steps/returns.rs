@@ -775,6 +775,15 @@ fn substitute_step_return_bindings(
                 })
                 .collect(),
         }),
+        ValueExpr::Equality {
+            operator,
+            left,
+            right,
+        } => ValueExpr::Equality {
+            operator,
+            left: Box::new(substitute_step_return_bindings(*left, bindings)),
+            right: Box::new(substitute_step_return_bindings(*right, bindings)),
+        },
         ValueExpr::IfElse {
             condition,
             then_branch,

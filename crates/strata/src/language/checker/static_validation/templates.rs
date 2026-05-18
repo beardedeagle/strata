@@ -9,8 +9,9 @@ use super::process_refs::{
 };
 use crate::language::checked::{
     CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess, CheckedProcessRefId,
-    CheckedStateId, CheckedTypeKind, CheckedTypeRef, CheckedValueShape, CheckedValueTemplate,
-    CheckedValueTemplateField, CheckedValueTemplateMapEntry,
+    CheckedStateId, CheckedTypeKind, CheckedTypeRef, CheckedValueEqualityOperator,
+    CheckedValueShape, CheckedValueTemplate, CheckedValueTemplateField,
+    CheckedValueTemplateMapEntry,
 };
 use crate::language::diagnostic::{Error, Result};
 
@@ -151,7 +152,8 @@ fn validate_bool_condition_template_shape(
         | CheckedValueTemplate::ListElement { .. }
         | CheckedValueTemplate::ListPrefixElement { .. }
         | CheckedValueTemplate::MapValue { .. }
-        | CheckedValueTemplate::LoopElement { .. } => Ok(()),
+        | CheckedValueTemplate::LoopElement { .. }
+        | CheckedValueTemplate::Equality { .. } => Ok(()),
         CheckedValueTemplate::ListRest { .. }
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. }
@@ -329,6 +331,90 @@ pub(super) fn validate_value_template_binding_types(
             }
             Ok(())
         }
+        CheckedValueTemplate::Equality {
+            ty,
+            operand_ty,
+            left,
+            right,
+            ..
+        } => {
+            validate_checked_equality_template(ty, operand_ty, left, right)?;
+            validate_value_template_binding_types(
+                left,
+                received_payload_type,
+                current_state_payload_type,
+            )?;
+            validate_value_template_binding_types(
+                right,
+                received_payload_type,
+                current_state_payload_type,
+            )
+        }
+    }
+}
+
+fn validate_checked_equality_template(
+    result_ty: &CheckedTypeRef,
+    operand_ty: &CheckedTypeRef,
+    left: &CheckedValueTemplate,
+    right: &CheckedValueTemplate,
+) -> Result<()> {
+    validate_checked_bool_contract_type(result_ty)?;
+    validate_checked_equality_operand_type(operand_ty)?;
+    if left.result_type() != operand_ty {
+        return Err(Error::new(format!(
+            "equality left operand has type {}, expected {}",
+            left.result_type(),
+            operand_ty
+        )));
+    }
+    if right.result_type() != operand_ty {
+        return Err(Error::new(format!(
+            "equality right operand has type {}, expected {}",
+            right.result_type(),
+            operand_ty
+        )));
+    }
+    Ok(())
+}
+
+fn validate_checked_bool_contract_type(ty: &CheckedTypeRef) -> Result<()> {
+    if matches!(
+        ty.kind(),
+        CheckedTypeKind::Value { shape } if is_checked_bool_contract_shape(shape)
+    ) {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "equality result type must be enum Bool {{ False, True }}, found {ty}"
+    )))
+}
+
+fn is_checked_bool_contract_shape(shape: &CheckedValueShape) -> bool {
+    matches!(
+        shape,
+        CheckedValueShape::Enum { variants }
+            if variants.len() == 2
+                && variants[0].name.as_str() == "False"
+                && variants[0].payload_type.is_none()
+                && variants[1].name.as_str() == "True"
+                && variants[1].payload_type.is_none()
+    )
+}
+
+fn validate_checked_equality_operand_type(operand_ty: &CheckedTypeRef) -> Result<()> {
+    match operand_ty.kind() {
+        CheckedTypeKind::Value {
+            shape: CheckedValueShape::Enum { variants },
+        } if variants
+            .iter()
+            .all(|variant| variant.payload_type.is_none()) =>
+        {
+            Ok(())
+        }
+        _ => Err(Error::new(format!(
+            "equality operands must be Bool or fieldless enum values, found {operand_ty}"
+        ))),
     }
 }
 
@@ -419,6 +505,10 @@ pub(super) fn validate_value_template_payload_labels(
         } => {
             validate_map_rest_projection_keys(excluded_keys)?;
             validate_value_template_payload_labels(map)
+        }
+        CheckedValueTemplate::Equality { left, right, .. } => {
+            validate_value_template_payload_labels(left)?;
+            validate_value_template_payload_labels(right)
         }
         CheckedValueTemplate::ProcessRef { .. } => Ok(()),
         CheckedValueTemplate::EnumVariant { payload, .. } => {
@@ -535,7 +625,8 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         | CheckedValueTemplate::MapValue { .. }
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. }
-        | CheckedValueTemplate::LoopElement { .. } => None,
+        | CheckedValueTemplate::LoopElement { .. }
+        | CheckedValueTemplate::Equality { .. } => None,
         CheckedValueTemplate::EnumVariant {
             ty,
             variant,
@@ -808,6 +899,10 @@ pub(super) fn validate_value_template_process_refs(
             }
             Ok(())
         }
+        CheckedValueTemplate::Equality { left, right, .. } => {
+            validate_value_template_process_refs(processes, process, left, spawned_refs, false)?;
+            validate_value_template_process_refs(processes, process, right, spawned_refs, false)
+        }
     }
 }
 
@@ -882,6 +977,16 @@ fn reject_process_ref_template_in_next_state(template: &CheckedValueTemplate) ->
             }
             reject_process_ref_template_in_next_state(map)
         }
+        CheckedValueTemplate::Equality {
+            operand_ty,
+            left,
+            right,
+            ..
+        } => {
+            reject_projected_process_ref_payload_type(operand_ty)?;
+            reject_process_ref_template_in_next_state(left)?;
+            reject_process_ref_template_in_next_state(right)
+        }
         CheckedValueTemplate::ProcessRef { .. } => Err(Error::new(
             "process reference templates are not valid next-state values",
         )),
@@ -954,6 +1059,10 @@ fn checked_template_depends_on_received_payload(template: &CheckedValueTemplate)
             checked_template_depends_on_received_payload(entry.key())
                 || checked_template_depends_on_received_payload(entry.value())
         }),
+        CheckedValueTemplate::Equality { left, right, .. } => {
+            checked_template_depends_on_received_payload(left)
+                || checked_template_depends_on_received_payload(right)
+        }
     }
 }
 
@@ -990,6 +1099,10 @@ fn checked_template_depends_on_loop_element(template: &CheckedValueTemplate) -> 
             checked_template_depends_on_loop_element(entry.key())
                 || checked_template_depends_on_loop_element(entry.value())
         }),
+        CheckedValueTemplate::Equality { left, right, .. } => {
+            checked_template_depends_on_loop_element(left)
+                || checked_template_depends_on_loop_element(right)
+        }
     }
 }
 
@@ -1199,7 +1312,56 @@ fn evaluate_checked_template(
                 ArtifactValue::Map(values),
             ))
         }
+        CheckedValueTemplate::Equality {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_checked_template(left, received_payload, current_state_payload)?;
+            if left.ty() != operand_ty {
+                return Err(Error::new(format!(
+                    "equality left operand has type {}, expected {}",
+                    left.ty(),
+                    operand_ty
+                )));
+            }
+            let left_value = checked_payload_value_ref(&left)?;
+            let right = evaluate_checked_template(right, received_payload, current_state_payload)?;
+            if right.ty() != operand_ty {
+                return Err(Error::new(format!(
+                    "equality right operand has type {}, expected {}",
+                    right.ty(),
+                    operand_ty
+                )));
+            }
+            let right_value = checked_payload_value_ref(&right)?;
+            let is_equal = left_value == right_value;
+            let selected = match operator {
+                CheckedValueEqualityOperator::Equal => is_equal,
+                CheckedValueEqualityOperator::NotEqual => !is_equal,
+            };
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Atom(bool_atom(selected)),
+            ))
+        }
     }
+}
+
+fn bool_atom(value: bool) -> String {
+    if value {
+        "True".to_string()
+    } else {
+        "False".to_string()
+    }
+}
+
+fn checked_payload_value_ref(payload: &CheckedPayloadValue) -> Result<&ArtifactValue> {
+    payload
+        .value()
+        .ok_or_else(|| Error::new("process reference payloads are not valid state values"))
 }
 
 fn checked_payload_value(payload: &CheckedPayloadValue) -> Result<ArtifactValue> {

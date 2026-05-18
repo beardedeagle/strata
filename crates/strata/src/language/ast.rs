@@ -454,6 +454,26 @@ pub enum ValueExpr {
         then_branch: Box<ValueExpr>,
         else_branch: Box<ValueExpr>,
     },
+    Equality {
+        operator: ValueEqualityOperator,
+        left: Box<ValueExpr>,
+        right: Box<ValueExpr>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueEqualityOperator {
+    Equal,
+    NotEqual,
+}
+
+impl ValueEqualityOperator {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Equal => "==",
+            Self::NotEqual => "!=",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -503,6 +523,11 @@ impl fmt::Display for ValueExpr {
                 then_branch,
                 else_branch,
             } => write!(f, "if({condition}){{{then_branch}}}else{{{else_branch}}}"),
+            Self::Equality {
+                operator,
+                left,
+                right,
+            } => write!(f, "{left}{}{}", operator.as_str(), right),
         }
     }
 }

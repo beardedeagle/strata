@@ -392,6 +392,10 @@ fn collect_source_value_expr_calls<'a>(value: &'a ValueExpr, calls: &mut BTreeSe
             collect_source_value_expr_calls(then_branch, calls);
             collect_source_value_expr_calls(else_branch, calls);
         }
+        ValueExpr::Equality { left, right, .. } => {
+            collect_source_value_expr_calls(left, calls);
+            collect_source_value_expr_calls(right, calls);
+        }
     }
 }
 

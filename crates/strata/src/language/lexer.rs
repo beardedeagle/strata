@@ -7,6 +7,8 @@ pub(super) enum TokenKind {
     Number(String),
     StringLiteral(String),
     Symbol(char),
+    EqualEqual,
+    BangEqual,
     DotDot,
     Arrow,
     FatArrow,
@@ -58,6 +60,18 @@ impl<'a> Lexer<'a> {
                 self.bump_char();
                 self.bump_char();
                 push_source_token(&mut tokens, TokenKind::FatArrow, offset)?;
+                continue;
+            }
+            if ch == '=' && self.peek_next_char() == Some('=') {
+                self.bump_char();
+                self.bump_char();
+                push_source_token(&mut tokens, TokenKind::EqualEqual, offset)?;
+                continue;
+            }
+            if ch == '!' && self.peek_next_char() == Some('=') {
+                self.bump_char();
+                self.bump_char();
+                push_source_token(&mut tokens, TokenKind::BangEqual, offset)?;
                 continue;
             }
             if ch == '.' && self.peek_next_char() == Some('.') {

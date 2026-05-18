@@ -486,6 +486,19 @@ pub(in crate::language) enum CheckedValueTemplate {
         ty: CheckedTypeRef,
         entries: Vec<CheckedValueTemplateMapEntry>,
     },
+    Equality {
+        ty: CheckedTypeRef,
+        operand_ty: CheckedTypeRef,
+        operator: CheckedValueEqualityOperator,
+        left: Box<CheckedValueTemplate>,
+        right: Box<CheckedValueTemplate>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) enum CheckedValueEqualityOperator {
+    Equal,
+    NotEqual,
 }
 
 impl CheckedValueTemplate {
@@ -506,7 +519,8 @@ impl CheckedValueTemplate {
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
-            | Self::Map { ty, .. } => ty,
+            | Self::Map { ty, .. }
+            | Self::Equality { ty, .. } => ty,
         }
     }
 }

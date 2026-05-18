@@ -251,6 +251,158 @@ fn runtime_rejects_loaded_if_else_dynamic_non_unit_bool_shape_before_artifact_lo
 }
 
 #[test]
+fn runtime_rejects_loaded_equality_malformed_operand_type_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    artifact.processes[0].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::Equality {
+            ty: bool_type,
+            operand_ty: bool_type,
+            operator: ArtifactValueEqualityOperator::Equal,
+            left: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+            right: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+        },
+        then_state: Box::new(NextState::Current),
+        else_state: Box::new(NextState::Current),
+    };
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state = LoadedNextState::IfElse {
+        condition: LoadedValueTemplate::Equality {
+            ty: bool_type,
+            operand_ty: MAIN_STATE,
+            operator: ArtifactValueEqualityOperator::Equal,
+            left: Box::new(LoadedValueTemplate::Literal {
+                ty: bool_type,
+                value: RuntimeValue::Atom("True".to_string()),
+            }),
+            right: Box::new(LoadedValueTemplate::Literal {
+                ty: bool_type,
+                value: RuntimeValue::Atom("True".to_string()),
+            }),
+        },
+        then_state: Box::new(LoadedNextState::Current),
+        else_state: Box::new(LoadedNextState::Current),
+    };
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main message id 0 next_state_condition.operand_type_id must be Bool or a fieldless enum value type",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_equality_non_bool_result_type_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    artifact.processes[0].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::Equality {
+            ty: bool_type,
+            operand_ty: bool_type,
+            operator: ArtifactValueEqualityOperator::Equal,
+            left: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+            right: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+        },
+        then_state: Box::new(NextState::Current),
+        else_state: Box::new(NextState::Current),
+    };
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state = LoadedNextState::IfElse {
+        condition: LoadedValueTemplate::Equality {
+            ty: MAIN_STATE,
+            operand_ty: bool_type,
+            operator: ArtifactValueEqualityOperator::Equal,
+            left: Box::new(LoadedValueTemplate::Literal {
+                ty: bool_type,
+                value: RuntimeValue::Atom("True".to_string()),
+            }),
+            right: Box::new(LoadedValueTemplate::Literal {
+                ty: bool_type,
+                value: RuntimeValue::Atom("True".to_string()),
+            }),
+        },
+        then_state: Box::new(LoadedNextState::Current),
+        else_state: Box::new(LoadedNextState::Current),
+    };
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main message id 0 next_state_condition must have type enum Bool { False, True }",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_equality_operand_result_type_mismatch_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    artifact.processes[0].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::Equality {
+            ty: bool_type,
+            operand_ty: bool_type,
+            operator: ArtifactValueEqualityOperator::Equal,
+            left: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+            right: Box::new(ArtifactValueTemplate::Literal {
+                ty: bool_type,
+                value: artifact_value("True"),
+            }),
+        },
+        then_state: Box::new(NextState::Current),
+        else_state: Box::new(NextState::Current),
+    };
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state = LoadedNextState::IfElse {
+        condition: LoadedValueTemplate::Equality {
+            ty: bool_type,
+            operand_ty: bool_type,
+            operator: ArtifactValueEqualityOperator::Equal,
+            left: Box::new(LoadedValueTemplate::Literal {
+                ty: MAIN_STATE,
+                value: RuntimeValue::Atom("MainState".to_string()),
+            }),
+            right: Box::new(LoadedValueTemplate::Literal {
+                ty: bool_type,
+                value: RuntimeValue::Atom("True".to_string()),
+            }),
+        },
+        then_state: Box::new(LoadedNextState::Current),
+        else_state: Box::new(LoadedNextState::Current),
+    };
+    let expected = format!(
+        "process Main message id 0 next_state_condition.left has type id {}, expected {}",
+        MAIN_STATE.as_u32(),
+        bool_type.as_u32()
+    );
+
+    assert_loaded_admission_rejects_before_artifact_loaded(&program, &expected);
+}
+
+#[test]
 fn runtime_rejects_loaded_nested_if_else_inside_runtime_if_branch_before_artifact_loaded() {
     let mut artifact = artifact_with_unbound_worker_process_ref();
     let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");

@@ -12,8 +12,8 @@ mod value_template;
 
 pub use value_template::{
     ArtifactMapEntry, ArtifactPayload, ArtifactProcessRefPayload, ArtifactRecordField,
-    ArtifactValue, ArtifactValueTemplate, ArtifactValueTemplateField,
-    ArtifactValueTemplateMapEntry, MapProjectionMode,
+    ArtifactValue, ArtifactValueEqualityOperator, ArtifactValueTemplate,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, MapProjectionMode,
 };
 
 use crate::{
