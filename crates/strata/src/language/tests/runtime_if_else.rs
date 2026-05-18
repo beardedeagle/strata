@@ -110,6 +110,98 @@ fn runtime_if_else_checks_and_lowers_to_mantle_control_flow() {
 }
 
 #[test]
+fn runtime_if_else_without_branch_effects_keeps_action_prefix_empty() {
+    let source = r#"
+module runtime_if_else_no_effects;
+
+record MainState;
+enum Bool {
+    False,
+    True,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerState {
+    Idle,
+    WarmReady,
+    ColdReady,
+}
+enum WorkerMsg {
+    Branch(Bool),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let warm: ProcessRef<Worker> = spawn Worker;
+        send warm Branch(True);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        if (flag == True) {
+            return Stop(WarmReady);
+        } else {
+            return Stop(ColdReady);
+        }
+    }
+}
+"#;
+
+    let checked = check_source(source).expect("runtime if without branch effects should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    let transition = only_transition(worker);
+    assert_eq!(transition.step_result(), CheckedStepResult::Stop);
+    assert!(transition.actions().is_empty());
+    assert!(matches!(
+        transition.next_state(),
+        CheckedNextState::IfElse {
+            condition: CheckedValueTemplate::Equality { .. },
+            ..
+        }
+    ));
+
+    let artifact = lower_to_artifact(&checked, source).expect("runtime if should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker artifact should exist");
+    let transition = worker
+        .transitions
+        .first()
+        .expect("Worker artifact transition should exist");
+    assert!(transition.actions.is_empty());
+    assert!(matches!(
+        transition.next_state,
+        NextState::IfElse {
+            condition: ArtifactValueTemplate::Equality { .. },
+            ..
+        }
+    ));
+}
+
+#[test]
 fn runtime_if_else_accepts_not_equal_payload_predicate() {
     let source = RUNTIME_IF_ELSE.replace("if (flag == True)", "if (flag != False)");
     let checked = check_source(&source).expect("runtime != predicate source should check");
@@ -272,6 +364,120 @@ fn runtime_if_else_accepts_direct_bool_payload_composition() {
                         )
             )
     ));
+}
+
+#[test]
+fn statement_runtime_if_accepts_noop_branch_shapes() {
+    let checked = check_source(RUNTIME_GUARD_NOOP).expect("guard no-op source should check");
+    assert_eq!(
+        checked.outputs(),
+        ["guard saw true", "guard enabled", "guard saw false"]
+    );
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
+    let transition = only_transition(worker);
+    assert!(matches!(
+        transition.actions(),
+        [
+            CheckedAction::IfElse {
+                then_actions: first_then,
+                else_actions: first_else,
+                ..
+            },
+            CheckedAction::IfElse {
+                then_actions: second_then,
+                else_actions: second_else,
+                ..
+            },
+            CheckedAction::IfElse {
+                then_actions: third_then,
+                else_actions: third_else,
+                ..
+            },
+        ] if matches!(first_then.as_slice(), [CheckedAction::Emit { .. }])
+            && first_else.is_empty()
+            && matches!(second_then.as_slice(), [CheckedAction::Emit { .. }])
+            && second_else.is_empty()
+            && third_then.is_empty()
+            && matches!(third_else.as_slice(), [CheckedAction::Emit { .. }])
+    ));
+
+    let artifact =
+        lower_to_artifact(&checked, RUNTIME_GUARD_NOOP).expect("guard no-op source should lower");
+    let worker = artifact
+        .processes
+        .iter()
+        .find(|process| process.debug_name == "Worker")
+        .expect("Worker artifact should exist");
+    let transition = worker
+        .transitions
+        .first()
+        .expect("Worker artifact transition should exist");
+    assert!(matches!(
+        transition.actions.as_slice(),
+        [
+            ArtifactAction::IfElse {
+                then_actions: first_then,
+                else_actions: first_else,
+                ..
+            },
+            ArtifactAction::IfElse {
+                then_actions: second_then,
+                else_actions: second_else,
+                ..
+            },
+            ArtifactAction::IfElse {
+                then_actions: third_then,
+                else_actions: third_else,
+                ..
+            },
+        ] if matches!(first_then.as_slice(), [ArtifactAction::Emit { .. }])
+            && first_else.is_empty()
+            && matches!(second_then.as_slice(), [ArtifactAction::Emit { .. }])
+            && second_else.is_empty()
+            && third_then.is_empty()
+            && matches!(third_else.as_slice(), [ArtifactAction::Emit { .. }])
+    ));
+    assert!(
+        !artifact
+            .encode()
+            .lines()
+            .any(|line| line.ends_with("=flag") || line.contains("debug_name=flag")),
+        "no-op branch artifact must not dispatch through the source binding name"
+    );
+}
+
+#[test]
+fn statement_runtime_if_rejects_omitted_else_when_then_branch_is_empty() {
+    let source = RUNTIME_GUARD_NOOP.replace(
+        "        if (flag == True) {\n            emit \"guard saw true\";\n        }",
+        "        if (flag == True) {\n        }",
+    );
+    let error = check_source(&source).expect_err("omitted else with empty then must fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("statement-level if branches cannot both be empty"),
+        "{error}"
+    );
+}
+
+#[test]
+fn statement_runtime_if_rejects_explicit_both_empty_branches() {
+    let source = RUNTIME_GUARD_NOOP.replace(
+        "        if (flag == True) {\n            emit \"guard saw true\";\n        }",
+        "        if (flag == True) {\n        } else {\n        }",
+    );
+    let error = check_source(&source).expect_err("both empty branches must fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("statement-level if branches cannot both be empty"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -680,13 +680,6 @@ impl ArtifactProcess {
                         transition.message.as_u32()
                     )));
                 }
-                if scope.inside_loop && (then_actions.is_empty() || else_actions.is_empty()) {
-                    return Err(Error::new(format!(
-                        "process {} transition {} for loop branch actions must not be empty in this artifact slice",
-                        self.debug_name,
-                        transition.message.as_u32()
-                    )));
-                }
                 let received_payload_type = self
                     .message_variants
                     .get(transition.message.index())
@@ -713,6 +706,13 @@ impl ArtifactProcess {
                         transition.message.as_u32()
                     ),
                 )?;
+                if then_actions.is_empty() && else_actions.is_empty() {
+                    return Err(Error::new(format!(
+                        "process {} transition {} runtime if action branches cannot both be empty",
+                        self.debug_name,
+                        transition.message.as_u32()
+                    )));
+                }
                 let branch_scope = scope.if_branch();
                 for action in then_actions {
                     self.validate_action_reference(

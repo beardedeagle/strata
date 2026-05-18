@@ -68,6 +68,51 @@ fn validate_rejects_nested_if_else_action_without_declared_effect() {
 }
 
 #[test]
+fn validate_accepts_if_else_action_with_one_empty_branch() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::IfElse {
+        condition: ArtifactValueTemplate::Literal {
+            ty: bool_type,
+            value: artifact_value("True"),
+        },
+        then_actions: vec![ArtifactAction::Emit {
+            output: OutputId::new(0),
+        }],
+        else_actions: Vec::new(),
+    }];
+
+    artifact
+        .validate()
+        .expect("one empty runtime if action branch should admit");
+}
+
+#[test]
+fn validate_rejects_if_else_action_with_both_branches_empty() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].effects = Vec::new();
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::IfElse {
+        condition: ArtifactValueTemplate::Literal {
+            ty: bool_type,
+            value: artifact_value("True"),
+        },
+        then_actions: Vec::new(),
+        else_actions: Vec::new(),
+    }];
+
+    let err = artifact
+        .validate()
+        .expect_err("both empty runtime if action branches should fail admission");
+
+    assert!(
+        err.to_string()
+            .contains("runtime if action branches cannot both be empty"),
+        "{err}"
+    );
+}
+
+#[test]
 fn validate_rejects_if_else_action_nesting_above_limit() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);

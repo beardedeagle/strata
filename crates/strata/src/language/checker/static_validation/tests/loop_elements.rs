@@ -106,7 +106,7 @@ fn static_validation_accepts_runtime_if_inside_for_each_loop_body() {
 }
 
 #[test]
-fn static_validation_rejects_empty_runtime_if_branch_inside_for_each_loop_body() {
+fn static_validation_accepts_one_empty_runtime_if_branch_inside_for_each_loop_body() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
     let process = process_with_single_loop_body_and_element(
         bool_ty.clone(),
@@ -125,12 +125,36 @@ fn static_validation_rejects_empty_runtime_if_branch_inside_for_each_loop_body()
         vec![Effect::Emit],
     );
 
+    validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+        .expect("one empty checked runtime if loop branch should validate");
+}
+
+#[test]
+fn static_validation_rejects_both_empty_runtime_if_branches_inside_for_each_loop_body() {
+    let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let process = process_with_single_loop_body_and_element(
+        bool_ty.clone(),
+        CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+            bool_ty.clone(),
+            artifact_value("List[True]"),
+        )),
+        vec![CheckedAction::IfElse {
+            condition: CheckedValueTemplate::LoopElement {
+                ty: bool_ty,
+                element: checked_loop_element_id(0),
+            },
+            then_actions: Vec::new(),
+            else_actions: Vec::new(),
+        }],
+        Vec::new(),
+    );
+
     let err =
         validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
-            .expect_err("empty checked runtime if loop branch should fail");
+            .expect_err("both empty checked runtime if branches should fail");
     assert!(
         err.to_string()
-            .contains("for loop branch actions must not be empty"),
+            .contains("runtime if action branches cannot both be empty"),
         "{err}"
     );
 }

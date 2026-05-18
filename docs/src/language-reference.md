@@ -559,7 +559,7 @@ assignment, mutation, or authority.
 ## Runtime Branching
 
 Step bodies can use a final-position runtime `if` whose condition is a checked
-`Bool` value template, or a statement-level runtime `if` whose branches contain
+`Bool` value template, or a statement-level runtime `if` whose branches run
 effects and then continue to the enclosing final return:
 
 ```strata
@@ -585,6 +585,25 @@ fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [em
 }
 ```
 
+Statement-level runtime branches also admit guard/no-op shapes:
+
+```strata
+fn step(state: WorkerState, Check(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+    if (flag == True) {
+        emit "guard saw true";
+    }
+    if (!(flag == False)) {
+        emit "guard enabled";
+    } else {
+    }
+    if (flag == True) {
+    } else {
+        emit "guard saw false";
+    }
+    return Continue(state);
+}
+```
+
 This is ordinary runtime branching. If the condition depends on the received
 payload or current state payload, Strata lowers the checked condition, branch
 actions, and any branch next states into the Mantle artifact. Mantle admits the
@@ -593,10 +612,15 @@ records `branch_selected` trace events with a stable admitted-artifact
 `branch_path`. Branch effects must be declared by the step effect list. Runtime
 branch statement prefixes cannot bind process references, contain nested
 branches, or contain loops in this slice.
-Final-position runtime branches must return the same step result from both
-branches. Statement-level runtime branches cannot return; state changes still
-occur only through the enclosing immutable whole-value `Continue`, `Stop`, or
-`Panic` return.
+An omitted statement-level `else` lowers as an explicit empty branch. Empty
+statement-level branches perform no effects, no state change, no authority
+acquisition, and no hidden work; branch selection is still observable through
+`branch_selected`. One branch may be empty when the sibling branch contains at
+least one admitted action. Both branches empty are rejected at source checking,
+artifact admission, and loaded-runtime admission. Final-position runtime
+branches must return the same step result from both branches. Statement-level
+runtime branches cannot return; state changes still occur only through the
+enclosing immutable whole-value `Continue`, `Stop`, or `Panic` return.
 
 This slice does not add ordering comparisons, arithmetic, unbounded loops,
 imports, or a standard library.
@@ -627,7 +651,8 @@ collection length and runtime fuel limits, and records `loop_started`,
 
 The loop element is immutable and may be used only as a typed value template in
 the loop body. Loop bodies may use statement-level runtime `if` over the active
-loop element or another checked `Bool` template; Mantle selects the branch during
+loop element or another checked `Bool` template, including the same one-sided
+no-op branch shapes admitted outside loops. Mantle selects the branch during
 execution and records `branch_selected` inside the loop trace with the active
 loop element ID and iteration index. The body is still intentionally narrow in
 this slice: no nested loops, no `spawn`, no `return`, no assignment, no nested
@@ -644,8 +669,10 @@ emit "text";
 let worker: ProcessRef<Worker> = spawn Worker;
 send worker Ping;
 if (flag == True) { emit "true"; } else { emit "false"; }
+if (flag == True) { emit "true"; }
+if (flag == True) {} else { emit "false"; }
 for item in items { send worker Branch(item); }
-for item in items { if ((item != False) && !(item == False)) { send worker Branch(item); } else { emit "skip"; } }
+for item in items { if ((item != False) && !(item == False)) { send worker Branch(item); } }
 return Stop(state);
 return Continue(next_state);
 return Panic(failed_state);

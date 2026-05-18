@@ -64,6 +64,9 @@ A runtime control-flow gate checks, builds, admits, runs, and traces typed
 Mantle execution:
 
 ```sh
+cargo run -p strata --bin strata -- check examples/runtime_guard_noop.str
+cargo run -p strata --bin strata -- build examples/runtime_guard_noop.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guard_noop.mta
 cargo run -p strata --bin strata -- check examples/runtime_for_each.str
 cargo run -p strata --bin strata -- build examples/runtime_for_each.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta

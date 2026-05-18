@@ -1,0 +1,60 @@
+module runtime_guard_noop;
+
+record MainState;
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum WorkerState {
+    Ready,
+}
+
+enum WorkerMsg {
+    Check(Bool),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Check(True);
+        send worker Check(False);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Ready;
+    }
+
+    fn step(state: WorkerState, Check(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (flag == True) {
+            emit "guard saw true";
+        }
+        if (!(flag == False)) {
+            emit "guard enabled";
+        } else {
+        }
+        if (flag == True) {
+        } else {
+            emit "guard saw false";
+        }
+        return Continue(state);
+    }
+}

@@ -162,6 +162,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_if_else.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_if_else.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_if_else.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_guard_noop.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_guard_noop.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_guard_noop.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_for_each.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_for_each.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta
