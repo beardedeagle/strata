@@ -646,10 +646,16 @@ impl ArtifactValueTemplate {
                             record_field.name
                         )));
                     }
-                    let expected = expected_fields
+                    let Some(expected) = expected_fields
                         .iter()
                         .find(|expected| expected.name == record_field.name)
-                        .expect("record template type validation should check field names");
+                    else {
+                        return Err(Error::new(format!(
+                            "{field}.field {} is not declared by type id {}",
+                            record_field.name,
+                            ty.as_u32()
+                        )));
+                    };
                     record_field.value.validate_for_received_payload(
                         artifact,
                         &format!("{field}.field.{}", record_field.name),

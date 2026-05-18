@@ -525,7 +525,9 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`as`, `else`, `if`, `let`, `mut`, and `var` are reserved everywhere identifiers
-are accepted. The single `_` token is reserved for wildcard patterns.
+`_`, `as`, `bounded`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`,
+`mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`, `security`,
+`send`, `spawn`, `type`, and `var` are reserved everywhere identifiers are
+accepted. The single `_` token is reserved for wildcard patterns.
 `ProcResult`, `ProcessRef`, `List`, and `Map` are reserved type names because
 they name built-in transition, process-reference, and collection types.

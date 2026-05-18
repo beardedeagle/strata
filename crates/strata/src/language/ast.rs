@@ -108,7 +108,31 @@ fn is_identifier(value: &str) -> bool {
 }
 
 fn is_reserved_identifier(value: &str) -> bool {
-    matches!(value, "_" | "as" | "else" | "if" | "let" | "mut" | "var")
+    matches!(
+        value,
+        "_" | "as"
+            | "bounded"
+            | "else"
+            | "emit"
+            | "enum"
+            | "fn"
+            | "for"
+            | "if"
+            | "in"
+            | "let"
+            | "mailbox"
+            | "match"
+            | "module"
+            | "mut"
+            | "proc"
+            | "record"
+            | "return"
+            | "security"
+            | "send"
+            | "spawn"
+            | "type"
+            | "var"
+    )
 }
 
 fn validate_output_literal(value: &str) -> Result<()> {
