@@ -146,6 +146,10 @@ strings, helper names, or debug labels. For composed predicates, this metadata
 is still only the final evaluated Bool value; the branch path remains the trace
 identity for the admitted artifact node. Statement-level branches record this
 event even when the selected branch is an admitted no-op branch with no actions.
+When a statement-level branch guards a bounded runtime loop, the outer
+`branch_selected` event is recorded before any loop events. If the selected
+branch is empty, no `loop_started`, `loop_iteration`, or `loop_completed` event
+is emitted for that branch.
 
 When a branch runs inside a bounded runtime loop body, `branch_selected` appears
 after that iteration's `loop_iteration` event and before the selected branch

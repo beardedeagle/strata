@@ -357,12 +357,6 @@ fn validate_action_reference(
             body,
             ..
         } => {
-            if scope.inside_runtime_if_branch {
-                return Err(Error::new(format!(
-                    "process {} runtime if branch cannot contain for loop actions in this source slice",
-                    process.debug_name()
-                )));
-            }
             if scope.inside_loop {
                 return Err(Error::new(format!(
                     "process {} nested for loops are not supported in this source slice",

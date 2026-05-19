@@ -43,28 +43,29 @@ Read them in this order:
    branch behavior.
 23. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-24. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+24. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+25. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-25. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-26. `actor_payload_match.str` for the same payload binding through a whole-body
+26. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+27. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-27. `actor_payload_split_match.str` for payload-sensitive same-message
+28. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-28. `actor_payload_split_signature.str` for payload-sensitive same-message
+29. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-29. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+30. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-30. `actor_payload_state_match_split.str` for payload-sensitive same-message
+31. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-31. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+32. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-32. `nested_patterns.str` for nested immutable constructor, record, list, and
+33. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-33. `actor_reply.str` for transporting typed process references through message
+34. `actor_reply.str` for transporting typed process references through message
    payloads.
-34. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+35. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-35. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+36. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -590,6 +591,27 @@ Key source ideas:
   another statement-level branch in this slice.
 - The runtime trace records `loop_iteration`, `branch_selected`, branch effects,
   and `loop_completed` in deterministic collection order.
+
+`examples/runtime_guarded_for_each.str` guards a whole bounded runtime loop with
+a statement-level branch.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_guarded_for_each.str
+cargo run -p strata --bin strata -- build examples/runtime_guarded_for_each.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_for_each.mta
+```
+
+Key source ideas:
+
+- `if (enabled == True) { for item in items { ... } } else {}` lowers as a
+  typed Mantle branch whose selected `then` branch contains a bounded loop.
+- The disabled selected branch records `branch_selected` but emits no loop
+  events and performs no branch-local work.
+- The enabled selected branch records `branch_selected`, then `loop_started`,
+  ordered `loop_iteration` body effects, and `loop_completed`.
+- The loop body keeps the same restrictions: no nested loops, no `spawn`, no
+  `return`, no assignment, and no nested branch actions inside a selected
+  loop-body branch.
 
 ## Actor Payload Match
 
