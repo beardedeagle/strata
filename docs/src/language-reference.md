@@ -611,8 +611,8 @@ typed condition, validates both branches, executes only the selected branch, and
 records `branch_selected` trace events with a stable admitted-artifact
 `branch_path`. Branch effects must be declared by the step effect list. Runtime
 branch statement prefixes cannot bind process references or contain direct
-nested branches in this slice. A branch may contain one bounded runtime `for`
-loop; the loop body remains the same admitted runtime-loop body surface.
+nested branches in this slice. Branches may contain bounded runtime `for`
+statements; each loop body remains the same admitted runtime-loop body surface.
 An omitted statement-level `else` lowers as an explicit empty branch. Empty
 statement-level branches perform no effects, no state change, no authority
 acquisition, and no hidden work; branch selection is still observable through
