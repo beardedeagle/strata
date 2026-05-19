@@ -1,13 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use mantle_artifact::{
     ArtifactMapEntry, ArtifactRecordField, ArtifactValueBooleanOperator,
-    ArtifactValueEqualityOperator, Error, ProcessRefId, Result,
+    ArtifactValueEqualityOperator, Error, Result,
 };
 
 use super::RuntimeLoopElement;
 use super::model::ActiveStep;
-use crate::event::RuntimeProcessId;
+use super::process_refs::LocalProcessRefs;
 use crate::program::{LoadedProgram, LoadedValueTemplate, RuntimePayload, RuntimeValue};
 
 pub(super) fn evaluate_runtime_template(
@@ -15,7 +15,7 @@ pub(super) fn evaluate_runtime_template(
     template: &LoadedValueTemplate,
     received_payload: Option<&RuntimePayload>,
     step: &ActiveStep,
-    process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+    process_refs: &LocalProcessRefs,
     loop_elements: &[RuntimeLoopElement],
 ) -> Result<RuntimePayload> {
     match template {
@@ -172,7 +172,7 @@ pub(super) fn evaluate_runtime_template(
             target_process,
             process_ref,
         } => {
-            let pid = process_refs.get(process_ref).copied().ok_or_else(|| {
+            let pid = process_refs.get(*process_ref).ok_or_else(|| {
                 Error::new(format!(
                     "process {} sends unbound process reference id {} as payload",
                     step.process_name,

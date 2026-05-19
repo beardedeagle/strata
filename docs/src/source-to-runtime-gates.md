@@ -33,8 +33,9 @@ just source-to-runtime-failure-gates
 The maintained command list belongs in the executable gate definitions:
 
 - `Justfile` owns the commands a user or CI runner executes.
-- `crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs` mirrors the
-  same source-to-runtime contract as integration tests.
+- `crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs` is the root
+  integration harness, with focused gate families under
+  `crates/strata-mantle-acceptance/tests/source_to_runtime_gates/`.
 - `docs/src/examples.md` owns the curated list of runnable examples and the
   behavior each one demonstrates.
 

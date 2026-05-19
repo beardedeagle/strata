@@ -309,7 +309,7 @@ fn runtime_rejects_oversized_record_payload_template_value() {
         &loaded_template(template),
         Some(&received),
         &step,
-        &BTreeMap::new(),
+        &LocalProcessRefs::empty(),
         &[],
     )
     .expect_err("oversized record payload labels should fail closed");

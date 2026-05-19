@@ -150,9 +150,11 @@ The runnable examples are:
 - `examples/actor_emit_spawn_send.str`;
 - `examples/actor_panic_no_replay.str`.
 
-The integration tests in
-`crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs` mirror the
-same source check, artifact build, and runtime execution sequence:
+The integration tests rooted at
+`crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs`, with focused
+gate families under
+`crates/strata-mantle-acceptance/tests/source_to_runtime_gates/`, mirror the same
+source check, artifact build, and runtime execution sequence:
 
 ```sh
 cargo run -p strata --bin strata -- check examples/hello.str

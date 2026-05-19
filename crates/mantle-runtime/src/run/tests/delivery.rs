@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use super::support::*;
 use crate::{ProcessStatus, RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeProcessId};
 use mantle_artifact::ArtifactBranch;
@@ -563,8 +561,12 @@ fn failing_current_state_payload_send() -> LoadedAction {
     }
 }
 
-fn worker_ref_binding(worker_pid: RuntimeProcessId) -> BTreeMap<ProcessRefId, RuntimeProcessId> {
-    BTreeMap::from([(ProcessRefId::new(0), worker_pid)])
+fn worker_ref_binding(worker_pid: RuntimeProcessId) -> LocalProcessRefs {
+    let mut process_refs = LocalProcessRefs::new(1);
+    process_refs
+        .bind(ProcessRefId::new(0), worker_pid)
+        .expect("worker process reference should bind");
+    process_refs
 }
 
 fn main_step(main_pid: RuntimeProcessId) -> ActiveStep {

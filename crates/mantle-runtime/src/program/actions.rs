@@ -357,6 +357,16 @@ impl LoadedAction {
                         "for loop max_items must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
                     )));
                 }
+                validate_for_each_collection_type(
+                    program,
+                    &format!(
+                        "process {} transition {} for collection",
+                        process.debug_name,
+                        message.as_u32()
+                    ),
+                    collection,
+                    element.ty,
+                )?;
                 LoadedTemplateAdmission {
                     expected_type: None,
                     received_payload_type: process.message_variants[message.index()].payload_type,
@@ -575,6 +585,30 @@ fn action_count_at_depth(actions: &[LoadedAction], depth: usize) -> Result<usize
             .checked_add(action.action_count_at_depth(depth)?)
             .ok_or_else(|| Error::new("loaded action_count overflowed"))
     })
+}
+
+fn validate_for_each_collection_type(
+    program: &LoadedProgram,
+    field: &str,
+    collection: &LoadedValueTemplate,
+    element_type: TypeId,
+) -> Result<()> {
+    let collection_type = collection.result_type();
+    let type_entry = program.type_entry(collection_type)?;
+    let ArtifactValueShape::List { element, .. } = type_entry.value_shape()? else {
+        return Err(Error::new(format!(
+            "{field} type id {} must be a list type",
+            collection_type.as_u32()
+        )));
+    };
+    if *element != element_type {
+        return Err(Error::new(format!(
+            "{field} element type id {}, expected {}",
+            element.as_u32(),
+            element_type.as_u32()
+        )));
+    }
+    Ok(())
 }
 
 impl LoadedSendTarget {
