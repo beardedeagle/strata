@@ -663,10 +663,11 @@ the loop, trace order is `branch_selected`, `loop_started`, ordered
 `loop_iteration` body effects, and `loop_completed`.
 
 The loop body is still intentionally narrow in this slice: no nested loops, no
-`spawn`, no `return`, no assignment, no branch nested inside another branch,
-and no process-reference element type. A loop body may contain the admitted
-statement-level runtime `if` / no-op shape, including when the loop is itself
-inside a selected guard branch. Send targets may be process references bound
+`spawn`, no `return`, no assignment, and no process-reference element type. A
+loop body may contain the admitted statement-level runtime `if` / no-op shape,
+including when the loop is itself inside a selected guard branch. What remains
+disallowed is a statement-level branch whose branch body directly contains
+another statement-level branch. Send targets may be process references bound
 before the loop or direct `ProcessRef<T>` payloads received by the current step.
 Declare every body effect in the enclosing step effect list.
 

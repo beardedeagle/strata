@@ -611,9 +611,10 @@ Key source ideas:
   events and performs no branch-local work.
 - The enabled selected branch records `branch_selected`, then `loop_started`,
   ordered `loop_iteration` body effects, and `loop_completed`.
-- The loop body keeps the same restrictions: no nested loops, no `spawn`, no
-  `return`, no assignment, no branch nested inside another branch, and no
-  process-reference loop element type.
+- The guarded branch and loop body keep the same restrictions: no nested loops,
+  no `spawn`, no `return`, no assignment, and no process-reference loop element
+  type. A statement-level branch body still cannot directly contain another
+  statement-level branch.
 
 `examples/runtime_guarded_ref_loop.str` routes that guarded-loop send through a
 direct `ProcessRef<Worker>` received as the current message payload.
