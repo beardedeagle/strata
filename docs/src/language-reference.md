@@ -663,9 +663,12 @@ the loop, trace order is `branch_selected`, `loop_started`, ordered
 `loop_iteration` body effects, and `loop_completed`.
 
 The loop body is still intentionally narrow in this slice: no nested loops, no
-`spawn`, no `return`, no assignment, no nested branch actions inside a selected
-loop-body branch, and no process-reference element type. Bind process references
-before the loop and declare every body effect in the enclosing step effect list.
+`spawn`, no `return`, no assignment, no branch nested inside another branch,
+and no process-reference element type. A loop body may contain the admitted
+statement-level runtime `if` / no-op shape, including when the loop is itself
+inside a selected guard branch. Send targets may be process references bound
+before the loop or direct `ProcessRef<T>` payloads received by the current step.
+Declare every body effect in the enclosing step effect list.
 
 ## Statements
 
@@ -731,6 +734,12 @@ fn step(state: WorkerState, Work(reply_to: ProcessRef<Sink>)) -> ProcResult<Work
 
 Runtime dispatch uses the transported runtime process ID and admitted target
 process ID. Source names remain diagnostics and trace metadata.
+
+Received references can also be used as send targets inside admitted
+statement-level branches and bounded loop bodies. This does not make process
+references general source values: they remain direct message payload authority,
+and lowering emits typed received-payload send targets rather than source
+binding names.
 
 Current process-reference boundaries:
 

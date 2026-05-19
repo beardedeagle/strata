@@ -138,6 +138,7 @@ The runnable examples are:
 - `examples/runtime_for_each_empty.str`;
 - `examples/runtime_for_each_if.str`;
 - `examples/runtime_guarded_for_each.str`;
+- `examples/runtime_guarded_ref_loop.str`;
 - `examples/actor_payload_match.str`;
 - `examples/actor_payload_split_match.str`;
 - `examples/actor_payload_split_signature.str`;

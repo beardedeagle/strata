@@ -1,0 +1,103 @@
+module runtime_guarded_ref_loop;
+
+record MainState;
+
+record BatchRequest {
+    enabled: Bool,
+    items: List<Bool,2>,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum BatchState {
+    Configured(BatchRequest),
+}
+
+enum BatchMsg {
+    Configure(BatchRequest),
+    Route(ProcessRef<Worker>),
+}
+
+enum WorkerState {
+    Waiting,
+}
+
+enum WorkerMsg {
+    Branch(Bool),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let enabled_batch: ProcessRef<BatchWorker> = spawn BatchWorker;
+        let disabled_batch: ProcessRef<BatchWorker> = spawn BatchWorker;
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send enabled_batch Configure(BatchRequest { enabled: True, items: List<Bool,2>[True, False] });
+        send enabled_batch Route(worker);
+        send disabled_batch Configure(BatchRequest { enabled: False, items: List<Bool,2>[True, False] });
+        send disabled_batch Route(worker);
+        return Stop(state);
+    }
+}
+
+proc BatchWorker mailbox bounded(2) {
+    type State = BatchState;
+    type Msg = BatchMsg;
+
+    fn init() -> BatchState ! [] ~ [] @det {
+        return Configured(BatchRequest { enabled: False, items: List<Bool,2>[False, False] });
+    }
+
+    fn step(state: BatchState, Configure(request: BatchRequest)) -> ProcResult<BatchState> ! [] ~ [] @det {
+        return Continue(Configured(request));
+    }
+
+    fn step(state: BatchState, Route(worker: ProcessRef<Worker>)) -> ProcResult<BatchState> ! [emit, send] ~ [] @det {
+        match state {
+            Configured(BatchRequest { enabled, items }) => {
+                if (enabled == True) {
+                    for item in items {
+                        if (item == True) {
+                            emit "received ref guarded loop selected true";
+                            send worker Branch(item);
+                        } else {
+                        }
+                    }
+                } else {
+                }
+                return Continue(state);
+            }
+        }
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Waiting;
+    }
+
+    fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (flag == True) {
+            emit "worker handled routed true";
+        } else {
+            emit "worker handled routed false";
+        }
+        return Continue(state);
+    }
+}
