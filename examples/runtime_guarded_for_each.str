@@ -1,0 +1,91 @@
+module runtime_guarded_for_each;
+
+record MainState;
+
+record BatchRequest {
+    enabled: Bool,
+    items: List<Bool,2>,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum BatchState {
+    Ready,
+}
+
+enum BatchMsg {
+    Batch(BatchRequest),
+}
+
+enum WorkerState {
+    Waiting,
+}
+
+enum WorkerMsg {
+    Branch(Bool),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let batch: ProcessRef<BatchWorker> = spawn BatchWorker;
+        send batch Batch(BatchRequest { enabled: True, items: List<Bool,2>[True, False] });
+        send batch Batch(BatchRequest { enabled: False, items: List<Bool,2>[True, False] });
+        return Stop(state);
+    }
+}
+
+proc BatchWorker mailbox bounded(2) {
+    type State = BatchState;
+    type Msg = BatchMsg;
+
+    fn init() -> BatchState ! [] ~ [] @det {
+        return Ready;
+    }
+
+    fn step(state: BatchState, Batch(BatchRequest { enabled, items })) -> ProcResult<BatchState> ! [spawn, emit, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        if (enabled == True) {
+            for item in items {
+                if (item == True) {
+                    emit "guarded loop selected true";
+                    send worker Branch(item);
+                } else {
+                }
+            }
+        } else {
+        }
+        return Continue(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Waiting;
+    }
+
+    fn step(state: WorkerState, Branch(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (flag == True) {
+            emit "worker handled true";
+        } else {
+            emit "worker handled false";
+        }
+        return Continue(state);
+    }
+}

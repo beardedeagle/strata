@@ -610,8 +610,9 @@ actions, and any branch next states into the Mantle artifact. Mantle admits the
 typed condition, validates both branches, executes only the selected branch, and
 records `branch_selected` trace events with a stable admitted-artifact
 `branch_path`. Branch effects must be declared by the step effect list. Runtime
-branch statement prefixes cannot bind process references, contain nested
-branches, or contain loops in this slice.
+branch statement prefixes cannot bind process references or contain direct
+nested branches in this slice. A branch may contain one bounded runtime `for`
+loop; the loop body remains the same admitted runtime-loop body surface.
 An omitted statement-level `else` lowers as an explicit empty branch. Empty
 statement-level branches perform no effects, no state change, no authority
 acquisition, and no hidden work; branch selection is still observable through
@@ -654,11 +655,17 @@ the loop body. Loop bodies may use statement-level runtime `if` over the active
 loop element or another checked `Bool` template, including the same one-sided
 no-op branch shapes admitted outside loops. Mantle selects the branch during
 execution and records `branch_selected` inside the loop trace with the active
-loop element ID and iteration index. The body is still intentionally narrow in
-this slice: no nested loops, no `spawn`, no `return`, no assignment, no nested
-statement branches, and no process-reference element type. Bind process
-references before the loop and declare every body effect in the enclosing step
-effect list.
+loop element ID and iteration index. Bounded loops may also appear inside
+statement-level runtime branches, allowing a guard to select or skip a whole
+loop. If the selected branch is empty, Mantle records only the outer
+`branch_selected` event and emits no loop events. If the selected branch contains
+the loop, trace order is `branch_selected`, `loop_started`, ordered
+`loop_iteration` body effects, and `loop_completed`.
+
+The loop body is still intentionally narrow in this slice: no nested loops, no
+`spawn`, no `return`, no assignment, no nested branch actions inside a selected
+loop-body branch, and no process-reference element type. Bind process references
+before the loop and declare every body effect in the enclosing step effect list.
 
 ## Statements
 

@@ -309,7 +309,7 @@ fn static_validation_rejects_runtime_if_branch_process_ref_binding() {
 }
 
 #[test]
-fn static_validation_rejects_runtime_if_branch_for_each_action() {
+fn static_validation_accepts_runtime_if_branch_for_each_action() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
     let condition =
         CheckedValueTemplate::Literal(CheckedPayloadValue::new(bool_ty, artifact_value("True")));
@@ -354,13 +354,6 @@ fn static_validation_rejects_runtime_if_branch_for_each_action() {
         })],
     });
 
-    let err =
-        validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
-            .expect_err("runtime if branch for loop action should fail static validation");
-
-    assert!(
-        err.to_string()
-            .contains("runtime if branch cannot contain for loop actions"),
-        "{err}"
-    );
+    validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+        .expect("runtime if branch for loop action should pass static validation");
 }

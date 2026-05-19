@@ -51,12 +51,12 @@ result of the first invalid shape.
 | `assignment statements are not supported` | Source code uses assignment-style mutation. | Bind immutable values through declarations or return a whole replacement state value. |
 | `statement-level if branches must not return` | An effect-only runtime branch tries to terminate the step. | Put the final `return` after the statement-level branch, or use final-position runtime `if` when each branch must return. |
 | `statement-level if branches cannot bind process references` | A branch tries to introduce branch-local authority with `spawn`. | Bind process references before the branch and use only admitted branch effects. |
-| `statement-level if branches cannot contain for loops` | A branch tries to introduce nested loop control flow. | Keep bounded loops outside the branch for this slice. |
 | `nested statement-level if branches are not supported` | A statement-level runtime branch contains another branch. | Split the behavior into separate steps or keep one branch level for this slice. |
-| `statement-level if branches cannot both be empty` | A statement-level runtime branch has no admitted effects on either side. | Put an `emit` or `send` in one branch. Omitted `else` and explicit `else {}` are allowed only when the other branch has admitted effects. |
+| `statement-level if branches cannot both be empty` | A statement-level runtime branch has no admitted actions on either side. | Put an admitted action, such as `emit`, `send`, or a bounded `for` loop, in one branch. Omitted `else` and explicit `else {}` are allowed only when the other branch has admitted work. |
 | `runtime if branch cannot bind process references` | A checked or admitted runtime branch tries to introduce branch-local authority. | Bind process references before the branch and keep branch bodies to declared effects. |
 | `runtime if branch cannot contain nested runtime if actions` | A checked runtime branch contains another runtime branch. | Keep runtime branch actions single-level for this slice. |
-| `runtime if branch cannot contain for loop actions` | A checked or admitted runtime branch contains loop control flow. | Move the loop outside the branch for this slice. |
+| `final-position runtime if branch cannot contain for loop actions` | A final-position runtime branch tries to introduce loop control flow. | Use a statement-level guard before the final return when a branch needs to guard a bounded loop. |
+| `for loop branch cannot contain nested runtime if actions` | A loop-body runtime branch contains another branch. | Keep loop-body branch actions single-level for this slice. |
 | `runtime if action branches cannot both be empty` | A decoded or constructed artifact tries to admit a runtime branch action with no actions in either branch. | Keep no-op branches explicit in the typed artifact, but ensure the sibling branch has at least one admitted action. |
 
 ## Source Function Errors

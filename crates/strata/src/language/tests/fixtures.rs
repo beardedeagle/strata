@@ -65,6 +65,8 @@ pub(super) const RUNTIME_FOR_EACH: &str =
     include_str!("../../../../../examples/runtime_for_each.str");
 pub(super) const RUNTIME_FOR_EACH_IF: &str =
     include_str!("../../../../../examples/runtime_for_each_if.str");
+pub(super) const RUNTIME_GUARDED_FOR_EACH: &str =
+    include_str!("../../../../../examples/runtime_guarded_for_each.str");
 
 pub(super) const ACTOR_PING: &str = r#"
 module actor_ping;

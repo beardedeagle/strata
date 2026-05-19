@@ -404,11 +404,13 @@ impl LoadedAction {
                 process.debug_name,
                 message.as_u32()
             ))),
-            Self::ForEach { .. } => Err(Error::new(format!(
-                "process {} transition {} runtime if branch cannot contain for loop actions in this artifact slice",
-                process.debug_name,
-                message.as_u32()
-            ))),
+            Self::ForEach { .. } => self.validate_admission(
+                program,
+                process,
+                message,
+                current_state_payload,
+                spawned_refs,
+            ),
             Self::IfElse { .. } => Err(Error::new(format!(
                 "process {} transition {} runtime if branch cannot contain nested runtime if actions in this artifact slice",
                 process.debug_name,

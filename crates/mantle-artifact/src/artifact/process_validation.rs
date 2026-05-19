@@ -739,13 +739,6 @@ impl ArtifactProcess {
                 max_items,
                 body,
             } => {
-                if scope.inside_runtime_if_branch {
-                    return Err(Error::new(format!(
-                        "process {} transition {} runtime if branch cannot contain for loop actions in this artifact slice",
-                        self.debug_name,
-                        transition.message.as_u32()
-                    )));
-                }
                 if scope.inside_loop {
                     return Err(Error::new(format!(
                         "process {} transition {} nested for loops are not supported in this artifact slice",

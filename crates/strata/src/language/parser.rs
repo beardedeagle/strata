@@ -767,9 +767,6 @@ impl Parser {
                     "nested statement-level if branches are not supported in this source slice",
                 ));
             }
-            if self.peek_keyword("for") {
-                return Err(self.error_here("statement-level if branches cannot contain for loops"));
-            }
             if self.peek_keyword("let") {
                 return Err(
                     self.error_here("statement-level if branches cannot bind process references")

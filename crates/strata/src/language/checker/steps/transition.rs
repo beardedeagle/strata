@@ -79,28 +79,61 @@ struct CheckedBlockOutcome {
 }
 
 #[derive(Debug, Clone, Copy)]
+enum RuntimeIfBranchScope {
+    Outside,
+    Statement,
+    FinalPosition,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct ActionCheckScope {
     in_loop_body: bool,
-    in_statement_if_branch: bool,
+    runtime_if_branch: RuntimeIfBranchScope,
 }
 
 impl ActionCheckScope {
     const TOP_LEVEL: Self = Self {
         in_loop_body: false,
-        in_statement_if_branch: false,
+        runtime_if_branch: RuntimeIfBranchScope::Outside,
     };
 
     const fn for_loop_body(self) -> Self {
         Self {
             in_loop_body: true,
-            in_statement_if_branch: self.in_statement_if_branch,
+            runtime_if_branch: self.runtime_if_branch,
         }
     }
 
     const fn for_statement_if_branch(self) -> Self {
         Self {
             in_loop_body: self.in_loop_body,
-            in_statement_if_branch: true,
+            runtime_if_branch: RuntimeIfBranchScope::Statement,
+        }
+    }
+
+    const fn for_final_runtime_if_branch(self) -> Self {
+        Self {
+            in_loop_body: self.in_loop_body,
+            runtime_if_branch: RuntimeIfBranchScope::FinalPosition,
+        }
+    }
+
+    fn is_in_runtime_if_branch(self) -> bool {
+        !matches!(self.runtime_if_branch, RuntimeIfBranchScope::Outside)
+    }
+
+    fn allows_for_each(self) -> bool {
+        matches!(
+            self.runtime_if_branch,
+            RuntimeIfBranchScope::Outside | RuntimeIfBranchScope::Statement
+        )
+    }
+
+    fn runtime_if_branch_label(self) -> &'static str {
+        match self.runtime_if_branch {
+            RuntimeIfBranchScope::Outside => "runtime if branch",
+            RuntimeIfBranchScope::Statement => "statement-level if branch",
+            RuntimeIfBranchScope::FinalPosition => "final-position runtime if branch",
         }
     }
 }
@@ -196,7 +229,7 @@ fn check_runtime_if_branch_block_outcome(
         template_bindings,
         input.payload_bindings,
         loop_elements,
-        ActionCheckScope::TOP_LEVEL.for_statement_if_branch(),
+        ActionCheckScope::TOP_LEVEL.for_final_runtime_if_branch(),
         &body.statements,
     )?;
     let outcome = checked_return_outcome(
@@ -237,10 +270,12 @@ fn checked_actions_for_statements(
                 });
             }
             Statement::LetProcessRef { name, target, .. } => {
-                if scope.in_statement_if_branch {
+                if scope.is_in_runtime_if_branch() {
                     return Err(Error::new(format!(
-                        "process {} statement-level if branch cannot bind process reference {} in this source slice",
-                        context.process.name, name
+                        "process {} {} cannot bind process reference {} in this source slice",
+                        context.process.name,
+                        scope.runtime_if_branch_label(),
+                        name
                     )));
                 }
                 if scope.in_loop_body {
@@ -286,7 +321,7 @@ fn checked_actions_for_statements(
                 then_body,
                 else_body,
             } => {
-                if scope.in_statement_if_branch {
+                if scope.is_in_runtime_if_branch() {
                     return Err(Error::new(format!(
                         "process {} nested statement-level if branches are not supported in this source slice",
                         context.process.name
@@ -312,15 +347,15 @@ fn checked_actions_for_statements(
                 collection,
                 body,
             } => {
-                if scope.in_statement_if_branch {
-                    return Err(Error::new(format!(
-                        "process {} statement-level if branch cannot contain for loop actions in this source slice",
-                        context.process.name
-                    )));
-                }
                 if scope.in_loop_body {
                     return Err(Error::new(format!(
                         "process {} nested for loops are not supported in this source slice",
+                        context.process.name
+                    )));
+                }
+                if !scope.allows_for_each() {
+                    return Err(Error::new(format!(
+                        "process {} final-position runtime if branch cannot contain for loop actions in this source slice",
                         context.process.name
                     )));
                 }
