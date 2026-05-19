@@ -47,25 +47,27 @@ Read them in this order:
 25. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
 26. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-27. `actor_payload_match.str` for the same payload binding through a whole-body
+27. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+   received direct process reference.
+28. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-28. `actor_payload_split_match.str` for payload-sensitive same-message
+29. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-29. `actor_payload_split_signature.str` for payload-sensitive same-message
+30. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-30. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+31. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-31. `actor_payload_state_match_split.str` for payload-sensitive same-message
+32. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-32. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+33. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-33. `nested_patterns.str` for nested immutable constructor, record, list, and
+34. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-34. `actor_reply.str` for transporting typed process references through message
+35. `actor_reply.str` for transporting typed process references through message
    payloads.
-35. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+36. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-36. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+37. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -609,9 +611,31 @@ Key source ideas:
   events and performs no branch-local work.
 - The enabled selected branch records `branch_selected`, then `loop_started`,
   ordered `loop_iteration` body effects, and `loop_completed`.
-- The loop body keeps the same restrictions: no nested loops, no `spawn`, no
-  `return`, no assignment, and no nested branch actions inside a selected
-  loop-body branch.
+- The guarded branch and loop body keep the same restrictions: no nested loops,
+  no `spawn`, no `return`, no assignment, and no process-reference loop element
+  type. A statement-level branch body still cannot directly contain another
+  statement-level branch.
+
+`examples/runtime_guarded_ref_loop.str` routes that guarded-loop send through a
+direct `ProcessRef<Worker>` received as the current message payload.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_guarded_ref_loop.str
+cargo run -p strata --bin strata -- build examples/runtime_guarded_ref_loop.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop.mta
+```
+
+Key source ideas:
+
+- `BatchWorker` stores only value data in state. The worker reference remains a
+  direct message payload on `Route(ProcessRef<Worker>)`.
+- The selected enabled branch sends `Branch(item)` through the received
+  reference from inside the guarded loop body.
+- The disabled branch records only `branch_selected`; it emits no loop events
+  and performs no branch-local or loop-local authority acquisition.
+- Lowering emits a typed received-payload send target. Runtime dispatch uses the
+  transported runtime process ID plus admitted target process ID, not the source
+  payload binding name.
 
 ## Actor Payload Match
 
