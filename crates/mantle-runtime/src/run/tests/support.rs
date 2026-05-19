@@ -3,8 +3,8 @@ pub(super) use super::super::*;
 pub(super) use crate::host::InMemoryRuntimeHost;
 pub(super) use crate::limits::RunLimits;
 pub(super) use crate::program::{
-    LoadedNextState, LoadedProgram, LoadedStateValue, LoadedValueTemplate, RuntimePayload,
-    RuntimeValue,
+    LoadedNextState, LoadedProgram, LoadedSendTarget, LoadedStateValue, LoadedValueTemplate,
+    RuntimePayload, RuntimeValue,
 };
 pub(super) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactEnumVariant,

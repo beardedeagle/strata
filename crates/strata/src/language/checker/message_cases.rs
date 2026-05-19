@@ -351,7 +351,7 @@ impl<'a> MessageCaseBuilder<'a> {
                     )?;
                     CheckedPayloadValue::new(checked_type, value)
                 };
-                Ok(self.insert_payload_case(variant_id, payload))
+                self.insert_payload_case(variant_id, payload)
             }
         }
     }
@@ -360,14 +360,14 @@ impl<'a> MessageCaseBuilder<'a> {
         &mut self,
         variant_id: CheckedMessageVariantId,
         payload: CheckedPayloadValue,
-    ) -> bool {
+    ) -> Result<bool> {
         let payloads = self.payload_cases.entry(variant_id).or_default();
-        let key = PayloadDomainKey::from_payload(&payload);
+        let key = PayloadDomainKey::from_payload(&payload)?;
         if payloads.contains_key(&key) {
-            return false;
+            return Ok(false);
         }
         payloads.insert(key, payload);
-        true
+        Ok(true)
     }
 
     fn current_cases(&self) -> Result<Vec<DiscoveredMessageCase>> {
@@ -544,7 +544,7 @@ fn state_payload_discovery_values(
     {
         for value in &domain.values {
             let payload = CheckedPayloadValue::new(checked_ty.clone(), value.clone());
-            payloads.insert(PayloadDomainKey::from_payload(&payload), payload);
+            payloads.insert(PayloadDomainKey::from_payload(&payload)?, payload);
         }
     }
     for case in sender_cases {
@@ -552,7 +552,7 @@ fn state_payload_discovery_values(
             continue;
         };
         if payload.ty() == &checked_ty && payload.process_ref_payload().is_none() {
-            payloads.insert(PayloadDomainKey::from_payload(payload), payload.clone());
+            payloads.insert(PayloadDomainKey::from_payload(payload)?, payload.clone());
         }
     }
     Ok(payloads.into_values().collect())

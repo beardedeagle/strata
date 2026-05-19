@@ -1,0 +1,492 @@
+use super::admission::LoadedTemplateAdmission;
+use super::dependencies::{
+    loaded_template_depends_on_loop_element, loaded_template_depends_on_received_payload,
+};
+use super::support::*;
+
+pub(in crate::program) fn evaluate_loaded_state_value(
+    program: &LoadedProgram,
+    template: &LoadedValueTemplate,
+    received_payload: Option<&RuntimePayload>,
+    current_state_payload: Option<&RuntimePayload>,
+) -> Result<LoadedStateValue> {
+    let payload =
+        evaluate_loaded_payload_value(program, template, received_payload, current_state_payload)?;
+    Ok(LoadedStateValue::from_payload(payload))
+}
+
+pub(in crate::program) fn validate_loaded_bool_condition(
+    program: &LoadedProgram,
+    process: &LoadedProcess,
+    field: &str,
+    condition: &LoadedValueTemplate,
+    received_payload_type: Option<TypeId>,
+    current_state_payload: Option<&RuntimePayload>,
+) -> Result<()> {
+    validate_loaded_bool_condition_with_loop_elements(
+        program,
+        process,
+        field,
+        condition,
+        received_payload_type,
+        current_state_payload,
+        &[],
+    )
+}
+
+pub(in crate::program) fn validate_loaded_bool_condition_with_loop_elements(
+    program: &LoadedProgram,
+    process: &LoadedProcess,
+    field: &str,
+    condition: &LoadedValueTemplate,
+    received_payload_type: Option<TypeId>,
+    current_state_payload: Option<&RuntimePayload>,
+    loop_elements: &[LoadedLoopElement],
+) -> Result<()> {
+    let bool_type = condition.result_type();
+    let ty = program.type_entry(bool_type)?;
+    let is_bool_contract = matches!(
+        ty.value_shape(),
+        Ok(ArtifactValueShape::Enum { variants })
+            if variants.len() == 2
+                && variants[0].label == "False"
+                && variants[0].payload_type.is_none()
+                && variants[1].label == "True"
+                && variants[1].payload_type.is_none()
+    );
+    if !is_bool_contract {
+        return Err(Error::new(format!(
+            "{field} must have type enum Bool {{ False, True }}"
+        )));
+    }
+    validate_loaded_bool_condition_shape(field, condition)?;
+    LoadedTemplateAdmission {
+        expected_type: Some(bool_type),
+        received_payload_type,
+        current_state_payload_type: current_state_payload.map(|payload| payload.ty),
+        allow_direct_process_ref: false,
+        loop_elements,
+        program,
+        process,
+        spawned_refs: &[],
+    }
+    .validate(field, condition)?;
+    validate_loaded_static_bool_condition_value(program, field, condition, current_state_payload)
+}
+
+fn validate_loaded_bool_condition_shape(
+    field: &str,
+    condition: &LoadedValueTemplate,
+) -> Result<()> {
+    match condition {
+        LoadedValueTemplate::Literal { .. }
+        | LoadedValueTemplate::ReceivedPayload { .. }
+        | LoadedValueTemplate::CurrentStatePayload { .. }
+        | LoadedValueTemplate::EnumPayload { .. }
+        | LoadedValueTemplate::RecordField { .. }
+        | LoadedValueTemplate::ListElement { .. }
+        | LoadedValueTemplate::ListPrefixElement { .. }
+        | LoadedValueTemplate::MapValue { .. }
+        | LoadedValueTemplate::LoopElement { .. }
+        | LoadedValueTemplate::Equality { .. }
+        | LoadedValueTemplate::BooleanNot { .. }
+        | LoadedValueTemplate::BooleanBinary { .. } => Ok(()),
+        LoadedValueTemplate::ListRest { .. }
+        | LoadedValueTemplate::MapRest { .. }
+        | LoadedValueTemplate::ProcessRef { .. }
+        | LoadedValueTemplate::EnumVariant { .. }
+        | LoadedValueTemplate::Record { .. }
+        | LoadedValueTemplate::List { .. }
+        | LoadedValueTemplate::Map { .. } => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
+    }
+}
+
+fn validate_loaded_static_bool_condition_value(
+    program: &LoadedProgram,
+    field: &str,
+    condition: &LoadedValueTemplate,
+    current_state_payload: Option<&RuntimePayload>,
+) -> Result<()> {
+    if loaded_template_depends_on_received_payload(condition)
+        || loaded_template_depends_on_loop_element(condition)
+    {
+        return Ok(());
+    }
+
+    let value = evaluate_loaded_payload_value(program, condition, None, current_state_payload)?;
+    validate_loaded_bool_atom_value(field, &value.value)
+}
+
+fn validate_loaded_bool_atom_value(field: &str, value: &RuntimeValue) -> Result<()> {
+    match value {
+        RuntimeValue::Atom(label) if label == "False" || label == "True" => Ok(()),
+        _ => Err(Error::new(format!(
+            "{field} must evaluate to unit Bool value False or True"
+        ))),
+    }
+}
+
+fn evaluate_loaded_payload_value(
+    program: &LoadedProgram,
+    template: &LoadedValueTemplate,
+    received_payload: Option<&RuntimePayload>,
+    current_state_payload: Option<&RuntimePayload>,
+) -> Result<RuntimePayload> {
+    match template {
+        LoadedValueTemplate::Literal { ty, value } => {
+            program.runtime_payload_value("literal value template", *ty, value.clone())
+        }
+        LoadedValueTemplate::ReceivedPayload { ty } => {
+            let payload = received_payload.ok_or_else(|| {
+                Error::new("received payload template requires a payload-bearing message")
+            })?;
+            program.validate_runtime_payload_matches_type("received payload", *ty, payload)?;
+            Ok(payload.clone())
+        }
+        LoadedValueTemplate::CurrentStatePayload { ty } => {
+            let payload = current_state_payload.ok_or_else(|| {
+                Error::new("current state payload template requires a payload-bearing state")
+            })?;
+            program.validate_runtime_payload_matches_type("current state payload", *ty, payload)?;
+            Ok(payload.clone())
+        }
+        LoadedValueTemplate::EnumPayload { ty, value, variant } => {
+            let value = evaluate_loaded_payload_value(
+                program,
+                value,
+                received_payload,
+                current_state_payload,
+            )?;
+            let variant = program.enum_variant_label(value.ty, *variant)?;
+            program.runtime_payload_value(
+                "enum payload projection value",
+                *ty,
+                value.value.project_enum_payload(variant)?,
+            )
+        }
+        LoadedValueTemplate::RecordField { ty, record, field } => {
+            let record = evaluate_loaded_payload_value(
+                program,
+                record,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "record field projection value",
+                *ty,
+                record.value.project_record_field(field)?,
+            )
+        }
+        LoadedValueTemplate::ListElement {
+            ty,
+            list,
+            index,
+            len,
+        } => {
+            let list = evaluate_loaded_payload_value(
+                program,
+                list,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "list element projection value",
+                *ty,
+                list.value.project_list_element(*index, *len)?,
+            )
+        }
+        LoadedValueTemplate::ListPrefixElement {
+            ty,
+            list,
+            index,
+            prefix_len,
+        } => {
+            let list = evaluate_loaded_payload_value(
+                program,
+                list,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "list prefix projection value",
+                *ty,
+                list.value
+                    .project_list_prefix_element(*index, *prefix_len)?,
+            )
+        }
+        LoadedValueTemplate::ListRest {
+            ty,
+            list,
+            prefix_len,
+        } => {
+            let list = evaluate_loaded_payload_value(
+                program,
+                list,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "list rest projection value",
+                *ty,
+                list.value.project_list_rest(*prefix_len)?,
+            )
+        }
+        LoadedValueTemplate::MapValue {
+            ty,
+            map,
+            key,
+            keys,
+            projection,
+        } => {
+            let map = evaluate_loaded_payload_value(
+                program,
+                map,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "map value projection value",
+                *ty,
+                map.value.project_map_value(key, keys, *projection)?,
+            )
+        }
+        LoadedValueTemplate::MapRest {
+            ty,
+            map,
+            excluded_keys,
+        } => {
+            let map = evaluate_loaded_payload_value(
+                program,
+                map,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "map rest projection value",
+                *ty,
+                map.value.project_map_rest(excluded_keys)?,
+            )
+        }
+        LoadedValueTemplate::ProcessRef { .. } => Err(Error::new(
+            "process reference template requires runtime process reference bindings",
+        )),
+        LoadedValueTemplate::LoopElement { .. } => Err(Error::new(
+            "loop element template requires runtime loop element bindings",
+        )),
+        LoadedValueTemplate::EnumVariant {
+            ty,
+            variant,
+            payload,
+        } => {
+            let payload = evaluate_loaded_payload_value(
+                program,
+                payload,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "enum variant template value",
+                *ty,
+                RuntimeValue::EnumVariant {
+                    variant: program.enum_variant_label(*ty, *variant)?.to_string(),
+                    payload: Box::new(payload.value),
+                },
+            )
+        }
+        LoadedValueTemplate::Record { ty, fields } => {
+            let mut values = Vec::with_capacity(fields.len());
+            let mut seen = BTreeSet::new();
+            for field in fields {
+                let value = evaluate_loaded_payload_value(
+                    program,
+                    &field.value,
+                    received_payload,
+                    current_state_payload,
+                )?;
+                if !seen.insert(field.name.as_str()) {
+                    return Err(Error::new(format!(
+                        "record template duplicates field {}",
+                        field.name
+                    )));
+                }
+                values.push(ArtifactRecordField {
+                    name: field.name.clone(),
+                    value: value.value,
+                });
+            }
+            program.runtime_payload_value(
+                "record template value",
+                *ty,
+                RuntimeValue::Record {
+                    constructor: program.type_label(*ty)?.to_string(),
+                    fields: values,
+                },
+            )
+        }
+        LoadedValueTemplate::List { ty, items } => {
+            let mut values = Vec::with_capacity(items.len());
+            for item in items {
+                values.push(
+                    evaluate_loaded_payload_value(
+                        program,
+                        item,
+                        received_payload,
+                        current_state_payload,
+                    )?
+                    .value,
+                );
+            }
+            program.runtime_payload_value("list template value", *ty, RuntimeValue::List(values))
+        }
+        LoadedValueTemplate::Map { ty, entries } => {
+            let mut values = Vec::with_capacity(entries.len());
+            let mut seen = BTreeSet::new();
+            for entry in entries {
+                let key = evaluate_loaded_payload_value(
+                    program,
+                    &entry.key,
+                    received_payload,
+                    current_state_payload,
+                )?;
+                let value = evaluate_loaded_payload_value(
+                    program,
+                    &entry.value,
+                    received_payload,
+                    current_state_payload,
+                )?;
+                if !seen.insert(key.value.clone()) {
+                    return Err(Error::new(format!(
+                        "map template duplicates key {}",
+                        key.value.label()
+                    )));
+                }
+                values.push(ArtifactMapEntry {
+                    key: key.value,
+                    value: value.value,
+                });
+            }
+            program.runtime_payload_value("map template value", *ty, RuntimeValue::Map(values))
+        }
+        LoadedValueTemplate::Equality {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_loaded_payload_value(
+                program,
+                left,
+                received_payload,
+                current_state_payload,
+            )?;
+            if left.ty != *operand_ty {
+                return Err(Error::new(format!(
+                    "equality left operand has type id {}, expected {}",
+                    left.ty.as_u32(),
+                    operand_ty.as_u32()
+                )));
+            }
+            let right = evaluate_loaded_payload_value(
+                program,
+                right,
+                received_payload,
+                current_state_payload,
+            )?;
+            if right.ty != *operand_ty {
+                return Err(Error::new(format!(
+                    "equality right operand has type id {}, expected {}",
+                    right.ty.as_u32(),
+                    operand_ty.as_u32()
+                )));
+            }
+            let is_equal = left.value == right.value;
+            let selected = match operator {
+                ArtifactValueEqualityOperator::Equal => is_equal,
+                ArtifactValueEqualityOperator::NotEqual => !is_equal,
+            };
+            program.runtime_payload_value(
+                "equality template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(selected)),
+            )
+        }
+        LoadedValueTemplate::BooleanNot { ty, operand } => {
+            let value = evaluate_loaded_payload_value(
+                program,
+                operand,
+                received_payload,
+                current_state_payload,
+            )?;
+            program.runtime_payload_value(
+                "boolean predicate template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(!runtime_bool_value(&value.value)?)),
+            )
+        }
+        LoadedValueTemplate::BooleanBinary {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_loaded_payload_value(
+                program,
+                left,
+                received_payload,
+                current_state_payload,
+            )?;
+            let left = runtime_bool_value(&left.value)?;
+            let selected = match operator {
+                ArtifactValueBooleanOperator::And => {
+                    left && runtime_bool_value(
+                        &evaluate_loaded_payload_value(
+                            program,
+                            right,
+                            received_payload,
+                            current_state_payload,
+                        )?
+                        .value,
+                    )?
+                }
+                ArtifactValueBooleanOperator::Or => {
+                    left || runtime_bool_value(
+                        &evaluate_loaded_payload_value(
+                            program,
+                            right,
+                            received_payload,
+                            current_state_payload,
+                        )?
+                        .value,
+                    )?
+                }
+            };
+            program.runtime_payload_value(
+                "boolean predicate template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(selected)),
+            )
+        }
+    }
+}
+
+fn bool_atom(value: bool) -> String {
+    if value {
+        "True".to_string()
+    } else {
+        "False".to_string()
+    }
+}
+
+fn runtime_bool_value(value: &RuntimeValue) -> Result<bool> {
+    match value {
+        RuntimeValue::Atom(label) if label == "True" => Ok(true),
+        RuntimeValue::Atom(label) if label == "False" => Ok(false),
+        _ => Err(Error::new(format!(
+            "boolean predicate operand produced non-Bool value {}",
+            value.label()
+        ))),
+    }
+}

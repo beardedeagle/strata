@@ -4,5 +4,6 @@ mod identity_admission;
 mod process_lookup;
 mod process_ref_admission;
 mod state_message_admission;
+mod state_message_for_each_admission;
 mod storage;
 mod support;

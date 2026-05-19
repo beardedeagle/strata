@@ -1,28 +1,29 @@
-use std::collections::BTreeMap;
-
 use mantle_artifact::{
     ArtifactBranch, ArtifactValue, Error, LoopElementId, MantleArtifact, OutputId, ProcessId,
-    ProcessRefId, Result, StateId, StepResult, TypeId,
+    Result, StateId, StepResult,
 };
 
 use accounting::{checked_output_bytes, checked_trace_event_bytes};
 use model::{ActiveStep, ProcessInstance, RuntimeMessageEnvelope};
+use process_refs::LocalProcessRefs;
 use templates::evaluate_runtime_template;
 
 use crate::event::{
     RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope, RuntimeEvent,
-    RuntimeEventRecord, RuntimeFailureReason, RuntimeLoopContext, RuntimeOutputStream,
-    RuntimeProcessId, RuntimeStepResult, RuntimeStopReason,
+    RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
+    RuntimeStepResult, RuntimeStopReason,
 };
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
 use crate::program::{
-    LoadedAction, LoadedLoopElement, LoadedNextState, LoadedProgram, LoadedSendTarget,
-    LoadedValueTemplate, RuntimePayload,
+    LoadedAction, LoadedLoopElement, LoadedNextState, LoadedProgram, LoadedValueTemplate,
+    RuntimePayload,
 };
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
 mod accounting;
+mod control_flow;
+mod delivery;
 mod model;
 mod process_refs;
 mod templates;
@@ -39,7 +40,7 @@ struct BranchSelection<'a> {
     scope: RuntimeBranchScope,
     branch_path: RuntimeBranchPath,
     condition: &'a LoadedValueTemplate,
-    local_process_refs: &'a BTreeMap<ProcessRefId, RuntimeProcessId>,
+    local_process_refs: &'a LocalProcessRefs,
     loop_elements: &'a [RuntimeLoopElement],
 }
 
@@ -205,159 +206,6 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         Ok(pid)
     }
 
-    fn send_message(
-        &mut self,
-        target: RuntimeProcessId,
-        envelope: RuntimeMessageEnvelope,
-        sender_pid: Option<RuntimeProcessId>,
-    ) -> Result<()> {
-        let process_index = self.preflight_delivery_target(target)?;
-        let process = &self.processes[process_index];
-        let process_id = process.process_id;
-        let process_label = self.program.process_label(process_id)?;
-        envelope.validate_for_process(self.program, process_id)?;
-        self.validate_envelope_process_ref(&envelope)?;
-        let pid = process.pid;
-        let queue_depth = process.mailbox.len() + 1;
-        let message_label = self
-            .program
-            .message_label(process_id, envelope.message)?
-            .to_string();
-        let process_label = process_label.to_string();
-
-        self.record_event(RuntimeEvent::MessageAccepted {
-            pid,
-            process_id,
-            process: process_label.clone(),
-            message_id: envelope.message,
-            message: message_label.clone(),
-            payload: envelope.payload.clone(),
-            queue_depth,
-            sender_pid,
-        })?;
-        let delivered_message = envelope.display_label(&message_label);
-        self.processes[process_index].mailbox.push_back(envelope);
-        self.delivered_messages.push(MessageDelivery {
-            pid,
-            process: process_label,
-            message: delivered_message,
-        });
-        Ok(())
-    }
-
-    fn preflight_delivery_target(&self, target: RuntimeProcessId) -> Result<usize> {
-        let process_index = self.process_index_for_pid(target)?;
-        self.preflight_delivery_target_index(process_index, 0)
-    }
-
-    fn preflight_delivery_target_with_queued_messages(
-        &self,
-        target: RuntimeProcessId,
-        queued_mailbox_messages: &[usize],
-    ) -> Result<usize> {
-        let process_index = self.process_index_for_pid(target)?;
-        let queued_messages = queued_mailbox_messages
-            .get(process_index)
-            .copied()
-            .ok_or_else(|| {
-                Error::new("runtime loop preflight mailbox accounting is inconsistent")
-            })?;
-        self.preflight_delivery_target_index(process_index, queued_messages)
-    }
-
-    fn preflight_delivery_target_index(
-        &self,
-        process_index: usize,
-        queued_messages: usize,
-    ) -> Result<usize> {
-        let process = self.processes.get(process_index).ok_or_else(|| {
-            Error::new(format!(
-                "runtime process index {process_index} is not available for mailbox preflight"
-            ))
-        })?;
-        let process_label = self.program.process_label(process.process_id)?;
-        match process.status {
-            ProcessStatus::Running => {}
-            ProcessStatus::Stopped => {
-                return Err(Error::new(format!(
-                    "send to process {process_label} failed because it is stopped"
-                )));
-            }
-            ProcessStatus::Failed => {
-                return Err(Error::new(format!(
-                    "send to process {process_label} failed because it has failed"
-                )));
-            }
-        }
-        let projected_depth = process
-            .mailbox
-            .len()
-            .checked_add(queued_messages)
-            .ok_or_else(|| Error::new("runtime mailbox preflight depth overflowed"))?;
-        if projected_depth >= process.mailbox_bound {
-            return Err(Error::new(format!(
-                "mailbox for process {} is full; message was not accepted",
-                process_label
-            )));
-        }
-        Ok(process_index)
-    }
-
-    fn process_index_for_pid(&self, pid: RuntimeProcessId) -> Result<usize> {
-        let raw_index = pid
-            .as_u64()
-            .checked_sub(1)
-            .ok_or_else(|| Error::new("runtime process id index underflowed"))?;
-        let process_index = usize::try_from(raw_index).map_err(|_| {
-            Error::new(format!(
-                "runtime process {pid} cannot be indexed on this platform"
-            ))
-        })?;
-        let process = self
-            .processes
-            .get(process_index)
-            .ok_or_else(|| Error::new(format!("runtime process {pid} is not spawned")))?;
-        if process.pid != pid {
-            return Err(Error::new(format!(
-                "runtime process index for pid {pid} is inconsistent"
-            )));
-        }
-        Ok(process_index)
-    }
-
-    fn drain_mailboxes(&mut self, max_dispatches: usize) -> Result<()> {
-        let mut dispatches = 0usize;
-        while let Some(process_index) = self.next_runnable_process() {
-            if dispatches >= max_dispatches {
-                return Err(Error::new(format!(
-                    "runtime dispatch budget exceeded after {max_dispatches} process step(s)"
-                )));
-            }
-            let dequeued = self.processes[process_index].dequeue(self.program)?;
-            self.record_event(RuntimeEvent::MessageDequeued {
-                pid: dequeued.pid,
-                process_id: dequeued.process_id,
-                process: self.program.process_label(dequeued.process_id)?.to_string(),
-                message_id: dequeued.envelope.message,
-                message: self
-                    .program
-                    .message_label(dequeued.process_id, dequeued.envelope.message)?
-                    .to_string(),
-                payload: dequeued.envelope.payload.clone(),
-                queue_depth: dequeued.queue_depth,
-            })?;
-            self.step_process(process_index, dequeued.envelope)?;
-            dispatches += 1;
-        }
-        Ok(())
-    }
-
-    fn next_runnable_process(&self) -> Option<usize> {
-        self.processes.iter().position(|process| {
-            process.status == ProcessStatus::Running && !process.mailbox.is_empty()
-        })
-    }
-
     fn step_process(
         &mut self,
         process_index: usize,
@@ -381,7 +229,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         )?;
         let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
-        let mut local_process_refs = BTreeMap::new();
+        let mut local_process_refs = LocalProcessRefs::new(definition.process_refs.len());
 
         let final_state =
             self.resolve_next_state(process_index, &step, &next_state, RuntimeBranchPath::root())?;
@@ -402,7 +250,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     fn execute_action(
         &mut self,
-        local_process_refs: &mut BTreeMap<ProcessRefId, RuntimeProcessId>,
+        local_process_refs: &mut LocalProcessRefs,
         step: &ActiveStep,
         action: &LoadedAction,
         branch_path: RuntimeBranchPath,
@@ -571,7 +419,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     fn preflight_loop_body(
         &self,
-        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        local_process_refs: &LocalProcessRefs,
         step: &ActiveStep,
         element: &LoadedLoopElement,
         body: &[LoadedAction],
@@ -603,7 +451,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     fn preflight_loop_action(
         &self,
-        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
+        local_process_refs: &LocalProcessRefs,
         step: &ActiveStep,
         action: &LoadedAction,
         loop_elements: &[RuntimeLoopElement],
@@ -681,290 +529,6 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         }
     }
 
-    fn ensure_loop_iteration_budget(&self, item_count: usize) -> Result<()> {
-        let remaining = self
-            .max_loop_iterations
-            .checked_sub(self.loop_iterations)
-            .ok_or_else(|| Error::new("runtime loop iteration counter exceeded its budget"))?;
-        if item_count > remaining {
-            return Err(Error::new(format!(
-                "runtime loop iteration budget exceeded: loop requires {item_count} iteration(s), remaining budget is {remaining}"
-            )));
-        }
-        Ok(())
-    }
-
-    fn evaluate_bool_condition(
-        &self,
-        step: &ActiveStep,
-        condition: &LoadedValueTemplate,
-        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
-        loop_elements: &[RuntimeLoopElement],
-    ) -> Result<(ArtifactBranch, RuntimePayload)> {
-        let condition_value = evaluate_runtime_template(
-            self.program,
-            condition,
-            step.payload.as_ref(),
-            step,
-            local_process_refs,
-            loop_elements,
-        )?;
-        if condition_value.ty != condition.result_type() {
-            return Err(Error::new(format!(
-                "process {} if condition produced type id {}, expected {}",
-                step.process_name,
-                condition_value.ty.as_u32(),
-                condition.result_type().as_u32()
-            )));
-        }
-        let ArtifactValue::Atom(value) = &condition_value.value else {
-            return Err(Error::new(format!(
-                "process {} if condition produced non-Bool value {}",
-                step.process_name,
-                condition_value.label()
-            )));
-        };
-        let branch = match value.as_str() {
-            "True" => ArtifactBranch::Then,
-            "False" => ArtifactBranch::Else,
-            _ => {
-                return Err(Error::new(format!(
-                    "process {} if condition produced invalid Bool value {}",
-                    step.process_name,
-                    condition_value.label()
-                )));
-            }
-        };
-        Ok((branch, condition_value))
-    }
-
-    fn select_branch(&mut self, selection: BranchSelection<'_>) -> Result<ArtifactBranch> {
-        let (branch, condition_value) = self.evaluate_bool_condition(
-            selection.step,
-            selection.condition,
-            selection.local_process_refs,
-            selection.loop_elements,
-        )?;
-        self.record_branch_selected(
-            selection.step,
-            selection.scope,
-            selection.branch_path,
-            selection.loop_elements,
-            branch,
-            &condition_value,
-        )?;
-        Ok(branch)
-    }
-
-    fn record_branch_selected(
-        &mut self,
-        step: &ActiveStep,
-        scope: RuntimeBranchScope,
-        branch_path: RuntimeBranchPath,
-        loop_elements: &[RuntimeLoopElement],
-        branch: ArtifactBranch,
-        condition: &RuntimePayload,
-    ) -> Result<()> {
-        let loop_context = loop_elements.last();
-        self.record_event(RuntimeEvent::BranchSelected {
-            pid: step.pid,
-            process_id: step.process_id,
-            process: step.process_name.clone(),
-            message_id: step.message,
-            message: step.message_label.clone(),
-            branch,
-            scope,
-            branch_path,
-            loop_context: loop_context.map(|element| RuntimeLoopContext {
-                element_id: element.id,
-                index: element.index,
-            }),
-            condition_type_id: condition.ty,
-            condition: condition.label().to_string(),
-        })
-    }
-
-    fn consume_loop_iteration(&mut self) -> Result<()> {
-        if self.loop_iterations >= self.max_loop_iterations {
-            return Err(Error::new(format!(
-                "runtime loop iteration budget exceeded after {} iteration(s)",
-                self.max_loop_iterations
-            )));
-        }
-        self.loop_iterations = self
-            .loop_iterations
-            .checked_add(1)
-            .ok_or_else(|| Error::new("runtime loop iteration counter overflowed"))?;
-        Ok(())
-    }
-
-    fn record_loop_started(
-        &mut self,
-        step: &ActiveStep,
-        element_id: LoopElementId,
-        collection_type_id: TypeId,
-        max_items: usize,
-        item_count: usize,
-    ) -> Result<()> {
-        self.record_event(RuntimeEvent::LoopStarted {
-            pid: step.pid,
-            process_id: step.process_id,
-            process: step.process_name.clone(),
-            message_id: step.message,
-            message: step.message_label.clone(),
-            element_id,
-            collection_type_id,
-            max_items,
-            item_count,
-        })
-    }
-
-    fn record_loop_iteration(
-        &mut self,
-        step: &ActiveStep,
-        element_id: LoopElementId,
-        index: usize,
-        element: &RuntimePayload,
-    ) -> Result<()> {
-        self.record_event(RuntimeEvent::LoopIteration {
-            pid: step.pid,
-            process_id: step.process_id,
-            process: step.process_name.clone(),
-            message_id: step.message,
-            message: step.message_label.clone(),
-            element_id,
-            index,
-            element_type_id: element.ty,
-            element: element.label().to_string(),
-        })
-    }
-
-    fn record_loop_completed(
-        &mut self,
-        step: &ActiveStep,
-        element_id: LoopElementId,
-        iteration_count: usize,
-    ) -> Result<()> {
-        self.record_event(RuntimeEvent::LoopCompleted {
-            pid: step.pid,
-            process_id: step.process_id,
-            process: step.process_name.clone(),
-            message_id: step.message,
-            message: step.message_label.clone(),
-            element_id,
-            iteration_count,
-        })
-    }
-
-    fn resolve_send_target(
-        &self,
-        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
-        step: &ActiveStep,
-        target: &LoadedSendTarget,
-    ) -> Result<RuntimeProcessId> {
-        match target {
-            LoadedSendTarget::ProcessRef(process_ref) => {
-                self.resolve_process_ref(local_process_refs, step, *process_ref)
-            }
-            LoadedSendTarget::ReceivedPayload { ty, target_process } => {
-                let payload = step.payload.as_ref().ok_or_else(|| {
-                    Error::new("received process reference send target requires a payload")
-                })?;
-                if payload.ty != *ty {
-                    return Err(Error::new(format!(
-                        "received process reference send target has type id {}, expected {}",
-                        payload.ty.as_u32(),
-                        ty.as_u32()
-                    )));
-                }
-                let process_ref = payload.process_ref.ok_or_else(|| {
-                    Error::new("received payload is not a process reference value")
-                })?;
-                if process_ref.target_process != *target_process {
-                    return Err(Error::new(format!(
-                        "received process reference targets process id {}, expected {}",
-                        process_ref.target_process.as_u32(),
-                        target_process.as_u32()
-                    )));
-                }
-                Ok(RuntimeProcessId::from_u64(process_ref.pid)?)
-            }
-        }
-    }
-
-    fn process_ref_target(
-        &self,
-        step: &ActiveStep,
-        process_ref: ProcessRefId,
-    ) -> Result<ProcessId> {
-        self.program
-            .process(step.process_id)?
-            .process_refs
-            .get(process_ref.index())
-            .map(|process_ref| process_ref.target)
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "process {} references undefined process reference id {}",
-                    step.process_name,
-                    process_ref.as_u32()
-                ))
-            })
-    }
-
-    fn ensure_process_ref_unbound(
-        &self,
-        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
-        step: &ActiveStep,
-        process_ref: ProcessRefId,
-    ) -> Result<()> {
-        self.process_ref_target(step, process_ref)?;
-        if local_process_refs.contains_key(&process_ref) {
-            return Err(Error::new(format!(
-                "process {} rebinds process reference id {}",
-                step.process_name,
-                process_ref.as_u32()
-            )));
-        }
-        Ok(())
-    }
-
-    fn bind_process_ref(
-        &self,
-        local_process_refs: &mut BTreeMap<ProcessRefId, RuntimeProcessId>,
-        step: &ActiveStep,
-        process_ref: ProcessRefId,
-        pid: RuntimeProcessId,
-    ) -> Result<()> {
-        self.process_ref_target(step, process_ref)?;
-        if local_process_refs.insert(process_ref, pid).is_some() {
-            return Err(Error::new(format!(
-                "process {} rebinds process reference id {}",
-                step.process_name,
-                process_ref.as_u32()
-            )));
-        }
-        Ok(())
-    }
-
-    fn resolve_process_ref(
-        &self,
-        local_process_refs: &BTreeMap<ProcessRefId, RuntimeProcessId>,
-        step: &ActiveStep,
-        process_ref: ProcessRefId,
-    ) -> Result<RuntimeProcessId> {
-        self.process_ref_target(step, process_ref)?;
-        local_process_refs
-            .get(&process_ref)
-            .copied()
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "process {} sends to unbound process reference id {}",
-                    step.process_name,
-                    process_ref.as_u32()
-                ))
-            })
-    }
-
     fn emit_output(&mut self, step: &ActiveStep, output: OutputId) -> Result<()> {
         let text = self.program.output(output)?.to_string();
         let emitted_output_bytes = checked_output_bytes(self.emitted_output_bytes, text.len())?;
@@ -1019,7 +583,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             template,
             step.payload.as_ref(),
             step,
-            &BTreeMap::new(),
+            &LocalProcessRefs::empty(),
             &[],
         )
     }
@@ -1040,7 +604,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 then_state,
                 else_state,
             } => {
-                let empty_process_refs = BTreeMap::new();
+                let empty_process_refs = LocalProcessRefs::empty();
                 let branch = self.select_branch(BranchSelection {
                     step,
                     scope: RuntimeBranchScope::NextState,
