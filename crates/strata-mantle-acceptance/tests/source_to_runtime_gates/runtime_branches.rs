@@ -4,6 +4,8 @@ use super::support::*;
 mod malformed_and_ordering;
 #[path = "runtime_branches/payload_projection.rs"]
 mod payload_projection;
+#[path = "runtime_branches/payload_projection_next_state.rs"]
+mod payload_projection_next_state;
 
 #[test]
 fn runtime_if_else_branches_on_payload_at_mantle_runtime() {
