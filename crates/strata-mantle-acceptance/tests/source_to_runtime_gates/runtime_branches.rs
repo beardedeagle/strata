@@ -6,6 +6,8 @@ mod malformed_and_ordering;
 mod payload_projection;
 #[path = "runtime_branches/payload_projection_next_state.rs"]
 mod payload_projection_next_state;
+#[path = "runtime_branches/state_payload_projection_if.rs"]
+mod state_payload_projection_if;
 #[path = "runtime_branches/state_payload_projection_next_state.rs"]
 mod state_payload_projection_next_state;
 
