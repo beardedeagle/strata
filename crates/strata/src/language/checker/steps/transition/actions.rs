@@ -239,8 +239,9 @@ fn checked_for_each_action(
         .is_some()
     {
         return Err(Error::new(format!(
-            "process {} for loop element cannot have process reference type",
-            context.process.name
+            "process {} for loop element binding {} cannot have process reference type",
+            context.process.name,
+            for_each_item_name(item)
         )));
     }
     if !template_bindings
@@ -357,6 +358,12 @@ fn checked_loop_element_bindings<'a>(
             fields,
             element_type,
         ),
+    }
+}
+
+fn for_each_item_name(item: &ForEachItem) -> &Identifier {
+    match item {
+        ForEachItem::Binding(name) | ForEachItem::RecordPattern { name, .. } => name,
     }
 }
 

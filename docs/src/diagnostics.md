@@ -46,8 +46,13 @@ result of the first invalid shape.
 | `for loop collection must be an identifier binding` | A runtime `for` loop tries to iterate a literal or computed value. | Iterate an immutable runtime collection binding such as a typed message payload binding. |
 | `for loop collection ... must have type List<T,N>` | A runtime `for` loop source is not a typed list collection. | Use a binding whose type is `List<Element,N>`. |
 | `for loop collection must be a runtime list binding` | A `for` loop source is static source data rather than runtime data. | Pass the list as a typed runtime payload or state-derived runtime binding. |
+| `for loop element binding ... cannot have process reference type` | A runtime `for` loop tries to iterate process-reference values as ordinary loop data. | Keep `ProcessRef<T>` as direct message authority and do not place it in loop collections. |
 | `for loop record pattern ... cannot match ...` | A runtime loop record pattern names the wrong record type or tries to destructure a non-record element. | Match the actual record element type, or use a plain immutable loop element binding. |
+| `record pattern ... must bind at least one field` | A source record pattern, including a loop-element record pattern, has no fields. | Bind at least one immutable field or use a plain immutable binding. |
+| `for loop record pattern ... binds field ... more than once` | A runtime loop record pattern repeats one record field. | Bind each projected field at most once. |
 | `for loop record pattern ... has no field ...` | A runtime loop record pattern names a field outside the loop element record. | Bind a declared field from the record element. |
+| `loop element binding ... is declared more than once` | A loop-element record pattern maps multiple fields to the same local binding. | Use one distinct immutable binding name per projected field. |
+| `loop element binding ... cannot have process reference type` | A loop-element record pattern projects a `ProcessRef<T>` field as ordinary data. | Keep process references out of records, lists, maps, state, and projected loop data. |
 | `loop element binding ... conflicts ...` | A loop element or projected field binding reuses a reserved name, source binding, process reference, process declaration, type, or constructor. | Choose a distinct immutable binding name for the loop body. |
 | `for loop body cannot bind process reference` | A loop body tries to create new authority with `spawn`. | Bind process references before the loop and use only admitted linear loop body effects. |
 | `nested for loops are not supported` | A loop body contains another loop. | Flatten the runtime payload shape or split the behavior into separate admitted steps for this slice. |
