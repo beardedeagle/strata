@@ -49,25 +49,27 @@ Read them in this order:
 26. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
 27. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-28. `actor_payload_match.str` for the same payload binding through a whole-body
+28. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+   values through a guarded loop and received direct process reference.
+29. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-29. `actor_payload_split_match.str` for payload-sensitive same-message
+30. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-30. `actor_payload_split_signature.str` for payload-sensitive same-message
+31. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-31. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+32. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-32. `actor_payload_state_match_split.str` for payload-sensitive same-message
+33. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-33. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+34. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-34. `nested_patterns.str` for nested immutable constructor, record, list, and
+35. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-35. `actor_reply.str` for transporting typed process references through message
+36. `actor_reply.str` for transporting typed process references through message
    payloads.
-36. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+37. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-37. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+38. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -636,6 +638,29 @@ Key source ideas:
 - Lowering emits a typed received-payload send target. Runtime dispatch uses the
   transported runtime process ID plus admitted target process ID, not the source
   payload binding name.
+
+## Runtime Guarded Ref Loop Jobs
+
+`examples/runtime_guarded_ref_loop_jobs.str` keeps the same received direct
+`ProcessRef<Worker>` routing shape, but the guarded loop iterates over
+ordinary immutable `Job` record values.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_guarded_ref_loop_jobs.str
+cargo run -p strata --bin strata -- build examples/runtime_guarded_ref_loop_jobs.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop_jobs.mta
+```
+
+Key source ideas:
+
+- The guard remains a `Bool` predicate over current `BatchRequest` state.
+- The loop collection is `List<Job,2>`, and `Job` is plain value data.
+- The worker reference remains direct message authority on
+  `Route(ProcessRef<Worker>)`; it is not stored in state or nested inside the
+  job list.
+- Lowering emits the `jobs` projection as a current-state value template, the
+  loop element as `Job`, and the send target as a typed received-payload
+  process reference.
 
 ## Actor Payload Match
 
