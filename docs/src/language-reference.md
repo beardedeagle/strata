@@ -651,13 +651,17 @@ collection length and runtime fuel limits, and records `loop_started`,
 `loop_iteration`, and `loop_completed` trace events.
 
 The loop element is immutable and may be used only as a typed value template in
-the loop body. Loop bodies may use statement-level runtime `if` over the active
-loop element or another checked `Bool` template, including the same one-sided
-no-op branch shapes admitted outside loops. Mantle selects the branch during
-execution and records `branch_selected` inside the loop trace with the active
-loop element ID and iteration index. Bounded loops may also appear inside
-statement-level runtime branches, allowing a guard to select or skip a whole
-loop. If the selected branch is empty, Mantle records only the outer
+the loop body. A loop item may also use a record pattern over the element type,
+for example `for Job { phase: routed_phase } in jobs { ... }`. That binds an
+immutable projected field value for the loop body; lowering emits a typed record
+field projection from the active loop element, not an executable source binding
+name. Loop bodies may use statement-level runtime `if` over the active loop
+element, a projected loop-element field, or another checked `Bool` template,
+including the same one-sided no-op branch shapes admitted outside loops. Mantle
+selects the branch during execution and records `branch_selected` inside the loop
+trace with the active loop element ID and iteration index. Bounded loops may also
+appear inside statement-level runtime branches, allowing a guard to select or
+skip a whole loop. If the selected branch is empty, Mantle records only the outer
 `branch_selected` event and emits no loop events. If the selected branch contains
 the loop, trace order is `branch_selected`, `loop_started`, ordered
 `loop_iteration` body effects, and `loop_completed`.
@@ -684,6 +688,7 @@ if (flag == True) { emit "true"; }
 if (flag == True) {} else { emit "false"; }
 for item in items { send worker Branch(item); }
 for item in items { if ((item != False) && !(item == False)) { send worker Branch(item); } }
+for Job { phase: routed_phase } in jobs { send worker AssignPhase(routed_phase); }
 return Stop(state);
 return Continue(next_state);
 return Panic(failed_state);

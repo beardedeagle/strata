@@ -404,7 +404,11 @@ branch_statement =
   | for_statement
 
 for_statement =
-    "for" ident "in" ident "{" statement* "}"
+    "for" for_item "in" ident "{" statement* "}"
+
+for_item =
+    ident
+  | ident "{" record_pattern_fields "}"
 
 return_statement =
     "return" return_expr ";"
@@ -425,10 +429,11 @@ variants reject payload values.
 
 The `for` collection source is an identifier binding, not an arbitrary
 expression. Checking requires it to be a runtime-bound `List<T,N>` value. The
-element identifier is immutable and visible only in the loop body. This slice
-admits statement-level runtime `if` inside loop bodies, but still rejects nested
-loops, `return`, `spawn`, branch-local process-reference binding, and nested
-statement-level branches.
+element item is either an immutable element binding or a record pattern over the
+element type. Record-pattern fields bind immutable projected values in the loop
+body. This slice admits statement-level runtime `if` inside loop bodies, but
+still rejects nested loops, `return`, `spawn`, branch-local process-reference
+binding, and nested statement-level branches.
 
 ## Types
 
@@ -544,8 +549,9 @@ bounded-loop action; both branches empty are rejected. An omitted `else` lowers
 as an explicit empty branch in the typed Mantle artifact. Branches cannot bind
 process references, return, contain nested loops, or contain direct nested
 statement-level branches. Inside `for`, the condition may use the immutable loop
-element binding; lowering emits a typed Mantle branch over the loop element ID,
-not the source binding name.
+element binding or an immutable field projected from a loop-element record
+pattern; lowering emits typed Mantle templates over the loop element ID, not the
+source binding name.
 
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,

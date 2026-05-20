@@ -320,9 +320,18 @@ pub enum Statement {
         else_body: Vec<Statement>,
     },
     ForEach {
-        item: Identifier,
+        item: ForEachItem,
         collection: ValueExpr,
         body: Vec<Statement>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForEachItem {
+    Binding(Identifier),
+    RecordPattern {
+        name: Identifier,
+        fields: Vec<RecordPatternField>,
     },
 }
 

@@ -1,10 +1,10 @@
 use super::ast::{
     CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, EnumVariant,
-    Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
-    MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm,
-    Module, OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordPatternField,
-    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueBooleanOperator,
-    ValueEqualityOperator, ValueExpr,
+    ForEachItem, Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern,
+    ListValue, MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match,
+    MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record, RecordField,
+    RecordPatternField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
+    ValueBooleanOperator, ValueEqualityOperator, ValueExpr,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};

@@ -1,0 +1,105 @@
+module runtime_loop_element_projection;
+
+record MainState;
+
+record Job {
+    phase: Phase,
+}
+
+record BatchRequest {
+    enabled: Bool,
+    jobs: List<Job,2>,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum BatchState {
+    Configured(BatchRequest),
+}
+
+enum BatchMsg {
+    Configure(BatchRequest),
+    Route(ProcessRef<Worker>),
+}
+
+record WorkerState;
+
+enum WorkerMsg {
+    AssignPhase(Phase),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let enabled_batch: ProcessRef<BatchWorker> = spawn BatchWorker;
+        let disabled_batch: ProcessRef<BatchWorker> = spawn BatchWorker;
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send enabled_batch Configure(BatchRequest { enabled: True, jobs: List<Job,2>[Job { phase: Ready }, Job { phase: Done }] });
+        send enabled_batch Route(worker);
+        send disabled_batch Configure(BatchRequest { enabled: False, jobs: List<Job,2>[Job { phase: Ready }, Job { phase: Done }] });
+        send disabled_batch Route(worker);
+        return Stop(state);
+    }
+}
+
+proc BatchWorker mailbox bounded(2) {
+    type State = BatchState;
+    type Msg = BatchMsg;
+
+    fn init() -> BatchState ! [] ~ [] @det {
+        return Configured(BatchRequest { enabled: False, jobs: List<Job,2>[Job { phase: Done }, Job { phase: Done }] });
+    }
+
+    fn step(state: BatchState, Configure(request: BatchRequest)) -> ProcResult<BatchState> ! [] ~ [] @det {
+        return Continue(Configured(request));
+    }
+
+    fn step(state: BatchState, Route(worker: ProcessRef<Worker>)) -> ProcResult<BatchState> ! [send] ~ [] @det {
+        match state {
+            Configured(BatchRequest { enabled, jobs }) => {
+                if (enabled == True) {
+                    for Job { phase: routed_phase } in jobs {
+                        if (routed_phase == Ready) {
+                            send worker AssignPhase(routed_phase);
+                        } else {
+                        }
+                    }
+                } else {
+                }
+                return Continue(state);
+            }
+        }
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, AssignPhase(phase: Phase)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled routed phase";
+        return Continue(state);
+    }
+}
