@@ -16,11 +16,13 @@ fn runtime_payload_projection_next_state_branches_on_received_record_field() {
     let bool_type = value_type_id(&artifact, "Bool");
     let phase_type = value_type_id(&artifact, "Phase");
     let job_type = value_type_id(&artifact, "Job");
+    let worker_process_id = artifact_process_id(&artifact, "Worker");
     let worker = artifact_process(&artifact, "Worker");
     let transition = worker
         .transitions
         .first()
         .expect("Worker should have an Assign transition");
+    let assign_message_id = transition.message;
     let ready_seen = state_id(worker, "ReadySeen");
     let done_seen = state_id(worker, "DoneSeen");
 
@@ -101,21 +103,68 @@ fn runtime_payload_projection_next_state_branches_on_received_record_field() {
             r#""condition":"False""#,
         ],
     );
-    let ready_branch = trace_line_index(
+    let worker_process = format!(r#""process_id":{}"#, worker_process_id.as_u32());
+    let assign_message = format!(r#""message_id":{}"#, assign_message_id.as_u32());
+    let job_payload_type = format!(r#""payload_type_id":{}"#, job_type.as_u32());
+    let ready_seen_state = format!(r#""state_id":{}"#, ready_seen.as_u32());
+    let done_seen_state = format!(r#""state_id":{}"#, done_seen.as_u32());
+    let ready_branch = trace_line_index_with_fields(
         &trace,
-        r#""event":"branch_selected","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","branch":"then","scope":"next_state""#,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":2"#,
+            worker_process.as_str(),
+            r#""process":"Worker""#,
+            assign_message.as_str(),
+            r#""message":"Assign""#,
+            r#""branch":"then""#,
+            r#""scope":"next_state""#,
+        ],
     );
-    let ready_step = trace_line_index(
+    let ready_step = trace_line_index_with_fields(
         &trace,
-        r#""event":"process_stepped","pid":2,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type_id":0,"payload":"Job{phase:Ready}","result":"Continue","state_id":1,"state":"ReadySeen""#,
+        &[
+            r#""event":"process_stepped""#,
+            r#""pid":2"#,
+            worker_process.as_str(),
+            r#""process":"Worker""#,
+            assign_message.as_str(),
+            r#""message":"Assign""#,
+            job_payload_type.as_str(),
+            r#""payload":"Job{phase:Ready}""#,
+            r#""result":"Continue""#,
+            ready_seen_state.as_str(),
+            r#""state":"ReadySeen""#,
+        ],
     );
-    let done_branch = trace_line_index(
+    let done_branch = trace_line_index_with_fields(
         &trace,
-        r#""event":"branch_selected","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","branch":"else","scope":"next_state""#,
+        &[
+            r#""event":"branch_selected""#,
+            r#""pid":3"#,
+            worker_process.as_str(),
+            r#""process":"Worker""#,
+            assign_message.as_str(),
+            r#""message":"Assign""#,
+            r#""branch":"else""#,
+            r#""scope":"next_state""#,
+        ],
     );
-    let done_step = trace_line_index(
+    let done_step = trace_line_index_with_fields(
         &trace,
-        r#""event":"process_stepped","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Assign","payload_type_id":0,"payload":"Job{phase:Done}","result":"Continue","state_id":2,"state":"DoneSeen""#,
+        &[
+            r#""event":"process_stepped""#,
+            r#""pid":3"#,
+            worker_process.as_str(),
+            r#""process":"Worker""#,
+            assign_message.as_str(),
+            r#""message":"Assign""#,
+            job_payload_type.as_str(),
+            r#""payload":"Job{phase:Done}""#,
+            r#""result":"Continue""#,
+            done_seen_state.as_str(),
+            r#""state":"DoneSeen""#,
+        ],
     );
     assert!(ready_branch < ready_step);
     assert!(done_branch < done_step);
@@ -162,6 +211,17 @@ fn state_id(worker: &ArtifactProcess, label: &str) -> StateId {
         .position(|state| state.ty == worker.state_type && state.label == label)
         .unwrap_or_else(|| panic!("Worker state {label} should exist"));
     StateId::from_index(index).expect("Worker state index should fit")
+}
+
+fn trace_line_index_with_fields(trace: &str, fields: &[&str]) -> usize {
+    assert!(
+        !fields.is_empty(),
+        "trace line assertion should require at least one field"
+    );
+    trace
+        .lines()
+        .position(|line| fields.iter().all(|field| line.contains(field)))
+        .unwrap_or_else(|| panic!("trace should contain fields {fields:?}\n{trace}"))
 }
 
 fn next_state_projection_condition_left_mut(
