@@ -1,5 +1,3 @@
-use mantle_artifact::StateId;
-
 use super::super::support::*;
 
 const STEM: &str = "runtime_payload_projection_next_state";
@@ -202,26 +200,6 @@ fn runtime_payload_projection_next_state_rejects_unknown_projected_field_before_
     );
     assert!(!stdout.contains("mantle: loaded"));
     assert!(!gate.trace_exists(invalid_trace_stem));
-}
-
-fn state_id(worker: &ArtifactProcess, label: &str) -> StateId {
-    let index = worker
-        .state_values
-        .iter()
-        .position(|state| state.ty == worker.state_type && state.label == label)
-        .unwrap_or_else(|| panic!("Worker state {label} should exist"));
-    StateId::from_index(index).expect("Worker state index should fit")
-}
-
-fn trace_line_index_with_fields(trace: &str, fields: &[&str]) -> usize {
-    assert!(
-        !fields.is_empty(),
-        "trace line assertion should require at least one field"
-    );
-    trace
-        .lines()
-        .position(|line| fields.iter().all(|field| line.contains(field)))
-        .unwrap_or_else(|| panic!("trace should contain fields {fields:?}\n{trace}"))
 }
 
 fn next_state_projection_condition_left_mut(
