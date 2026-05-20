@@ -180,6 +180,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_guarded_ref_loop.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_guarded_ref_loop.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_guarded_ref_loop_jobs.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_guarded_ref_loop_jobs.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop_jobs.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta

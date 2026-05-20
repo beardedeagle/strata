@@ -2,6 +2,8 @@ use super::support::*;
 
 #[path = "runtime_loop_execution/guarded_ref_loop.rs"]
 mod guarded_ref_loop;
+#[path = "runtime_loop_execution/guarded_ref_loop_jobs.rs"]
+mod guarded_ref_loop_jobs;
 
 #[test]
 fn runtime_for_each_iterates_over_payload_at_mantle_runtime() {
