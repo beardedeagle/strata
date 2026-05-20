@@ -1,0 +1,75 @@
+module runtime_state_payload_projection_if;
+
+record MainState;
+
+record Job {
+    phase: Phase,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+enum WorkerState {
+    Holding(Job),
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum WorkerMsg {
+    Assign(Job),
+    Decide,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let ready_worker: ProcessRef<Worker> = spawn Worker;
+        let done_worker: ProcessRef<Worker> = spawn Worker;
+        send ready_worker Assign(Job { phase: Ready });
+        send ready_worker Decide;
+        send done_worker Assign(Job { phase: Done });
+        send done_worker Decide;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Holding(Job { phase: Done });
+    }
+
+    fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(Holding(job));
+    }
+
+    fn step(state: WorkerState, Decide) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        match state {
+            Holding(Job { phase: held_phase }) => {
+                if (held_phase == Ready) {
+                    emit "worker saw ready state";
+                } else {
+                    emit "worker saw done state";
+                }
+                return Continue(state);
+            }
+        }
+    }
+}
