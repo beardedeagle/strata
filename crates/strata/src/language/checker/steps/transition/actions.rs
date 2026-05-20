@@ -202,11 +202,10 @@ fn checked_for_each_action(
     template_bindings: &[ValueTemplateBinding<'_>],
     payload_bindings: &[StepPayloadBinding],
     loop_elements: &mut LoopElementAllocator,
-    item: &Identifier,
+    item: &ForEachItem,
     collection: &ValueExpr,
     body: &[Statement],
 ) -> Result<CheckedAction> {
-    validate_loop_element_binding(context, source_bindings, item)?;
     let ValueExpr::Identifier(collection_name) = collection else {
         return Err(Error::new(format!(
             "process {} for loop collection must be a runtime list binding",
@@ -241,7 +240,8 @@ fn checked_for_each_action(
     {
         return Err(Error::new(format!(
             "process {} for loop element binding {} cannot have process reference type",
-            context.process.name, item
+            context.process.name,
+            for_each_item_name(item)
         )));
     }
     if !template_bindings
@@ -278,22 +278,32 @@ fn checked_for_each_action(
     let element_id = loop_elements.next_id()?;
     let element_ty = types.intern(element_type)?;
     let loop_element = CheckedLoopElement::new(element_id, element_ty.clone());
-    let element_path = PayloadBindingPath::whole();
-    let element_template_binding = ValueTemplateBinding {
-        name: item,
-        ty: element_type,
-        checked_ty: &element_ty,
-        root_checked_ty: &element_ty,
-        source: ValueTemplateSource::LoopElement(element_id),
-        path: &element_path,
-    };
+    let loop_bindings = checked_loop_element_bindings(
+        context,
+        types,
+        source_bindings,
+        item,
+        element_type,
+        &element_ty,
+    )?;
     let mut body_source_bindings = source_bindings.to_vec();
-    body_source_bindings.push(SourceValueBinding {
-        name: item,
-        ty: element_type,
-    });
+    for binding in &loop_bindings {
+        body_source_bindings.push(SourceValueBinding {
+            name: binding.name,
+            ty: &binding.ty,
+        });
+    }
     let mut body_template_bindings = template_bindings.to_vec();
-    body_template_bindings.push(element_template_binding);
+    for binding in &loop_bindings {
+        body_template_bindings.push(ValueTemplateBinding {
+            name: binding.name,
+            ty: &binding.ty,
+            checked_ty: &binding.checked_ty,
+            root_checked_ty: &element_ty,
+            source: ValueTemplateSource::LoopElement(element_id),
+            path: &binding.path,
+        });
+    }
     let body = checked_actions_for_statements(
         context,
         outputs,
@@ -313,6 +323,128 @@ fn checked_for_each_action(
         max_items: capacity,
         body,
     })
+}
+
+struct LoopElementBinding<'a> {
+    name: &'a Identifier,
+    ty: TypeRef,
+    checked_ty: CheckedTypeRef,
+    path: PayloadBindingPath,
+}
+
+fn checked_loop_element_bindings<'a>(
+    context: &StepCheckContext<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    item: &'a ForEachItem,
+    element_type: &'a TypeRef,
+    element_ty: &CheckedTypeRef,
+) -> Result<Vec<LoopElementBinding<'a>>> {
+    match item {
+        ForEachItem::Binding(item) => {
+            validate_loop_element_binding(context, source_bindings, item)?;
+            Ok(vec![LoopElementBinding {
+                name: item,
+                ty: element_type.clone(),
+                checked_ty: element_ty.clone(),
+                path: PayloadBindingPath::whole(),
+            }])
+        }
+        ForEachItem::RecordPattern { name, fields } => checked_record_loop_element_bindings(
+            context,
+            types,
+            source_bindings,
+            name,
+            fields,
+            element_type,
+        ),
+    }
+}
+
+fn for_each_item_name(item: &ForEachItem) -> &Identifier {
+    match item {
+        ForEachItem::Binding(name) | ForEachItem::RecordPattern { name, .. } => name,
+    }
+}
+
+fn checked_record_loop_element_bindings<'a>(
+    context: &StepCheckContext<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    name: &Identifier,
+    fields: &'a [RecordPatternField],
+    element_type: &'a TypeRef,
+) -> Result<Vec<LoopElementBinding<'a>>> {
+    let record = context
+        .semantic_index
+        .record_decl(context.module, element_type)
+        .map_err(|_| {
+            Error::new(format!(
+                "process {} for loop record pattern {name} cannot match loop element type {element_type}",
+                context.process.name
+            ))
+        })?;
+    if record.name != *name {
+        return Err(Error::new(format!(
+            "process {} for loop record pattern {name} cannot match record {}",
+            context.process.name, record.name
+        )));
+    }
+    if fields.is_empty() {
+        return Err(Error::new(format!(
+            "process {} for loop record pattern {name} must bind at least one field",
+            context.process.name
+        )));
+    }
+
+    let mut seen_fields = BTreeSet::new();
+    let mut seen_bindings = BTreeSet::new();
+    let mut bindings = Vec::with_capacity(fields.len());
+    for field in fields {
+        if !seen_fields.insert(field.field.as_str()) {
+            return Err(Error::new(format!(
+                "process {} for loop record pattern {name} binds field {} more than once",
+                context.process.name, field.field
+            )));
+        }
+        let Some(field_decl) = record
+            .fields
+            .iter()
+            .find(|candidate| candidate.name == field.field)
+        else {
+            return Err(Error::new(format!(
+                "process {} for loop record pattern {name} has no field {}",
+                context.process.name, field.field
+            )));
+        };
+        if !seen_bindings.insert(field.binding.as_str()) {
+            return Err(Error::new(format!(
+                "process {} loop element binding {} is declared more than once",
+                context.process.name, field.binding
+            )));
+        }
+        validate_loop_element_binding(context, source_bindings, &field.binding)?;
+        if context
+            .semantic_index
+            .process_ref_target_type(&field_decl.ty)?
+            .is_some()
+        {
+            return Err(Error::new(format!(
+                "process {} loop element binding {} cannot have process reference type",
+                context.process.name, field.binding
+            )));
+        }
+        bindings.push(LoopElementBinding {
+            name: &field.binding,
+            ty: field_decl.ty.clone(),
+            checked_ty: types.intern(&field_decl.ty)?,
+            path: PayloadBindingPath::whole().then(PayloadProjectionSegment::record_field(
+                field_decl.ty.clone(),
+                field.field.clone(),
+            )),
+        });
+    }
+    Ok(bindings)
 }
 
 fn validate_loop_element_binding(

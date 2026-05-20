@@ -153,7 +153,15 @@ impl Parser {
 
     pub(super) fn parse_for_each_statement(&mut self) -> Result<Statement> {
         self.expect_keyword("for")?;
-        let item = self.expect_identifier()?;
+        let item_name = self.expect_identifier()?;
+        let item = if self.consume_symbol('{') {
+            ForEachItem::RecordPattern {
+                name: item_name.clone(),
+                fields: self.parse_record_pattern_fields(&item_name)?,
+            }
+        } else {
+            ForEachItem::Binding(item_name)
+        };
         self.expect_keyword("in")?;
         let collection_name = self.expect_identifier()?;
         if !self.peek_symbol('{') {

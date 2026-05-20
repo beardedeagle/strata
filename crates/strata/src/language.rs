@@ -10,11 +10,12 @@ mod parser;
 mod tests;
 
 pub use ast::{
-    CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, Function,
-    FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue, MapPattern,
-    MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module,
-    OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordValue, RecordValueField,
-    ReturnExpr, Statement, TypeRef, ValueBooleanOperator, ValueEqualityOperator, ValueExpr,
+    CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, ForEachItem,
+    Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
+    MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm,
+    Module, OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordValue,
+    RecordValueField, ReturnExpr, Statement, TypeRef, ValueBooleanOperator, ValueEqualityOperator,
+    ValueExpr,
 };
 pub use checked::CheckedProgram;
 pub use checker::check_module;

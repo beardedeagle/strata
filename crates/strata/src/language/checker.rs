@@ -19,10 +19,10 @@ use mantle_artifact::{
 
 use super::ast::{
     CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, EnumVariant,
-    Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
-    MapPattern, MapPatternCompleteness, MapValue, MapValueEntry, Match, MatchArm, Module, Param,
-    Pattern, Process, Record, RecordPatternField, RecordValue, RecordValueField, ReturnExpr,
-    Statement, TypeRef, ValueExpr,
+    ForEachItem, Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern,
+    ListValue, MapPattern, MapPatternCompleteness, MapValue, MapValueEntry, Match, MatchArm,
+    Module, Param, Pattern, Process, Record, RecordPatternField, RecordValue, RecordValueField,
+    ReturnExpr, Statement, TypeRef, ValueExpr,
 };
 use super::checked::{
     CheckedAction, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,

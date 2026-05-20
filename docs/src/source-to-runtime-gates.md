@@ -86,6 +86,9 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_re
 cargo run -p strata --bin strata -- check examples/runtime_guarded_ref_loop_jobs.str
 cargo run -p strata --bin strata -- build examples/runtime_guarded_ref_loop_jobs.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop_jobs.mta
+cargo run -p strata --bin strata -- check examples/runtime_loop_element_projection.str
+cargo run -p strata --bin strata -- build examples/runtime_loop_element_projection.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_loop_element_projection.mta
 ```
 
 A source rejection gate must fail during checking and must not create a target

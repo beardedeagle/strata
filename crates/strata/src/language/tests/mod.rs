@@ -13,6 +13,7 @@ mod process_return_match;
 mod runtime_for_each;
 mod runtime_guarded_ref_loop;
 mod runtime_if_else;
+mod runtime_loop_element_projection;
 mod source_function_collection_patterns;
 mod source_function_core;
 mod source_function_if_else;
