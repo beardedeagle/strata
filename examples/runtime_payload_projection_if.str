@@ -1,0 +1,61 @@
+module runtime_payload_projection_if;
+
+record MainState;
+
+record Job {
+    phase: Phase,
+}
+
+record WorkerState;
+
+enum Bool {
+    False,
+    True,
+}
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum WorkerMsg {
+    Assign(Job),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let ready_worker: ProcessRef<Worker> = spawn Worker;
+        let done_worker: ProcessRef<Worker> = spawn Worker;
+        send ready_worker Assign(Job { phase: Ready });
+        send done_worker Assign(Job { phase: Done });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Assign(Job { phase: assigned_phase })) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (assigned_phase == Ready) {
+            emit "worker accepted ready payload";
+        } else {
+        }
+        return Continue(state);
+    }
+}

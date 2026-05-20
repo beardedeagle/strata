@@ -39,39 +39,41 @@ Read them in this order:
    bindings in actor step parameter patterns.
 21. `runtime_if_else.str` for Mantle-backed runtime branching over a message
    payload.
-22. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+22. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
+   a projected field from an immutable received record payload.
+23. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
    branch behavior.
-23. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+24. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-24. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-25. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+25. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+26. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-26. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-27. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+27. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+28. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-28. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+29. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
    values through a guarded loop and received direct process reference.
-29. `runtime_loop_element_projection.str` for projecting immutable record
+30. `runtime_loop_element_projection.str` for projecting immutable record
    fields from guarded runtime loop elements.
-30. `actor_payload_match.str` for the same payload binding through a whole-body
+31. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-31. `actor_payload_split_match.str` for payload-sensitive same-message
+32. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-32. `actor_payload_split_signature.str` for payload-sensitive same-message
+33. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-33. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+34. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-34. `actor_payload_state_match_split.str` for payload-sensitive same-message
+35. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-35. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+36. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-36. `nested_patterns.str` for nested immutable constructor, record, list, and
+37. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-37. `actor_reply.str` for transporting typed process references through message
+38. `actor_reply.str` for transporting typed process references through message
    payloads.
-38. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+39. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-39. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+40. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -521,6 +523,28 @@ Key source ideas:
   flow through a typed equality template.
 - Each branch emits its own declared output and returns a whole immutable state.
 - The runtime trace records `branch_selected` for both `then` and `else` paths.
+
+## Runtime Payload Projection If
+
+`examples/runtime_payload_projection_if.str` branches inside `Worker.step` over a
+field destructured from a received `Job` record payload. The source binding is
+immutable step-local syntax; the runtime branch lowers through a typed Mantle
+record-field projection over the received payload.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_payload_projection_if.str
+cargo run -p strata --bin strata -- build examples/runtime_payload_projection_if.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_payload_projection_if.mta
+```
+
+Key source ideas:
+
+- `Assign(Job { phase: assigned_phase })` destructures the received record
+  payload without introducing mutation.
+- `if (assigned_phase == Ready) { ... } else { ... }` lowers as typed Mantle
+  branch control through `ReceivedPayload<Job>`, `RecordField("phase")`, and a
+  `Phase` equality predicate.
+- Only the ready payload emits output; the done payload takes the empty branch.
 
 ## Runtime Guard Noop
 
