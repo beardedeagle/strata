@@ -4,10 +4,10 @@ use std::process::{Command, Output};
 use std::sync::Once;
 
 pub(crate) use mantle_artifact::{
-    ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactSendTarget, ArtifactTypeKind,
-    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
+    ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactSendTarget, ArtifactTransition,
+    ArtifactTypeKind, ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
     ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
-    EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId, TypeId, read_artifact,
+    EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId, StateId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -196,6 +196,24 @@ pub(crate) fn artifact_process_id(artifact: &MantleArtifact, process: &str) -> P
     ProcessId::from_index(index).expect("artifact process index should fit")
 }
 
+pub(crate) fn message_id(process: &ArtifactProcess, label: &str) -> MessageId {
+    let index = process
+        .message_variants
+        .iter()
+        .position(|message| message.label == label)
+        .unwrap_or_else(|| panic!("artifact message {label} should exist"));
+    MessageId::from_index(index).expect("artifact message index should fit")
+}
+
+pub(crate) fn state_id(process: &ArtifactProcess, label: &str) -> StateId {
+    let index = process
+        .state_values
+        .iter()
+        .position(|state| state.ty == process.state_type && state.label == label)
+        .unwrap_or_else(|| panic!("artifact state {label} should exist"));
+    StateId::from_index(index).expect("artifact state index should fit")
+}
+
 pub(crate) fn assert_trace_event(trace: &str, fields: &[&str]) {
     assert!(
         !fields.is_empty(),
@@ -207,6 +225,17 @@ pub(crate) fn assert_trace_event(trace: &str, fields: &[&str]) {
             .any(|line| fields.iter().all(|field| line.contains(field))),
         "expected trace event containing fields {fields:?}\ntrace:\n{trace}"
     );
+}
+
+pub(crate) fn trace_line_index_with_fields(trace: &str, fields: &[&str]) -> usize {
+    assert!(
+        !fields.is_empty(),
+        "trace line assertion should require at least one field"
+    );
+    trace
+        .lines()
+        .position(|line| fields.iter().all(|field| line.contains(field)))
+        .unwrap_or_else(|| panic!("trace should contain fields {fields:?}\n{trace}"))
 }
 
 pub(crate) fn transition_effects<'a>(
