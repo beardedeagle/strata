@@ -1,5 +1,47 @@
 use super::support::*;
 
+use mantle_artifact::MAX_NEXT_STATE_IF_ELSE_DEPTH;
+
+#[test]
+fn static_validation_rejects_next_state_if_else_above_terminal_limit() {
+    let bool_type = enum_value_type("Bool", &["False", "True"]);
+    let invalid_depth = MAX_NEXT_STATE_IF_ELSE_DEPTH + 1;
+    let process = CheckedProcess::new(CheckedProcessParts {
+        debug_name: ident("Main"),
+        state_type: value_type("MainState"),
+        state_values: checked_state_values("MainState", &["MainState"]),
+        message_type: value_type("MainMsg"),
+        message_cases: vec![
+            CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case"),
+        ],
+        process_refs: Vec::new(),
+        mailbox_bound: 1,
+        init_state: checked_state_id(0),
+        transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+            current_state: None,
+            message: checked_message_id(0),
+            step_result: CheckedStepResult::Stop,
+            next_state: nested_next_state_if_else(invalid_depth, &bool_type),
+            effects: Vec::new(),
+            actions: Vec::new(),
+        })],
+    });
+
+    let err =
+        validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+            .expect_err("checked next_state if above terminal depth limit must fail");
+
+    let expected = format!(
+        "next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH}"
+    );
+    assert!(err.to_string().contains(&expected), "{err}");
+}
+
 #[test]
 fn static_validation_rejects_next_state_received_payload_template_for_unit_message() {
     let process = CheckedProcess::new(CheckedProcessParts {
@@ -38,6 +80,22 @@ fn static_validation_rejects_next_state_received_payload_template_for_unit_messa
         err.to_string()
             .contains("received payload template requires a payload-bearing message")
     );
+}
+
+fn nested_next_state_if_else(depth: usize, bool_type: &CheckedTypeRef) -> CheckedNextState {
+    let mut next_state = CheckedNextState::Value(checked_state_id(0));
+    let condition = CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+        bool_type.clone(),
+        artifact_value("True"),
+    ));
+    for _ in 0..depth {
+        next_state = CheckedNextState::IfElse {
+            condition: condition.clone(),
+            then_state: Box::new(next_state),
+            else_state: Box::new(CheckedNextState::Value(checked_state_id(0))),
+        };
+    }
+    next_state
 }
 
 #[test]

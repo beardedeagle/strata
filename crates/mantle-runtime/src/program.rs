@@ -27,11 +27,12 @@ use mantle_artifact::{
     ArtifactProcessRef, ArtifactSendTarget, ArtifactTransition, ArtifactType, ArtifactTypeField,
     ArtifactTypeKind, ArtifactValueShape, EnumVariantId, Error, LoopElementId,
     MAX_ACTIONS_PER_PROCESS, MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_ENUM_VARIANTS_PER_TYPE,
-    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
-    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
-    NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
-    validate_message_label, validate_state_value_identity_label,
+    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH,
+    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
+    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId, validate_message_label,
+    validate_state_value_identity_label,
 };
 
 #[derive(Debug, Clone)]

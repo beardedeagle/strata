@@ -1,6 +1,24 @@
 use super::super::support::*;
 
 #[test]
+fn runtime_rejects_loaded_next_state_if_else_above_terminal_limit_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.processes[0].transitions[0].next_state =
+        nested_loaded_if_else_next_state(MAX_NEXT_STATE_IF_ELSE_DEPTH + 1, bool_type);
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "next_state runtime if nesting exceeds maximum depth of 2",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_unknown_next_state_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");

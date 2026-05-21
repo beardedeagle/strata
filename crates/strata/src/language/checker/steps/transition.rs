@@ -1,7 +1,9 @@
 use super::super::source_functions::validate_source_function_value_expr;
 use super::returns::{StepReturnInput, resolve_step_return, step_source_bindings};
 use super::*;
-use mantle_artifact::{MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_VALUE_TEMPLATE_FIELDS};
+use mantle_artifact::{
+    MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS,
+};
 
 mod actions;
 mod send;
@@ -62,6 +64,7 @@ pub(super) fn check_step_transition(
         &input,
         &mut loop_elements,
         input.body,
+        0,
     )?;
     let transition = CheckedTransition::new(CheckedTransitionParts {
         current_state: input.current_state,
@@ -179,6 +182,7 @@ fn check_step_block_outcome(
     input: &StepTransitionInput<'_>,
     loop_elements: &mut LoopElementAllocator,
     body: &FunctionBlock,
+    next_state_if_depth: usize,
 ) -> Result<CheckedBlockOutcome> {
     let mut actions = checked_actions_for_statements(
         context,
@@ -203,6 +207,7 @@ fn check_step_block_outcome(
         input,
         loop_elements,
         body,
+        next_state_if_depth,
     )?;
     actions.extend(outcome.actions);
     Ok(CheckedBlockOutcome { actions, ..outcome })
@@ -220,14 +225,8 @@ fn check_runtime_if_branch_block_outcome(
     input: &StepTransitionInput<'_>,
     loop_elements: &mut LoopElementAllocator,
     body: &FunctionBlock,
+    next_state_if_depth: usize,
 ) -> Result<CheckedBlockOutcome> {
-    if matches!(body.returns, ReturnExpr::IfElse { .. }) {
-        return Err(Error::new(format!(
-            "process {} nested runtime if branches are not supported in this source slice",
-            context.process.name
-        )));
-    }
-
     let mut actions = checked_actions_for_statements(
         context,
         outputs,
@@ -251,6 +250,7 @@ fn check_runtime_if_branch_block_outcome(
         input,
         loop_elements,
         body,
+        next_state_if_depth,
     )?;
     actions.extend(outcome.actions);
     Ok(CheckedBlockOutcome { actions, ..outcome })
@@ -268,6 +268,7 @@ fn checked_return_outcome(
     input: &StepTransitionInput<'_>,
     loop_elements: &mut LoopElementAllocator,
     body: &FunctionBlock,
+    next_state_if_depth: usize,
 ) -> Result<CheckedBlockOutcome> {
     if let ReturnExpr::IfElse {
         condition,
@@ -288,6 +289,7 @@ fn checked_return_outcome(
             condition,
             then_branch,
             else_branch,
+            next_state_if_depth,
         );
     }
 
@@ -314,6 +316,7 @@ fn checked_return_outcome(
         template_bindings,
         input,
         &step_return.state_arg,
+        next_state_if_depth,
     )?;
     Ok(CheckedBlockOutcome {
         step_result: step_return.step_result,
@@ -336,7 +339,10 @@ fn checked_if_else_return_outcome(
     condition: &ValueExpr,
     then_branch: &FunctionBlock,
     else_branch: &FunctionBlock,
+    next_state_if_depth: usize,
 ) -> Result<CheckedBlockOutcome> {
+    let branch_next_state_if_depth =
+        checked_next_state_if_child_depth(context.process.name.as_str(), next_state_if_depth)?;
     let condition = checked_runtime_bool_condition(
         context,
         types,
@@ -356,6 +362,7 @@ fn checked_if_else_return_outcome(
         input,
         loop_elements,
         then_branch,
+        branch_next_state_if_depth,
     )?;
     let else_outcome = check_runtime_if_branch_block_outcome(
         context,
@@ -368,6 +375,7 @@ fn checked_if_else_return_outcome(
         input,
         loop_elements,
         else_branch,
+        branch_next_state_if_depth,
     )?;
     if then_outcome.step_result != else_outcome.step_result {
         return Err(Error::new(format!(
@@ -428,6 +436,7 @@ fn checked_next_state_for_arg(
     template_bindings: &[ValueTemplateBinding<'_>],
     input: &StepTransitionInput<'_>,
     state_arg: &ValueExpr,
+    next_state_if_depth: usize,
 ) -> Result<CheckedNextState> {
     if let ValueExpr::IfElse {
         condition,
@@ -443,6 +452,8 @@ fn checked_next_state_for_arg(
             template_bindings,
             condition,
         )?;
+        let child_next_state_if_depth =
+            checked_next_state_if_child_depth(context.process.name.as_str(), next_state_if_depth)?;
         let then_state = checked_next_state_for_arg(
             context,
             state_space,
@@ -452,6 +463,7 @@ fn checked_next_state_for_arg(
             template_bindings,
             input,
             then_branch,
+            child_next_state_if_depth,
         )?;
         let else_state = checked_next_state_for_arg(
             context,
@@ -462,6 +474,7 @@ fn checked_next_state_for_arg(
             template_bindings,
             input,
             else_branch,
+            child_next_state_if_depth,
         )?;
         return Ok(CheckedNextState::IfElse {
             condition,
@@ -510,6 +523,15 @@ fn checked_next_state_for_arg(
         types,
         &state_arg,
     )?))
+}
+
+fn checked_next_state_if_child_depth(process: &str, depth: usize) -> Result<usize> {
+    if depth >= MAX_NEXT_STATE_IF_ELSE_DEPTH {
+        return Err(Error::new(format!(
+            "process {process} next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH} in this source slice"
+        )));
+    }
+    Ok(depth + 1)
 }
 
 #[allow(clippy::too_many_arguments)]

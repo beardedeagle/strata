@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
 use mantle_artifact::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, MAX_VALUE_TEMPLATE_FIELDS,
+    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, MAX_NEXT_STATE_IF_ELSE_DEPTH,
+    MAX_VALUE_TEMPLATE_FIELDS,
 };
 
 use super::process_refs::{
@@ -33,6 +34,16 @@ pub(super) fn validate_next_state(
     current_message: CheckedMessageId,
     current_state: Option<CheckedStateId>,
     next_state: &CheckedNextState,
+) -> Result<()> {
+    validate_next_state_at_depth(process, current_message, current_state, next_state, 0)
+}
+
+fn validate_next_state_at_depth(
+    process: &CheckedProcess,
+    current_message: CheckedMessageId,
+    current_state: Option<CheckedStateId>,
+    next_state: &CheckedNextState,
+    next_state_if_depth: usize,
 ) -> Result<()> {
     match next_state {
         CheckedNextState::Current => Ok(()),
@@ -79,6 +90,13 @@ pub(super) fn validate_next_state(
             then_state,
             else_state,
         } => {
+            if next_state_if_depth >= MAX_NEXT_STATE_IF_ELSE_DEPTH {
+                return Err(Error::new(format!(
+                    "process {} next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH} in this checked slice",
+                    process.debug_name()
+                )));
+            }
+            let branch_next_state_if_depth = next_state_if_depth + 1;
             validate_bool_condition_template(process, condition)?;
             validate_value_template_binding_types(
                 condition,
@@ -92,8 +110,20 @@ pub(super) fn validate_next_state(
                 condition,
                 current_state_payload(process, current_state)?,
             )?;
-            validate_next_state(process, current_message, current_state, then_state)?;
-            validate_next_state(process, current_message, current_state, else_state)
+            validate_next_state_at_depth(
+                process,
+                current_message,
+                current_state,
+                then_state,
+                branch_next_state_if_depth,
+            )?;
+            validate_next_state_at_depth(
+                process,
+                current_message,
+                current_state,
+                else_state,
+                branch_next_state_if_depth,
+            )
         }
     }
 }

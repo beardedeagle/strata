@@ -77,6 +77,9 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_g
 cargo run -p strata --bin strata -- check examples/runtime_final_if_nested_if_actions.str
 cargo run -p strata --bin strata -- build examples/runtime_final_if_nested_if_actions.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_if_actions.mta
+cargo run -p strata --bin strata -- check examples/runtime_final_if_nested_terminal_if.str
+cargo run -p strata --bin strata -- build examples/runtime_final_if_nested_terminal_if.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_terminal_if.mta
 cargo run -p strata --bin strata -- check examples/runtime_for_each.str
 cargo run -p strata --bin strata -- build examples/runtime_for_each.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta

@@ -183,6 +183,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_final_if_nested_if_actions.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_final_if_nested_if_actions.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_if_actions.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_final_if_nested_terminal_if.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_final_if_nested_terminal_if.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_terminal_if.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_guard_noop.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_guard_noop.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_guard_noop.mta
