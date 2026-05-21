@@ -101,12 +101,6 @@ pub(super) fn checked_actions_for_statements(
                         context.process.name
                     )));
                 }
-                if !scope.allows_for_each() {
-                    return Err(Error::new(format!(
-                        "process {} final-position runtime if branch cannot contain for loop actions in this source slice",
-                        context.process.name
-                    )));
-                }
                 actions.push(checked_for_each_action(
                     context,
                     outputs,

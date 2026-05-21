@@ -138,6 +138,7 @@ The runnable examples are:
 - `examples/runtime_state_payload_projection_if.str`;
 - `examples/runtime_state_payload_projection_next_state.str`;
 - `examples/runtime_nested_if_actions.str`;
+- `examples/runtime_final_if_guarded_loop.str`;
 - `examples/runtime_guard_noop.str`;
 - `examples/runtime_for_each.str`;
 - `examples/runtime_for_each_empty.str`;

@@ -1,17 +1,26 @@
 use super::*;
 
 #[test]
-fn guarded_runtime_for_each_rejects_loop_inside_final_runtime_if_branch() {
+fn guarded_runtime_for_each_accepts_loop_prefix_inside_final_runtime_if_branch() {
     let source = RUNTIME_GUARDED_FOR_EACH.replace(
         "        if (enabled == True) {\n            for item in items {\n                if (item == True) {\n                    emit \"guarded loop selected true\";\n                    send worker Branch(item);\n                } else {\n                }\n            }\n        } else {\n        }\n        return Continue(state);",
         "        if (enabled == True) {\n            for item in items {\n                if (item == True) {\n                    emit \"guarded loop selected true\";\n                    send worker Branch(item);\n                } else {\n                }\n            }\n            return Continue(state);\n        } else {\n            return Continue(state);\n        }",
     );
+    check_source(&source).expect("final-position runtime if branch loop prefix should be accepted");
+}
+
+#[test]
+fn guarded_runtime_for_each_rejects_nested_loop_inside_final_runtime_if_branch_loop() {
+    let source = RUNTIME_GUARDED_FOR_EACH.replace(
+        "        if (enabled == True) {\n            for item in items {\n                if (item == True) {\n                    emit \"guarded loop selected true\";\n                    send worker Branch(item);\n                } else {\n                }\n            }\n        } else {\n        }\n        return Continue(state);",
+        "        if (enabled == True) {\n            for item in items {\n                for other in items {\n                    send worker Branch(other);\n                }\n            }\n            return Continue(state);\n        } else {\n            return Continue(state);\n        }",
+    );
     let error = check_source(&source)
-        .expect_err("final-position runtime if branch loop must remain rejected");
+        .expect_err("nested loop in final-position runtime if branch loop must remain rejected");
     assert!(
         error
             .to_string()
-            .contains("final-position runtime if branch cannot contain for loop actions"),
+            .contains("nested for loops are not supported"),
         "{error}"
     );
 }

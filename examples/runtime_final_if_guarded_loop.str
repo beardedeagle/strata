@@ -1,0 +1,65 @@
+module runtime_final_if_guarded_loop;
+
+record MainState;
+record WorkerState;
+
+record CheckFlags {
+    enabled: Bool,
+    items: List<Bool,2>,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum WorkerMsg {
+    Check(CheckFlags),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let enabled_with_item: ProcessRef<Worker> = spawn Worker;
+        let enabled_without_item: ProcessRef<Worker> = spawn Worker;
+        let disabled: ProcessRef<Worker> = spawn Worker;
+        send enabled_with_item Check(CheckFlags { enabled: True, items: List<Bool,2>[True, False] });
+        send enabled_without_item Check(CheckFlags { enabled: True, items: List<Bool,2>[False, False] });
+        send disabled Check(CheckFlags { enabled: False, items: List<Bool,2>[True, True] });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Check(CheckFlags { enabled, items })) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (enabled == True) {
+            for item in items {
+                if (item == True) {
+                    emit "worker saw enabled item";
+                } else {
+                }
+            }
+            return Continue(state);
+        } else {
+            emit "worker disabled";
+            return Continue(state);
+        }
+    }
+}

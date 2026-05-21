@@ -64,7 +64,6 @@ result of the first invalid shape.
 | `statement-level if branches cannot both be empty` | A statement-level runtime branch has no admitted actions on either side. | Put an admitted action, such as `emit`, `send`, or a bounded `for` loop, in one branch. Omitted `else` and explicit `else {}` are allowed only when the other branch has admitted work. |
 | `runtime if branch cannot bind process references` | A checked or admitted runtime branch tries to introduce branch-local authority. | Bind process references before the branch and keep branch bodies to declared effects. |
 | `runtime if action nesting exceeds maximum depth` | A checked or admitted runtime branch action exceeds the direct nesting bound. | Keep runtime branch actions to an outer branch plus one nested branch. |
-| `final-position runtime if branch cannot contain for loop actions` | A final-position runtime branch tries to introduce loop control flow. | Use a statement-level guard before the final return when a branch needs to guard a bounded loop. |
 | `for loop branch cannot contain nested runtime if actions` | A loop-body runtime branch contains another branch. | Keep loop-body branch actions single-level for this slice. |
 | `runtime if action branches cannot both be empty` | A decoded or constructed artifact tries to admit a runtime branch action with no actions in either branch. | Keep no-op branches explicit in the typed artifact, but ensure the sibling branch has at least one admitted action. |
 

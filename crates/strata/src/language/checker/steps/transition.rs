@@ -128,13 +128,6 @@ impl ActionCheckScope {
         }
     }
 
-    fn allows_for_each(self) -> bool {
-        matches!(
-            self.runtime_if_branch,
-            RuntimeIfBranchScope::Outside | RuntimeIfBranchScope::Statement
-        )
-    }
-
     fn validate_statement_if_allowed(self, process: &Identifier) -> Result<()> {
         if matches!(self.runtime_if_branch, RuntimeIfBranchScope::FinalPosition) {
             return Err(Error::new(format!(
