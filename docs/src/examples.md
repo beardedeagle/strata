@@ -52,39 +52,41 @@ Read them in this order:
    record payload.
 26. `runtime_nested_if_actions.str` for one bounded layer of nested
    statement-level runtime branch actions.
-27. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+27. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
+   final-position runtime branches.
+28. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
    branch behavior.
-28. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+29. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-29. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-30. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+30. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+31. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-31. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-32. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+32. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+33. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-33. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+34. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
    values through a guarded loop and received direct process reference.
-34. `runtime_loop_element_projection.str` for projecting immutable record
+35. `runtime_loop_element_projection.str` for projecting immutable record
    fields from guarded runtime loop elements.
-35. `actor_payload_match.str` for the same payload binding through a whole-body
+36. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-36. `actor_payload_split_match.str` for payload-sensitive same-message
+37. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-37. `actor_payload_split_signature.str` for payload-sensitive same-message
+38. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-38. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+39. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-39. `actor_payload_state_match_split.str` for payload-sensitive same-message
+40. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-40. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+41. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-41. `nested_patterns.str` for nested immutable constructor, record, list, and
+42. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-42. `actor_reply.str` for transporting typed process references through message
+43. `actor_reply.str` for transporting typed process references through message
    payloads.
-43. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+44. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-44. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+45. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -652,6 +654,33 @@ Key source ideas:
 - State remains a whole-value `Continue(state)` after the effect-only nested
   branch action; branch-local `spawn`, process-reference binding, `return`,
   nested loops, and deeper direct branch nesting remain rejected.
+
+## Runtime Final If Guarded Loop
+
+`examples/runtime_final_if_guarded_loop.str` sends immutable `CheckFlags` record
+payloads to three workers and uses a bounded loop action prefix inside a
+final-position runtime branch before returning the whole-value step result.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_final_if_guarded_loop.str
+cargo run -p strata --bin strata -- build examples/runtime_final_if_guarded_loop.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_guarded_loop.mta
+```
+
+Key source ideas:
+
+- The final-position `if (enabled == True) { ... } else { ... }` lowers both
+  branch action prefixes and branch next states through typed Mantle control
+  flow.
+- The selected enabled branch records `branch_selected`, runs the bounded loop,
+  and then returns `Continue(state)`.
+- The selected disabled branch emits `worker disabled`, returns the same
+  whole-value step result shape, and does not execute loop actions.
+- Loop element access lowers through the typed loop element ID; source aliases
+  such as `item` are not executable runtime dispatch paths.
+- Direct statement-level branch prefixes, branch-local `spawn`, branch-local
+  process-reference binding, nested loops, and mutable state updates remain
+  rejected.
 
 ## Runtime Guard Noop
 

@@ -72,9 +72,11 @@ Runtime `if` conditions are admitted as typed `Bool` value templates. Mantle
 validates both branch bodies before execution, executes only the selected
 branch, admits one direct nested runtime branch action layer, rejects deeper
 direct branch nesting, rejects branch-local process-reference binding for this
-slice, and records branch selection in the runtime trace. Equality conditions
-are admitted as typed value templates over `Bool` or payload-free enum operands;
-Mantle evaluates admitted typed values, not source strings or debug labels.
+slice, and records branch selection in the runtime trace. Runtime branch bodies
+may contain admitted bounded loop actions; Mantle validates loop bodies before
+execution and still rejects nested loops. Equality conditions are admitted as
+typed value templates over `Bool` or payload-free enum operands; Mantle
+evaluates admitted typed values, not source strings or debug labels.
 Boolean predicate composition is admitted as a typed Bool value-template tree
 built from `!`, `&&`, `||`, direct Bool templates, and typed equality templates.
 
