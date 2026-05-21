@@ -143,6 +143,7 @@ The runnable examples are:
 - `examples/runtime_for_each.str`;
 - `examples/runtime_for_each_empty.str`;
 - `examples/runtime_for_each_if.str`;
+- `examples/runtime_for_each_nested_if_actions.str`;
 - `examples/runtime_guarded_for_each.str`;
 - `examples/runtime_guarded_ref_loop.str`;
 - `examples/runtime_guarded_ref_loop_jobs.str`;

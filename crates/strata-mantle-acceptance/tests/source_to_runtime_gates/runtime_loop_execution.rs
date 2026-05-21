@@ -12,5 +12,7 @@ mod guarded_ref_loop_jobs;
 mod loop_branching;
 #[path = "runtime_loop_execution/loop_element_projection.rs"]
 mod loop_element_projection;
+#[path = "runtime_loop_execution/nested_branch.rs"]
+mod nested_branch;
 #[path = "runtime_loop_execution/noop_branch.rs"]
 mod noop_branch;

@@ -675,11 +675,10 @@ the loop, trace order is `branch_selected`, `loop_started`, ordered
 The loop body is still intentionally narrow in this slice: no nested loops, no
 `spawn`, no `return`, no assignment, and no process-reference element type. A
 loop body may contain the admitted statement-level runtime `if` / no-op shape,
-including when the loop is itself inside a selected guard branch. What remains
-disallowed is a loop-body statement-level branch whose branch body directly
-contains another statement-level branch. Send targets may be process references
-bound before the loop or direct `ProcessRef<T>` payloads received by the current
-step.
+including one direct nested statement-level runtime branch and including when
+the loop is itself inside a selected guard branch. Deeper direct branch nesting
+remains rejected. Send targets may be process references bound before the loop
+or direct `ProcessRef<T>` payloads received by the current step.
 Declare every body effect in the enclosing step effect list.
 
 ## Statements

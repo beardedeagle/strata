@@ -14,19 +14,27 @@ impl Parser {
         while !self.at_eof() {
             if self.peek_keyword("record") {
                 records.push(self.parse_record()?);
-            } else if self.peek_keyword("enum") {
+                continue;
+            }
+            if self.peek_keyword("enum") {
                 enums.push(self.parse_enum()?);
-            } else if self.peek_keyword("fn") {
+                continue;
+            }
+            if self.peek_keyword("fn") {
                 functions.push(self.parse_function()?);
-            } else if self.peek_keyword("proc") {
+                continue;
+            }
+            if self.peek_keyword("proc") {
                 processes.push(self.parse_process()?);
-            } else if self.peek_keyword("security") {
+                continue;
+            }
+            if self.peek_keyword("security") {
                 return Err(self.error_here(
                     "security declarations are not supported in this buildable source slice",
                 ));
-            } else {
-                return Err(self.error_here("expected record, enum, function, or proc declaration"));
             }
+
+            return Err(self.error_here("expected record, enum, function, or proc declaration"));
         }
 
         Ok(Module {

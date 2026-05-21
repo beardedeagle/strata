@@ -1,0 +1,95 @@
+module runtime_for_each_nested_if_actions;
+
+record MainState;
+
+record CheckFlags {
+    outer_flag: Bool,
+    inner_flag: Bool,
+}
+
+record WorkerState;
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum BatchState {
+    Ready,
+}
+
+enum BatchMsg {
+    Batch(List<CheckFlags,3>),
+}
+
+enum WorkerMsg {
+    Report(Bool),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let batch: ProcessRef<BatchWorker> = spawn BatchWorker;
+        send batch Batch(List<CheckFlags,3>[
+            CheckFlags { outer_flag: True, inner_flag: True },
+            CheckFlags { outer_flag: True, inner_flag: False },
+            CheckFlags { outer_flag: False, inner_flag: True },
+        ]);
+        return Stop(state);
+    }
+}
+
+proc BatchWorker mailbox bounded(1) {
+    type State = BatchState;
+    type Msg = BatchMsg;
+
+    fn init() -> BatchState ! [] ~ [] @det {
+        return Ready;
+    }
+
+    fn step(state: BatchState, Batch(items: List<CheckFlags,3>)) -> ProcResult<BatchState> ! [spawn, emit, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        for CheckFlags { outer_flag: outer, inner_flag: inner } in items {
+            if (outer == True) {
+                if (inner == True) {
+                    emit "batch outer true inner true";
+                    send worker Report(inner);
+                } else {
+                    emit "batch outer true inner false";
+                    send worker Report(inner);
+                }
+            } else {
+                emit "batch outer false";
+            }
+        }
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Report(flag: Bool)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (flag == True) {
+            emit "worker reported true";
+        } else {
+            emit "worker reported false";
+        }
+        return Continue(state);
+    }
+}

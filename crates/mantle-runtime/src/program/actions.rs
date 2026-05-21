@@ -52,7 +52,7 @@ pub(crate) enum LoadedSendTarget {
 struct LoopBodyAdmissionScope<'a> {
     current_state_payload: Option<&'a RuntimePayload>,
     loop_elements: &'a [LoadedLoopElement],
-    inside_loop_if: bool,
+    runtime_if_depth: usize,
 }
 
 impl<'a> LoopBodyAdmissionScope<'a> {
@@ -63,7 +63,7 @@ impl<'a> LoopBodyAdmissionScope<'a> {
         Self {
             current_state_payload,
             loop_elements,
-            inside_loop_if: false,
+            runtime_if_depth: 0,
         }
     }
 
@@ -71,7 +71,7 @@ impl<'a> LoopBodyAdmissionScope<'a> {
         Self {
             current_state_payload: self.current_state_payload,
             loop_elements: self.loop_elements,
-            inside_loop_if: true,
+            runtime_if_depth: self.runtime_if_depth.saturating_add(1),
         }
     }
 }
@@ -507,9 +507,9 @@ impl LoadedAction {
                 then_actions,
                 else_actions,
             } => {
-                if scope.inside_loop_if {
+                if scope.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
                     return Err(Error::new(format!(
-                        "process {} transition {} for loop branch cannot contain nested runtime if actions in this artifact slice",
+                        "process {} transition {} runtime if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this artifact slice",
                         process.debug_name,
                         message.as_u32()
                     )));

@@ -76,6 +76,23 @@ pub(super) fn enum_value_type_with_payloads(
     )
 }
 
+pub(super) fn list_value_type(
+    label: &str,
+    element: &CheckedTypeRef,
+    capacity: usize,
+) -> CheckedTypeRef {
+    CheckedTypeRef::new(
+        value_type(label).id(),
+        label.to_string(),
+        CheckedTypeKind::Value {
+            shape: CheckedValueShape::List {
+                element: element.id(),
+                capacity,
+            },
+        },
+    )
+}
+
 pub(super) fn process_ref_type(target: &str) -> CheckedTypeRef {
     let target_process = match target {
         "Worker" => checked_process_id(1),

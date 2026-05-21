@@ -83,6 +83,9 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_e
 cargo run -p strata --bin strata -- check examples/runtime_for_each_if.str
 cargo run -p strata --bin strata -- build examples/runtime_for_each_if.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_if.mta
+cargo run -p strata --bin strata -- check examples/runtime_for_each_nested_if_actions.str
+cargo run -p strata --bin strata -- build examples/runtime_for_each_nested_if_actions.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_nested_if_actions.mta
 cargo run -p strata --bin strata -- check examples/runtime_guarded_for_each.str
 cargo run -p strata --bin strata -- build examples/runtime_guarded_for_each.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_for_each.mta

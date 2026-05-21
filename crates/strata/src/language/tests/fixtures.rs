@@ -65,6 +65,8 @@ pub(super) const RUNTIME_FOR_EACH: &str =
     include_str!("../../../../../examples/runtime_for_each.str");
 pub(super) const RUNTIME_FOR_EACH_IF: &str =
     include_str!("../../../../../examples/runtime_for_each_if.str");
+pub(super) const RUNTIME_FOR_EACH_NESTED_IF_ACTIONS: &str =
+    include_str!("../../../../../examples/runtime_for_each_nested_if_actions.str");
 pub(super) const RUNTIME_GUARDED_FOR_EACH: &str =
     include_str!("../../../../../examples/runtime_guarded_for_each.str");
 pub(super) const RUNTIME_GUARDED_REF_LOOP: &str =

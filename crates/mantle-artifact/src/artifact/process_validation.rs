@@ -84,14 +84,12 @@ impl<'a> ActionReferenceScope<'a> {
         process: &ArtifactProcess,
         transition: &ArtifactTransition,
     ) -> Result<()> {
-        if self.inside_loop && self.loop_runtime_if_depth > 0 {
-            return Err(Error::new(format!(
-                "process {} transition {} for loop branch cannot contain nested runtime if actions in this artifact slice",
-                process.debug_name,
-                transition.message.as_u32()
-            )));
-        }
-        if self.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
+        let runtime_if_depth = if self.inside_loop {
+            self.loop_runtime_if_depth
+        } else {
+            self.runtime_if_depth
+        };
+        if runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
             return Err(Error::new(format!(
                 "process {} transition {} runtime if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this artifact slice",
                 process.debug_name,

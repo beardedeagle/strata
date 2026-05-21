@@ -59,12 +59,11 @@ result of the first invalid shape.
 | `assignment statements are not supported` | Source code uses assignment-style mutation. | Bind immutable values through declarations or return a whole replacement state value. |
 | `statement-level if branches must not return` | An effect-only runtime branch tries to terminate the step. | Put the final `return` after the statement-level branch, or use final-position runtime `if` when each branch must return. |
 | `statement-level if branches cannot bind process references` | A branch tries to introduce branch-local authority with `spawn`. | Bind process references before the branch and use only admitted branch effects. |
-| `nested statement-level if branches are not supported` | A final-position runtime branch or loop-body branch contains a direct statement-level branch inside another branch. | Move the nested branch to a supported statement-level action shape outside that restricted branch body. |
+| `nested statement-level if branches are not supported` | A final-position runtime branch directly contains a statement-level branch prefix. | Move the nested branch to a supported statement-level action shape outside the final-position branch body, or keep it inside an admitted bounded loop body. |
 | `statement-level if action nesting exceeds maximum depth` | Direct statement-level runtime branch nesting goes beyond the single admitted nested layer. | Keep direct branch actions to an outer branch plus one nested branch. |
 | `statement-level if branches cannot both be empty` | A statement-level runtime branch has no admitted actions on either side. | Put an admitted action, such as `emit`, `send`, or a bounded `for` loop, in one branch. Omitted `else` and explicit `else {}` are allowed only when the other branch has admitted work. |
 | `runtime if branch cannot bind process references` | A checked or admitted runtime branch tries to introduce branch-local authority. | Bind process references before the branch and keep branch bodies to declared effects. |
 | `runtime if action nesting exceeds maximum depth` | A checked or admitted runtime branch action exceeds the direct nesting bound. | Keep runtime branch actions to an outer branch plus one nested branch. |
-| `for loop branch cannot contain nested runtime if actions` | A loop-body runtime branch contains another branch. | Keep loop-body branch actions single-level for this slice. |
 | `runtime if action branches cannot both be empty` | A decoded or constructed artifact tries to admit a runtime branch action with no actions in either branch. | Keep no-op branches explicit in the typed artifact, but ensure the sibling branch has at least one admitted action. |
 
 ## Source Function Errors
