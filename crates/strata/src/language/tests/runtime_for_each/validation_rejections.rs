@@ -200,16 +200,16 @@ fn runtime_for_each_if_rejects_spawn_inside_loop_branch() {
 }
 
 #[test]
-fn runtime_for_each_if_rejects_nested_statement_branch() {
+fn runtime_for_each_if_rejects_statement_branch_nesting_above_limit() {
     let source = RUNTIME_FOR_EACH_IF.replace(
         "emit \"batch selected true\";",
-        "if (item) { emit \"nested true\"; } else { emit \"nested false\"; }",
+        "if (item) { if (item) { emit \"nested true\"; } else { emit \"nested false\"; } } else { emit \"outer false\"; }",
     );
-    let error = check_source(&source).expect_err("nested statement if must be rejected");
+    let error = check_source(&source).expect_err("too-deep statement if must be rejected");
     assert!(
         error
             .to_string()
-            .contains("nested statement-level if branches are not supported"),
+            .contains("statement-level if action nesting exceeds maximum depth"),
         "{error}"
     );
 }

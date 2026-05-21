@@ -248,7 +248,7 @@ fn admission_rejects_loop_branch_condition_with_non_unit_bool_shape() {
 }
 
 #[test]
-fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
+fn admission_rejects_if_else_nesting_above_limit_inside_for_each_loop_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
     let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
@@ -270,9 +270,15 @@ fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
         body: vec![ArtifactAction::IfElse {
             condition: condition.clone(),
             then_actions: vec![ArtifactAction::IfElse {
-                condition,
-                then_actions: Vec::new(),
-                else_actions: Vec::new(),
+                condition: condition.clone(),
+                then_actions: vec![ArtifactAction::IfElse {
+                    condition,
+                    then_actions: Vec::new(),
+                    else_actions: Vec::new(),
+                }],
+                else_actions: vec![ArtifactAction::Emit {
+                    output: OutputId::new(0),
+                }],
             }],
             else_actions: vec![ArtifactAction::Emit {
                 output: OutputId::new(0),
@@ -282,10 +288,10 @@ fn admission_rejects_nested_if_else_inside_for_each_loop_branch() {
 
     let err = artifact
         .validate()
-        .expect_err("nested if_else inside loop branch should fail admission");
+        .expect_err("too-deep if_else inside loop branch should fail admission");
     assert!(
         err.to_string()
-            .contains("for loop branch cannot contain nested runtime if actions"),
+            .contains("runtime if action nesting exceeds maximum depth"),
         "{err}"
     );
 }

@@ -116,11 +116,12 @@ impl Parser {
                     )));
                 }
                 capacity = Some(self.parse_capacity_arg(constructor)?);
-            } else if capacity.is_some() {
-                return Err(self.error_here(format!(
-                    "type {constructor} must declare type arguments before its numeric capacity"
-                )));
             } else {
+                if capacity.is_some() {
+                    return Err(self.error_here(format!(
+                        "type {constructor} must declare type arguments before its numeric capacity"
+                    )));
+                }
                 type_args.push(self.parse_type_with_depth(1)?);
             }
             if self.consume_symbol(',') {

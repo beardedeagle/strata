@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use super::super::checked::{
-    CheckedAction, CheckedLoopElementId, CheckedMessageId, CheckedPayloadValue, CheckedProcess,
-    CheckedProcessId, CheckedProcessRefId, CheckedTransition, CheckedTypeKind, CheckedTypeRef,
-    CheckedValueTemplate,
+    CheckedAction, CheckedLoopElement, CheckedLoopElementId, CheckedMessageId, CheckedPayloadValue,
+    CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedTransition, CheckedTypeKind,
+    CheckedTypeRef, CheckedValueShape, CheckedValueTemplate,
 };
 use super::super::diagnostic::{Error, Result};
 use mantle_artifact::{MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_VALUE_TEMPLATE_FIELDS};
@@ -79,13 +79,12 @@ impl<'a> ActionReferenceScope<'a> {
     }
 
     fn validate_runtime_if_allowed(self, process: &CheckedProcess) -> Result<()> {
-        if self.inside_loop && self.loop_runtime_if_depth > 0 {
-            return Err(Error::new(format!(
-                "process {} for loop branch cannot contain nested runtime if actions in this source slice",
-                process.debug_name()
-            )));
-        }
-        if self.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
+        let runtime_if_depth = if self.inside_loop {
+            self.loop_runtime_if_depth
+        } else {
+            self.runtime_if_depth
+        };
+        if runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
             return Err(Error::new(format!(
                 "process {} runtime if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice",
                 process.debug_name()
@@ -377,6 +376,7 @@ fn validate_action_reference(
             element,
             collection,
             body,
+            max_items,
             ..
         } => {
             if scope.inside_loop {
@@ -399,6 +399,13 @@ fn validate_action_reference(
                     MAX_VALUE_TEMPLATE_FIELDS - 1
                 )));
             }
+            if *max_items > MAX_VALUE_TEMPLATE_FIELDS {
+                return Err(Error::new(format!(
+                    "process {} for loop max_items must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}",
+                    process.debug_name()
+                )));
+            }
+            validate_for_each_collection_type(process, collection, element)?;
             validate_value_template_binding_types(
                 collection,
                 message_payload_type(process, transition.message())?,
@@ -426,6 +433,36 @@ fn validate_action_reference(
                 )?;
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_for_each_collection_type(
+    process: &CheckedProcess,
+    collection: &CheckedValueTemplate,
+    element: &CheckedLoopElement,
+) -> Result<()> {
+    let CheckedTypeKind::Value {
+        shape:
+            CheckedValueShape::List {
+                element: collection_element,
+                ..
+            },
+    } = collection.result_type().kind()
+    else {
+        return Err(Error::new(format!(
+            "process {} for loop collection template has type {}, expected List<T,N>",
+            process.debug_name(),
+            collection.result_type()
+        )));
+    };
+    if *collection_element != element.ty().id() {
+        return Err(Error::new(format!(
+            "process {} for loop collection element type id {}, expected {}",
+            process.debug_name(),
+            collection_element.as_u32(),
+            element.ty()
+        )));
     }
     Ok(())
 }

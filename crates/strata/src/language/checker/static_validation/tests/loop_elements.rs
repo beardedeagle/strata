@@ -84,10 +84,11 @@ fn static_validation_rejects_nested_for_each_loop_body() {
 #[test]
 fn static_validation_accepts_runtime_if_inside_for_each_loop_body() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let list_ty = list_value_type("BoolList", &bool_ty, 1);
     let process = process_with_single_loop_body_and_element(
         bool_ty.clone(),
         CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-            bool_ty.clone(),
+            list_ty,
             artifact_value("List[True]"),
         )),
         vec![CheckedAction::IfElse {
@@ -108,10 +109,11 @@ fn static_validation_accepts_runtime_if_inside_for_each_loop_body() {
 #[test]
 fn static_validation_accepts_one_empty_runtime_if_branch_inside_for_each_loop_body() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let list_ty = list_value_type("BoolList", &bool_ty, 1);
     let process = process_with_single_loop_body_and_element(
         bool_ty.clone(),
         CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-            bool_ty.clone(),
+            list_ty,
             artifact_value("List[True]"),
         )),
         vec![CheckedAction::IfElse {
@@ -132,10 +134,11 @@ fn static_validation_accepts_one_empty_runtime_if_branch_inside_for_each_loop_bo
 #[test]
 fn static_validation_rejects_both_empty_runtime_if_branches_inside_for_each_loop_body() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let list_ty = list_value_type("BoolList", &bool_ty, 1);
     let process = process_with_single_loop_body_and_element(
         bool_ty.clone(),
         CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-            bool_ty.clone(),
+            list_ty,
             artifact_value("List[True]"),
         )),
         vec![CheckedAction::IfElse {
@@ -160,8 +163,9 @@ fn static_validation_rejects_both_empty_runtime_if_branches_inside_for_each_loop
 }
 
 #[test]
-fn static_validation_rejects_nested_runtime_if_inside_for_each_loop_branch() {
+fn static_validation_rejects_runtime_if_nesting_above_limit_inside_for_each_loop_branch() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let list_ty = list_value_type("BoolList", &bool_ty, 1);
     let condition = CheckedValueTemplate::LoopElement {
         ty: bool_ty.clone(),
         element: checked_loop_element_id(0),
@@ -169,15 +173,19 @@ fn static_validation_rejects_nested_runtime_if_inside_for_each_loop_branch() {
     let process = process_with_single_loop_body_and_element(
         bool_ty.clone(),
         CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-            bool_ty,
+            list_ty,
             artifact_value("List[True]"),
         )),
         vec![CheckedAction::IfElse {
             condition: condition.clone(),
             then_actions: vec![CheckedAction::IfElse {
-                condition,
-                then_actions: Vec::new(),
-                else_actions: Vec::new(),
+                condition: condition.clone(),
+                then_actions: vec![CheckedAction::IfElse {
+                    condition,
+                    then_actions: Vec::new(),
+                    else_actions: Vec::new(),
+                }],
+                else_actions: vec![emit_action()],
             }],
             else_actions: vec![emit_action()],
         }],
@@ -186,10 +194,63 @@ fn static_validation_rejects_nested_runtime_if_inside_for_each_loop_branch() {
 
     let err =
         validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
-            .expect_err("nested runtime if in checked for loop branch should fail");
+            .expect_err("too-deep runtime if in checked for loop branch should fail");
     assert!(
         err.to_string()
-            .contains("for loop branch cannot contain nested runtime if actions"),
+            .contains("runtime if action nesting exceeds maximum depth"),
+        "{err}"
+    );
+}
+
+#[test]
+fn static_validation_rejects_non_list_for_each_collection_template() {
+    let process = process_with_single_loop(
+        checked_loop_element_id(0),
+        value_type("Job"),
+        CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+            value_type("Job"),
+            artifact_value("Ready"),
+        )),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let err =
+        validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+            .expect_err("checked for loop collection must have list type");
+
+    assert!(
+        err.to_string()
+            .contains("for loop collection template has type Job, expected List<T,N>"),
+        "{err}"
+    );
+}
+
+#[test]
+fn static_validation_rejects_for_each_collection_element_type_mismatch() {
+    let job = value_type("Job");
+    let phase = value_type("Phase");
+    let job_list = list_value_type("JobList", &job, 1);
+    let process = process_with_single_loop(
+        checked_loop_element_id(0),
+        phase.clone(),
+        CheckedValueTemplate::Literal(CheckedPayloadValue::new(
+            job_list,
+            artifact_value("List[Ready]"),
+        )),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let err =
+        validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+            .expect_err("checked for loop collection element must match loop element type");
+
+    assert!(
+        err.to_string().contains(&format!(
+            "for loop collection element type id {}, expected {phase}",
+            job.id().as_u32()
+        )),
         "{err}"
     );
 }
@@ -206,6 +267,22 @@ fn static_validation_rejects_loop_element_id_above_codec_bound() {
     assert!(
         err.to_string().contains(&format!(
             "for loop element id {MAX_VALUE_TEMPLATE_FIELDS} must be no greater than"
+        )),
+        "{err}"
+    );
+}
+
+#[test]
+fn static_validation_rejects_for_each_max_items_above_codec_bound() {
+    let process = process_with_single_loop_max_items(MAX_VALUE_TEMPLATE_FIELDS + 1);
+
+    let err =
+        validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+            .expect_err("checked for loop max_items above the codec bound should fail");
+
+    assert!(
+        err.to_string().contains(&format!(
+            "for loop max_items must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
         )),
         "{err}"
     );
@@ -246,10 +323,32 @@ fn process_with_single_loop_element_id(element_id: CheckedLoopElementId) -> Chec
     )
 }
 
+fn process_with_single_loop_max_items(max_items: usize) -> CheckedProcess {
+    process_with_single_loop_with_max_items(
+        checked_loop_element_id(0),
+        value_type("Job"),
+        list_payload_template(),
+        max_items,
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
 fn process_with_single_loop(
     element_id: CheckedLoopElementId,
     element_ty: CheckedTypeRef,
     collection: CheckedValueTemplate,
+    effects: Vec<Effect>,
+    body: Vec<CheckedAction>,
+) -> CheckedProcess {
+    process_with_single_loop_with_max_items(element_id, element_ty, collection, 1, effects, body)
+}
+
+fn process_with_single_loop_with_max_items(
+    element_id: CheckedLoopElementId,
+    element_ty: CheckedTypeRef,
+    collection: CheckedValueTemplate,
+    max_items: usize,
     effects: Vec<Effect>,
     body: Vec<CheckedAction>,
 ) -> CheckedProcess {
@@ -278,7 +377,7 @@ fn process_with_single_loop(
             actions: vec![CheckedAction::ForEach {
                 element: CheckedLoopElement::new(element_id, element_ty),
                 collection,
-                max_items: 1,
+                max_items,
                 body,
             }],
         })],
@@ -314,8 +413,9 @@ fn worker_process_with_payload(payload_ty: CheckedTypeRef) -> CheckedProcess {
 }
 
 fn list_payload_template() -> CheckedValueTemplate {
+    let job = value_type("Job");
     CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-        value_type("JobList"),
+        list_value_type("JobList", &job, 1),
         artifact_value("List[Ready]"),
     ))
 }

@@ -359,6 +359,8 @@ fn static_validation_rejects_runtime_if_branch_process_ref_binding() {
 #[test]
 fn static_validation_accepts_runtime_if_branch_for_each_action() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let job_ty = value_type("Job");
+    let job_list_ty = list_value_type("JobList", &job_ty, 1);
     let condition =
         CheckedValueTemplate::Literal(CheckedPayloadValue::new(bool_ty, artifact_value("True")));
     let process = CheckedProcess::new(CheckedProcessParts {
@@ -388,10 +390,10 @@ fn static_validation_accepts_runtime_if_branch_for_each_action() {
                 then_actions: vec![CheckedAction::ForEach {
                     element: CheckedLoopElement::new(
                         CheckedLoopElementId::from_index(0).expect("valid loop element id"),
-                        value_type("Job"),
+                        job_ty,
                     ),
                     collection: CheckedValueTemplate::Literal(CheckedPayloadValue::new(
-                        value_type("JobList"),
+                        job_list_ty,
                         artifact_value("List[Ready]"),
                     )),
                     max_items: 1,

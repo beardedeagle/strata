@@ -134,11 +134,6 @@ impl ActionCheckScope {
                 "process {process} nested statement-level if branches are not supported in this source slice"
             )));
         }
-        if self.in_loop_body && self.statement_if_depth > 0 {
-            return Err(Error::new(format!(
-                "process {process} nested statement-level if branches are not supported in loop bodies in this source slice"
-            )));
-        }
         if self.statement_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
             return Err(Error::new(format!(
                 "process {process} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice"

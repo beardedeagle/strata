@@ -443,7 +443,8 @@ element item is either an immutable element binding or a record pattern over the
 element type. Record-pattern fields bind immutable projected values in the loop
 body. This slice admits statement-level runtime `if` inside loop bodies, but
 still rejects nested loops, `return`, `spawn`, branch-local process-reference
-binding, and direct nested statement-level branches inside loop-body branches.
+binding, and runtime branch nesting beyond the single admitted direct nested
+branch layer.
 
 ## Types
 
@@ -565,8 +566,8 @@ cannot bind process references, return, contain nested loops, or exceed the one
 direct nested branch-action layer. Inside `for`, the condition may use the
 immutable loop element binding or an immutable field projected from a
 loop-element record pattern; lowering emits typed Mantle templates over the loop
-element ID, not the source binding name. Loop-body branch bodies still cannot
-directly contain another statement-level branch.
+element ID, not the source binding name. Loop-body branch bodies follow the same
+direct nested branch-action bound.
 
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,
