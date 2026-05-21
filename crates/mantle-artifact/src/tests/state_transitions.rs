@@ -145,6 +145,24 @@ fn validate_rejects_if_else_next_state_literal_that_is_not_bool_value() {
 }
 
 #[test]
+fn validate_rejects_if_else_next_state_above_terminal_limit() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].next_state =
+        nested_if_else_next_state(MAX_NEXT_STATE_IF_ELSE_DEPTH + 1, bool_type);
+
+    let err = artifact
+        .validate()
+        .expect_err("third-level next_state if should fail artifact admission");
+
+    assert!(
+        err.to_string()
+            .contains("next_state runtime if nesting exceeds maximum depth of 2"),
+        "{err}"
+    );
+}
+
+#[test]
 fn validate_rejects_if_else_next_state_static_projection_that_is_not_bool_value() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);

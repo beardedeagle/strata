@@ -26,6 +26,23 @@ fn decode_rejects_missing_if_else_next_state_branch() {
 }
 
 #[test]
+fn decode_rejects_if_else_next_state_above_terminal_limit() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[1].transitions[0].next_state =
+        nested_if_else_next_state(MAX_NEXT_STATE_IF_ELSE_DEPTH + 1, bool_type);
+    let encoded = artifact.encode();
+
+    let err = MantleArtifact::decode(&encoded).expect_err("overly nested next_state should fail");
+
+    assert!(
+        err.to_string()
+            .contains("next_state runtime if nesting exceeds maximum depth of 2"),
+        "{err}"
+    );
+}
+
+#[test]
 fn decode_rejects_if_else_action_nesting_above_limit() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);

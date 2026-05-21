@@ -149,12 +149,6 @@ impl LoadedTransition {
         value_types: LoadedTransitionValueTypes,
         depth: usize,
     ) -> Result<()> {
-        if depth > MAX_VALUE_TEMPLATE_DEPTH {
-            return Err(Error::new(format!(
-                "process {} {} next_state nesting exceeds maximum depth {}",
-                process.debug_name, context, MAX_VALUE_TEMPLATE_DEPTH
-            )));
-        }
         match next_state {
             LoadedNextState::Current => Ok(()),
             LoadedNextState::Value(state) => {
@@ -210,6 +204,13 @@ impl LoadedTransition {
                 then_state,
                 else_state,
             } => {
+                if depth >= MAX_NEXT_STATE_IF_ELSE_DEPTH {
+                    return Err(Error::new(format!(
+                        "process {} {} next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH} in this loaded runtime slice",
+                        process.debug_name, context
+                    )));
+                }
+                let branch_depth = depth + 1;
                 validate_loaded_bool_condition(
                     program,
                     process,
@@ -227,7 +228,7 @@ impl LoadedTransition {
                     &format!("{context} then"),
                     then_state,
                     value_types,
-                    depth + 1,
+                    branch_depth,
                 )?;
                 self.validate_next_state_node(
                     program,
@@ -235,7 +236,7 @@ impl LoadedTransition {
                     &format!("{context} else"),
                     else_state,
                     value_types,
-                    depth + 1,
+                    branch_depth,
                 )
             }
         }
@@ -255,6 +256,10 @@ impl LoadedTransition {
 
 impl LoadedNextState {
     pub(crate) fn from_artifact(next_state: &NextState) -> Result<Self> {
+        Self::from_artifact_at_depth(next_state, 0)
+    }
+
+    fn from_artifact_at_depth(next_state: &NextState, depth: usize) -> Result<Self> {
         match next_state {
             NextState::Current => Ok(Self::Current),
             NextState::Value(state) => Ok(Self::Value(*state)),
@@ -265,11 +270,19 @@ impl LoadedNextState {
                 condition,
                 then_state,
                 else_state,
-            } => Ok(Self::IfElse {
-                condition: LoadedValueTemplate::from_artifact(condition)?,
-                then_state: Box::new(LoadedNextState::from_artifact(then_state)?),
-                else_state: Box::new(LoadedNextState::from_artifact(else_state)?),
-            }),
+            } => {
+                if depth >= MAX_NEXT_STATE_IF_ELSE_DEPTH {
+                    return Err(Error::new(format!(
+                        "loaded next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH}"
+                    )));
+                }
+                let branch_depth = depth + 1;
+                Ok(Self::IfElse {
+                    condition: LoadedValueTemplate::from_artifact(condition)?,
+                    then_state: Box::new(Self::from_artifact_at_depth(then_state, branch_depth)?),
+                    else_state: Box::new(Self::from_artifact_at_depth(else_state, branch_depth)?),
+                })
+            }
         }
     }
 }

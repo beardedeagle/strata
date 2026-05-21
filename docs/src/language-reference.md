@@ -618,7 +618,10 @@ runtime `for` statements, including effect-only loop prefixes before the
 terminal return in final-position runtime branches. Each loop body remains the
 same admitted runtime-loop body surface. Final-position branch prefixes may also
 contain one direct statement-level runtime `if` action; deeper direct
-branch-action nesting remains rejected.
+branch-action nesting remains rejected. A final-position runtime branch may end
+in one direct nested final-position runtime `if`, which lowers as a bounded
+nested `NextState::IfElse`; third-level terminal runtime branches remain
+rejected at source checking, artifact admission, and loaded-runtime admission.
 An omitted statement-level `else` lowers as an explicit empty branch. Empty
 statement-level branches perform no effects, no state change, no authority
 acquisition, and no hidden work; branch selection is still observable through

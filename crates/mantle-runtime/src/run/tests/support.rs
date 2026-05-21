@@ -12,9 +12,9 @@ pub(super) use mantle_artifact::{
     ArtifactProcessRefPayload, ArtifactRecordField, ArtifactStateValue, ArtifactTransition,
     ArtifactType, ArtifactTypeField, ArtifactValue, ArtifactValueBooleanOperator,
     ArtifactValueEqualityOperator, ArtifactValueTemplate, ArtifactValueTemplateField,
-    EnumVariantId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_PROCESS_REFS_PER_PROCESS,
-    MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, StateId, StepResult, TypeId,
+    EnumVariantId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_NEXT_STATE_IF_ELSE_DEPTH,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
@@ -262,6 +262,22 @@ pub(super) fn loaded_template(template: ArtifactValueTemplate) -> LoadedValueTem
 
 pub(super) fn loaded_next_state(next_state: NextState) -> LoadedNextState {
     LoadedNextState::from_artifact(&next_state).expect("test next state should load")
+}
+
+pub(super) fn nested_loaded_if_else_next_state(depth: usize, bool_type: TypeId) -> LoadedNextState {
+    let condition = LoadedValueTemplate::Literal {
+        ty: bool_type,
+        value: RuntimeValue::Atom("True".to_string()),
+    };
+    let mut next_state = LoadedNextState::Value(StateId::new(0));
+    for _ in 0..depth {
+        next_state = LoadedNextState::IfElse {
+            condition: condition.clone(),
+            then_state: Box::new(next_state),
+            else_state: Box::new(LoadedNextState::Value(StateId::new(0))),
+        };
+    }
+    next_state
 }
 
 pub(super) fn runtime_payload(payload: ArtifactPayload) -> RuntimePayload {

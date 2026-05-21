@@ -1,0 +1,79 @@
+module runtime_final_if_nested_terminal_if;
+
+record MainState;
+
+record CheckFlags {
+    outer_flag: Bool,
+    inner_flag: Bool,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum WorkerState {
+    Idle,
+    OuterTrueInnerTrue,
+    OuterTrueInnerFalse,
+    OuterFalseInnerTrue,
+    OuterFalseInnerFalse,
+}
+
+enum WorkerMsg {
+    Check(CheckFlags),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let both_true: ProcessRef<Worker> = spawn Worker;
+        let outer_true: ProcessRef<Worker> = spawn Worker;
+        let outer_false_inner_true: ProcessRef<Worker> = spawn Worker;
+        let both_false: ProcessRef<Worker> = spawn Worker;
+        send both_true Check(CheckFlags { outer_flag: True, inner_flag: True });
+        send outer_true Check(CheckFlags { outer_flag: True, inner_flag: False });
+        send outer_false_inner_true Check(CheckFlags { outer_flag: False, inner_flag: True });
+        send both_false Check(CheckFlags { outer_flag: False, inner_flag: False });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Check(CheckFlags { outer_flag: outer, inner_flag: inner })) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (outer == True) {
+            if (inner == True) {
+                emit "worker terminal outer true inner true";
+                return Continue(OuterTrueInnerTrue);
+            } else {
+                emit "worker terminal outer true inner false";
+                return Continue(OuterTrueInnerFalse);
+            }
+        } else {
+            if (inner == True) {
+                emit "worker terminal outer false inner true";
+                return Continue(OuterFalseInnerTrue);
+            } else {
+                emit "worker terminal outer false inner false";
+                return Continue(OuterFalseInnerFalse);
+            }
+        }
+    }
+}

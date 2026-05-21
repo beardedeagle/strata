@@ -237,6 +237,22 @@ pub(super) fn nested_if_else_action(depth: usize, bool_type: TypeId) -> Artifact
     action
 }
 
+pub(super) fn nested_if_else_next_state(depth: usize, bool_type: TypeId) -> NextState {
+    let condition = ArtifactValueTemplate::Literal {
+        ty: bool_type,
+        value: artifact_value("True"),
+    };
+    let mut next_state = NextState::Value(StateId::new(0));
+    for _ in 0..depth {
+        next_state = NextState::IfElse {
+            condition: condition.clone(),
+            then_state: Box::new(next_state),
+            else_state: Box::new(NextState::Value(StateId::new(0))),
+        };
+    }
+    next_state
+}
+
 pub(super) fn emit_actions(count: usize) -> Vec<ArtifactAction> {
     vec![
         ArtifactAction::Emit {

@@ -1,4 +1,5 @@
 use super::*;
+use mantle_artifact::MAX_VALUE_TEMPLATE_DEPTH;
 
 impl Parser {
     pub(super) fn expect_keyword(&mut self, keyword: &str) -> Result<()> {
@@ -158,10 +159,20 @@ impl Parser {
     }
 
     pub(super) fn if_starts_return_expr(&self) -> bool {
-        if !self.peek_keyword("if") {
+        self.if_starts_return_expr_at(self.index, 0)
+    }
+
+    fn if_starts_return_expr_at(&self, if_index: usize, probe_depth: usize) -> bool {
+        if probe_depth > MAX_VALUE_TEMPLATE_DEPTH {
             return false;
         }
-        let Some(condition_start) = self.index.checked_add(1) else {
+        if !matches!(
+            self.tokens.get(if_index).map(|token| &token.kind),
+            Some(TokenKind::Ident(value)) if value == "if"
+        ) {
+            return false;
+        }
+        let Some(condition_start) = if_index.checked_add(1) else {
             return false;
         };
         if !matches!(
@@ -181,7 +192,7 @@ impl Parser {
         ) {
             return false;
         }
-        if !self.block_contains_top_level_return(branch_start) {
+        if !self.block_contains_terminal_return(branch_start, probe_depth + 1) {
             return false;
         }
         let Some(branch_end) = self.matching_symbol_index(branch_start, '{', '}') else {
@@ -218,6 +229,13 @@ impl Parser {
     }
 
     pub(super) fn block_contains_top_level_return(&self, block_start: usize) -> bool {
+        self.block_contains_terminal_return(block_start, 0)
+    }
+
+    fn block_contains_terminal_return(&self, block_start: usize, probe_depth: usize) -> bool {
+        if probe_depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return false;
+        }
         let mut depth = 0usize;
         let mut index = block_start;
         while let Some(token) = self.tokens.get(index) {
@@ -233,6 +251,13 @@ impl Parser {
                     }
                 }
                 TokenKind::Ident(value) if value == "return" && depth == 1 => return true,
+                TokenKind::Ident(value)
+                    if value == "if"
+                        && depth == 1
+                        && self.if_starts_return_expr_at(index, probe_depth + 1) =>
+                {
+                    return true;
+                }
                 TokenKind::Eof => return false,
                 _ => {}
             }

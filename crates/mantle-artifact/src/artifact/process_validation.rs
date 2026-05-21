@@ -1,6 +1,6 @@
 use super::value_template::ValueTemplatePayloadValidation;
 use super::*;
-use crate::MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH;
+use crate::{MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_NEXT_STATE_IF_ELSE_DEPTH};
 
 mod actions;
 mod templates;
@@ -392,12 +392,6 @@ impl ArtifactProcess {
         value_types: TransitionValueTypes,
         depth: usize,
     ) -> Result<()> {
-        if depth > MAX_VALUE_TEMPLATE_DEPTH {
-            return Err(Error::new(format!(
-                "process {} {} next_state exceeds maximum control-flow depth of {MAX_VALUE_TEMPLATE_DEPTH}",
-                self.debug_name, transition_context
-            )));
-        }
         match next_state {
             NextState::Current => Ok(()),
             NextState::Value(state) => {
@@ -442,6 +436,13 @@ impl ArtifactProcess {
                 then_state,
                 else_state,
             } => {
+                if depth >= MAX_NEXT_STATE_IF_ELSE_DEPTH {
+                    return Err(Error::new(format!(
+                        "process {} {} next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH} in this artifact slice",
+                        self.debug_name, transition_context
+                    )));
+                }
+                let branch_depth = depth + 1;
                 validate_bool_condition_template(
                     artifact,
                     &format!(
@@ -467,7 +468,7 @@ impl ArtifactProcess {
                     &format!("{transition_context} then"),
                     then_state,
                     value_types,
-                    depth + 1,
+                    branch_depth,
                 )?;
                 self.validate_next_state(
                     artifact,
@@ -475,7 +476,7 @@ impl ArtifactProcess {
                     &format!("{transition_context} else"),
                     else_state,
                     value_types,
-                    depth + 1,
+                    branch_depth,
                 )
             }
         }

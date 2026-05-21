@@ -575,6 +575,8 @@ to one state value before lowering. `step` returns `Continue(value)`,
 `Stop(value)`, `Panic(value)`, a final-position runtime `if`, or a
 `return match` that the checker reduces to one of those result forms before
 lowering while preserving any uniform action prefix as typed transition actions.
+A final-position runtime `if` branch may end in one direct nested final-position
+runtime `if`; third-level terminal runtime branches remain rejected.
 
 ## Literals
 

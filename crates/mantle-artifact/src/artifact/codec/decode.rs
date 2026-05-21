@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::MAX_NEXT_STATE_IF_ELSE_DEPTH;
 use crate::fields::ArtifactFields;
 
 impl MantleArtifact {
@@ -284,11 +285,6 @@ fn decode_type_shape(fields: &mut ArtifactFields, prefix: &str) -> Result<Artifa
 }
 
 fn decode_next_state(fields: &mut ArtifactFields, prefix: &str, depth: usize) -> Result<NextState> {
-    if depth > MAX_VALUE_TEMPLATE_DEPTH {
-        return Err(Error::new(format!(
-            "{prefix}.next_state exceeds maximum control-flow depth of {MAX_VALUE_TEMPLATE_DEPTH}"
-        )));
-    }
     let key = format!("{prefix}.next_state");
     match fields.take_required(&key)?.as_str() {
         "current" => Ok(NextState::Current),
@@ -300,19 +296,31 @@ fn decode_next_state(fields: &mut ArtifactFields, prefix: &str, depth: usize) ->
             &format!("{prefix}.next_state_template"),
             0,
         )?)),
-        "if_else" => Ok(NextState::IfElse {
-            condition: decode_value_template(fields, &format!("{prefix}.next_state_condition"), 0)?,
-            then_state: Box::new(decode_next_state(
-                fields,
-                &format!("{prefix}.next_state_then"),
-                depth + 1,
-            )?),
-            else_state: Box::new(decode_next_state(
-                fields,
-                &format!("{prefix}.next_state_else"),
-                depth + 1,
-            )?),
-        }),
+        "if_else" => {
+            if depth >= MAX_NEXT_STATE_IF_ELSE_DEPTH {
+                return Err(Error::new(format!(
+                    "{prefix}.next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH}"
+                )));
+            }
+            let branch_depth = depth + 1;
+            Ok(NextState::IfElse {
+                condition: decode_value_template(
+                    fields,
+                    &format!("{prefix}.next_state_condition"),
+                    0,
+                )?,
+                then_state: Box::new(decode_next_state(
+                    fields,
+                    &format!("{prefix}.next_state_then"),
+                    branch_depth,
+                )?),
+                else_state: Box::new(decode_next_state(
+                    fields,
+                    &format!("{prefix}.next_state_else"),
+                    branch_depth,
+                )?),
+            })
+        }
         value => Err(Error::new(format!(
             "invalid {key} value {value:?}; expected \"current\", \"value\", \"template\", or \"if_else\""
         ))),
