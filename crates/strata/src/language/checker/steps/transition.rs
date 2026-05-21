@@ -1,7 +1,7 @@
 use super::super::source_functions::validate_source_function_value_expr;
 use super::returns::{StepReturnInput, resolve_step_return, step_source_bindings};
 use super::*;
-use mantle_artifact::MAX_VALUE_TEMPLATE_FIELDS;
+use mantle_artifact::{MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_VALUE_TEMPLATE_FIELDS};
 
 mod actions;
 mod send;
@@ -94,18 +94,21 @@ enum RuntimeIfBranchScope {
 struct ActionCheckScope {
     in_loop_body: bool,
     runtime_if_branch: RuntimeIfBranchScope,
+    statement_if_depth: usize,
 }
 
 impl ActionCheckScope {
     const TOP_LEVEL: Self = Self {
         in_loop_body: false,
         runtime_if_branch: RuntimeIfBranchScope::Outside,
+        statement_if_depth: 0,
     };
 
     const fn for_loop_body(self) -> Self {
         Self {
             in_loop_body: true,
             runtime_if_branch: self.runtime_if_branch,
+            statement_if_depth: self.statement_if_depth,
         }
     }
 
@@ -113,6 +116,7 @@ impl ActionCheckScope {
         Self {
             in_loop_body: self.in_loop_body,
             runtime_if_branch: RuntimeIfBranchScope::Statement,
+            statement_if_depth: self.statement_if_depth.saturating_add(1),
         }
     }
 
@@ -120,11 +124,8 @@ impl ActionCheckScope {
         Self {
             in_loop_body: self.in_loop_body,
             runtime_if_branch: RuntimeIfBranchScope::FinalPosition,
+            statement_if_depth: self.statement_if_depth,
         }
-    }
-
-    fn is_in_runtime_if_branch(self) -> bool {
-        !matches!(self.runtime_if_branch, RuntimeIfBranchScope::Outside)
     }
 
     fn allows_for_each(self) -> bool {
@@ -132,6 +133,25 @@ impl ActionCheckScope {
             self.runtime_if_branch,
             RuntimeIfBranchScope::Outside | RuntimeIfBranchScope::Statement
         )
+    }
+
+    fn validate_statement_if_allowed(self, process: &Identifier) -> Result<()> {
+        if matches!(self.runtime_if_branch, RuntimeIfBranchScope::FinalPosition) {
+            return Err(Error::new(format!(
+                "process {process} nested statement-level if branches are not supported in this source slice"
+            )));
+        }
+        if self.in_loop_body && self.statement_if_depth > 0 {
+            return Err(Error::new(format!(
+                "process {process} nested statement-level if branches are not supported in loop bodies in this source slice"
+            )));
+        }
+        if self.statement_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
+            return Err(Error::new(format!(
+                "process {process} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice"
+            )));
+        }
+        Ok(())
     }
 
     fn runtime_if_branch_label(self) -> &'static str {

@@ -1,7 +1,7 @@
 use super::super::support::*;
 
 #[test]
-fn admission_rejects_nested_if_else_inside_runtime_if_branch() {
+fn admission_accepts_one_nested_if_else_inside_runtime_if_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
     let condition = ArtifactValueTemplate::Literal {
@@ -21,12 +21,42 @@ fn admission_rejects_nested_if_else_inside_runtime_if_branch() {
         else_actions: Vec::new(),
     }];
 
+    artifact
+        .validate()
+        .expect("one nested if_else inside runtime if branch should pass admission");
+}
+
+#[test]
+fn admission_rejects_if_else_action_nesting_above_limit() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    let condition = ArtifactValueTemplate::Literal {
+        ty: bool_type,
+        value: artifact_value("True"),
+    };
+    artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::IfElse {
+        condition: condition.clone(),
+        then_actions: vec![ArtifactAction::IfElse {
+            condition: condition.clone(),
+            then_actions: vec![ArtifactAction::IfElse {
+                condition,
+                then_actions: vec![ArtifactAction::Emit {
+                    output: OutputId::new(0),
+                }],
+                else_actions: Vec::new(),
+            }],
+            else_actions: Vec::new(),
+        }],
+        else_actions: Vec::new(),
+    }];
+
     let err = artifact
         .validate()
-        .expect_err("nested if_else inside top-level runtime if branch should fail admission");
+        .expect_err("over-limit if_else action nesting should fail admission");
     assert!(
         err.to_string()
-            .contains("runtime if branch cannot contain nested runtime if actions"),
+            .contains("runtime if action nesting exceeds maximum depth of 2"),
         "{err}"
     );
 }

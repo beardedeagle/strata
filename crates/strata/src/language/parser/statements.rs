@@ -1,6 +1,9 @@
 use super::*;
 
 impl Parser {
+    const MAX_DIRECT_STATEMENT_IF_DEPTH: usize =
+        mantle_artifact::MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH;
+
     pub(super) fn parse_match_body(&mut self) -> Result<Match> {
         self.expect_keyword("match")?;
         let scrutinee = self.expect_identifier()?;
@@ -108,25 +111,13 @@ impl Parser {
     }
 
     pub(super) fn parse_if_else_statement(&mut self) -> Result<Statement> {
-        self.expect_keyword("if")?;
-        self.expect_symbol('(')?;
-        let condition = self.parse_value_expr()?;
-        self.expect_symbol(')')?;
-        let then_body = self.parse_if_else_statement_branch()?;
-        let else_body = if self.peek_keyword("else") {
-            self.expect_keyword("else")?;
-            self.parse_if_else_statement_branch()?
-        } else {
-            Vec::new()
-        };
-        Ok(Statement::IfElse {
-            condition,
-            then_body,
-            else_body,
-        })
+        self.parse_if_else_statement_at_depth(1)
     }
 
-    pub(super) fn parse_if_else_statement_branch(&mut self) -> Result<Vec<Statement>> {
+    pub(super) fn parse_if_else_statement_branch(
+        &mut self,
+        statement_if_depth: usize,
+    ) -> Result<Vec<Statement>> {
         self.expect_symbol('{')?;
         let mut statements = Vec::new();
         while !self.peek_symbol('}') {
@@ -136,9 +127,17 @@ impl Parser {
                 ));
             }
             if self.peek_keyword("if") {
-                return Err(self.error_here(
-                    "nested statement-level if branches are not supported in this source slice",
-                ));
+                if statement_if_depth >= Self::MAX_DIRECT_STATEMENT_IF_DEPTH {
+                    return Err(self.error_here(format!(
+                        "statement-level if action nesting exceeds maximum depth of {} in this source slice",
+                        Self::MAX_DIRECT_STATEMENT_IF_DEPTH
+                    )));
+                }
+                let nested_depth = statement_if_depth
+                    .checked_add(1)
+                    .ok_or_else(|| self.error_here("statement-level if nesting overflowed"))?;
+                statements.push(self.parse_if_else_statement_at_depth(nested_depth)?);
+                continue;
             }
             if self.peek_keyword("let") {
                 return Err(
@@ -149,6 +148,25 @@ impl Parser {
         }
         self.expect_symbol('}')?;
         Ok(statements)
+    }
+
+    fn parse_if_else_statement_at_depth(&mut self, statement_if_depth: usize) -> Result<Statement> {
+        self.expect_keyword("if")?;
+        self.expect_symbol('(')?;
+        let condition = self.parse_value_expr()?;
+        self.expect_symbol(')')?;
+        let then_body = self.parse_if_else_statement_branch(statement_if_depth)?;
+        let else_body = if self.peek_keyword("else") {
+            self.expect_keyword("else")?;
+            self.parse_if_else_statement_branch(statement_if_depth)?
+        } else {
+            Vec::new()
+        };
+        Ok(Statement::IfElse {
+            condition,
+            then_body,
+            else_body,
+        })
     }
 
     pub(super) fn parse_for_each_statement(&mut self) -> Result<Statement> {

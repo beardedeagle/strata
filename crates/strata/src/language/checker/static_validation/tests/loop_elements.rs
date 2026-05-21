@@ -189,7 +189,7 @@ fn static_validation_rejects_nested_runtime_if_inside_for_each_loop_branch() {
             .expect_err("nested runtime if in checked for loop branch should fail");
     assert!(
         err.to_string()
-            .contains("runtime if branch cannot contain nested runtime if actions"),
+            .contains("for loop branch cannot contain nested runtime if actions"),
         "{err}"
     );
 }

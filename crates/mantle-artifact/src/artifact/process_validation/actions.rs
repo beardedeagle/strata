@@ -27,7 +27,7 @@ impl ArtifactProcess {
                 target,
                 process_ref,
             } => {
-                if scope.inside_runtime_if_branch {
+                if scope.is_inside_runtime_if_branch() {
                     return Err(Error::new(format!(
                         "process {} transition {} runtime if branch cannot bind process references in this artifact slice",
                         self.debug_name,
@@ -149,18 +149,7 @@ impl ArtifactProcess {
                 then_actions,
                 else_actions,
             } => {
-                if scope.inside_runtime_if_branch {
-                    let branch_scope = if scope.inside_loop {
-                        "for loop branch"
-                    } else {
-                        "runtime if branch"
-                    };
-                    return Err(Error::new(format!(
-                        "process {} transition {} {branch_scope} cannot contain nested runtime if actions in this artifact slice",
-                        self.debug_name,
-                        transition.message.as_u32()
-                    )));
-                }
+                scope.validate_runtime_if_allowed(self, transition)?;
                 let received_payload_type = self
                     .message_variants
                     .get(transition.message.index())

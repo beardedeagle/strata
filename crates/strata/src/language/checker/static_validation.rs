@@ -6,7 +6,7 @@ use super::super::checked::{
     CheckedValueTemplate,
 };
 use super::super::diagnostic::{Error, Result};
-use mantle_artifact::MAX_VALUE_TEMPLATE_FIELDS;
+use mantle_artifact::{MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_VALUE_TEMPLATE_FIELDS};
 
 mod process_refs;
 mod runtime_order;
@@ -34,7 +34,8 @@ struct ActiveCheckedLoopElement {
 struct ActionReferenceScope<'a> {
     active_loop_elements: &'a [ActiveCheckedLoopElement],
     inside_loop: bool,
-    inside_runtime_if_branch: bool,
+    runtime_if_depth: usize,
+    loop_runtime_if_depth: usize,
 }
 
 impl<'a> ActionReferenceScope<'a> {
@@ -42,7 +43,8 @@ impl<'a> ActionReferenceScope<'a> {
         Self {
             active_loop_elements: &[],
             inside_loop: false,
-            inside_runtime_if_branch: false,
+            runtime_if_depth: 0,
+            loop_runtime_if_depth: 0,
         }
     }
 
@@ -50,7 +52,8 @@ impl<'a> ActionReferenceScope<'a> {
         Self {
             active_loop_elements,
             inside_loop: true,
-            inside_runtime_if_branch: false,
+            runtime_if_depth: 0,
+            loop_runtime_if_depth: 0,
         }
     }
 
@@ -58,8 +61,37 @@ impl<'a> ActionReferenceScope<'a> {
         Self {
             active_loop_elements: self.active_loop_elements,
             inside_loop: self.inside_loop,
-            inside_runtime_if_branch: true,
+            runtime_if_depth: if self.inside_loop {
+                self.runtime_if_depth
+            } else {
+                self.runtime_if_depth.saturating_add(1)
+            },
+            loop_runtime_if_depth: if self.inside_loop {
+                self.loop_runtime_if_depth.saturating_add(1)
+            } else {
+                self.loop_runtime_if_depth
+            },
         }
+    }
+
+    fn is_inside_runtime_if_branch(self) -> bool {
+        self.runtime_if_depth > 0 || self.loop_runtime_if_depth > 0
+    }
+
+    fn validate_runtime_if_allowed(self, process: &CheckedProcess) -> Result<()> {
+        if self.inside_loop && self.loop_runtime_if_depth > 0 {
+            return Err(Error::new(format!(
+                "process {} for loop branch cannot contain nested runtime if actions in this source slice",
+                process.debug_name()
+            )));
+        }
+        if self.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
+            return Err(Error::new(format!(
+                "process {} runtime if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice",
+                process.debug_name()
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -219,7 +251,7 @@ fn validate_action_reference(
             target,
             process_ref,
         } => {
-            if scope.inside_runtime_if_branch {
+            if scope.is_inside_runtime_if_branch() {
                 return Err(Error::new(format!(
                     "process {} runtime if branch cannot bind process references in this source slice",
                     process.debug_name()
@@ -305,12 +337,7 @@ fn validate_action_reference(
             then_actions,
             else_actions,
         } => {
-            if scope.inside_runtime_if_branch {
-                return Err(Error::new(format!(
-                    "process {} runtime if branch cannot contain nested runtime if actions in this source slice",
-                    process.debug_name()
-                )));
-            }
+            scope.validate_runtime_if_allowed(process)?;
             validate_bool_condition_template(process, condition)?;
             validate_value_template_binding_types(
                 condition,

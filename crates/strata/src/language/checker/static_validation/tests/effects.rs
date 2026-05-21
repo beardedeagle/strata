@@ -157,7 +157,7 @@ fn static_validation_rejects_runtime_if_dynamic_non_unit_bool_shape() {
 }
 
 #[test]
-fn static_validation_rejects_nested_runtime_if_branch_actions() {
+fn static_validation_accepts_one_nested_runtime_if_branch_action() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
     let condition =
         CheckedValueTemplate::Literal(CheckedPayloadValue::new(bool_ty, artifact_value("True")));
@@ -201,13 +201,61 @@ fn static_validation_rejects_nested_runtime_if_branch_actions() {
         })],
     });
 
+    validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
+        .expect("one nested checked runtime if action should pass static validation");
+}
+
+#[test]
+fn static_validation_rejects_runtime_if_action_nesting_above_limit() {
+    let bool_ty = enum_value_type("Bool", &["False", "True"]);
+    let condition =
+        CheckedValueTemplate::Literal(CheckedPayloadValue::new(bool_ty, artifact_value("True")));
+    let process = CheckedProcess::new(CheckedProcessParts {
+        debug_name: ident("Main"),
+        state_type: value_type("MainState"),
+        state_values: checked_state_values("MainState", &["MainState"]),
+        message_type: value_type("MainMsg"),
+        message_cases: vec![
+            CheckedMessageCase::new(
+                "Start".to_string(),
+                CheckedMessageVariantId::from_index(0).expect("valid message variant id"),
+                None,
+            )
+            .expect("valid checked message case"),
+        ],
+        process_refs: Vec::new(),
+        mailbox_bound: 1,
+        init_state: checked_state_id(0),
+        transitions: vec![CheckedTransition::new(CheckedTransitionParts {
+            current_state: None,
+            message: checked_message_id(0),
+            step_result: CheckedStepResult::Stop,
+            next_state: CheckedNextState::Current,
+            effects: vec![Effect::Emit],
+            actions: vec![CheckedAction::IfElse {
+                condition: condition.clone(),
+                then_actions: vec![CheckedAction::IfElse {
+                    condition: condition.clone(),
+                    then_actions: vec![CheckedAction::IfElse {
+                        condition,
+                        then_actions: vec![CheckedAction::Emit {
+                            output: checked_output_id(0),
+                        }],
+                        else_actions: Vec::new(),
+                    }],
+                    else_actions: Vec::new(),
+                }],
+                else_actions: Vec::new(),
+            }],
+        })],
+    });
+
     let err =
         validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
-            .expect_err("nested checked runtime if action should fail static validation");
-
+            .expect_err("over-limit checked runtime if action nesting should fail");
     assert!(
         err.to_string()
-            .contains("runtime if branch cannot contain nested runtime if actions"),
+            .contains("runtime if action nesting exceeds maximum depth of 2"),
         "{err}"
     );
 }

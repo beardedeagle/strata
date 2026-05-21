@@ -609,10 +609,13 @@ payload or current state payload, Strata lowers the checked condition, branch
 actions, and any branch next states into the Mantle artifact. Mantle admits the
 typed condition, validates both branches, executes only the selected branch, and
 records `branch_selected` trace events with a stable admitted-artifact
-`branch_path`. Branch effects must be declared by the step effect list. Runtime
-branch statement prefixes cannot bind process references or contain direct
-nested branches in this slice. Branches may contain bounded runtime `for`
-statements; each loop body remains the same admitted runtime-loop body surface.
+`branch_path`. Branch effects must be declared by the step effect list.
+Statement-level runtime branches may contain one direct nested statement-level
+runtime branch action; deeper direct branch nesting is rejected at source
+checking, artifact admission, and loaded-runtime admission. Runtime branch
+statement prefixes cannot bind process references. Branches may contain bounded
+runtime `for` statements; each loop body remains the same admitted runtime-loop
+body surface.
 An omitted statement-level `else` lowers as an explicit empty branch. Empty
 statement-level branches perform no effects, no state change, no authority
 acquisition, and no hidden work; branch selection is still observable through
@@ -670,9 +673,10 @@ The loop body is still intentionally narrow in this slice: no nested loops, no
 `spawn`, no `return`, no assignment, and no process-reference element type. A
 loop body may contain the admitted statement-level runtime `if` / no-op shape,
 including when the loop is itself inside a selected guard branch. What remains
-disallowed is a statement-level branch whose branch body directly contains
-another statement-level branch. Send targets may be process references bound
-before the loop or direct `ProcessRef<T>` payloads received by the current step.
+disallowed is a loop-body statement-level branch whose branch body directly
+contains another statement-level branch. Send targets may be process references
+bound before the loop or direct `ProcessRef<T>` payloads received by the current
+step.
 Declare every body effect in the enclosing step effect list.
 
 ## Statements

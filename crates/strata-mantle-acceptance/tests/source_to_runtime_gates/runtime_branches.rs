@@ -2,6 +2,8 @@ use super::support::*;
 
 #[path = "runtime_branches/malformed_and_ordering.rs"]
 mod malformed_and_ordering;
+#[path = "runtime_branches/nested_if_actions.rs"]
+mod nested_if_actions;
 #[path = "runtime_branches/payload_projection.rs"]
 mod payload_projection;
 #[path = "runtime_branches/payload_projection_next_state.rs"]

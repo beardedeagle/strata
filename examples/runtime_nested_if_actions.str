@@ -1,0 +1,64 @@
+module runtime_nested_if_actions;
+
+record MainState;
+
+record WorkerState;
+
+record CheckFlags {
+    outer_flag: Bool,
+    inner_flag: Bool,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum WorkerMsg {
+    Check(CheckFlags),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let both_true: ProcessRef<Worker> = spawn Worker;
+        let outer_only: ProcessRef<Worker> = spawn Worker;
+        let outer_false: ProcessRef<Worker> = spawn Worker;
+        send both_true Check(CheckFlags { outer_flag: True, inner_flag: True });
+        send outer_only Check(CheckFlags { outer_flag: True, inner_flag: False });
+        send outer_false Check(CheckFlags { outer_flag: False, inner_flag: True });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Check(CheckFlags { outer_flag: primary, inner_flag: secondary })) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (primary == True) {
+            if (secondary == True) {
+                emit "worker saw both true";
+            } else {
+                emit "worker saw outer true only";
+            }
+        } else {
+            emit "worker saw outer false";
+        }
+        return Continue(state);
+    }
+}

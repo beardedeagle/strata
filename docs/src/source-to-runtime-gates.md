@@ -68,6 +68,9 @@ Mantle execution:
 cargo run -p strata --bin strata -- check examples/runtime_guard_noop.str
 cargo run -p strata --bin strata -- build examples/runtime_guard_noop.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guard_noop.mta
+cargo run -p strata --bin strata -- check examples/runtime_nested_if_actions.str
+cargo run -p strata --bin strata -- build examples/runtime_nested_if_actions.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_nested_if_actions.mta
 cargo run -p strata --bin strata -- check examples/runtime_for_each.str
 cargo run -p strata --bin strata -- build examples/runtime_for_each.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta
