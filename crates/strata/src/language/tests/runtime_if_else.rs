@@ -481,6 +481,21 @@ fn statement_runtime_if_rejects_explicit_both_empty_branches() {
 }
 
 #[test]
+fn statement_runtime_if_rejects_action_nesting_above_limit() {
+    let source = RUNTIME_GUARD_NOOP.replace(
+        "        if (flag == True) {\n            emit \"guard saw true\";\n        }",
+        "        if (flag == True) {\n            if (flag == True) {\n                if (flag == True) {\n                    emit \"too deep\";\n                }\n            }\n        }",
+    );
+    let error = check_source(&source).expect_err("over-limit nested branch must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("statement-level if action nesting exceeds maximum depth of 2"),
+        "{error}"
+    );
+}
+
+#[test]
 fn runtime_if_else_disambiguates_fieldless_variant_from_payload_type() {
     let source = RUNTIME_IF_ELSE.replace(
         "enum MainMsg {\n    Start,\n}",

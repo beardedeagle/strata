@@ -78,18 +78,12 @@ fn guarded_runtime_for_each_rejects_return_inside_branch_loop() {
 }
 
 #[test]
-fn guarded_runtime_for_each_rejects_direct_nested_branch() {
+fn guarded_runtime_for_each_accepts_one_direct_nested_branch() {
     let source = RUNTIME_GUARDED_FOR_EACH.replace(
         "            for item in items {",
         "            if (enabled == True) {\n                emit \"nested branch\";\n            }\n            for item in items {",
     );
-    let error = check_source(&source).expect_err("direct nested branch must be rejected");
-    assert!(
-        error
-            .to_string()
-            .contains("nested statement-level if branches are not supported"),
-        "{error}"
-    );
+    check_source(&source).expect("one direct nested statement branch should check");
 }
 
 #[test]

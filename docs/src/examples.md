@@ -50,39 +50,41 @@ Read them in this order:
 25. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable current-state
    record payload.
-26. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+26. `runtime_nested_if_actions.str` for one bounded layer of nested
+   statement-level runtime branch actions.
+27. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
    branch behavior.
-27. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+28. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-28. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-29. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+29. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+30. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-30. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-31. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+31. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+32. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-32. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+33. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
    values through a guarded loop and received direct process reference.
-33. `runtime_loop_element_projection.str` for projecting immutable record
+34. `runtime_loop_element_projection.str` for projecting immutable record
    fields from guarded runtime loop elements.
-34. `actor_payload_match.str` for the same payload binding through a whole-body
+35. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-35. `actor_payload_split_match.str` for payload-sensitive same-message
+36. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-36. `actor_payload_split_signature.str` for payload-sensitive same-message
+37. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-37. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+38. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-38. `actor_payload_state_match_split.str` for payload-sensitive same-message
+39. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-39. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+40. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-40. `nested_patterns.str` for nested immutable constructor, record, list, and
+41. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-41. `actor_reply.str` for transporting typed process references through message
+42. `actor_reply.str` for transporting typed process references through message
    payloads.
-42. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+43. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-43. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+44. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -625,6 +627,31 @@ Key source ideas:
   `RecordField("phase")`, and a `Phase` equality predicate.
 - Both branches return whole `WorkerState` enum values; the artifact does not
   use the source alias as an executable runtime path.
+
+## Runtime Nested If Actions
+
+`examples/runtime_nested_if_actions.str` sends immutable `CheckFlags` record
+payloads to three workers and uses one nested statement-level runtime branch to
+choose effect-only action output inside Mantle.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_nested_if_actions.str
+cargo run -p strata --bin strata -- build examples/runtime_nested_if_actions.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_nested_if_actions.mta
+```
+
+Key source ideas:
+
+- `Check(CheckFlags { outer_flag: primary, inner_flag: secondary })`
+  destructures the received record payload into immutable source bindings.
+- The outer and inner `if` conditions lower through typed
+  `RecordField(ReceivedPayload<CheckFlags>, ...)` Bool equality templates.
+- The nested branch is an admitted typed Mantle action with a stable nested
+  `branch_path`; source aliases such as `primary` and `secondary` are not
+  executable dispatch paths.
+- State remains a whole-value `Continue(state)` after the effect-only nested
+  branch action; branch-local `spawn`, process-reference binding, `return`,
+  nested loops, and deeper direct branch nesting remain rejected.
 
 ## Runtime Guard Noop
 

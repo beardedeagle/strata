@@ -23,7 +23,7 @@ pub(super) fn checked_actions_for_statements(
                 });
             }
             Statement::LetProcessRef { name, target, .. } => {
-                if scope.is_in_runtime_if_branch() {
+                if !matches!(scope.runtime_if_branch, RuntimeIfBranchScope::Outside) {
                     return Err(Error::new(format!(
                         "process {} {} cannot bind process reference {} in this source slice",
                         context.process.name,
@@ -74,12 +74,7 @@ pub(super) fn checked_actions_for_statements(
                 then_body,
                 else_body,
             } => {
-                if scope.is_in_runtime_if_branch() {
-                    return Err(Error::new(format!(
-                        "process {} nested statement-level if branches are not supported in this source slice",
-                        context.process.name
-                    )));
-                }
+                scope.validate_statement_if_allowed(&context.process.name)?;
                 actions.push(checked_if_else_statement_action(
                     context,
                     outputs,

@@ -1,7 +1,7 @@
 use super::super::support::*;
 
 #[test]
-fn runtime_rejects_loaded_nested_if_else_inside_runtime_if_branch_before_artifact_loaded() {
+fn runtime_accepts_loaded_one_nested_if_else_inside_runtime_if_branch_before_artifact_loaded() {
     let mut artifact = artifact_with_unbound_worker_process_ref();
     let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
     artifact.types.push(ArtifactType::enum_value(
@@ -9,6 +9,9 @@ fn runtime_rejects_loaded_nested_if_else_inside_runtime_if_branch_before_artifac
         vec!["False".to_string(), "True".to_string()],
     ));
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.outputs.push("nested branch emitted".to_string());
+    program.processes[0].transitions[0].effect_authority =
+        crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
     let condition = LoadedValueTemplate::Literal {
         ty: bool_type,
         value: RuntimeValue::Atom("True".to_string()),
@@ -17,7 +20,46 @@ fn runtime_rejects_loaded_nested_if_else_inside_runtime_if_branch_before_artifac
         condition: condition.clone(),
         then_actions: vec![LoadedAction::IfElse {
             condition,
-            then_actions: Vec::new(),
+            then_actions: vec![LoadedAction::Emit {
+                output: OutputId::new(0),
+            }],
+            else_actions: Vec::new(),
+        }],
+        else_actions: Vec::new(),
+    }];
+
+    program
+        .validate_admission()
+        .expect("one nested loaded if_else action should pass admission");
+}
+
+#[test]
+fn runtime_rejects_loaded_if_else_action_nesting_above_limit_before_artifact_loaded() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    let bool_type = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::enum_value(
+        "Bool",
+        vec!["False".to_string(), "True".to_string()],
+    ));
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.outputs.push("nested branch emitted".to_string());
+    program.processes[0].transitions[0].effect_authority =
+        crate::program::LoadedEffectAuthority::from_artifact(&[ArtifactEffect::Emit]);
+    let condition = LoadedValueTemplate::Literal {
+        ty: bool_type,
+        value: RuntimeValue::Atom("True".to_string()),
+    };
+    program.processes[0].transitions[0].actions = vec![LoadedAction::IfElse {
+        condition: condition.clone(),
+        then_actions: vec![LoadedAction::IfElse {
+            condition: condition.clone(),
+            then_actions: vec![LoadedAction::IfElse {
+                condition,
+                then_actions: vec![LoadedAction::Emit {
+                    output: OutputId::new(0),
+                }],
+                else_actions: Vec::new(),
+            }],
             else_actions: Vec::new(),
         }],
         else_actions: Vec::new(),
@@ -25,7 +67,7 @@ fn runtime_rejects_loaded_nested_if_else_inside_runtime_if_branch_before_artifac
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process Main transition 0 runtime if branch cannot contain nested runtime if actions",
+        "process Main transition 0 runtime if action nesting exceeds maximum depth of 2",
     );
 }
 

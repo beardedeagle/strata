@@ -1,5 +1,6 @@
 use super::value_template::ValueTemplatePayloadValidation;
 use super::*;
+use crate::MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH;
 
 mod actions;
 mod templates;
@@ -34,7 +35,8 @@ struct ActiveArtifactLoopElement {
 pub(in crate::artifact) struct ActionReferenceScope<'a> {
     active_loop_elements: &'a [ActiveArtifactLoopElement],
     inside_loop: bool,
-    inside_runtime_if_branch: bool,
+    runtime_if_depth: usize,
+    loop_runtime_if_depth: usize,
 }
 
 impl<'a> ActionReferenceScope<'a> {
@@ -42,7 +44,8 @@ impl<'a> ActionReferenceScope<'a> {
         Self {
             active_loop_elements: &[],
             inside_loop: false,
-            inside_runtime_if_branch: false,
+            runtime_if_depth: 0,
+            loop_runtime_if_depth: 0,
         }
     }
 
@@ -50,7 +53,8 @@ impl<'a> ActionReferenceScope<'a> {
         Self {
             active_loop_elements,
             inside_loop: true,
-            inside_runtime_if_branch: false,
+            runtime_if_depth: 0,
+            loop_runtime_if_depth: 0,
         }
     }
 
@@ -58,8 +62,43 @@ impl<'a> ActionReferenceScope<'a> {
         Self {
             active_loop_elements: self.active_loop_elements,
             inside_loop: self.inside_loop,
-            inside_runtime_if_branch: true,
+            runtime_if_depth: if self.inside_loop {
+                self.runtime_if_depth
+            } else {
+                self.runtime_if_depth.saturating_add(1)
+            },
+            loop_runtime_if_depth: if self.inside_loop {
+                self.loop_runtime_if_depth.saturating_add(1)
+            } else {
+                self.loop_runtime_if_depth
+            },
         }
+    }
+
+    fn is_inside_runtime_if_branch(self) -> bool {
+        self.runtime_if_depth > 0 || self.loop_runtime_if_depth > 0
+    }
+
+    fn validate_runtime_if_allowed(
+        self,
+        process: &ArtifactProcess,
+        transition: &ArtifactTransition,
+    ) -> Result<()> {
+        if self.inside_loop && self.loop_runtime_if_depth > 0 {
+            return Err(Error::new(format!(
+                "process {} transition {} for loop branch cannot contain nested runtime if actions in this artifact slice",
+                process.debug_name,
+                transition.message.as_u32()
+            )));
+        }
+        if self.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
+            return Err(Error::new(format!(
+                "process {} transition {} runtime if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this artifact slice",
+                process.debug_name,
+                transition.message.as_u32()
+            )));
+        }
+        Ok(())
     }
 }
 

@@ -401,6 +401,16 @@ if_statement =
 branch_statement =
     emit_statement
   | send_statement
+  | nested_if_statement
+  | for_statement
+
+nested_if_statement =
+    "if" "(" value_expr ")" "{" nested_branch_statement* "}"
+    ("else" "{" nested_branch_statement* "}")?
+
+nested_branch_statement =
+    emit_statement
+  | send_statement
   | for_statement
 
 for_statement =
@@ -433,7 +443,7 @@ element item is either an immutable element binding or a record pattern over the
 element type. Record-pattern fields bind immutable projected values in the loop
 body. This slice admits statement-level runtime `if` inside loop bodies, but
 still rejects nested loops, `return`, `spawn`, branch-local process-reference
-binding, and nested statement-level branches.
+binding, and direct nested statement-level branches inside loop-body branches.
 
 ## Types
 
@@ -543,15 +553,17 @@ traces the branch choice.
 
 Statement-level `if_statement` is runtime control flow for effects before the
 enclosing return. Branches may contain `emit`, `send`, and bounded `for`
-statements. The `else` branch may be omitted, and one branch body may be empty
-when the sibling branch has at least one admitted effect statement or admitted
-bounded-loop action; both branches empty are rejected. An omitted `else` lowers
-as an explicit empty branch in the typed Mantle artifact. Branches cannot bind
-process references, return, contain nested loops, or contain direct nested
-statement-level branches. Inside `for`, the condition may use the immutable loop
-element binding or an immutable field projected from a loop-element record
-pattern; lowering emits typed Mantle templates over the loop element ID, not the
-source binding name.
+statements, plus one direct nested statement-level `if_statement`. The `else`
+branch may be omitted, and one branch body may be empty when the sibling branch
+has at least one admitted effect statement, nested branch action, or
+admitted bounded-loop action; both branches empty are rejected. An omitted
+`else` lowers as an explicit empty branch in the typed Mantle artifact. Branches
+cannot bind process references, return, contain nested loops, or exceed the one
+direct nested branch-action layer. Inside `for`, the condition may use the
+immutable loop element binding or an immutable field projected from a
+loop-element record pattern; lowering emits typed Mantle templates over the loop
+element ID, not the source binding name. Loop-body branch bodies still cannot
+directly contain another statement-level branch.
 
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,
