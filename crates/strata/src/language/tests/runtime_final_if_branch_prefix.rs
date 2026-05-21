@@ -266,11 +266,13 @@ fn artifact_process<'a>(
 }
 
 fn assert_no_executable_source_aliases(artifact: &MantleArtifact) {
+    let worker_process = artifact_process_id(artifact, "Worker");
+    let transition_prefix = format!("process.{}.transition.", worker_process.as_u32());
     let encoded = artifact.encode();
     assert!(
         !encoded
             .lines()
-            .filter(|line| line.starts_with("process.1.transition."))
+            .filter(|line| line.starts_with(&transition_prefix))
             .any(|line| { line.ends_with("=outer") || line.ends_with("=inner") }),
         "final-position nested branch artifact must not dispatch through source aliases"
     );
