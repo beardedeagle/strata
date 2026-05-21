@@ -54,41 +54,44 @@ Read them in this order:
    statement-level runtime branch actions.
 27. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
    final-position runtime branches.
-28. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+28. `runtime_final_if_nested_if_actions.str` for one direct nested
+   statement-level runtime branch action inside final-position runtime
+   branches.
+29. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
    branch behavior.
-29. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+30. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-30. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-31. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+31. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+32. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-32. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
+33. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
    branch inside a bounded loop-body branch.
-33. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-34. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+34. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+35. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-35. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+36. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
    values through a guarded loop and received direct process reference.
-36. `runtime_loop_element_projection.str` for projecting immutable record
+37. `runtime_loop_element_projection.str` for projecting immutable record
    fields from guarded runtime loop elements.
-37. `actor_payload_match.str` for the same payload binding through a whole-body
+38. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-38. `actor_payload_split_match.str` for payload-sensitive same-message
+39. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-39. `actor_payload_split_signature.str` for payload-sensitive same-message
+40. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-40. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+41. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-41. `actor_payload_state_match_split.str` for payload-sensitive same-message
+42. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-42. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+43. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-43. `nested_patterns.str` for nested immutable constructor, record, list, and
+44. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-44. `actor_reply.str` for transporting typed process references through message
+45. `actor_reply.str` for transporting typed process references through message
    payloads.
-45. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+46. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-46. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+47. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -680,9 +683,39 @@ Key source ideas:
   whole-value step result shape, and does not execute loop actions.
 - Loop element access lowers through the typed loop element ID; source aliases
   such as `item` are not executable runtime dispatch paths.
-- Direct statement-level branch prefixes, branch-local `spawn`, branch-local
-  process-reference binding, nested loops, and mutable state updates remain
-  rejected.
+- Branch-local `spawn`, branch-local process-reference binding, nested loops,
+  deeper direct branch-action nesting, and mutable state updates remain rejected.
+
+## Runtime Final If Nested If Actions
+
+`examples/runtime_final_if_nested_if_actions.str` sends immutable `CheckFlags`
+record payloads to four workers and uses one direct nested statement-level
+runtime branch action as an action prefix inside each selected final-position
+runtime branch. Each outer final-position branch still ends in the same
+whole-value `Continue(state)` result.
+
+```sh
+cargo run -p strata --bin strata -- check examples/runtime_final_if_nested_if_actions.str
+cargo run -p strata --bin strata -- build examples/runtime_final_if_nested_if_actions.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_if_actions.mta
+```
+
+Key source ideas:
+
+- The final-position `if (outer == True) { ... } else { ... }` lowers both
+  branch action prefixes and branch next states through typed Mantle control
+  flow.
+- The direct nested `if (inner == True) { ... } else { ... }` in each selected
+  final-position branch lowers as a typed Mantle `ArtifactAction::IfElse`.
+- Nested branch sends use the declared `reporter: ProcessRef<Reporter>` binding
+  created before the final-position branch and typed `ReceivedPayload` record
+  field templates for the immutable `inner_flag` value.
+- Runtime execution records the final-position branch selection, nested branch
+  selection, selected emit/send effects, and final whole-value result behavior
+  in order.
+- Third-level runtime branch actions, nested loops, branch-local `spawn`,
+  branch-local process-reference binding, statement-branch `return`, and mutable
+  state updates remain rejected.
 
 ## Runtime Guard Noop
 

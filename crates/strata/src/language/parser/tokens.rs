@@ -181,7 +181,40 @@ impl Parser {
         ) {
             return false;
         }
-        self.block_contains_top_level_return(branch_start)
+        if !self.block_contains_top_level_return(branch_start) {
+            return false;
+        }
+        let Some(branch_end) = self.matching_symbol_index(branch_start, '{', '}') else {
+            return false;
+        };
+        let Some(else_index) = branch_end.checked_add(1) else {
+            return false;
+        };
+        if !matches!(
+            self.tokens.get(else_index).map(|token| &token.kind),
+            Some(TokenKind::Ident(value)) if value == "else"
+        ) {
+            return false;
+        }
+        let Some(else_branch_start) = else_index.checked_add(1) else {
+            return false;
+        };
+        if !matches!(
+            self.tokens.get(else_branch_start).map(|token| &token.kind),
+            Some(TokenKind::Symbol('{'))
+        ) {
+            return false;
+        }
+        let Some(else_branch_end) = self.matching_symbol_index(else_branch_start, '{', '}') else {
+            return false;
+        };
+        let Some(after_else_branch) = else_branch_end.checked_add(1) else {
+            return false;
+        };
+        matches!(
+            self.tokens.get(after_else_branch).map(|token| &token.kind),
+            Some(TokenKind::Symbol('}')) | Some(TokenKind::Eof)
+        )
     }
 
     pub(super) fn block_contains_top_level_return(&self, block_start: usize) -> bool {

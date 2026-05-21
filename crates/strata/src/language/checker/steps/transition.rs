@@ -124,16 +124,11 @@ impl ActionCheckScope {
         Self {
             in_loop_body: self.in_loop_body,
             runtime_if_branch: RuntimeIfBranchScope::FinalPosition,
-            statement_if_depth: self.statement_if_depth,
+            statement_if_depth: self.statement_if_depth.saturating_add(1),
         }
     }
 
     fn validate_statement_if_allowed(self, process: &Identifier) -> Result<()> {
-        if matches!(self.runtime_if_branch, RuntimeIfBranchScope::FinalPosition) {
-            return Err(Error::new(format!(
-                "process {process} nested statement-level if branches are not supported in this source slice"
-            )));
-        }
         if self.statement_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
             return Err(Error::new(format!(
                 "process {process} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice"

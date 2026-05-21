@@ -2,6 +2,8 @@ use super::support::*;
 
 #[path = "runtime_branches/final_if_loop_actions.rs"]
 mod final_if_loop_actions;
+#[path = "runtime_branches/final_if_nested_actions.rs"]
+mod final_if_nested_actions;
 #[path = "runtime_branches/malformed_and_ordering.rs"]
 mod malformed_and_ordering;
 #[path = "runtime_branches/nested_if_actions.rs"]
