@@ -1,8 +1,11 @@
 use super::support::*;
 
+use mantle_artifact::MAX_NEXT_STATE_IF_ELSE_DEPTH;
+
 #[test]
 fn static_validation_rejects_next_state_if_else_above_terminal_limit() {
     let bool_type = enum_value_type("Bool", &["False", "True"]);
+    let invalid_depth = MAX_NEXT_STATE_IF_ELSE_DEPTH + 1;
     let process = CheckedProcess::new(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
@@ -23,7 +26,7 @@ fn static_validation_rejects_next_state_if_else_above_terminal_limit() {
             current_state: None,
             message: checked_message_id(0),
             step_result: CheckedStepResult::Stop,
-            next_state: nested_next_state_if_else(3, &bool_type),
+            next_state: nested_next_state_if_else(invalid_depth, &bool_type),
             effects: Vec::new(),
             actions: Vec::new(),
         })],
@@ -31,13 +34,12 @@ fn static_validation_rejects_next_state_if_else_above_terminal_limit() {
 
     let err =
         validate_action_references(&[process], &checked_process_id(0), &checked_message_id(0))
-            .expect_err("third-level checked next_state if must fail");
+            .expect_err("checked next_state if above terminal depth limit must fail");
 
-    assert!(
-        err.to_string()
-            .contains("next_state runtime if nesting exceeds maximum depth of 2"),
-        "{err}"
+    let expected = format!(
+        "next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH}"
     );
+    assert!(err.to_string().contains(&expected), "{err}");
 }
 
 #[test]
