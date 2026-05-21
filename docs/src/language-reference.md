@@ -616,9 +616,9 @@ checking, artifact admission, and loaded-runtime admission. Runtime branch
 statement prefixes cannot bind process references. Branches may contain bounded
 runtime `for` statements, including effect-only loop prefixes before the
 terminal return in final-position runtime branches. Each loop body remains the
-same admitted runtime-loop body surface. Final-position branch prefixes still
-cannot directly contain statement-level runtime `if`; nested branch selection in
-that shape must stay inside the bounded loop body surface.
+same admitted runtime-loop body surface. Final-position branch prefixes may also
+contain one direct statement-level runtime `if` action; deeper direct
+branch-action nesting remains rejected.
 An omitted statement-level `else` lowers as an explicit empty branch. Empty
 statement-level branches perform no effects, no state change, no authority
 acquisition, and no hidden work; branch selection is still observable through

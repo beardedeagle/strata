@@ -548,12 +548,13 @@ Final-position `return_if_else` is runtime control flow in `step` bodies. The
 condition must have the same `Bool` contract, but it may depend on received
 payload or current-state payload bindings. Each branch is a block body with its
 own statements and terminal return. Branch statement prefixes are limited to
-`emit`, `send`, and bounded `for` actions in this slice. Direct statement-level
-`if_statement` prefixes remain rejected inside final-position branches; a
-bounded `for` prefix keeps the ordinary loop-body surface, including the
-admitted loop-body branch action. Strata lowers the checked condition, branch
-action prefixes, and branch next states to Mantle control flow; Mantle executes
-only the selected branch and traces the branch choice.
+`emit`, `send`, bounded `for` actions, and one direct statement-level
+`if_statement` action in this slice. A bounded `for` prefix keeps the ordinary
+loop-body surface, including the admitted loop-body branch action. Strata lowers
+the checked condition, branch action prefixes, and branch next states to Mantle
+control flow; Mantle executes only the selected branch and traces the branch
+choice. Deeper direct branch-action nesting remains rejected at source checking,
+artifact admission, and loaded-runtime admission.
 
 Statement-level `if_statement` is runtime control flow for effects before the
 enclosing return. Branches may contain `emit`, `send`, and bounded `for`

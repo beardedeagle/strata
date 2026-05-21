@@ -1,0 +1,99 @@
+module runtime_final_if_nested_if_actions;
+
+record MainState;
+
+record CheckFlags {
+    outer_flag: Bool,
+    inner_flag: Bool,
+}
+
+record WorkerState;
+record ReporterState;
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum WorkerMsg {
+    Check(CheckFlags),
+}
+
+enum ReporterMsg {
+    Report(Bool),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let both_true: ProcessRef<Worker> = spawn Worker;
+        let outer_true: ProcessRef<Worker> = spawn Worker;
+        let outer_false_inner_true: ProcessRef<Worker> = spawn Worker;
+        let both_false: ProcessRef<Worker> = spawn Worker;
+        send both_true Check(CheckFlags { outer_flag: True, inner_flag: True });
+        send outer_true Check(CheckFlags { outer_flag: True, inner_flag: False });
+        send outer_false_inner_true Check(CheckFlags { outer_flag: False, inner_flag: True });
+        send both_false Check(CheckFlags { outer_flag: False, inner_flag: False });
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Check(CheckFlags { outer_flag: outer, inner_flag: inner })) -> ProcResult<WorkerState> ! [spawn, emit, send] ~ [] @det {
+        let reporter: ProcessRef<Reporter> = spawn Reporter;
+        if (outer == True) {
+            if (inner == True) {
+                emit "worker final outer true inner true";
+                send reporter Report(inner);
+            } else {
+                emit "worker final outer true inner false";
+                send reporter Report(inner);
+            }
+            return Continue(state);
+        } else {
+            if (inner == True) {
+                emit "worker final outer false inner true";
+                send reporter Report(inner);
+            } else {
+                emit "worker final outer false inner false";
+                send reporter Report(inner);
+            }
+            return Continue(state);
+        }
+    }
+}
+
+proc Reporter mailbox bounded(1) {
+    type State = ReporterState;
+    type Msg = ReporterMsg;
+
+    fn init() -> ReporterState ! [] ~ [] @det {
+        return ReporterState;
+    }
+
+    fn step(state: ReporterState, Report(flag: Bool)) -> ProcResult<ReporterState> ! [emit] ~ [] @det {
+        if (flag == True) {
+            emit "reporter saw true";
+        } else {
+            emit "reporter saw false";
+        }
+        return Continue(state);
+    }
+}
