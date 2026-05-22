@@ -4,16 +4,14 @@ use super::*;
 mod arm_statements;
 mod selected_actions;
 mod static_preadmit;
+mod substitutions;
 
 use arm_statements::validate_step_return_match_arm_statements;
 pub(in crate::language::checker) use selected_actions::selected_step_return_match_action_statements;
 pub(super) use static_preadmit::static_step_return_match_arm_state_args;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StepReturnSubstitution<'a> {
-    name: &'a Identifier,
-    value: ValueExpr,
-}
+use substitutions::{
+    StepReturnSubstitution, substitute_step_return_bindings, substitute_step_return_statements,
+};
 
 pub(super) fn resolve_step_return_match(
     module: &Module,
@@ -594,146 +592,4 @@ fn artifact_collection_to_source_value(
             value.label()
         ))),
     }
-}
-
-fn substitute_step_return_bindings(
-    value: ValueExpr,
-    bindings: &[StepReturnSubstitution<'_>],
-) -> ValueExpr {
-    match value {
-        ValueExpr::Identifier(name) => bindings
-            .iter()
-            .find_map(|binding| (binding.name == &name).then(|| binding.value.clone()))
-            .unwrap_or(ValueExpr::Identifier(name)),
-        ValueExpr::Call { name, arg } => ValueExpr::Call {
-            name,
-            arg: Box::new(substitute_step_return_bindings(*arg, bindings)),
-        },
-        ValueExpr::EnumVariant { name, payload } => ValueExpr::EnumVariant {
-            name,
-            payload: Box::new(substitute_step_return_bindings(*payload, bindings)),
-        },
-        ValueExpr::Record(record) => ValueExpr::Record(RecordValue {
-            name: record.name,
-            fields: record
-                .fields
-                .into_iter()
-                .map(|field| RecordValueField {
-                    name: field.name,
-                    value: substitute_step_return_bindings(field.value, bindings),
-                })
-                .collect(),
-        }),
-        ValueExpr::List(list) => ValueExpr::List(ListValue {
-            element_type: list.element_type,
-            capacity: list.capacity,
-            items: list
-                .items
-                .into_iter()
-                .map(|item| substitute_step_return_bindings(item, bindings))
-                .collect(),
-        }),
-        ValueExpr::Map(map) => ValueExpr::Map(MapValue {
-            key_type: map.key_type,
-            value_type: map.value_type,
-            capacity: map.capacity,
-            entries: map
-                .entries
-                .into_iter()
-                .map(|entry| MapValueEntry {
-                    key: substitute_step_return_bindings(entry.key, bindings),
-                    value: substitute_step_return_bindings(entry.value, bindings),
-                })
-                .collect(),
-        }),
-        ValueExpr::Equality {
-            operator,
-            left,
-            right,
-        } => ValueExpr::Equality {
-            operator,
-            left: Box::new(substitute_step_return_bindings(*left, bindings)),
-            right: Box::new(substitute_step_return_bindings(*right, bindings)),
-        },
-        ValueExpr::BooleanNot { operand } => ValueExpr::BooleanNot {
-            operand: Box::new(substitute_step_return_bindings(*operand, bindings)),
-        },
-        ValueExpr::BooleanBinary {
-            operator,
-            left,
-            right,
-        } => ValueExpr::BooleanBinary {
-            operator,
-            left: Box::new(substitute_step_return_bindings(*left, bindings)),
-            right: Box::new(substitute_step_return_bindings(*right, bindings)),
-        },
-        ValueExpr::Grouped { value } => ValueExpr::Grouped {
-            value: Box::new(substitute_step_return_bindings(*value, bindings)),
-        },
-        ValueExpr::IfElse {
-            condition,
-            then_branch,
-            else_branch,
-        } => ValueExpr::IfElse {
-            condition: Box::new(substitute_step_return_bindings(*condition, bindings)),
-            then_branch: Box::new(substitute_step_return_bindings(*then_branch, bindings)),
-            else_branch: Box::new(substitute_step_return_bindings(*else_branch, bindings)),
-        },
-    }
-}
-
-fn substitute_step_return_statements(
-    statements: &[Statement],
-    bindings: &[StepReturnSubstitution<'_>],
-) -> Vec<Statement> {
-    if statements.is_empty() {
-        return Vec::new();
-    }
-    if bindings.is_empty() {
-        return statements.to_vec();
-    }
-    statements
-        .iter()
-        .cloned()
-        .map(|statement| substitute_step_return_statement(statement, bindings))
-        .collect()
-}
-
-fn substitute_step_return_statement(
-    statement: Statement,
-    bindings: &[StepReturnSubstitution<'_>],
-) -> Statement {
-    match statement {
-        Statement::Emit(_) | Statement::LetProcessRef { .. } | Statement::ForEach { .. } => {
-            statement
-        }
-        Statement::IfElse {
-            condition,
-            then_body,
-            else_body,
-        } => Statement::IfElse {
-            condition: substitute_step_return_bindings(condition, bindings),
-            then_body: substitute_step_return_statement_vec(then_body, bindings),
-            else_body: substitute_step_return_statement_vec(else_body, bindings),
-        },
-        Statement::Send {
-            target,
-            message,
-            payload,
-        } => Statement::Send {
-            target,
-            message,
-            payload: payload.map(|payload| substitute_step_return_bindings(payload, bindings)),
-        },
-    }
-}
-
-fn substitute_step_return_statement_vec(
-    statements: Vec<Statement>,
-    bindings: &[StepReturnSubstitution<'_>],
-) -> Vec<Statement> {
-    statements
-        .into_iter()
-        .map(|statement| substitute_step_return_statement(statement, bindings))
-        .collect()
 }

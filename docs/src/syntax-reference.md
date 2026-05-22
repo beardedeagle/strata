@@ -321,16 +321,18 @@ step_return_match =
     "return" "match" ident "{" match_arm+ "}" ";"
 ```
 
-Every arm body may perform local `emit` / in-scope direct `send` prefixes, or
-one direct statement-level runtime `if` whose branches contain only those
-admitted action prefixes, before returning `Continue(value)`, `Stop(value)`, or
-`Panic(value)`. The checker selects the concrete arm before lowering, appends
+Every arm body may perform local `emit` / in-scope direct `send` prefixes, one
+direct statement-level runtime `if` whose branches contain only those admitted
+action prefixes, or one direct bounded runtime `for` over a checked runtime
+`List<T,N>` binding. A loop body may contain only local `emit` or in-scope direct
+`send` actions. The checker selects the concrete arm before lowering, appends
 only that arm's typed action prefix after any uniform prefix actions, and emits
 the same typed transition metadata as a direct step return. Arm-local `spawn`,
-process-reference binding, multiple or nested runtime `if` statements, runtime
-`for`, final-position runtime `if`, nested return matches, dynamic payload
-catch-all dispatch, source-string selectors, and helper/init return-match arm
-statements remain rejected.
+process-reference binding, multiple or nested runtime `if` statements, multiple
+or nested runtime `for` statements, `for` inside arm-local runtime `if`,
+runtime `if` inside arm-local `for`, final-position runtime `if`, nested return
+matches, dynamic payload catch-all dispatch, source-string selectors, and
+helper/init return-match arm statements remain rejected.
 
 In a pure block-bodied `init`, the return expression may be a match over one
 fieldless enum constructor:
