@@ -321,12 +321,14 @@ step_return_match =
     "return" "match" ident "{" match_arm+ "}" ";"
 ```
 
-Every arm body must be statement-free and must return `Continue(value)`,
-`Stop(value)`, or `Panic(value)`. The checker selects the concrete arm before
-lowering and emits the same typed transition metadata as a direct step return,
-including the same prefix actions and effect list on every generated transition.
-This syntax does not admit dynamic payload catch-all dispatch, source-string
-selectors, or branch-local arm statements.
+Every arm body may perform a local `emit` or `send` to an already in-scope
+direct process reference before returning `Continue(value)`, `Stop(value)`, or
+`Panic(value)`. The checker selects the concrete arm before lowering, appends
+only that arm's typed action prefix after any uniform prefix actions, and emits
+the same typed transition metadata as a direct step return. Arm-local `spawn`,
+process-reference binding, runtime `if`, runtime `for`, nested return matches,
+dynamic payload catch-all dispatch, source-string selectors, and helper/init
+return-match arm statements remain rejected.
 
 In a pure block-bodied `init`, the return expression may be a match over one
 fieldless enum constructor:

@@ -22,7 +22,7 @@ Mantle artifact internals.
 | Boolean predicates | `!`, `&&`, and `||` over admitted Bool-producing predicates. |
 | Pure conditionals | Source-time expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`. |
 | Runtime branching | Final-position `if (condition) { ... return ...; } else { ... return ...; }` and statement-level effect branches in `step` bodies, lowered to Mantle control flow. |
-| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, step return-match expressions with optional uniform action prefixes, and `_` wildcards. |
+| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, step return-match expressions with optional uniform and selected-arm action prefixes, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
 | Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for helpers, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
@@ -848,9 +848,10 @@ The `! [...]` effect list is source-level authority for the runtime effects used
 by each `step` clause. It must exactly match the clause actions. For a
 `match msg`, `match state`, or `step return match` step, the one effect list
 applies to every generated transition. Match-body arms must use exactly those
-effects, and a return-match uniform prefix must lower the same actions onto each
-selected transition. Missing, duplicate, and unused declared effects are
-rejected before lowering.
+effects. A return-match uniform prefix lowers the same actions onto each
+selected transition, and selected-arm prefixes must still leave every generated
+transition with exactly the declared effects. Missing, duplicate, and unused
+declared effects are rejected before lowering.
 
 | Effect | Statement |
 | --- | --- |
@@ -1011,16 +1012,21 @@ return Panic(Failed);
 A `step` body may also use `return match` over a concrete enum source value
 binding when the checker can reduce the match to one typed transition before
 lowering. Statements before the `return match` are a uniform action prefix; the
-checker lowers that same typed action list onto every generated transition:
+checker lowers that same typed action list onto every generated transition.
+The selected arm may then perform its own straight-line `emit` or `send` prefix
+to an already in-scope direct process reference before the terminal whole-value
+result:
 
 ```strata
 fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
     emit "return-match prefix";
     return match phase {
         Ready => {
+            emit "ready arm prefix";
             return Continue(SawReady);
         }
         Done => {
+            emit "done arm prefix";
             return Stop(Done);
         }
     };
@@ -1031,16 +1037,17 @@ This form is not runtime dispatch. The checker requires an immutable enum source
 binding with a concrete value proven during step clause or state-match expansion,
 checks every arm as a `ProcResult<StateType>`, selects the matching arm, and
 lowers the selected arm to the existing typed transition shape. Uniform prefix
-effects occur before the return selection in source program order and remain
-committed runtime actions. Return-match arms remain statement-free, so per-arm
-effects are not admitted. Matching `state`, matching non-enum values, and
-dynamic payload catch-all dispatch are not admitted.
+effects occur before the selected arm prefix in source program order and remain
+committed runtime actions. Arm-local `spawn`, process-reference binding,
+runtime `if`, runtime `for`, nested return matches, matching `state`, matching
+non-enum values, and dynamic payload catch-all dispatch are not admitted.
 
 Current pattern-matching closure boundaries:
 
 | Surface | Current status |
 | --- | --- |
-| `step return match` after uniform pre-return effects | Admitted. Prefix actions lower identically onto each selected typed transition. |
+| `step return match` after uniform pre-return effects | Admitted. Uniform prefix actions lower identically onto each selected typed transition. |
+| `step return match` arm-local `emit` / in-scope direct `send` prefixes | Admitted only after source-time concrete arm selection; selected arm actions lower as typed transition actions before the terminal result. |
 | `step return match state` | Rejected. Use whole-body `match state`, then match a concrete state-payload binding when one is proven. |
 | `init match` over payload-bearing arm constructors | Admitted only when every arm returns a state value that does not materialize payload bindings. |
 | `init return match` over payload-bearing constructors | Rejected in this slice. `init return match` selects a static initial state from a fieldless enum scrutinee. |

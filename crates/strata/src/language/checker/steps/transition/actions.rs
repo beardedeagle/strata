@@ -23,6 +23,12 @@ pub(super) fn checked_actions_for_statements(
                 });
             }
             Statement::LetProcessRef { name, target, .. } => {
+                if scope.in_step_return_match_arm {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot bind process reference {} in this source slice",
+                        context.process.name, name
+                    )));
+                }
                 if !matches!(scope.runtime_if_branch, RuntimeIfBranchScope::Outside) {
                     return Err(Error::new(format!(
                         "process {} {} cannot bind process reference {} in this source slice",
@@ -74,6 +80,12 @@ pub(super) fn checked_actions_for_statements(
                 then_body,
                 else_body,
             } => {
+                if scope.in_step_return_match_arm {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot perform runtime if in this source slice",
+                        context.process.name
+                    )));
+                }
                 scope.validate_statement_if_allowed(&context.process.name)?;
                 actions.push(checked_if_else_statement_action(
                     context,
@@ -95,6 +107,12 @@ pub(super) fn checked_actions_for_statements(
                 collection,
                 body,
             } => {
+                if scope.in_step_return_match_arm {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot perform for loops in this source slice",
+                        context.process.name
+                    )));
+                }
                 if scope.in_loop_body {
                     return Err(Error::new(format!(
                         "process {} nested for loops are not supported in this source slice",

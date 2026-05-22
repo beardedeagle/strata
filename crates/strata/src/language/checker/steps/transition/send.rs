@@ -112,8 +112,8 @@ pub(super) fn resolve_send_message_case(
     })
 }
 
-fn checked_send_payload_template(
-    context: &mut StepCheckContext<'_>,
+pub(super) fn checked_send_payload_template(
+    context: &StepCheckContext<'_>,
     types: &mut CheckedTypeInterner<'_>,
     expected_type: &TypeRef,
     payload: &ValueExpr,

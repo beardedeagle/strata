@@ -1,6 +1,12 @@
 use super::super::super::source_functions::validate_source_function_value_expr;
 use super::*;
 
+mod selected_actions;
+mod static_preadmit;
+
+pub(in crate::language::checker) use selected_actions::selected_step_return_match_action_statements;
+pub(super) use static_preadmit::static_step_return_match_arm_state_args;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StepReturnSubstitution<'a> {
     name: &'a Identifier,
@@ -50,7 +56,12 @@ pub(super) fn resolve_step_return_match(
         binding_context: PatternBindingContext::Source { owner: &subject },
     };
     let arms = check_payload_sensitive_typed_match_arms(&pattern_context, &match_body.arms)?;
-    let mut wildcard = None;
+    if arms.len() != match_body.arms.len() {
+        return Err(Error::new(format!(
+            "process {} step return match typed arm count does not match source arm count",
+            process.name
+        )));
+    }
     for (arm, source_arm) in arms.iter().zip(&match_body.arms) {
         validate_step_return_match_arm(
             process,
@@ -59,6 +70,9 @@ pub(super) fn resolve_step_return_match(
             &arm.pattern,
             source_arm,
         )?;
+    }
+    let mut wildcard = None;
+    for (arm, source_arm) in arms.iter().zip(&match_body.arms) {
         match &arm.pattern {
             TypedMatchPattern::Variant {
                 variant,
@@ -111,17 +125,22 @@ fn validate_step_return_match_arm(
     pattern: &TypedMatchPattern,
     arm: &MatchArm,
 ) -> Result<()> {
-    if !arm.body.statements.is_empty() {
-        return Err(Error::new(format!(
-            "process {} step return match arms must not perform statements",
-            process.name
-        )));
-    }
+    validate_step_return_match_arm_statements(process, &arm.body.statements)?;
     let resolved = match &arm.body.returns {
         ReturnExpr::Call { name, arg } => step_result_call(name, arg, "step return match arm")?,
-        ReturnExpr::Match(_) | ReturnExpr::Value(_) | ReturnExpr::IfElse { .. } => {
-            return Err(step_return_shape_error("step return match arm"));
+        ReturnExpr::Match(_) => {
+            return Err(Error::new(format!(
+                "process {} step return match arm nested return match is not supported in this source slice",
+                process.name
+            )));
         }
+        ReturnExpr::IfElse { .. } => {
+            return Err(Error::new(format!(
+                "process {} step return match arm cannot perform final-position runtime if in this source slice",
+                process.name
+            )));
+        }
+        ReturnExpr::Value(_) => return Err(step_return_shape_error("step return match arm")),
     };
     let mut arm_bindings = Vec::new();
     let validation_bindings = match pattern {
@@ -164,6 +183,36 @@ fn validate_step_return_match_arm(
     )
 }
 
+fn validate_step_return_match_arm_statements(
+    process: &Process,
+    statements: &[Statement],
+) -> Result<()> {
+    for statement in statements {
+        match statement {
+            Statement::Emit(_) | Statement::Send { .. } => {}
+            Statement::LetProcessRef { name, .. } => {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot bind process reference {} in this source slice",
+                    process.name, name
+                )));
+            }
+            Statement::IfElse { .. } => {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot perform runtime if in this source slice",
+                    process.name
+                )));
+            }
+            Statement::ForEach { .. } => {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot perform for loops in this source slice",
+                    process.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn resolved_step_return_match_arm(
     body: &FunctionBlock,
     substitutions: &[StepReturnSubstitution<'_>],
@@ -175,6 +224,7 @@ fn resolved_step_return_match_arm(
     if !substitutions.is_empty() {
         resolved.state_arg = substitute_step_return_bindings(resolved.state_arg, substitutions);
     }
+    resolved.action_statements = substitute_step_return_statements(&body.statements, substitutions);
     Ok(resolved)
 }
 
@@ -656,6 +706,44 @@ fn substitute_step_return_bindings(
             condition: Box::new(substitute_step_return_bindings(*condition, bindings)),
             then_branch: Box::new(substitute_step_return_bindings(*then_branch, bindings)),
             else_branch: Box::new(substitute_step_return_bindings(*else_branch, bindings)),
+        },
+    }
+}
+
+fn substitute_step_return_statements(
+    statements: &[Statement],
+    bindings: &[StepReturnSubstitution<'_>],
+) -> Vec<Statement> {
+    if statements.is_empty() {
+        return Vec::new();
+    }
+    if bindings.is_empty() {
+        return statements.to_vec();
+    }
+    statements
+        .iter()
+        .cloned()
+        .map(|statement| substitute_step_return_statement(statement, bindings))
+        .collect()
+}
+
+fn substitute_step_return_statement(
+    statement: Statement,
+    bindings: &[StepReturnSubstitution<'_>],
+) -> Statement {
+    match statement {
+        Statement::Emit(_)
+        | Statement::LetProcessRef { .. }
+        | Statement::IfElse { .. }
+        | Statement::ForEach { .. } => statement,
+        Statement::Send {
+            target,
+            message,
+            payload,
+        } => Statement::Send {
+            target,
+            message,
+            payload: payload.map(|payload| substitute_step_return_bindings(payload, bindings)),
         },
     }
 }

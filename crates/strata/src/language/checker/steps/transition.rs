@@ -6,9 +6,11 @@ use mantle_artifact::{
 };
 
 mod actions;
+mod return_match_actions;
 mod send;
 
 use actions::checked_actions_for_statements;
+use return_match_actions::validate_return_match_arm_action_statements;
 
 pub(super) fn check_step_transition(
     context: &mut StepCheckContext<'_>,
@@ -96,6 +98,7 @@ enum RuntimeIfBranchScope {
 #[derive(Debug, Clone, Copy)]
 struct ActionCheckScope {
     in_loop_body: bool,
+    in_step_return_match_arm: bool,
     runtime_if_branch: RuntimeIfBranchScope,
     statement_if_depth: usize,
 }
@@ -103,6 +106,7 @@ struct ActionCheckScope {
 impl ActionCheckScope {
     const TOP_LEVEL: Self = Self {
         in_loop_body: false,
+        in_step_return_match_arm: false,
         runtime_if_branch: RuntimeIfBranchScope::Outside,
         statement_if_depth: 0,
     };
@@ -110,6 +114,7 @@ impl ActionCheckScope {
     const fn for_loop_body(self) -> Self {
         Self {
             in_loop_body: true,
+            in_step_return_match_arm: self.in_step_return_match_arm,
             runtime_if_branch: self.runtime_if_branch,
             statement_if_depth: self.statement_if_depth,
         }
@@ -118,6 +123,7 @@ impl ActionCheckScope {
     const fn for_statement_if_branch(self) -> Self {
         Self {
             in_loop_body: self.in_loop_body,
+            in_step_return_match_arm: self.in_step_return_match_arm,
             runtime_if_branch: RuntimeIfBranchScope::Statement,
             statement_if_depth: self.statement_if_depth.saturating_add(1),
         }
@@ -126,8 +132,18 @@ impl ActionCheckScope {
     const fn for_final_runtime_if_branch(self) -> Self {
         Self {
             in_loop_body: self.in_loop_body,
+            in_step_return_match_arm: self.in_step_return_match_arm,
             runtime_if_branch: RuntimeIfBranchScope::FinalPosition,
             statement_if_depth: self.statement_if_depth.saturating_add(1),
+        }
+    }
+
+    const fn for_step_return_match_arm(self) -> Self {
+        Self {
+            in_loop_body: self.in_loop_body,
+            in_step_return_match_arm: true,
+            runtime_if_branch: self.runtime_if_branch,
+            statement_if_depth: self.statement_if_depth,
         }
     }
 
@@ -307,6 +323,15 @@ fn checked_return_outcome(
             body,
         },
     )?;
+    validate_return_match_arm_action_statements(
+        context,
+        types,
+        function_scope,
+        source_bindings,
+        template_bindings,
+        input,
+        body,
+    )?;
     let next_state = checked_next_state_for_arg(
         context,
         state_space,
@@ -318,10 +343,26 @@ fn checked_return_outcome(
         &step_return.state_arg,
         next_state_if_depth,
     )?;
+    let actions = if step_return.action_statements.is_empty() {
+        Vec::new()
+    } else {
+        checked_actions_for_statements(
+            context,
+            outputs,
+            types,
+            function_scope,
+            source_bindings,
+            template_bindings,
+            input.payload_bindings,
+            loop_elements,
+            ActionCheckScope::TOP_LEVEL.for_step_return_match_arm(),
+            &step_return.action_statements,
+        )?
+    };
     Ok(CheckedBlockOutcome {
         step_result: step_return.step_result,
         next_state,
-        actions: Vec::new(),
+        actions,
     })
 }
 

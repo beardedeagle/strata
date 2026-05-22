@@ -14,6 +14,7 @@ pub(in crate::language::checker) use discovery::{
     validate_pattern_binding_name,
 };
 pub(in crate::language::checker) use process_refs::collect_message_case_process_refs;
+pub(in crate::language::checker) use returns::selected_step_return_match_action_statements;
 
 use clauses::check_step_clauses;
 use process_refs::collect_process_refs;
