@@ -10,6 +10,7 @@ mod nested_pattern_destructuring;
 mod payload_limits;
 mod process_refs;
 mod process_return_match;
+mod process_return_match_arm_for;
 mod process_return_match_arm_prefix;
 mod process_return_match_arm_prefix_invalid_templates;
 mod process_return_match_arm_prefix_properties;

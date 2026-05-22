@@ -18,7 +18,7 @@ struct StatementRuntimeIf<'a> {
 }
 
 #[derive(Clone, Copy)]
-struct ForEachAction<'a> {
+pub(super) struct ForEachAction<'a> {
     item: &'a ForEachItem,
     collection: &'a ValueExpr,
     body: &'a [Statement],
@@ -99,6 +99,12 @@ pub(super) fn checked_actions_for_statements(
                 then_body,
                 else_body,
             } => {
+                if input.scope.in_step_return_match_arm && input.scope.in_loop_body {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot perform nested runtime if in this source slice",
+                        context.process.name
+                    )));
+                }
                 if input.scope.in_step_return_match_arm
                     && !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside)
                 {
@@ -128,9 +134,17 @@ pub(super) fn checked_actions_for_statements(
                 collection,
                 body,
             } => {
-                if input.scope.in_step_return_match_arm {
+                if input.scope.in_step_return_match_arm
+                    && !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside)
+                {
                     return Err(Error::new(format!(
                         "process {} step return match arm cannot perform for loops in this source slice",
+                        context.process.name
+                    )));
+                }
+                if input.scope.in_step_return_match_arm && input.scope.in_loop_body {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot perform nested for loops in this source slice",
                         context.process.name
                     )));
                 }
@@ -318,6 +332,11 @@ fn checked_for_each_action(
             path: &binding.path,
         });
     }
+    let body_scope = if input.scope.in_step_return_match_arm {
+        input.scope.for_loop_body()
+    } else {
+        ActionCheckScope::TOP_LEVEL.for_loop_body()
+    };
     let body = checked_actions_for_statements(
         context,
         outputs,
@@ -328,7 +347,7 @@ fn checked_for_each_action(
             source_bindings: &body_source_bindings,
             template_bindings: &body_template_bindings,
             payload_bindings: input.payload_bindings,
-            scope: ActionCheckScope::TOP_LEVEL.for_loop_body(),
+            scope: body_scope,
         },
         for_each.body,
     )?;
@@ -341,14 +360,14 @@ fn checked_for_each_action(
     })
 }
 
-struct LoopElementBinding<'a> {
-    name: &'a Identifier,
-    ty: TypeRef,
-    checked_ty: CheckedTypeRef,
-    path: PayloadBindingPath,
+pub(super) struct LoopElementBinding<'a> {
+    pub(super) name: &'a Identifier,
+    pub(super) ty: TypeRef,
+    pub(super) checked_ty: CheckedTypeRef,
+    pub(super) path: PayloadBindingPath,
 }
 
-fn checked_loop_element_bindings<'a>(
+pub(super) fn checked_loop_element_bindings<'a>(
     context: &StepCheckContext<'_>,
     types: &mut CheckedTypeInterner<'_>,
     source_bindings: &[SourceValueBinding<'_>],
@@ -377,7 +396,7 @@ fn checked_loop_element_bindings<'a>(
     }
 }
 
-fn for_each_item_name(item: &ForEachItem) -> &Identifier {
+pub(super) fn for_each_item_name(item: &ForEachItem) -> &Identifier {
     match item {
         ForEachItem::Binding(name) | ForEachItem::RecordPattern { name, .. } => name,
     }

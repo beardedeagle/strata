@@ -1,8 +1,13 @@
-use crate::language::MAX_VALUE_NESTING;
 use crate::language::ast::{ListValue, MapValue, MapValueEntry, RecordValue, RecordValueField};
 
 use super::send::checked_send_payload_template;
 use super::*;
+
+mod for_each;
+mod static_arm;
+
+use for_each::validate_step_return_match_arm_for_each_statement;
+use static_arm::static_step_return_match_arm_substitutions;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StaticArmSubstitution<'a> {
@@ -20,6 +25,7 @@ struct ArmTemplateValidation<'a, 'template, 'arm> {
 struct ArmStatementValidation<'a, 'template, 'arm> {
     template: ArmTemplateValidation<'a, 'template, 'arm>,
     in_runtime_if_branch: bool,
+    in_loop_body: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -34,6 +40,13 @@ struct ArmSend<'a> {
     target: &'a Identifier,
     message: &'a Identifier,
     payload: Option<&'a ValueExpr>,
+}
+
+#[derive(Clone, Copy)]
+struct ArmForEach<'a> {
+    item: &'a ForEachItem,
+    collection: &'a ValueExpr,
+    body: &'a [Statement],
 }
 
 pub(super) fn validate_return_match_arm_action_statements(
@@ -98,12 +111,22 @@ pub(super) fn validate_return_match_arm_action_statements(
             &mut arm_bindings,
         )?;
         let mut runtime_if_count = 0usize;
+        let mut runtime_for_count = 0usize;
         for statement in &source_arm.body.statements {
             if matches!(statement, Statement::IfElse { .. }) {
                 runtime_if_count = runtime_if_count.saturating_add(1);
                 if runtime_if_count > 1 {
                     return Err(Error::new(format!(
                         "process {} step return match arm cannot perform more than one runtime if in this source slice",
+                        context.process.name
+                    )));
+                }
+            }
+            if matches!(statement, Statement::ForEach { .. }) {
+                runtime_for_count = runtime_for_count.saturating_add(1);
+                if runtime_for_count > 1 {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot perform more than one for loop in this source slice",
                         context.process.name
                     )));
                 }
@@ -117,6 +140,7 @@ pub(super) fn validate_return_match_arm_action_statements(
                 ArmStatementValidation {
                     template: template_validation,
                     in_runtime_if_branch: false,
+                    in_loop_body: false,
                 },
                 statement,
             )?;
@@ -212,6 +236,12 @@ fn validate_step_return_match_arm_action_statement(
             then_body,
             else_body,
         } => {
+            if validation.in_loop_body {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot perform nested runtime if in this source slice",
+                    context.process.name
+                )));
+            }
             if validation.in_runtime_if_branch {
                 return Err(Error::new(format!(
                     "process {} step return match arm cannot perform nested runtime if in this source slice",
@@ -232,10 +262,37 @@ fn validate_step_return_match_arm_action_statement(
                 },
             )
         }
-        Statement::ForEach { .. } => Err(Error::new(format!(
-            "process {} step return match arm cannot perform for loops in this source slice",
-            context.process.name
-        ))),
+        Statement::ForEach {
+            item,
+            collection,
+            body,
+        } => {
+            if validation.in_runtime_if_branch {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot perform for loops in this source slice",
+                    context.process.name
+                )));
+            }
+            if validation.in_loop_body {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot perform nested for loops in this source slice",
+                    context.process.name
+                )));
+            }
+            validate_step_return_match_arm_for_each_statement(
+                context,
+                types,
+                function_scope,
+                source_bindings,
+                input,
+                validation.template,
+                ArmForEach {
+                    item,
+                    collection,
+                    body,
+                },
+            )
+        }
     }
 }
 
@@ -326,6 +383,7 @@ fn validate_step_return_match_arm_runtime_if_branch(
             ArmStatementValidation {
                 template: template_validation,
                 in_runtime_if_branch: true,
+                in_loop_body: false,
             },
             statement,
         )?;
@@ -529,109 +587,6 @@ fn validate_step_return_match_arm_process_ref_payload(
         )));
     }
     Ok(())
-}
-
-fn static_step_return_match_arm_substitutions<'a>(
-    context: &StepCheckContext<'_>,
-    pattern: &'a TypedMatchPattern,
-) -> Result<Vec<StaticArmSubstitution<'a>>> {
-    let TypedMatchPattern::Variant { bindings, .. } = pattern else {
-        return Ok(Vec::new());
-    };
-    if bindings.is_empty() {
-        return Ok(Vec::new());
-    }
-    bindings
-        .iter()
-        .map(|binding| {
-            Ok(StaticArmSubstitution {
-                name: &binding.name,
-                value: static_source_value_for_type(
-                    context.module,
-                    context.semantic_index,
-                    &binding.ty,
-                    0,
-                )?,
-            })
-        })
-        .collect()
-}
-
-fn static_source_value_for_type(
-    module: &Module,
-    semantic_index: &SemanticIndex,
-    ty: &TypeRef,
-    depth: usize,
-) -> Result<ValueExpr> {
-    if depth > MAX_VALUE_NESTING {
-        return Err(Error::new(format!(
-            "value nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
-        )));
-    }
-    if semantic_index.process_ref_target_type(ty)?.is_some() {
-        return Err(Error::new(
-            "process references must be direct message payloads",
-        ));
-    }
-    if let Ok(record) = semantic_index.record_decl(module, ty) {
-        if record.fields.is_empty() {
-            return Ok(ValueExpr::Identifier(record.name.clone()));
-        }
-        let mut fields = Vec::with_capacity(record.fields.len());
-        for field in &record.fields {
-            fields.push(RecordValueField {
-                name: field.name.clone(),
-                value: static_source_value_for_type(module, semantic_index, &field.ty, depth + 1)?,
-            });
-        }
-        return Ok(ValueExpr::Record(RecordValue {
-            name: record.name.clone(),
-            fields,
-        }));
-    }
-    if let Some(collection) = semantic_index.collection_type(ty)? {
-        return Ok(match collection {
-            CollectionType::List { element, capacity } => ValueExpr::List(ListValue {
-                element_type: Some(element.clone()),
-                capacity: Some(capacity),
-                items: Vec::new(),
-            }),
-            CollectionType::Map {
-                key,
-                value,
-                capacity,
-            } => ValueExpr::Map(MapValue {
-                key_type: Some(key.clone()),
-                value_type: Some(value.clone()),
-                capacity: Some(capacity),
-                entries: Vec::<MapValueEntry>::new(),
-            }),
-        });
-    }
-    let enum_decl = semantic_index.enum_decl(module, ty)?;
-    let variant = enum_decl
-        .variants
-        .iter()
-        .find(|variant| variant.payload_type.is_none())
-        .or_else(|| enum_decl.variants.first())
-        .ok_or_else(|| {
-            Error::new(format!(
-                "enum {} must declare at least one variant",
-                enum_decl.name
-            ))
-        })?;
-    match &variant.payload_type {
-        Some(payload_type) => Ok(ValueExpr::EnumVariant {
-            name: variant.name.clone(),
-            payload: Box::new(static_source_value_for_type(
-                module,
-                semantic_index,
-                payload_type,
-                depth + 1,
-            )?),
-        }),
-        None => Ok(ValueExpr::Identifier(variant.name.clone())),
-    }
 }
 
 fn source_value_uses_template_binding(

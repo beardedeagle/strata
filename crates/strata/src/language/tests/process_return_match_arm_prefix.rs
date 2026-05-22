@@ -312,23 +312,6 @@ proc Sink mailbox bounded(1) {
 }
 
 #[test]
-fn rejects_step_return_match_arm_for_each_statement() {
-    let source = ARM_PREFIX_SOURCE.replace(
-        "            Ready => {\n                emit \"return-match ready arm prefix\";\n                send sink Notice(Ready);\n                return Continue(SawReady);",
-        "            Ready => {\n                for item in phases {\n                    emit \"return-match arm for is unsupported\";\n                }\n                return Continue(SawReady);",
-    );
-
-    let err = check_source(&source).expect_err("arm-local for loop should fail");
-
-    assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform for loops in this source slice"
-        ),
-        "unexpected error: {err}"
-    );
-}
-
-#[test]
 fn rejects_step_return_match_arm_terminal_runtime_if() {
     let source = ARM_PREFIX_SOURCE.replace(
         "            Ready => {\n                emit \"return-match ready arm prefix\";\n                send sink Notice(Ready);\n                return Continue(SawReady);\n            }",

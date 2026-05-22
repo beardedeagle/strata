@@ -62,12 +62,15 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_matc
 ```
 
 A selected return-match arm-prefix gate proves source-selected dispatch before
-Mantle executes typed runtime branch actions:
+Mantle executes typed runtime arm actions:
 
 ```sh
 cargo run -p strata --bin strata -- check examples/process_return_match_arm_runtime_if_prefix.str
 cargo run -p strata --bin strata -- build examples/process_return_match_arm_runtime_if_prefix.str
 cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_runtime_if_prefix.mta
+cargo run -p strata --bin strata -- check examples/process_return_match_arm_for_prefix.str
+cargo run -p strata --bin strata -- build examples/process_return_match_arm_for_prefix.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_for_prefix.mta
 ```
 
 A runtime control-flow gate checks, builds, admits, runs, and traces typed
