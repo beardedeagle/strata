@@ -19,6 +19,7 @@ mod equality;
 
 use collections::checked_collection_template;
 use equality::{
+    CheckedBinaryTemplate, CheckedEqualityTemplate, CheckedTemplateInput,
     checked_boolean_binary_template, checked_boolean_not_template, checked_equality_template,
     checked_grouped_template,
 };
@@ -102,15 +103,19 @@ fn checked_value_template(
     } = value
     {
         return checked_equality_template(
-            module,
-            semantic_index,
             types,
-            expected_type,
-            *operator,
-            left,
-            right,
-            bindings,
-            depth + 1,
+            CheckedTemplateInput {
+                module,
+                semantic_index,
+                expected_type,
+                bindings,
+                depth: depth + 1,
+            },
+            CheckedEqualityTemplate {
+                operator: *operator,
+                left,
+                right,
+            },
         );
     }
     if let ValueExpr::BooleanNot { operand } = value {
@@ -131,15 +136,19 @@ fn checked_value_template(
     } = value
     {
         return checked_boolean_binary_template(
-            module,
-            semantic_index,
             types,
-            expected_type,
-            *operator,
-            left,
-            right,
-            bindings,
-            depth + 1,
+            CheckedTemplateInput {
+                module,
+                semantic_index,
+                expected_type,
+                bindings,
+                depth: depth + 1,
+            },
+            CheckedBinaryTemplate {
+                operator: *operator,
+                left,
+                right,
+            },
         );
     }
     if let ValueExpr::Grouped { value } = value {

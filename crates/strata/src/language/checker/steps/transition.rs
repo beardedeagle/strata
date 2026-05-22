@@ -9,7 +9,7 @@ mod actions;
 mod return_match_actions;
 mod send;
 
-use actions::checked_actions_for_statements;
+use actions::{ActionCheckInput, checked_actions_for_statements};
 use return_match_actions::validate_return_match_arm_action_statements;
 
 pub(super) fn check_step_transition(
@@ -55,18 +55,23 @@ pub(super) fn check_step_transition(
     let source_bindings =
         step_source_bindings(input.payload_bindings, input.state_payload_bindings);
     let mut loop_elements = LoopElementAllocator::default();
+    let transition_env = StepTransitionEnv {
+        function_scope: &function_scope,
+        source_bindings: &source_bindings,
+        template_bindings: &template_bindings,
+        input: &input,
+    };
     let outcome = check_step_block_outcome(
         context,
         state_space,
         outputs,
         types,
-        &function_scope,
-        &source_bindings,
-        &template_bindings,
-        &input,
         &mut loop_elements,
-        input.body,
-        0,
+        transition_env,
+        StepBlockInput {
+            body: input.body,
+            next_state_if_depth: 0,
+        },
     )?;
     let transition = CheckedTransition::new(CheckedTransitionParts {
         current_state: input.current_state,
@@ -86,6 +91,34 @@ struct CheckedBlockOutcome {
     step_result: CheckedStepResult,
     next_state: CheckedNextState,
     actions: Vec<CheckedAction>,
+}
+
+#[derive(Clone, Copy)]
+struct StepTransitionEnv<'a, 'scope, 'source, 'template, 'input> {
+    function_scope: &'a SourceFunctionScope<'scope>,
+    source_bindings: &'a [SourceValueBinding<'source>],
+    template_bindings: &'a [ValueTemplateBinding<'template>],
+    input: &'a StepTransitionInput<'input>,
+}
+
+#[derive(Clone, Copy)]
+struct StepBlockInput<'a> {
+    body: &'a FunctionBlock,
+    next_state_if_depth: usize,
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeIfReturnInput<'a> {
+    condition: &'a ValueExpr,
+    then_branch: &'a FunctionBlock,
+    else_branch: &'a FunctionBlock,
+    next_state_if_depth: usize,
+}
+
+#[derive(Clone, Copy)]
+struct NextStateInput<'a> {
+    state_arg: &'a ValueExpr,
+    next_state_if_depth: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -186,126 +219,106 @@ impl LoopElementAllocator {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn check_step_block_outcome(
     context: &mut StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
-    function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    input: &StepTransitionInput<'_>,
     loop_elements: &mut LoopElementAllocator,
-    body: &FunctionBlock,
-    next_state_if_depth: usize,
+    env: StepTransitionEnv<'_, '_, '_, '_, '_>,
+    block: StepBlockInput<'_>,
 ) -> Result<CheckedBlockOutcome> {
     let mut actions = checked_actions_for_statements(
         context,
         outputs,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        input.payload_bindings,
         loop_elements,
-        ActionCheckScope::TOP_LEVEL,
-        &body.statements,
+        ActionCheckInput {
+            function_scope: env.function_scope,
+            source_bindings: env.source_bindings,
+            template_bindings: env.template_bindings,
+            payload_bindings: env.input.payload_bindings,
+            scope: ActionCheckScope::TOP_LEVEL,
+        },
+        &block.body.statements,
     )?;
     let outcome = checked_return_outcome(
         context,
         state_space,
         outputs,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        input,
         loop_elements,
-        body,
-        next_state_if_depth,
+        env,
+        block,
     )?;
     actions.extend(outcome.actions);
     Ok(CheckedBlockOutcome { actions, ..outcome })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn check_runtime_if_branch_block_outcome(
     context: &mut StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
-    function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    input: &StepTransitionInput<'_>,
     loop_elements: &mut LoopElementAllocator,
-    body: &FunctionBlock,
-    next_state_if_depth: usize,
+    env: StepTransitionEnv<'_, '_, '_, '_, '_>,
+    block: StepBlockInput<'_>,
 ) -> Result<CheckedBlockOutcome> {
     let mut actions = checked_actions_for_statements(
         context,
         outputs,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        input.payload_bindings,
         loop_elements,
-        ActionCheckScope::TOP_LEVEL.for_final_runtime_if_branch(),
-        &body.statements,
+        ActionCheckInput {
+            function_scope: env.function_scope,
+            source_bindings: env.source_bindings,
+            template_bindings: env.template_bindings,
+            payload_bindings: env.input.payload_bindings,
+            scope: ActionCheckScope::TOP_LEVEL.for_final_runtime_if_branch(),
+        },
+        &block.body.statements,
     )?;
     let outcome = checked_return_outcome(
         context,
         state_space,
         outputs,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        input,
         loop_elements,
-        body,
-        next_state_if_depth,
+        env,
+        block,
     )?;
     actions.extend(outcome.actions);
     Ok(CheckedBlockOutcome { actions, ..outcome })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn checked_return_outcome(
     context: &mut StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
-    function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    input: &StepTransitionInput<'_>,
     loop_elements: &mut LoopElementAllocator,
-    body: &FunctionBlock,
-    next_state_if_depth: usize,
+    env: StepTransitionEnv<'_, '_, '_, '_, '_>,
+    block: StepBlockInput<'_>,
 ) -> Result<CheckedBlockOutcome> {
     if let ReturnExpr::IfElse {
         condition,
         then_branch,
         else_branch,
-    } = &body.returns
+    } = &block.body.returns
     {
         return checked_if_else_return_outcome(
             context,
             state_space,
             outputs,
             types,
-            function_scope,
-            source_bindings,
-            template_bindings,
-            input,
             loop_elements,
-            condition,
-            then_branch,
-            else_branch,
-            next_state_if_depth,
+            env,
+            RuntimeIfReturnInput {
+                condition,
+                then_branch,
+                else_branch,
+                next_state_if_depth: block.next_state_if_depth,
+            },
         );
     }
 
@@ -313,35 +326,34 @@ fn checked_return_outcome(
         context.module,
         context.process,
         context.semantic_index,
-        function_scope,
-        source_bindings,
+        env.function_scope,
+        env.source_bindings,
         &StepReturnInput {
-            variant: input.variant,
-            payload_guard: input.payload_guard,
-            payload_bindings: input.payload_bindings,
-            state_payload_bindings: input.state_payload_bindings,
-            body,
+            variant: env.input.variant,
+            payload_guard: env.input.payload_guard,
+            payload_bindings: env.input.payload_bindings,
+            state_payload_bindings: env.input.state_payload_bindings,
+            body: block.body,
         },
     )?;
     validate_return_match_arm_action_statements(
         context,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        input,
-        body,
+        env.function_scope,
+        env.source_bindings,
+        env.template_bindings,
+        env.input,
+        block.body,
     )?;
     let next_state = checked_next_state_for_arg(
         context,
         state_space,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        input,
-        &step_return.state_arg,
-        next_state_if_depth,
+        env,
+        NextStateInput {
+            state_arg: &step_return.state_arg,
+            next_state_if_depth: block.next_state_if_depth,
+        },
     )?;
     let actions = if step_return.action_statements.is_empty() {
         Vec::new()
@@ -350,12 +362,14 @@ fn checked_return_outcome(
             context,
             outputs,
             types,
-            function_scope,
-            source_bindings,
-            template_bindings,
-            input.payload_bindings,
             loop_elements,
-            ActionCheckScope::TOP_LEVEL.for_step_return_match_arm(),
+            ActionCheckInput {
+                function_scope: env.function_scope,
+                source_bindings: env.source_bindings,
+                template_bindings: env.template_bindings,
+                payload_bindings: env.input.payload_bindings,
+                scope: ActionCheckScope::TOP_LEVEL.for_step_return_match_arm(),
+            },
             &step_return.action_statements,
         )?
     };
@@ -366,57 +380,50 @@ fn checked_return_outcome(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn checked_if_else_return_outcome(
     context: &mut StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
-    function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    input: &StepTransitionInput<'_>,
     loop_elements: &mut LoopElementAllocator,
-    condition: &ValueExpr,
-    then_branch: &FunctionBlock,
-    else_branch: &FunctionBlock,
-    next_state_if_depth: usize,
+    env: StepTransitionEnv<'_, '_, '_, '_, '_>,
+    runtime_if: RuntimeIfReturnInput<'_>,
 ) -> Result<CheckedBlockOutcome> {
-    let branch_next_state_if_depth =
-        checked_next_state_if_child_depth(context.process.name.as_str(), next_state_if_depth)?;
+    let branch_next_state_if_depth = checked_next_state_if_child_depth(
+        context.process.name.as_str(),
+        runtime_if.next_state_if_depth,
+    )?;
     let condition = checked_runtime_bool_condition(
         context,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        condition,
+        env.function_scope,
+        env.source_bindings,
+        env.template_bindings,
+        runtime_if.condition,
     )?;
     let then_outcome = check_runtime_if_branch_block_outcome(
         context,
         state_space,
         outputs,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        input,
         loop_elements,
-        then_branch,
-        branch_next_state_if_depth,
+        env,
+        StepBlockInput {
+            body: runtime_if.then_branch,
+            next_state_if_depth: branch_next_state_if_depth,
+        },
     )?;
     let else_outcome = check_runtime_if_branch_block_outcome(
         context,
         state_space,
         outputs,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        input,
         loop_elements,
-        else_branch,
-        branch_next_state_if_depth,
+        env,
+        StepBlockInput {
+            body: runtime_if.else_branch,
+            next_state_if_depth: branch_next_state_if_depth,
+        },
     )?;
     if then_outcome.step_result != else_outcome.step_result {
         return Err(Error::new(format!(
@@ -467,55 +474,50 @@ fn checked_runtime_bool_condition(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn checked_next_state_for_arg(
     context: &StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     types: &mut CheckedTypeInterner<'_>,
-    function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    input: &StepTransitionInput<'_>,
-    state_arg: &ValueExpr,
-    next_state_if_depth: usize,
+    env: StepTransitionEnv<'_, '_, '_, '_, '_>,
+    next_state: NextStateInput<'_>,
 ) -> Result<CheckedNextState> {
     if let ValueExpr::IfElse {
         condition,
         then_branch,
         else_branch,
-    } = state_arg
+    } = next_state.state_arg
     {
         let condition = checked_runtime_bool_condition(
             context,
             types,
-            function_scope,
-            source_bindings,
-            template_bindings,
+            env.function_scope,
+            env.source_bindings,
+            env.template_bindings,
             condition,
         )?;
-        let child_next_state_if_depth =
-            checked_next_state_if_child_depth(context.process.name.as_str(), next_state_if_depth)?;
+        let child_next_state_if_depth = checked_next_state_if_child_depth(
+            context.process.name.as_str(),
+            next_state.next_state_if_depth,
+        )?;
         let then_state = checked_next_state_for_arg(
             context,
             state_space,
             types,
-            function_scope,
-            source_bindings,
-            template_bindings,
-            input,
-            then_branch,
-            child_next_state_if_depth,
+            env,
+            NextStateInput {
+                state_arg: then_branch,
+                next_state_if_depth: child_next_state_if_depth,
+            },
         )?;
         let else_state = checked_next_state_for_arg(
             context,
             state_space,
             types,
-            function_scope,
-            source_bindings,
-            template_bindings,
-            input,
-            else_branch,
-            child_next_state_if_depth,
+            env,
+            NextStateInput {
+                state_arg: else_branch,
+                next_state_if_depth: child_next_state_if_depth,
+            },
         )?;
         return Ok(CheckedNextState::IfElse {
             condition,
@@ -525,17 +527,18 @@ fn checked_next_state_for_arg(
     }
 
     let state_arg = resolve_source_value_expr(
-        function_scope,
+        env.function_scope,
         &context.process.state_type,
-        state_arg,
-        source_bindings,
+        next_state.state_arg,
+        env.source_bindings,
         0,
     )?;
     if matches!(&state_arg, ValueExpr::Identifier(name) if name.as_str() == STEP_STATE_PARAMETER_NAME)
     {
         return Ok(CheckedNextState::Current);
     }
-    if template_bindings
+    if env
+        .template_bindings
         .iter()
         .any(|binding| source_value_uses_binding(&state_arg, binding.name))
     {
@@ -545,18 +548,9 @@ fn checked_next_state_for_arg(
             types,
             &context.process.state_type,
             &state_arg,
-            template_bindings,
+            env.template_bindings,
         )?;
-        populate_template_state_values(
-            context,
-            state_space,
-            types,
-            input.variant,
-            input.payload_guard,
-            &state_arg,
-            input.payload_bindings,
-            input.state_payload_bindings,
-        )?;
+        populate_template_state_values(context, state_space, types, env, &state_arg)?;
         return Ok(CheckedNextState::Template(template));
     }
     Ok(CheckedNextState::Value(state_space.resolve_state_value(
@@ -575,28 +569,26 @@ fn checked_next_state_if_child_depth(process: &str, depth: usize) -> Result<usiz
     Ok(depth + 1)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn populate_template_state_values(
     context: &StepCheckContext<'_>,
     state_space: &mut StateSpace<'_>,
     types: &mut CheckedTypeInterner<'_>,
-    variant: CheckedMessageVariantId,
-    payload_guard: Option<&CheckedPayloadValue>,
+    env: StepTransitionEnv<'_, '_, '_, '_, '_>,
     state_arg: &ValueExpr,
-    payload_bindings: &[StepPayloadBinding],
-    state_payload_bindings: &[StepStatePayloadBinding],
 ) -> Result<()> {
-    if !payload_bindings.is_empty() {
-        let payloads = match payload_guard {
+    if !env.input.payload_bindings.is_empty() {
+        let payloads = match env.input.payload_guard {
             Some(payload) => vec![payload],
             None => context
                 .message_cases
-                .payload_values(context.process_id, variant)?
+                .payload_values(context.process_id, env.input.variant)?
                 .iter()
                 .collect::<Vec<_>>(),
         };
         for payload in payloads {
-            let payload_values = payload_bindings
+            let payload_values = env
+                .input
+                .payload_bindings
                 .iter()
                 .map(|binding| {
                     checked_payload_binding(
@@ -620,7 +612,8 @@ fn populate_template_state_values(
                 })
                 .collect::<Result<Vec<_>>>()?;
             let mut bindings = Vec::new();
-            for (binding, (label, value)) in payload_bindings.iter().zip(&payload_values) {
+            for (binding, (label, value)) in env.input.payload_bindings.iter().zip(&payload_values)
+            {
                 bindings.push(ValueBinding {
                     name: &binding.name,
                     ty: &binding.ty,
@@ -628,7 +621,7 @@ fn populate_template_state_values(
                     value: value.clone(),
                 });
             }
-            for state_binding in state_payload_bindings {
+            for state_binding in env.input.state_payload_bindings {
                 bindings.push(ValueBinding {
                     name: &state_binding.name,
                     ty: &state_binding.ty,
@@ -645,8 +638,10 @@ fn populate_template_state_values(
         }
         return Ok(());
     }
-    if !state_payload_bindings.is_empty() {
-        let bindings = state_payload_bindings
+    if !env.input.state_payload_bindings.is_empty() {
+        let bindings = env
+            .input
+            .state_payload_bindings
             .iter()
             .map(|binding| ValueBinding {
                 name: &binding.name,

@@ -316,12 +316,11 @@ fn reject_symlink_path_components(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    #[cfg(unix)]
     #[test]
     fn prepare_trace_file_rejects_fifo_trace_path_before_opening() {
         let path = unique_trace_path("fifo");
@@ -334,7 +333,6 @@ mod tests {
         fs::remove_file(path).expect("test FIFO should be removed");
     }
 
-    #[cfg(unix)]
     #[test]
     fn prepare_trace_file_rejects_symlink_trace_path_without_touching_target() {
         use std::os::unix::fs::symlink;
@@ -356,7 +354,6 @@ mod tests {
         fs::remove_file(target).expect("test target should be removed");
     }
 
-    #[cfg(unix)]
     #[test]
     fn prepare_trace_file_rejects_symlink_parent_path() {
         use std::os::unix::fs::symlink;
@@ -379,7 +376,6 @@ mod tests {
         fs::remove_dir(real_dir).expect("test real dir should be removed");
     }
 
-    #[cfg(unix)]
     #[test]
     fn secure_trace_open_rejects_symlink_parent_without_preflight() {
         use std::os::unix::fs::symlink;
@@ -403,7 +399,6 @@ mod tests {
         fs::remove_dir(real_dir).expect("test real dir should be removed");
     }
 
-    #[cfg(unix)]
     #[test]
     fn opened_non_regular_trace_handle_is_rejected() {
         let path = unique_trace_path("opened-fifo");
@@ -418,7 +413,6 @@ mod tests {
         fs::remove_file(path).expect("test FIFO should be removed");
     }
 
-    #[cfg(unix)]
     fn open_trace_read_handle_for_test(path: &Path) -> std::io::Result<File> {
         use nix::fcntl::OFlag;
         use std::fs::OpenOptions;
@@ -430,7 +424,6 @@ mod tests {
             .open(path)
     }
 
-    #[cfg(unix)]
     fn create_fifo(path: &Path) {
         use nix::sys::stat::Mode;
         use nix::unistd::mkfifo;
@@ -438,7 +431,6 @@ mod tests {
         mkfifo(path, Mode::S_IRUSR | Mode::S_IWUSR).expect("test FIFO should be created");
     }
 
-    #[cfg(unix)]
     fn unique_trace_path(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

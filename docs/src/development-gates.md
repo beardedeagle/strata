@@ -15,6 +15,14 @@ toolchain-policy-check`, which rejects repository instructions or workflow
 steps that switch the whole checkout to nightly Rust. Nightly-only tools must be
 invoked per command with `+nightly`.
 
+The quality bundle includes `just cfg-check`, which typechecks the workspace for
+representative Linux, macOS, and Windows Rust targets using `cargo check
+--workspace --all-targets --target ...`. This keeps platform-specific and
+test-only `#[cfg]` paths covered by real compiler evidence without changing
+source visibility or suppressing rust-analyzer's weak inactive-code hints. If a
+target is missing locally, install the reported target with `rustup target add
+--toolchain stable ...`.
+
 Run the source-to-runtime gates after changes that affect syntax,
 checking, lowering, artifacts, runtime behavior, diagnostics, examples, or
 acceptance criteria.
@@ -27,9 +35,9 @@ just source-to-runtime-gates
 
 The standard CI workflow installs `just` and calls `just ci-rust` on Linux,
 macOS, and Windows. The Linux quality job calls `just ci-quality`, which runs
-formatting, check, tests, clippy, performance smoke checks, build, tool metadata
-validation, toolchain policy validation, mdBook, source-to-runtime gates, and
-diff hygiene.
+formatting, native and cross-target checks, tests, clippy, performance smoke
+checks, build, tool metadata validation, toolchain policy validation, mdBook,
+source-to-runtime gates, and diff hygiene.
 
 CI uses GitHub-owned, SHA-pinned checkout and cache actions. The cache stores
 Cargo registry/git data and per-job build target directories. It does not cache

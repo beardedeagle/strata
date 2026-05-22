@@ -1,5 +1,12 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+struct SourceBooleanBinaryExpr<'a> {
+    operator: ValueBooleanOperator,
+    left: &'a ValueExpr,
+    right: &'a ValueExpr,
+}
+
 pub(in crate::language::checker) fn resolve_source_value_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
@@ -75,11 +82,13 @@ pub(in crate::language::checker) fn resolve_source_value_expr(
         } => resolve_source_boolean_binary_value_expr(
             scope,
             expected_type,
-            *operator,
-            left,
-            right,
             bindings,
             depth + 1,
+            SourceBooleanBinaryExpr {
+                operator: *operator,
+                left,
+                right,
+            },
         ),
         ValueExpr::Grouped { value } => {
             resolve_source_grouped_value_expr(scope, expected_type, value, bindings, depth + 1)
@@ -197,31 +206,35 @@ fn resolve_source_boolean_not_value_expr(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn resolve_source_boolean_binary_value_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
-    operator: ValueBooleanOperator,
-    left: &ValueExpr,
-    right: &ValueExpr,
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
+    binary: SourceBooleanBinaryExpr<'_>,
 ) -> Result<ValueExpr> {
     let bool_type = scope.semantic_index.bool_type(scope.module)?;
-    validate_source_boolean_binary_expr(scope, expected_type, operator, left, right, bindings)?;
-    let left = resolve_source_value_expr(scope, &bool_type, left, bindings, depth + 1)?;
-    let right = resolve_source_value_expr(scope, &bool_type, right, bindings, depth + 1)?;
+    validate_source_boolean_binary_expr(
+        scope,
+        expected_type,
+        binary.operator,
+        binary.left,
+        binary.right,
+        bindings,
+    )?;
+    let left = resolve_source_value_expr(scope, &bool_type, binary.left, bindings, depth + 1)?;
+    let right = resolve_source_value_expr(scope, &bool_type, binary.right, bindings, depth + 1)?;
     let left_value = concrete_bool_value_option(scope, &bool_type, &left, bindings)?;
     let right_value = concrete_bool_value_option(scope, &bool_type, &right, bindings)?;
     if let (Some(left_value), Some(right_value)) = (left_value, right_value) {
         return Ok(ValueExpr::Identifier(bool_identifier(boolean_result(
-            operator,
+            binary.operator,
             left_value,
             right_value,
         ))?));
     }
     Ok(ValueExpr::BooleanBinary {
-        operator,
+        operator: binary.operator,
         left: Box::new(left),
         right: Box::new(right),
     })

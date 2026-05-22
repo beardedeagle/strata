@@ -1,0 +1,109 @@
+module process_return_match_arm_runtime_if_prefix;
+
+record MainState;
+record Assignment {
+    phase: Phase,
+    flag: Bool,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+enum Route {
+    Assign(Assignment),
+}
+
+enum WorkerState {
+    Idle,
+    SawReady,
+    SawDone,
+}
+
+enum WorkerMsg {
+    Envelope(Route),
+}
+
+record SinkState;
+enum SinkMsg {
+    Notice(Phase),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Assignment { phase: Ready, flag: True }));
+        send worker Envelope(Assign(Assignment { phase: Done, flag: False }));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(Assignment { phase: phase, flag: flag }))) -> ProcResult<WorkerState> ! [emit, spawn, send] ~ [] @det {
+        emit "return-match runtime-if uniform prefix";
+        let sink: ProcessRef<Sink> = spawn Sink;
+        return match phase {
+            Ready => {
+                if (flag == True) {
+                    emit "return-match ready true branch";
+                    send sink Notice(Ready);
+                } else {
+                    emit "return-match ready false branch";
+                }
+                return Continue(SawReady);
+            }
+            Done => {
+                if (flag == True) {
+                    emit "return-match done true branch";
+                } else {
+                    emit "return-match done false branch";
+                    send sink Notice(Done);
+                }
+                return Stop(SawDone);
+            }
+        };
+    }
+}
+
+proc Sink mailbox bounded(1) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Notice(Ready)) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received ready branch notice";
+        return Stop(state);
+    }
+
+    fn step(state: SinkState, Notice(Done)) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received done branch notice";
+        return Stop(state);
+    }
+}

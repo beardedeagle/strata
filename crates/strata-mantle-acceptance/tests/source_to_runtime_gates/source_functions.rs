@@ -468,6 +468,143 @@ fn process_return_match_arm_prefix_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn process_return_match_arm_runtime_if_prefix_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/process_return_match_arm_runtime_if_prefix.str",
+        "target/strata/process_return_match_arm_runtime_if_prefix.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: stopped Main normally"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+    assert_eq!(
+        stdout
+            .matches("return-match runtime-if uniform prefix")
+            .count(),
+        2
+    );
+    assert_eq!(stdout.matches("return-match ready true branch").count(), 1);
+    assert_eq!(stdout.matches("return-match ready false branch").count(), 0);
+    assert_eq!(stdout.matches("return-match done true branch").count(), 0);
+    assert_eq!(stdout.matches("return-match done false branch").count(), 1);
+    assert_eq!(
+        stdout.matches("sink received ready branch notice").count(),
+        1
+    );
+    assert_eq!(
+        stdout.matches("sink received done branch notice").count(),
+        1
+    );
+
+    let artifact =
+        gate.read_artifact("target/strata/process_return_match_arm_runtime_if_prefix.mta");
+    let worker = artifact_process(&artifact, "Worker");
+    assert_eq!(worker.transitions.len(), 2);
+    for transition in &worker.transitions {
+        assert_eq!(
+            transition.effects,
+            [
+                ArtifactEffect::Emit,
+                ArtifactEffect::Spawn,
+                ArtifactEffect::Send
+            ]
+        );
+        assert!(
+            matches!(
+                transition.actions.as_slice(),
+                [
+                    ArtifactAction::Emit { .. },
+                    ArtifactAction::Spawn { .. },
+                    ArtifactAction::IfElse { then_actions, else_actions, .. },
+                ] if matches!(
+                    (then_actions.as_slice(), else_actions.as_slice()),
+                    ([ArtifactAction::Emit { .. }, ArtifactAction::Send { .. }], [ArtifactAction::Emit { .. }])
+                        | ([ArtifactAction::Emit { .. }], [ArtifactAction::Emit { .. }, ArtifactAction::Send { .. }])
+                )
+            ),
+            "selected return-match arm runtime-if must lower as typed branch actions"
+        );
+    }
+    let sink = artifact_process(&artifact, "Sink");
+    let mut sink_payload_guards = sink
+        .transitions
+        .iter()
+        .map(|transition| {
+            transition
+                .payload_guard
+                .as_ref()
+                .map(|payload| payload.value.label())
+                .expect("Sink transition should have a payload guard")
+        })
+        .collect::<Vec<_>>();
+    sink_payload_guards.sort();
+    assert_eq!(sink_payload_guards, ["Done", "Ready"]);
+
+    let trace = gate.read_trace("process_return_match_arm_runtime_if_prefix");
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            r#""branch":"then""#,
+            r#""scope":"action""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"branch_selected""#,
+            r#""process":"Worker""#,
+            r#""message":"Envelope""#,
+            r#""branch":"else""#,
+            r#""scope":"action""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""payload":"Assign(Assignment{phase:Ready,flag:True})""#,
+            r#""result":"Continue""#,
+            r#""state":"SawReady""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""payload":"Assign(Assignment{phase:Done,flag:False})""#,
+            r#""result":"Stop""#,
+            r#""state":"SawDone""#,
+        ],
+    );
+    let first_uniform = trace_line_index_with_fields(
+        &trace,
+        &[
+            r#""event":"program_output""#,
+            r#""process":"Worker""#,
+            r#""text":"return-match runtime-if uniform prefix""#,
+        ],
+    );
+    let ready_branch = trace_line_index_with_fields(
+        &trace,
+        &[
+            r#""event":"program_output""#,
+            r#""process":"Worker""#,
+            r#""text":"return-match ready true branch""#,
+        ],
+    );
+    assert!(
+        first_uniform < ready_branch,
+        "uniform prefix should execute before selected arm runtime-if branch"
+    );
+}
+
+#[test]
 fn function_record_pattern_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(

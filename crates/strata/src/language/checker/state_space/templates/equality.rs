@@ -3,49 +3,74 @@ use crate::language::checked::{CheckedValueBooleanOperator, CheckedValueEquality
 
 use super::*;
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Copy)]
+pub(super) struct CheckedTemplateInput<'a, 'binding> {
+    pub(super) module: &'a Module,
+    pub(super) semantic_index: &'a SemanticIndex,
+    pub(super) expected_type: &'a TypeRef,
+    pub(super) bindings: &'a [ValueTemplateBinding<'binding>],
+    pub(super) depth: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CheckedBinaryTemplate<'a> {
+    pub(super) operator: ValueBooleanOperator,
+    pub(super) left: &'a ValueExpr,
+    pub(super) right: &'a ValueExpr,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CheckedEqualityTemplate<'a> {
+    pub(super) operator: ValueEqualityOperator,
+    pub(super) left: &'a ValueExpr,
+    pub(super) right: &'a ValueExpr,
+}
+
 pub(super) fn checked_equality_template(
-    module: &Module,
-    semantic_index: &SemanticIndex,
     types: &mut CheckedTypeInterner<'_>,
-    expected_type: &TypeRef,
-    operator: ValueEqualityOperator,
-    left: &ValueExpr,
-    right: &ValueExpr,
-    bindings: &[ValueTemplateBinding<'_>],
-    depth: usize,
+    input: CheckedTemplateInput<'_, '_>,
+    equality: CheckedEqualityTemplate<'_>,
 ) -> Result<CheckedValueTemplate> {
-    let bool_type = semantic_index.bool_type(module)?;
-    if !semantic_index.same_type(expected_type, &bool_type) {
+    let bool_type = input.semantic_index.bool_type(input.module)?;
+    if !input
+        .semantic_index
+        .same_type(input.expected_type, &bool_type)
+    {
         return Err(Error::new(format!(
-            "equality expression produces {bool_type}, expected {expected_type}"
+            "equality expression produces {bool_type}, expected {}",
+            input.expected_type
         )));
     }
-    let operand_type =
-        equality_template_operand_pair_type(module, semantic_index, left, right, bindings)?;
-    validate_equality_template_operand_type(module, semantic_index, &operand_type)?;
+    let operand_type = equality_template_operand_pair_type(
+        input.module,
+        input.semantic_index,
+        equality.left,
+        equality.right,
+        input.bindings,
+    )?;
+    validate_equality_template_operand_type(input.module, input.semantic_index, &operand_type)?;
     let operand_ty = types.intern(&operand_type)?;
     Ok(CheckedValueTemplate::Equality {
         ty: types.intern(&bool_type)?,
         operand_ty,
-        operator: checked_equality_operator(operator),
+        operator: checked_equality_operator(equality.operator),
         left: Box::new(checked_value_template(
-            module,
-            semantic_index,
+            input.module,
+            input.semantic_index,
             types,
             &operand_type,
-            left,
-            bindings,
-            depth + 1,
+            equality.left,
+            input.bindings,
+            input.depth + 1,
         )?),
         right: Box::new(checked_value_template(
-            module,
-            semantic_index,
+            input.module,
+            input.semantic_index,
             types,
             &operand_type,
-            right,
-            bindings,
-            depth + 1,
+            equality.right,
+            input.bindings,
+            input.depth + 1,
         )?),
     })
 }
@@ -83,41 +108,34 @@ pub(super) fn checked_boolean_not_template(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn checked_boolean_binary_template(
-    module: &Module,
-    semantic_index: &SemanticIndex,
     types: &mut CheckedTypeInterner<'_>,
-    expected_type: &TypeRef,
-    operator: ValueBooleanOperator,
-    left: &ValueExpr,
-    right: &ValueExpr,
-    bindings: &[ValueTemplateBinding<'_>],
-    depth: usize,
+    input: CheckedTemplateInput<'_, '_>,
+    binary: CheckedBinaryTemplate<'_>,
 ) -> Result<CheckedValueTemplate> {
-    let bool_type = semantic_index.bool_type(module)?;
-    validate_boolean_template_result_type(semantic_index, expected_type, &bool_type)?;
+    let bool_type = input.semantic_index.bool_type(input.module)?;
+    validate_boolean_template_result_type(input.semantic_index, input.expected_type, &bool_type)?;
     let ty = types.intern(&bool_type)?;
     Ok(CheckedValueTemplate::BooleanBinary {
         ty,
-        operator: checked_boolean_operator(operator),
+        operator: checked_boolean_operator(binary.operator),
         left: Box::new(checked_value_template(
-            module,
-            semantic_index,
+            input.module,
+            input.semantic_index,
             types,
             &bool_type,
-            left,
-            bindings,
-            depth + 1,
+            binary.left,
+            input.bindings,
+            input.depth + 1,
         )?),
         right: Box::new(checked_value_template(
-            module,
-            semantic_index,
+            input.module,
+            input.semantic_index,
             types,
             &bool_type,
-            right,
-            bindings,
-            depth + 1,
+            binary.right,
+            input.bindings,
+            input.depth + 1,
         )?),
     })
 }

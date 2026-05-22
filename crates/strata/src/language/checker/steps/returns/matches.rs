@@ -1,9 +1,11 @@
 use super::super::super::source_functions::validate_source_function_value_expr;
 use super::*;
 
+mod arm_statements;
 mod selected_actions;
 mod static_preadmit;
 
+use arm_statements::validate_step_return_match_arm_statements;
 pub(in crate::language::checker) use selected_actions::selected_step_return_match_action_statements;
 pub(super) use static_preadmit::static_step_return_match_arm_state_args;
 
@@ -181,36 +183,6 @@ fn validate_step_return_match_arm(
         &resolved.state_arg,
         validation_bindings,
     )
-}
-
-fn validate_step_return_match_arm_statements(
-    process: &Process,
-    statements: &[Statement],
-) -> Result<()> {
-    for statement in statements {
-        match statement {
-            Statement::Emit(_) | Statement::Send { .. } => {}
-            Statement::LetProcessRef { name, .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot bind process reference {} in this source slice",
-                    process.name, name
-                )));
-            }
-            Statement::IfElse { .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform runtime if in this source slice",
-                    process.name
-                )));
-            }
-            Statement::ForEach { .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform for loops in this source slice",
-                    process.name
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 fn resolved_step_return_match_arm(
@@ -732,10 +704,18 @@ fn substitute_step_return_statement(
     bindings: &[StepReturnSubstitution<'_>],
 ) -> Statement {
     match statement {
-        Statement::Emit(_)
-        | Statement::LetProcessRef { .. }
-        | Statement::IfElse { .. }
-        | Statement::ForEach { .. } => statement,
+        Statement::Emit(_) | Statement::LetProcessRef { .. } | Statement::ForEach { .. } => {
+            statement
+        }
+        Statement::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => Statement::IfElse {
+            condition: substitute_step_return_bindings(condition, bindings),
+            then_body: substitute_step_return_statement_vec(then_body, bindings),
+            else_body: substitute_step_return_statement_vec(else_body, bindings),
+        },
         Statement::Send {
             target,
             message,
@@ -746,4 +726,14 @@ fn substitute_step_return_statement(
             payload: payload.map(|payload| substitute_step_return_bindings(payload, bindings)),
         },
     }
+}
+
+fn substitute_step_return_statement_vec(
+    statements: Vec<Statement>,
+    bindings: &[StepReturnSubstitution<'_>],
+) -> Vec<Statement> {
+    statements
+        .into_iter()
+        .map(|statement| substitute_step_return_statement(statement, bindings))
+        .collect()
 }
