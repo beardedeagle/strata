@@ -76,6 +76,22 @@ impl<'a> LoopBodyAdmissionScope<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ActionAdmissionContext<'a> {
+    program: &'a LoadedProgram,
+    process: &'a LoadedProcess,
+    message: MessageId,
+    current_state_payload: Option<&'a RuntimePayload>,
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeIfAdmission<'a> {
+    condition: &'a LoadedValueTemplate,
+    then_actions: &'a [LoadedAction],
+    else_actions: &'a [LoadedAction],
+    depth: usize,
+}
+
 impl LoadedAction {
     pub(super) fn collect_effects(&self, effects: &mut BTreeSet<ArtifactEffect>) {
         match self {
@@ -299,15 +315,19 @@ impl LoadedAction {
                 then_actions,
                 else_actions,
             } => Self::validate_if_else_admission(
-                program,
-                process,
-                message,
-                current_state_payload,
+                ActionAdmissionContext {
+                    program,
+                    process,
+                    message,
+                    current_state_payload,
+                },
                 spawned_refs,
-                condition,
-                then_actions,
-                else_actions,
-                0,
+                RuntimeIfAdmission {
+                    condition,
+                    then_actions,
+                    else_actions,
+                    depth: 0,
+                },
             ),
             Self::ForEach {
                 element,
@@ -398,15 +418,19 @@ impl LoadedAction {
                 then_actions,
                 else_actions,
             } => Self::validate_if_else_admission(
-                program,
-                process,
-                message,
-                current_state_payload,
+                ActionAdmissionContext {
+                    program,
+                    process,
+                    message,
+                    current_state_payload,
+                },
                 spawned_refs,
-                condition,
-                then_actions,
-                else_actions,
-                runtime_if_depth,
+                RuntimeIfAdmission {
+                    condition,
+                    then_actions,
+                    else_actions,
+                    depth: runtime_if_depth,
+                },
             ),
             Self::Emit { .. } | Self::Send { .. } => self.validate_admission(
                 program,
@@ -418,63 +442,57 @@ impl LoadedAction {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn validate_if_else_admission(
-        program: &LoadedProgram,
-        process: &LoadedProcess,
-        message: MessageId,
-        current_state_payload: Option<&RuntimePayload>,
+        context: ActionAdmissionContext<'_>,
         spawned_refs: &mut [bool],
-        condition: &LoadedValueTemplate,
-        then_actions: &[LoadedAction],
-        else_actions: &[LoadedAction],
-        runtime_if_depth: usize,
+        runtime_if: RuntimeIfAdmission<'_>,
     ) -> Result<()> {
-        if runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
+        if runtime_if.depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
             return Err(Error::new(format!(
                 "process {} transition {} runtime if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this artifact slice",
-                process.debug_name,
-                message.as_u32()
+                context.process.debug_name,
+                context.message.as_u32()
             )));
         }
         validate_loaded_bool_condition(
-            program,
-            process,
+            context.program,
+            context.process,
             &format!(
                 "process {} transition {} if condition",
-                process.debug_name,
-                message.as_u32()
+                context.process.debug_name,
+                context.message.as_u32()
             ),
-            condition,
-            process.message_variants[message.index()].payload_type,
-            current_state_payload,
+            runtime_if.condition,
+            context.process.message_variants[context.message.index()].payload_type,
+            context.current_state_payload,
         )?;
-        if then_actions.is_empty() && else_actions.is_empty() {
+        if runtime_if.then_actions.is_empty() && runtime_if.else_actions.is_empty() {
             return Err(Error::new(format!(
                 "process {} transition {} runtime if action branches cannot both be empty",
-                process.debug_name,
-                message.as_u32()
+                context.process.debug_name,
+                context.message.as_u32()
             )));
         }
-        let branch_runtime_if_depth = runtime_if_depth
+        let branch_runtime_if_depth = runtime_if
+            .depth
             .checked_add(1)
             .ok_or_else(|| Error::new("runtime if action nesting depth overflowed"))?;
-        for action in then_actions {
+        for action in runtime_if.then_actions {
             action.validate_runtime_if_branch_admission(
-                program,
-                process,
-                message,
-                current_state_payload,
+                context.program,
+                context.process,
+                context.message,
+                context.current_state_payload,
                 spawned_refs,
                 branch_runtime_if_depth,
             )?;
         }
-        for action in else_actions {
+        for action in runtime_if.else_actions {
             action.validate_runtime_if_branch_admission(
-                program,
-                process,
-                message,
-                current_state_payload,
+                context.program,
+                context.process,
+                context.message,
+                context.current_state_payload,
                 spawned_refs,
                 branch_runtime_if_depth,
             )?;

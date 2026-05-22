@@ -1,6 +1,8 @@
 pub(super) use super::super::*;
 pub(super) use std::fs;
-pub(super) use std::path::{Path, PathBuf};
+#[cfg(unix)]
+pub(super) use std::path::Path;
+pub(super) use std::path::PathBuf;
 pub(super) use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";

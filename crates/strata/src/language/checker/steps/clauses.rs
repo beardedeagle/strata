@@ -16,7 +16,7 @@ use policy::{
 };
 pub(in crate::language::checker) use preadmit::collect_concrete_state_payload_domains;
 use preadmit::preadmit_concrete_step_state_values;
-use state_match::expand_state_match_step_clause_group;
+use state_match::{StateMatchExpansionContext, expand_state_match_step_clause_group};
 
 pub(super) fn check_step_clauses<'a, 'state>(
     module: &Module,
@@ -57,10 +57,13 @@ pub(super) fn check_step_clauses<'a, 'state>(
                     return Err(Error::new("step parameter pattern must use a block body"));
                 };
                 insert_step_body_clause(
-                    module,
-                    semantic_index,
-                    process,
-                    &msg_enum.variants,
+                    StepClauseInsertContext {
+                        module,
+                        semantic_index,
+                        process,
+                        message_variants: &msg_enum.variants,
+                        mode: StepClauseInsertMode::Signature,
+                    },
                     &mut explicit_clauses,
                     &mut wildcard_clause,
                     pattern,
@@ -70,7 +73,6 @@ pub(super) fn check_step_clauses<'a, 'state>(
                         payload_params: Vec::new(),
                         payload_guard: None,
                     },
-                    StepClauseInsertMode::Signature,
                 )?;
             }
             StepDispatchForm::BodyMatch => {
@@ -98,10 +100,13 @@ pub(super) fn check_step_clauses<'a, 'state>(
                         &arm.pattern,
                     )?;
                     insert_step_body_clause(
-                        module,
-                        semantic_index,
-                        process,
-                        &msg_enum.variants,
+                        StepClauseInsertContext {
+                            module,
+                            semantic_index,
+                            process,
+                            message_variants: &msg_enum.variants,
+                            mode: StepClauseInsertMode::MatchBody,
+                        },
                         &mut explicit_clauses,
                         &mut wildcard_clause,
                         pattern,
@@ -111,7 +116,6 @@ pub(super) fn check_step_clauses<'a, 'state>(
                             payload_params: Vec::new(),
                             payload_guard: None,
                         },
-                        StepClauseInsertMode::MatchBody,
                     )?;
                 }
             }
@@ -125,10 +129,13 @@ pub(super) fn check_step_clauses<'a, 'state>(
                     return Err(Error::new("state match step must use a match body"));
                 };
                 insert_step_body_clause(
-                    module,
-                    semantic_index,
-                    process,
-                    &msg_enum.variants,
+                    StepClauseInsertContext {
+                        module,
+                        semantic_index,
+                        process,
+                        message_variants: &msg_enum.variants,
+                        mode: StepClauseInsertMode::StateMatch,
+                    },
                     &mut explicit_clauses,
                     &mut wildcard_clause,
                     pattern,
@@ -138,7 +145,6 @@ pub(super) fn check_step_clauses<'a, 'state>(
                         payload_params: Vec::new(),
                         payload_guard: None,
                     },
-                    StepClauseInsertMode::StateMatch,
                 )?;
             }
         }
@@ -280,13 +286,15 @@ pub(super) fn check_step_clauses<'a, 'state>(
         }
     }
     expand_state_match_step_clause_group(
-        module,
-        process,
-        process_id,
-        semantic_index,
-        message_cases,
-        state_space,
-        types,
+        StateMatchExpansionContext {
+            module,
+            process,
+            process_id,
+            semantic_index,
+            message_cases,
+            state_space,
+            types,
+        },
         &state_match_cases,
         &mut clauses,
     )?;
@@ -401,17 +409,21 @@ impl StepClauseInsertMode {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Copy)]
+struct StepClauseInsertContext<'a> {
+    module: &'a Module,
+    semantic_index: &'a SemanticIndex,
+    process: &'a Process,
+    message_variants: &'a [EnumVariant],
+    mode: StepClauseInsertMode,
+}
+
 fn insert_step_body_clause<'a>(
-    module: &Module,
-    semantic_index: &SemanticIndex,
-    process: &Process,
-    message_variants: &[EnumVariant],
+    context: StepClauseInsertContext<'_>,
     explicit_clauses: &mut [Vec<StepBodyClause<'a>>],
     wildcard_clause: &mut Option<StepBodyClause<'a>>,
     pattern: StepPattern,
     mut clause: StepBodyClause<'a>,
-    mode: StepClauseInsertMode,
 ) -> Result<()> {
     match pattern {
         StepPattern::Variant {
@@ -422,7 +434,7 @@ fn insert_step_body_clause<'a>(
             clause.payload_params = bindings;
             clause.payload_guard = payload_guard;
             let clauses = &mut explicit_clauses[message.index()];
-            if mode == StepClauseInsertMode::Signature
+            if context.mode == StepClauseInsertMode::Signature
                 && clause.payload_guard.is_none()
                 && clauses
                     .iter()
@@ -430,27 +442,27 @@ fn insert_step_body_clause<'a>(
             {
                 return Err(Error::new(format!(
                     "process {} declares duplicate step pattern for message {}",
-                    process.name,
-                    message_variants[message.index()].name
+                    context.process.name,
+                    context.message_variants[message.index()].name
                 )));
             }
             for existing in clauses.iter() {
                 if payload_patterns_overlap(
-                    semantic_index,
+                    context.semantic_index,
                     clause.payload_guard.as_ref(),
                     existing.payload_guard.as_ref(),
                 )? {
                     return Err(Error::new(format!(
                         "process {} {} {} overlaps an earlier pattern for message {}",
-                        process.name,
-                        mode.pattern_label(),
+                        context.process.name,
+                        context.mode.pattern_label(),
                         step_pattern_payload_label(
-                            module,
-                            semantic_index,
-                            &message_variants[message.index()],
+                            context.module,
+                            context.semantic_index,
+                            &context.message_variants[message.index()],
                             clause.payload_guard.as_ref(),
                         )?,
-                        message_variants[message.index()].name
+                        context.message_variants[message.index()].name
                     )));
                 }
             }
@@ -460,7 +472,7 @@ fn insert_step_body_clause<'a>(
             if wildcard_clause.replace(clause).is_some() {
                 return Err(Error::new(format!(
                     "process {} declares duplicate wildcard step pattern",
-                    process.name
+                    context.process.name
                 )));
             }
         }

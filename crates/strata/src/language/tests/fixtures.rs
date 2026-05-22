@@ -75,6 +75,8 @@ pub(super) const RUNTIME_GUARDED_FOR_EACH: &str =
     include_str!("../../../../../examples/runtime_guarded_for_each.str");
 pub(super) const RUNTIME_GUARDED_REF_LOOP: &str =
     include_str!("../../../../../examples/runtime_guarded_ref_loop.str");
+pub(super) const PROCESS_RETURN_MATCH_ARM_RUNTIME_IF_PREFIX: &str =
+    include_str!("../../../../../examples/process_return_match_arm_runtime_if_prefix.str");
 
 pub(super) const ACTOR_PING: &str = r#"
 module actor_ping;

@@ -14,15 +14,18 @@ fn state_match_transition_key(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct StateMatchExpansionContext<'a, 'state> {
+    pub(super) module: &'a Module,
+    pub(super) process: &'a Process,
+    pub(super) process_id: CheckedProcessId,
+    pub(super) semantic_index: &'a SemanticIndex,
+    pub(super) message_cases: &'a MessageCaseTable,
+    pub(super) state_space: &'a mut StateSpace<'state>,
+    pub(super) types: &'a mut CheckedTypeInterner<'state>,
+}
+
 pub(super) fn expand_state_match_step_clause_group<'a, 'state>(
-    module: &Module,
-    process: &Process,
-    process_id: CheckedProcessId,
-    semantic_index: &SemanticIndex,
-    message_cases: &MessageCaseTable,
-    state_space: &mut StateSpace<'state>,
-    types: &mut CheckedTypeInterner<'state>,
+    mut context: StateMatchExpansionContext<'_, 'state>,
     state_match_cases: &[StateMatchStepExpansion<'a>],
     clauses: &mut Vec<StepClause<'a>>,
 ) -> Result<()> {
@@ -33,23 +36,19 @@ pub(super) fn expand_state_match_step_clause_group<'a, 'state>(
     let mut seen_transitions = BTreeSet::new();
     let mut iteration_count = 0usize;
     loop {
-        let state_count = state_space.values().len();
+        let state_count = context.state_space.values().len();
         let transition_count = seen_transitions.len();
         for case in state_match_cases {
             expand_state_match_step_clause_once(
-                module,
-                process,
-                process_id,
-                semantic_index,
-                message_cases,
-                state_space,
-                types,
+                &mut context,
                 case,
                 &mut seen_transitions,
                 clauses,
             )?;
         }
-        if state_space.values().len() == state_count && seen_transitions.len() == transition_count {
+        if context.state_space.values().len() == state_count
+            && seen_transitions.len() == transition_count
+        {
             break;
         }
         iteration_count = iteration_count
@@ -58,33 +57,28 @@ pub(super) fn expand_state_match_step_clause_group<'a, 'state>(
         if iteration_count > MAX_STATE_VALUES_PER_PROCESS.saturating_add(state_match_cases.len()) {
             return Err(Error::new(format!(
                 "process {} state match expansion did not converge within the state value limit",
-                process.name
+                context.process.name
             )));
         }
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn expand_state_match_step_clause_once<'a, 'state>(
-    module: &Module,
-    process: &Process,
-    process_id: CheckedProcessId,
-    semantic_index: &SemanticIndex,
-    message_cases: &MessageCaseTable,
-    state_space: &mut StateSpace<'state>,
-    types: &mut CheckedTypeInterner<'state>,
+    context: &mut StateMatchExpansionContext<'_, 'state>,
     case: &StateMatchStepExpansion<'a>,
     seen_transitions: &mut BTreeSet<StateMatchTransitionKey>,
     clauses: &mut Vec<StepClause<'a>>,
 ) -> Result<()> {
-    let state_enum = semantic_index.enum_decl(module, &process.state_type)?;
-    let subject = format!("process {}", process.name);
+    let state_enum = context
+        .semantic_index
+        .enum_decl(context.module, &context.process.state_type)?;
+    let subject = format!("process {}", context.process.name);
     let pattern_context = PatternCheckContext {
-        module,
-        semantic_index,
+        module: context.module,
+        semantic_index: context.semantic_index,
         enum_decl: state_enum,
-        enum_type: &process.state_type,
+        enum_type: &context.process.state_type,
         subject: &subject,
         label: "state match",
         payload_context: PatternPayloadContext::SourceValue,
@@ -99,32 +93,15 @@ fn expand_state_match_step_clause_once<'a, 'state>(
         })
         .collect::<BTreeSet<_>>();
     for arm in &arms {
-        let cases = state_match_arm_cases(
-            module,
-            process,
-            process_id,
-            semantic_index,
-            message_cases,
-            state_space,
-            types,
-            state_enum,
-            &explicit_variants,
-            &arm.pattern,
-        )?;
+        let cases = state_match_arm_cases(context, state_enum, &explicit_variants, &arm.pattern)?;
         for (current_state, state_payload_bindings) in cases {
             validate_state_payload_binding_name(
-                process,
+                context.process,
                 &case.payload_bindings,
                 &state_payload_bindings,
             )?;
             preadmit_state_match_case_return(
-                module,
-                process,
-                process_id,
-                semantic_index,
-                message_cases,
-                state_space,
-                types,
+                context,
                 case.variant,
                 arm.body,
                 case.payload_guard.as_ref(),
@@ -153,32 +130,25 @@ fn expand_state_match_step_clause_once<'a, 'state>(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn preadmit_state_match_case_return<'state>(
-    module: &Module,
-    process: &Process,
-    process_id: CheckedProcessId,
-    semantic_index: &SemanticIndex,
-    message_cases: &MessageCaseTable,
-    state_space: &mut StateSpace<'state>,
-    types: &mut CheckedTypeInterner<'state>,
+    context: &mut StateMatchExpansionContext<'_, 'state>,
     variant: CheckedMessageVariantId,
     body: &FunctionBlock,
     payload_guard: Option<&CheckedPayloadValue>,
     payload_bindings: &[StepPayloadBinding],
     state_payload_bindings: &[StepStatePayloadBinding],
 ) -> Result<()> {
-    let mut context = StepReturnPreadmitContext {
-        module,
-        process,
-        process_id,
-        semantic_index,
-        message_cases,
-        state_space,
-        types,
+    let mut preadmit_context = StepReturnPreadmitContext {
+        module: context.module,
+        process: context.process,
+        process_id: context.process_id,
+        semantic_index: context.semantic_index,
+        message_cases: context.message_cases,
+        state_space: context.state_space,
+        types: context.types,
     };
     preadmit_step_return_state_value(
-        &mut context,
+        &mut preadmit_context,
         &StepReturnInput {
             variant,
             payload_guard,
@@ -208,15 +178,8 @@ fn validate_state_payload_binding_name(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn state_match_arm_cases(
-    module: &Module,
-    process: &Process,
-    process_id: CheckedProcessId,
-    semantic_index: &SemanticIndex,
-    message_cases: &MessageCaseTable,
-    state_space: &mut StateSpace<'_>,
-    types: &mut CheckedTypeInterner<'_>,
+    context: &mut StateMatchExpansionContext<'_, '_>,
     state_enum: &Enum,
     explicit_variants: &BTreeSet<usize>,
     pattern: &TypedMatchPattern,
@@ -231,40 +194,40 @@ fn state_match_arm_cases(
             match &variant_decl.payload_type {
                 None if bindings.is_empty() => {
                     let value = ValueExpr::Identifier(variant_decl.name.clone());
-                    let state = state_space.resolve_state_value(semantic_index, types, &value)?;
+                    let state = context.state_space.resolve_state_value(
+                        context.semantic_index,
+                        context.types,
+                        &value,
+                    )?;
                     Ok(vec![(state, Vec::new())])
                 }
                 None => Err(Error::new(format!(
                     "process {} state match pattern {} does not carry a payload",
-                    process.name, variant_decl.name
+                    context.process.name, variant_decl.name
                 ))),
                 Some(payload_type) => {
                     if bindings.is_empty() && payload_guard.is_none() {
                         return Err(Error::new(format!(
                             "process {} state match pattern {} requires a payload binding",
-                            process.name, variant_decl.name
+                            context.process.name, variant_decl.name
                         )));
                     }
-                    let checked_ty = types.intern(payload_type)?;
-                    let payloads = state_match_payload_domain(
-                        module,
-                        process,
-                        process_id,
-                        semantic_index,
-                        message_cases,
-                        state_space,
-                        payload_type,
-                        &checked_ty,
-                    )?;
+                    let checked_ty = context.types.intern(payload_type)?;
+                    let payloads = state_match_payload_domain(context, payload_type, &checked_ty)?;
                     payloads
                         .into_iter()
                         .map(|payload| {
                             if let Some(guard) = payload_guard
-                                && !payload_matches_guard(module, semantic_index, &payload, guard)?
+                                && !payload_matches_guard(
+                                    context.module,
+                                    context.semantic_index,
+                                    &payload,
+                                    guard,
+                                )?
                             {
                                 return Err(Error::new(format!(
                                     "process {} state match pattern {} does not match discovered payload {}",
-                                    process.name,
+                                    context.process.name,
                                     variant_decl.name,
                                     payload.label()
                                 )));
@@ -277,13 +240,13 @@ fn state_match_arm_cases(
                             let payload_value = payload.value().cloned().ok_or_else(|| {
                                 Error::new(format!(
                                     "process {} state payload {} cannot be a process reference",
-                                    process.name,
+                                    context.process.name,
                                     payload.label()
                                 ))
                             })?;
-                            let state = state_space.resolve_state_value_with_bindings(
-                                semantic_index,
-                                types,
+                            let state = context.state_space.resolve_state_value_with_bindings(
+                                context.semantic_index,
+                                context.types,
                                 &state_value,
                                 &[ValueBinding {
                                     name: &payload_name,
@@ -296,15 +259,15 @@ fn state_match_arm_cases(
                                 .iter()
                                 .map(|binding| {
                                     let (label, value) = checked_payload_binding(
-                                        module,
-                                        semantic_index,
+                                        context.module,
+                                        context.semantic_index,
                                         &payload,
                                         binding,
                                     )?
                                     .ok_or_else(|| {
                                         Error::new(format!(
                                             "process {} state payload {} does not match binding {}",
-                                            process.name,
+                                            context.process.name,
                                             payload.label(),
                                             binding.name
                                         ))
@@ -312,7 +275,7 @@ fn state_match_arm_cases(
                                     let value = value.ok_or_else(|| {
                                         Error::new(format!(
                                             "process {} state payload {} does not match binding {}",
-                                            process.name,
+                                            context.process.name,
                                             payload.label(),
                                             binding.name
                                         ))
@@ -322,7 +285,7 @@ fn state_match_arm_cases(
                                         payload_ty: payload_type.clone(),
                                         ty: binding.ty.clone(),
                                         checked_payload_ty: checked_ty.clone(),
-                                        checked_ty: types.intern(&binding.ty)?,
+                                        checked_ty: context.types.intern(&binding.ty)?,
                                         label,
                                         value,
                                         path: binding.path.clone(),
@@ -344,37 +307,33 @@ fn state_match_arm_cases(
                 match &variant_decl.payload_type {
                     None => {
                         let value = ValueExpr::Identifier(variant_decl.name.clone());
-                        let state =
-                            state_space.resolve_state_value(semantic_index, types, &value)?;
+                        let state = context.state_space.resolve_state_value(
+                            context.semantic_index,
+                            context.types,
+                            &value,
+                        )?;
                         cases.push((state, Vec::new()));
                     }
                     Some(payload_type) => {
-                        let checked_ty = types.intern(payload_type)?;
+                        let checked_ty = context.types.intern(payload_type)?;
                         let payload_name = Identifier::new("__state_payload")?;
                         let state_value = ValueExpr::EnumVariant {
                             name: variant_decl.name.clone(),
                             payload: Box::new(ValueExpr::Identifier(payload_name.clone())),
                         };
-                        for payload in state_match_payload_domain(
-                            module,
-                            process,
-                            process_id,
-                            semantic_index,
-                            message_cases,
-                            state_space,
-                            payload_type,
-                            &checked_ty,
-                        )? {
+                        for payload in
+                            state_match_payload_domain(context, payload_type, &checked_ty)?
+                        {
                             let payload_value = payload.value().cloned().ok_or_else(|| {
                                 Error::new(format!(
                                     "process {} state payload {} cannot be a process reference",
-                                    process.name,
+                                    context.process.name,
                                     payload.label()
                                 ))
                             })?;
-                            let state = state_space.resolve_state_value_with_bindings(
-                                semantic_index,
-                                types,
+                            let state = context.state_space.resolve_state_value_with_bindings(
+                                context.semantic_index,
+                                context.types,
                                 &state_value,
                                 &[ValueBinding {
                                     name: &payload_name,
@@ -393,35 +352,37 @@ fn state_match_arm_cases(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn state_match_payload_domain(
-    module: &Module,
-    process: &Process,
-    process_id: CheckedProcessId,
-    semantic_index: &SemanticIndex,
-    message_cases: &MessageCaseTable,
-    state_space: &StateSpace<'_>,
+    context: &StateMatchExpansionContext<'_, '_>,
     payload_type: &TypeRef,
     checked_payload_type: &CheckedTypeRef,
 ) -> Result<Vec<CheckedPayloadValue>> {
     let mut payloads = BTreeMap::new();
-    for state in state_space.values() {
+    for state in context.state_space.values() {
         if let Some(payload) = state.payload() {
             if payload.ty() == checked_payload_type {
                 payloads.insert(PayloadDomainKey::from_payload(payload)?, payload.clone());
             }
         }
     }
-    let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
+    let msg_enum = context
+        .semantic_index
+        .enum_decl(context.module, &context.process.msg_type)?;
     for (variant_index, message_variant) in msg_enum.variants.iter().enumerate() {
         let Some(message_payload_type) = &message_variant.payload_type else {
             continue;
         };
-        if !semantic_index.same_type(message_payload_type, payload_type) {
+        if !context
+            .semantic_index
+            .same_type(message_payload_type, payload_type)
+        {
             continue;
         }
         let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
-        for payload in message_cases.payload_values(process_id, variant_id)? {
+        for payload in context
+            .message_cases
+            .payload_values(context.process_id, variant_id)?
+        {
             payloads.insert(PayloadDomainKey::from_payload(payload)?, payload.clone());
         }
     }

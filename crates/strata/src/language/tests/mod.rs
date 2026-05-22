@@ -14,6 +14,7 @@ mod process_return_match_arm_prefix;
 mod process_return_match_arm_prefix_invalid_templates;
 mod process_return_match_arm_prefix_properties;
 mod process_return_match_arm_prefix_state_discovery;
+mod process_return_match_arm_runtime_if;
 mod runtime_final_if_branch_prefix;
 mod runtime_final_if_nested_terminal;
 mod runtime_for_each;

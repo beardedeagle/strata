@@ -1,17 +1,35 @@
 use super::send::{resolve_checked_send_target, resolve_send_message_case};
 use super::*;
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Copy)]
+pub(super) struct ActionCheckInput<'a, 'scope, 'source, 'template> {
+    pub(super) function_scope: &'a SourceFunctionScope<'scope>,
+    pub(super) source_bindings: &'a [SourceValueBinding<'source>],
+    pub(super) template_bindings: &'a [ValueTemplateBinding<'template>],
+    pub(super) payload_bindings: &'a [StepPayloadBinding],
+    pub(super) scope: ActionCheckScope,
+}
+
+#[derive(Clone, Copy)]
+struct StatementRuntimeIf<'a> {
+    condition: &'a ValueExpr,
+    then_body: &'a [Statement],
+    else_body: &'a [Statement],
+}
+
+#[derive(Clone, Copy)]
+struct ForEachAction<'a> {
+    item: &'a ForEachItem,
+    collection: &'a ValueExpr,
+    body: &'a [Statement],
+}
+
 pub(super) fn checked_actions_for_statements(
     context: &mut StepCheckContext<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
-    function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    payload_bindings: &[StepPayloadBinding],
     loop_elements: &mut LoopElementAllocator,
-    scope: ActionCheckScope,
+    input: ActionCheckInput<'_, '_, '_, '_>,
     statements: &[Statement],
 ) -> Result<Vec<CheckedAction>> {
     let mut actions = Vec::with_capacity(statements.len());
@@ -23,21 +41,21 @@ pub(super) fn checked_actions_for_statements(
                 });
             }
             Statement::LetProcessRef { name, target, .. } => {
-                if scope.in_step_return_match_arm {
+                if input.scope.in_step_return_match_arm {
                     return Err(Error::new(format!(
                         "process {} step return match arm cannot bind process reference {} in this source slice",
                         context.process.name, name
                     )));
                 }
-                if !matches!(scope.runtime_if_branch, RuntimeIfBranchScope::Outside) {
+                if !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside) {
                     return Err(Error::new(format!(
                         "process {} {} cannot bind process reference {} in this source slice",
                         context.process.name,
-                        scope.runtime_if_branch_label(),
+                        input.scope.runtime_if_branch_label(),
                         name
                     )));
                 }
-                if scope.in_loop_body {
+                if input.scope.in_loop_body {
                     return Err(Error::new(format!(
                         "process {} for loop body cannot bind process reference {} in this source slice",
                         context.process.name, name
@@ -59,15 +77,16 @@ pub(super) fn checked_actions_for_statements(
                 message,
                 payload,
             } => {
-                let send_target = resolve_checked_send_target(context, payload_bindings, target)?;
+                let send_target =
+                    resolve_checked_send_target(context, input.payload_bindings, target)?;
                 let message_id = resolve_send_message_case(
                     context,
                     types,
                     send_target.target_process,
                     message,
                     payload.as_ref(),
-                    source_bindings,
-                    template_bindings,
+                    input.source_bindings,
+                    input.template_bindings,
                 )?;
                 actions.push(CheckedAction::Send {
                     target: send_target.target,
@@ -80,26 +99,28 @@ pub(super) fn checked_actions_for_statements(
                 then_body,
                 else_body,
             } => {
-                if scope.in_step_return_match_arm {
+                if input.scope.in_step_return_match_arm
+                    && !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside)
+                {
                     return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform runtime if in this source slice",
+                        "process {} step return match arm cannot perform nested runtime if in this source slice",
                         context.process.name
                     )));
                 }
-                scope.validate_statement_if_allowed(&context.process.name)?;
+                input
+                    .scope
+                    .validate_statement_if_allowed(&context.process.name)?;
                 actions.push(checked_if_else_statement_action(
                     context,
                     outputs,
                     types,
-                    function_scope,
-                    source_bindings,
-                    template_bindings,
-                    payload_bindings,
                     loop_elements,
-                    scope,
-                    condition,
-                    then_body,
-                    else_body,
+                    input,
+                    StatementRuntimeIf {
+                        condition,
+                        then_body,
+                        else_body,
+                    },
                 )?);
             }
             Statement::ForEach {
@@ -107,13 +128,13 @@ pub(super) fn checked_actions_for_statements(
                 collection,
                 body,
             } => {
-                if scope.in_step_return_match_arm {
+                if input.scope.in_step_return_match_arm {
                     return Err(Error::new(format!(
                         "process {} step return match arm cannot perform for loops in this source slice",
                         context.process.name
                     )));
                 }
-                if scope.in_loop_body {
+                if input.scope.in_loop_body {
                     return Err(Error::new(format!(
                         "process {} nested for loops are not supported in this source slice",
                         context.process.name
@@ -123,14 +144,13 @@ pub(super) fn checked_actions_for_statements(
                     context,
                     outputs,
                     types,
-                    function_scope,
-                    source_bindings,
-                    template_bindings,
-                    payload_bindings,
                     loop_elements,
-                    item,
-                    collection,
-                    body,
+                    input,
+                    ForEachAction {
+                        item,
+                        collection,
+                        body,
+                    },
                 )?);
             }
         }
@@ -138,53 +158,42 @@ pub(super) fn checked_actions_for_statements(
     Ok(actions)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn checked_if_else_statement_action(
     context: &mut StepCheckContext<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
-    function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    payload_bindings: &[StepPayloadBinding],
     loop_elements: &mut LoopElementAllocator,
-    scope: ActionCheckScope,
-    condition: &ValueExpr,
-    then_body: &[Statement],
-    else_body: &[Statement],
+    input: ActionCheckInput<'_, '_, '_, '_>,
+    runtime_if: StatementRuntimeIf<'_>,
 ) -> Result<CheckedAction> {
     let condition = checked_runtime_bool_condition(
         context,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        condition,
+        input.function_scope,
+        input.source_bindings,
+        input.template_bindings,
+        runtime_if.condition,
     )?;
-    let branch_scope = scope.for_statement_if_branch();
+    let branch_scope = input.scope.for_statement_if_branch();
+    let branch_input = ActionCheckInput {
+        scope: branch_scope,
+        ..input
+    };
     let then_actions = checked_actions_for_statements(
         context,
         outputs,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        payload_bindings,
         loop_elements,
-        branch_scope,
-        then_body,
+        branch_input,
+        runtime_if.then_body,
     )?;
     let else_actions = checked_actions_for_statements(
         context,
         outputs,
         types,
-        function_scope,
-        source_bindings,
-        template_bindings,
-        payload_bindings,
         loop_elements,
-        branch_scope,
-        else_body,
+        branch_input,
+        runtime_if.else_body,
     )?;
     if then_actions.is_empty() && else_actions.is_empty() {
         return Err(Error::new(format!(
@@ -199,27 +208,24 @@ fn checked_if_else_statement_action(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn checked_for_each_action(
     context: &mut StepCheckContext<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
-    function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    payload_bindings: &[StepPayloadBinding],
     loop_elements: &mut LoopElementAllocator,
-    item: &ForEachItem,
-    collection: &ValueExpr,
-    body: &[Statement],
+    input: ActionCheckInput<'_, '_, '_, '_>,
+    for_each: ForEachAction<'_>,
 ) -> Result<CheckedAction> {
+    let item = for_each.item;
+    let collection = for_each.collection;
     let ValueExpr::Identifier(collection_name) = collection else {
         return Err(Error::new(format!(
             "process {} for loop collection must be a runtime list binding",
             context.process.name
         )));
     };
-    let Some(collection_binding) = source_bindings
+    let Some(collection_binding) = input
+        .source_bindings
         .iter()
         .find(|binding| binding.name == collection_name)
     else {
@@ -251,7 +257,8 @@ fn checked_for_each_action(
             for_each_item_name(item)
         )));
     }
-    if !template_bindings
+    if !input
+        .template_bindings
         .iter()
         .any(|binding| binding.name == collection_name)
     {
@@ -261,16 +268,16 @@ fn checked_for_each_action(
         )));
     }
     validate_source_function_value_expr(
-        function_scope,
+        input.function_scope,
         collection_binding.ty,
         collection,
-        source_bindings,
+        input.source_bindings,
     )?;
     let collection = resolve_source_value_expr(
-        function_scope,
+        input.function_scope,
         collection_binding.ty,
         collection,
-        source_bindings,
+        input.source_bindings,
         0,
     )?;
     let collection_template = checked_value_template_with_binding(
@@ -279,7 +286,7 @@ fn checked_for_each_action(
         types,
         collection_binding.ty,
         &collection,
-        template_bindings,
+        input.template_bindings,
     )?;
 
     let element_id = loop_elements.next_id()?;
@@ -288,19 +295,19 @@ fn checked_for_each_action(
     let loop_bindings = checked_loop_element_bindings(
         context,
         types,
-        source_bindings,
+        input.source_bindings,
         item,
         element_type,
         &element_ty,
     )?;
-    let mut body_source_bindings = source_bindings.to_vec();
+    let mut body_source_bindings = input.source_bindings.to_vec();
     for binding in &loop_bindings {
         body_source_bindings.push(SourceValueBinding {
             name: binding.name,
             ty: &binding.ty,
         });
     }
-    let mut body_template_bindings = template_bindings.to_vec();
+    let mut body_template_bindings = input.template_bindings.to_vec();
     for binding in &loop_bindings {
         body_template_bindings.push(ValueTemplateBinding {
             name: binding.name,
@@ -315,13 +322,15 @@ fn checked_for_each_action(
         context,
         outputs,
         types,
-        function_scope,
-        &body_source_bindings,
-        &body_template_bindings,
-        payload_bindings,
         loop_elements,
-        ActionCheckScope::TOP_LEVEL.for_loop_body(),
-        body,
+        ActionCheckInput {
+            function_scope: input.function_scope,
+            source_bindings: &body_source_bindings,
+            template_bindings: &body_template_bindings,
+            payload_bindings: input.payload_bindings,
+            scope: ActionCheckScope::TOP_LEVEL.for_loop_body(),
+        },
+        for_each.body,
     )?;
 
     Ok(CheckedAction::ForEach {

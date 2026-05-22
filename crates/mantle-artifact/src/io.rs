@@ -310,12 +310,11 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    #[cfg(unix)]
     #[test]
     fn opened_non_regular_artifact_handle_is_rejected() {
         let path = unique_artifact_path("opened-fifo");
@@ -329,7 +328,6 @@ mod tests {
         fs::remove_file(path).expect("test FIFO should be removed");
     }
 
-    #[cfg(unix)]
     #[test]
     fn secure_artifact_output_open_rejects_symlink_parent_without_preflight() {
         use std::os::unix::fs::symlink;
@@ -353,7 +351,6 @@ mod tests {
         fs::remove_dir(real_dir).expect("test real dir should be removed");
     }
 
-    #[cfg(unix)]
     #[test]
     fn secure_artifact_input_open_rejects_symlink_parent_without_preflight() {
         use std::os::unix::fs::symlink;
@@ -375,7 +372,6 @@ mod tests {
         fs::remove_dir(real_dir).expect("test real dir should be removed");
     }
 
-    #[cfg(unix)]
     fn create_fifo(path: &Path) {
         use nix::sys::stat::Mode;
         use nix::unistd::mkfifo;
@@ -383,7 +379,6 @@ mod tests {
         mkfifo(path, Mode::S_IRUSR | Mode::S_IWUSR).expect("test FIFO should be created");
     }
 
-    #[cfg(unix)]
     fn unique_artifact_path(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -17,6 +17,19 @@ struct ArmTemplateValidation<'a, 'template, 'arm> {
 }
 
 #[derive(Clone, Copy)]
+struct ArmStatementValidation<'a, 'template, 'arm> {
+    template: ArmTemplateValidation<'a, 'template, 'arm>,
+    in_runtime_if_branch: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ArmRuntimeIf<'a> {
+    condition: &'a ValueExpr,
+    then_body: &'a [Statement],
+    else_body: &'a [Statement],
+}
+
+#[derive(Clone, Copy)]
 struct ArmSend<'a> {
     target: &'a Identifier,
     message: &'a Identifier,
@@ -84,14 +97,27 @@ pub(super) fn validate_return_match_arm_action_statements(
             &arm.pattern,
             &mut arm_bindings,
         )?;
+        let mut runtime_if_count = 0usize;
         for statement in &source_arm.body.statements {
+            if matches!(statement, Statement::IfElse { .. }) {
+                runtime_if_count = runtime_if_count.saturating_add(1);
+                if runtime_if_count > 1 {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot perform more than one runtime if in this source slice",
+                        context.process.name
+                    )));
+                }
+            }
             validate_step_return_match_arm_action_statement(
                 context,
                 types,
                 function_scope,
                 validation_bindings,
                 input,
-                template_validation,
+                ArmStatementValidation {
+                    template: template_validation,
+                    in_runtime_if_branch: false,
+                },
                 statement,
             )?;
         }
@@ -152,7 +178,7 @@ fn validate_step_return_match_arm_action_statement(
     function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
     input: &StepTransitionInput<'_>,
-    template_validation: ArmTemplateValidation<'_, '_, '_>,
+    validation: ArmStatementValidation<'_, '_, '_>,
     statement: &Statement,
 ) -> Result<()> {
     match statement {
@@ -169,7 +195,7 @@ fn validate_step_return_match_arm_action_statement(
                 function_scope,
                 source_bindings,
                 input,
-                template_validation,
+                validation.template,
                 ArmSend {
                     target,
                     message,
@@ -181,15 +207,130 @@ fn validate_step_return_match_arm_action_statement(
             "process {} step return match arm cannot bind process reference {} in this source slice",
             context.process.name, name
         ))),
-        Statement::IfElse { .. } => Err(Error::new(format!(
-            "process {} step return match arm cannot perform runtime if in this source slice",
-            context.process.name
-        ))),
+        Statement::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            if validation.in_runtime_if_branch {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot perform nested runtime if in this source slice",
+                    context.process.name
+                )));
+            }
+            validate_step_return_match_arm_runtime_if_statement(
+                context,
+                types,
+                function_scope,
+                source_bindings,
+                input,
+                validation.template,
+                ArmRuntimeIf {
+                    condition,
+                    then_body,
+                    else_body,
+                },
+            )
+        }
         Statement::ForEach { .. } => Err(Error::new(format!(
             "process {} step return match arm cannot perform for loops in this source slice",
             context.process.name
         ))),
     }
+}
+
+fn validate_step_return_match_arm_runtime_if_statement(
+    context: &StepCheckContext<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    input: &StepTransitionInput<'_>,
+    template_validation: ArmTemplateValidation<'_, '_, '_>,
+    runtime_if: ArmRuntimeIf<'_>,
+) -> Result<()> {
+    validate_step_return_match_arm_runtime_if_condition(
+        context,
+        types,
+        function_scope,
+        source_bindings,
+        template_validation,
+        runtime_if.condition,
+    )?;
+    if runtime_if.then_body.is_empty() && runtime_if.else_body.is_empty() {
+        return Err(Error::new(format!(
+            "process {} statement-level if branches cannot both be empty",
+            context.process.name
+        )));
+    }
+    validate_step_return_match_arm_runtime_if_branch(
+        context,
+        types,
+        function_scope,
+        source_bindings,
+        input,
+        template_validation,
+        runtime_if.then_body,
+    )?;
+    validate_step_return_match_arm_runtime_if_branch(
+        context,
+        types,
+        function_scope,
+        source_bindings,
+        input,
+        template_validation,
+        runtime_if.else_body,
+    )
+}
+
+fn validate_step_return_match_arm_runtime_if_condition(
+    context: &StepCheckContext<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    template_validation: ArmTemplateValidation<'_, '_, '_>,
+    condition: &ValueExpr,
+) -> Result<()> {
+    let bool_type = context.semantic_index.bool_type(context.module)?;
+    validate_source_function_value_expr(function_scope, &bool_type, condition, source_bindings)
+        .map_err(|err| Error::new(format!("if condition must have type {bool_type}: {err}")))?;
+    let resolved =
+        resolve_source_value_expr(function_scope, &bool_type, condition, source_bindings, 0)?;
+    let condition = substitute_static_arm_bindings(resolved, template_validation.arm_substitutions);
+    checked_value_template_with_binding(
+        context.module,
+        context.semantic_index,
+        types,
+        &bool_type,
+        &condition,
+        template_validation.template_bindings,
+    )?;
+    Ok(())
+}
+
+fn validate_step_return_match_arm_runtime_if_branch(
+    context: &StepCheckContext<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    function_scope: &SourceFunctionScope<'_>,
+    source_bindings: &[SourceValueBinding<'_>],
+    input: &StepTransitionInput<'_>,
+    template_validation: ArmTemplateValidation<'_, '_, '_>,
+    statements: &[Statement],
+) -> Result<()> {
+    for statement in statements {
+        validate_step_return_match_arm_action_statement(
+            context,
+            types,
+            function_scope,
+            source_bindings,
+            input,
+            ArmStatementValidation {
+                template: template_validation,
+                in_runtime_if_branch: true,
+            },
+            statement,
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_step_return_match_arm_effect(

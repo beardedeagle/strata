@@ -5,6 +5,10 @@ use super::steps::{
 };
 use super::*;
 
+mod send_discovery;
+
+use send_discovery::discover_send_statements;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct DiscoveredMessageCase {
     variant: CheckedMessageVariantId,
@@ -126,17 +130,15 @@ impl MessageCaseTable {
                             process_refs: &process_ref_targets[process_index],
                             types,
                         };
-                        for statement in &clause.body.statements {
-                            changed |= discover_send_statement(
-                                &mut builders,
-                                process,
-                                &clause.pattern,
-                                statement,
-                                &bindings,
-                                &clause.state_payload_bindings,
-                                &mut discovery_context,
-                            )?;
-                        }
+                        changed |= discover_send_statements(
+                            &mut builders,
+                            process,
+                            &clause.pattern,
+                            &clause.body.statements,
+                            &bindings,
+                            &clause.state_payload_bindings,
+                            &mut discovery_context,
+                        )?;
                         for selected_bindings in return_match_discovery_binding_sets(
                             &clause.body.returns,
                             &clause.pattern,
@@ -154,17 +156,15 @@ impl MessageCaseTable {
                             else {
                                 continue;
                             };
-                            for statement in &statements {
-                                changed |= discover_send_statement(
-                                    &mut builders,
-                                    process,
-                                    &clause.pattern,
-                                    statement,
-                                    &selected_bindings,
-                                    &clause.state_payload_bindings,
-                                    &mut discovery_context,
-                                )?;
-                            }
+                            changed |= discover_send_statements(
+                                &mut builders,
+                                process,
+                                &clause.pattern,
+                                &statements,
+                                &selected_bindings,
+                                &clause.state_payload_bindings,
+                                &mut discovery_context,
+                            )?;
                         }
                     }
                 }
@@ -438,52 +438,6 @@ impl<'a> MessageCaseBuilder<'a> {
         }
         Ok(payloads_by_variant)
     }
-}
-
-fn discover_send_statement(
-    builders: &mut [MessageCaseBuilder<'_>],
-    process: &Process,
-    pattern: &StepPattern,
-    statement: &Statement,
-    bindings: &[DiscoveryValueBinding],
-    state_payload_bindings: &[StatePayloadDiscoveryBinding],
-    context: &mut SendPayloadDiscoveryContext<'_, '_, '_>,
-) -> Result<bool> {
-    let Statement::Send {
-        target,
-        message,
-        payload,
-    } = statement
-    else {
-        return Ok(false);
-    };
-    let target_process_id = resolve_send_target_process_for_discovery(
-        process,
-        context.semantic_index,
-        context.process_refs,
-        pattern,
-        target,
-    )?;
-    let target_variant = context.semantic_index.message_id_for_process(
-        context.module,
-        process.name.as_str(),
-        target_process_id,
-        message,
-    )?;
-    let builder = builders.get_mut(target_process_id.index()).ok_or_else(|| {
-        Error::new(format!(
-            "process id {} is not declared",
-            target_process_id.as_u32()
-        ))
-    })?;
-    add_discovered_send_payload_cases(
-        builder,
-        target_variant,
-        payload.as_ref(),
-        bindings,
-        state_payload_bindings,
-        context,
-    )
 }
 
 fn return_match_discovery_binding_sets(

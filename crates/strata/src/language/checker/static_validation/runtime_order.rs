@@ -22,6 +22,36 @@ struct StaticLoopElementBinding {
     value: CheckedPayloadValue,
 }
 
+#[derive(Clone, Copy)]
+struct StaticActionContext<'a> {
+    processes: &'a [CheckedProcess],
+    process: &'a CheckedProcess,
+    envelope: &'a StaticMessageEnvelope,
+    current_state_payload: Option<&'a CheckedPayloadValue>,
+    loop_elements: &'a [StaticLoopElementBinding],
+}
+
+impl<'a> StaticActionContext<'a> {
+    fn with_loop_elements<'b>(
+        self,
+        loop_elements: &'b [StaticLoopElementBinding],
+    ) -> StaticActionContext<'b>
+    where
+        'a: 'b,
+    {
+        StaticActionContext {
+            loop_elements,
+            ..self
+        }
+    }
+}
+
+struct StaticActionState<'a> {
+    instances: &'a mut Vec<StaticProcessInstance>,
+    next_pid: &'a mut StaticProcessId,
+    local_process_refs: &'a mut BTreeMap<CheckedProcessRefId, StaticProcessId>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StaticProcessStatus {
     Running,
@@ -226,18 +256,22 @@ pub(super) fn validate_static_runtime_order(
         )?;
         let mut local_process_refs = BTreeMap::new();
 
-        for action in transition.actions() {
-            execute_static_action(
+        {
+            let action_context = StaticActionContext {
                 processes,
-                &mut instances,
-                &mut next_pid,
                 process,
-                &mut local_process_refs,
-                &envelope,
+                envelope: &envelope,
                 current_state_payload,
-                action,
-                &[],
-            )?;
+                loop_elements: &[],
+            };
+            let mut action_state = StaticActionState {
+                instances: &mut instances,
+                next_pid: &mut next_pid,
+                local_process_refs: &mut local_process_refs,
+            };
+            for action in transition.actions() {
+                execute_static_action(action_context, &mut action_state, action)?;
+            }
         }
 
         instances[process_index].state = final_state;
@@ -267,17 +301,10 @@ pub(super) fn validate_static_runtime_order(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn execute_static_action(
-    processes: &[CheckedProcess],
-    instances: &mut Vec<StaticProcessInstance>,
-    next_pid: &mut StaticProcessId,
-    process: &CheckedProcess,
-    local_process_refs: &mut BTreeMap<CheckedProcessRefId, StaticProcessId>,
-    envelope: &StaticMessageEnvelope,
-    current_state_payload: Option<&CheckedPayloadValue>,
+    context: StaticActionContext<'_>,
+    state: &mut StaticActionState<'_>,
     action: &CheckedAction,
-    loop_elements: &[StaticLoopElementBinding],
 ) -> Result<()> {
     match action {
         CheckedAction::Emit { .. } => Ok(()),
@@ -285,13 +312,18 @@ fn execute_static_action(
             target,
             process_ref,
         } => {
-            let target_process = process_by_id(processes, *target)?;
-            ensure_static_process_capacity(instances.len())?;
-            let spawned_pid = *next_pid;
-            *next_pid = next_pid.checked_next()?;
-            bind_static_process_ref(process, local_process_refs, *process_ref, spawned_pid)
-                .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
-            instances.push(StaticProcessInstance {
+            let target_process = process_by_id(context.processes, *target)?;
+            ensure_static_process_capacity(state.instances.len())?;
+            let spawned_pid = *state.next_pid;
+            *state.next_pid = state.next_pid.checked_next()?;
+            bind_static_process_ref(
+                context.process,
+                state.local_process_refs,
+                *process_ref,
+                spawned_pid,
+            )
+            .map_err(|err| Error::new(format!("process {} {err}", context.process.debug_name())))?;
+            state.instances.push(StaticProcessInstance {
                 pid: spawned_pid,
                 process_id: *target,
                 state: target_process.init_state(),
@@ -306,40 +338,41 @@ fn execute_static_action(
             payload,
         } => {
             let target_pid = resolve_static_send_target(
-                process,
-                local_process_refs,
+                context.process,
+                state.local_process_refs,
                 target,
-                envelope.payload.as_ref(),
+                context.envelope.payload.as_ref(),
             )
-            .map_err(|err| Error::new(format!("process {} {err}", process.debug_name())))?;
+            .map_err(|err| Error::new(format!("process {} {err}", context.process.debug_name())))?;
             let target_index =
-                static_process_index_for_pid(instances, target_pid).map_err(|err| {
+                static_process_index_for_pid(state.instances, target_pid).map_err(|err| {
                     Error::new(format!(
                         "process {} sends through process reference to {err}",
-                        process.debug_name()
+                        context.process.debug_name()
                     ))
                 })?;
-            let target_process = process_by_id(processes, instances[target_index].process_id)?;
+            let target_process =
+                process_by_id(context.processes, state.instances[target_index].process_id)?;
             if message.index() >= target_process.message_cases().len() {
                 return Err(Error::new(format!(
                     "process {} sends message id {} not accepted by {}",
-                    process.debug_name(),
+                    context.process.debug_name(),
                     message.as_u32(),
                     target_process.debug_name()
                 )));
             }
 
-            if instances[target_index].status != StaticProcessStatus::Running {
+            if state.instances[target_index].status != StaticProcessStatus::Running {
                 return Err(Error::new(format!(
                     "process {} sends to {}, which is not running",
-                    process.debug_name(),
+                    context.process.debug_name(),
                     target_process.debug_name()
                 )));
             }
-            if instances[target_index].mailbox.len() >= target_process.mailbox_bound() {
+            if state.instances[target_index].mailbox.len() >= target_process.mailbox_bound() {
                 return Err(Error::new(format!(
                     "process {} sends to {}, but its mailbox would exceed bound {}",
-                    process.debug_name(),
+                    context.process.debug_name(),
                     target_process.debug_name(),
                     target_process.mailbox_bound()
                 )));
@@ -347,15 +380,15 @@ fn execute_static_action(
             let payload = match payload {
                 Some(payload) => Some(evaluate_checked_runtime_template(
                     payload,
-                    envelope.payload.as_ref(),
-                    current_state_payload,
-                    process,
-                    local_process_refs,
-                    loop_elements,
+                    context.envelope.payload.as_ref(),
+                    context.current_state_payload,
+                    context.process,
+                    state.local_process_refs,
+                    context.loop_elements,
                 )?),
                 None => None,
             };
-            instances[target_index]
+            state.instances[target_index]
                 .mailbox
                 .push_back(StaticMessageEnvelope::new(*message, payload));
             Ok(())
@@ -367,28 +400,18 @@ fn execute_static_action(
         } => {
             let selected_actions = if evaluate_checked_bool_condition(
                 condition,
-                envelope.payload.as_ref(),
-                current_state_payload,
-                process,
-                local_process_refs,
-                loop_elements,
+                context.envelope.payload.as_ref(),
+                context.current_state_payload,
+                context.process,
+                state.local_process_refs,
+                context.loop_elements,
             )? {
                 then_actions
             } else {
                 else_actions
             };
             for action in selected_actions {
-                execute_static_action(
-                    processes,
-                    instances,
-                    next_pid,
-                    process,
-                    local_process_refs,
-                    envelope,
-                    current_state_payload,
-                    action,
-                    loop_elements,
-                )?;
+                execute_static_action(context, state, action)?;
             }
             Ok(())
         }
@@ -400,25 +423,25 @@ fn execute_static_action(
         } => {
             let collection = evaluate_checked_runtime_template(
                 collection,
-                envelope.payload.as_ref(),
-                current_state_payload,
-                process,
-                local_process_refs,
-                loop_elements,
+                context.envelope.payload.as_ref(),
+                context.current_state_payload,
+                context.process,
+                state.local_process_refs,
+                context.loop_elements,
             )?;
             let collection_label = collection.label();
             let collection_value = checked_payload_value(&collection)?;
             let ArtifactValue::List(items) = collection_value else {
                 return Err(Error::new(format!(
                     "process {} for loop collection produced non-list value {}",
-                    process.debug_name(),
+                    context.process.debug_name(),
                     collection_label
                 )));
             };
             if items.len() > *max_items {
                 return Err(Error::new(format!(
                     "process {} for loop collection has {} item(s), max_items is {}",
-                    process.debug_name(),
+                    context.process.debug_name(),
                     items.len(),
                     max_items
                 )));
@@ -429,16 +452,11 @@ fn execute_static_action(
                     id: element.id(),
                     value: item_payload,
                 };
+                let loop_elements = [binding];
                 execute_static_action_list(
-                    processes,
-                    instances,
-                    next_pid,
-                    process,
-                    local_process_refs,
-                    envelope,
-                    current_state_payload,
+                    context.with_loop_elements(&loop_elements),
+                    state,
                     body,
-                    &[binding],
                 )?;
             }
             Ok(())
@@ -446,30 +464,13 @@ fn execute_static_action(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn execute_static_action_list(
-    processes: &[CheckedProcess],
-    instances: &mut Vec<StaticProcessInstance>,
-    next_pid: &mut StaticProcessId,
-    process: &CheckedProcess,
-    local_process_refs: &mut BTreeMap<CheckedProcessRefId, StaticProcessId>,
-    envelope: &StaticMessageEnvelope,
-    current_state_payload: Option<&CheckedPayloadValue>,
+    context: StaticActionContext<'_>,
+    state: &mut StaticActionState<'_>,
     actions: &[CheckedAction],
-    loop_elements: &[StaticLoopElementBinding],
 ) -> Result<()> {
     for action in actions {
-        execute_static_action(
-            processes,
-            instances,
-            next_pid,
-            process,
-            local_process_refs,
-            envelope,
-            current_state_payload,
-            action,
-            loop_elements,
-        )?;
+        execute_static_action(context, state, action)?;
     }
     Ok(())
 }

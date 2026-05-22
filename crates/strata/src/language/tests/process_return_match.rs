@@ -556,7 +556,7 @@ fn rejects_step_return_match_arm_that_returns_bare_state() {
 }
 
 #[test]
-fn rejects_step_return_match_arm_runtime_if_statement() {
+fn rejects_step_return_match_arm_runtime_if_without_bool_contract() {
     let source = STEP_RETURN_MATCH
         .replace(
             "fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [] ~ [] @det {",
@@ -567,12 +567,11 @@ fn rejects_step_return_match_arm_runtime_if_statement() {
             "            Ready => {\n                if (Ready == Ready) {\n                    emit \"return-match arm runtime if is unsupported\";\n                } else {\n                    emit \"return-match arm runtime if else is unsupported\";\n                }\n                return Continue(SawReady);",
         );
 
-    let err = check_source(&source).expect_err("return-match arm runtime if should fail");
+    let err = check_source(&source).expect_err("runtime if condition must use Bool");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform runtime if in this source slice"
-        ),
+        err.to_string()
+            .contains("if condition requires enum Bool { False, True }"),
         "unexpected error: {err}"
     );
 }

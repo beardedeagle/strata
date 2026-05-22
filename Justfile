@@ -4,6 +4,7 @@ stable_toolchain := "stable"
 nightly_toolchain := "nightly"
 mdbook_version := "0.5.2"
 cargo_fuzz_version := "0.13.1"
+cfg_check_targets := "x86_64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc"
 
 default:
     @just --list
@@ -22,6 +23,33 @@ fmt-check:
 
 check:
     cargo +{{stable_toolchain}} check --workspace --all-targets
+
+cfg-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    targets=( {{cfg_check_targets}} )
+    installed="$(rustup target list --installed --toolchain {{stable_toolchain}})"
+    missing=()
+
+    for target in "${targets[@]}"; do
+        if ! grep -qx "$target" <<<"$installed"; then
+            missing+=("$target")
+        fi
+    done
+
+    if (( ${#missing[@]} > 0 )); then
+        echo "Error: cfg-check requires additional Rust targets." >&2
+        printf 'Install missing targets with: rustup target add --toolchain {{stable_toolchain}}' >&2
+        printf ' %s' "${missing[@]}" >&2
+        printf '\n' >&2
+        exit 1
+    fi
+
+    for target in "${targets[@]}"; do
+        echo "==> cfg-check target: $target"
+        cargo +{{stable_toolchain}} check --workspace --all-targets --target "$target"
+    done
 
 test:
     cargo +{{stable_toolchain}} test --workspace --all-targets
@@ -132,6 +160,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_prefix.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_prefix.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_prefix.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_runtime_if_prefix.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_runtime_if_prefix.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_runtime_if_prefix.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_collection_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_collection_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_collection_match.mta
@@ -290,7 +321,7 @@ source-to-runtime-failure-gates: build
         exit 1
     fi
 
-quality: fmt-check check test lint performance-smoke metadata-check toolchain-policy-check docs source-to-runtime-gates diff-check
+quality: fmt-check check cfg-check test lint performance-smoke metadata-check toolchain-policy-check docs source-to-runtime-gates diff-check
 
 ci-native: quality
 
@@ -328,7 +359,7 @@ ci-local:
 # CI setup and entry points
 # =============================================================================
 
-install-ci-tools-linux: install-linux-metadata-tools install-docs-tools
+install-ci-tools-linux: install-linux-metadata-tools install-docs-tools install-cfg-check-targets
 
 install-linux-metadata-tools:
     #!/usr/bin/env bash
@@ -340,6 +371,9 @@ install-linux-metadata-tools:
 install-docs-tools:
     rustup toolchain install {{stable_toolchain}} --profile minimal
     cargo +{{stable_toolchain}} install mdbook --version {{mdbook_version}} --locked --target-dir target/cargo-install
+
+install-cfg-check-targets:
+    rustup target add --toolchain {{stable_toolchain}} {{cfg_check_targets}}
 
 install-fuzz-tools:
     rustup toolchain install {{stable_toolchain}} --profile minimal
