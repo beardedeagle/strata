@@ -29,7 +29,7 @@ cfg-check:
     set -euo pipefail
 
     targets=( {{cfg_check_targets}} )
-    installed="$(rustup target list --installed)"
+    installed="$(rustup target list --installed --toolchain {{stable_toolchain}})"
     missing=()
 
     for target in "${targets[@]}"; do
