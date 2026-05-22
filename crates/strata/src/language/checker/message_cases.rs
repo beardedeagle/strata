@@ -1,7 +1,7 @@
 use super::steps::{
     collect_concrete_state_payload_domains, collect_message_case_process_refs,
     matching_message_cases, payload_value_bindings, resolve_send_target_process_for_discovery,
-    step_discovery_clauses,
+    selected_step_return_match_action_statements, step_discovery_clauses,
 };
 use super::*;
 
@@ -118,52 +118,53 @@ impl MessageCaseTable {
                             &clause.pattern,
                             sender_case,
                         )?;
+                        let mut discovery_context = SendPayloadDiscoveryContext {
+                            sender_cases,
+                            concrete_state_payloads: &concrete_state_payload_domains[process_index],
+                            module,
+                            semantic_index,
+                            process_refs: &process_ref_targets[process_index],
+                            types,
+                        };
                         for statement in &clause.body.statements {
-                            let Statement::Send {
-                                target,
-                                message,
-                                payload,
-                            } = statement
-                            else {
-                                continue;
-                            };
-                            let target_process_id = resolve_send_target_process_for_discovery(
+                            changed |= discover_send_statement(
+                                &mut builders,
                                 process,
-                                semantic_index,
-                                &process_ref_targets[process_index],
                                 &clause.pattern,
-                                target,
-                            )?;
-                            let target_variant = semantic_index.message_id_for_process(
-                                module,
-                                process.name.as_str(),
-                                target_process_id,
-                                message,
-                            )?;
-                            let builder =
-                                builders.get_mut(target_process_id.index()).ok_or_else(|| {
-                                    Error::new(format!(
-                                        "process id {} is not declared",
-                                        target_process_id.as_u32()
-                                    ))
-                                })?;
-                            let mut discovery_context = SendPayloadDiscoveryContext {
-                                sender_cases,
-                                concrete_state_payloads: &concrete_state_payload_domains
-                                    [process_index],
-                                module,
-                                semantic_index,
-                                process_refs: &process_ref_targets[process_index],
-                                types,
-                            };
-                            changed |= add_discovered_send_payload_cases(
-                                builder,
-                                target_variant,
-                                payload.as_ref(),
+                                statement,
                                 &bindings,
                                 &clause.state_payload_bindings,
                                 &mut discovery_context,
                             )?;
+                        }
+                        for selected_bindings in return_match_discovery_binding_sets(
+                            &clause.body.returns,
+                            &clause.pattern,
+                            &bindings,
+                            &clause.state_payload_bindings,
+                            &mut discovery_context,
+                        )? {
+                            let Some(statements) =
+                                selected_return_match_action_statements_for_discovery(
+                                    process,
+                                    &clause.body.returns,
+                                    &selected_bindings,
+                                    &discovery_context,
+                                )?
+                            else {
+                                continue;
+                            };
+                            for statement in &statements {
+                                changed |= discover_send_statement(
+                                    &mut builders,
+                                    process,
+                                    &clause.pattern,
+                                    statement,
+                                    &selected_bindings,
+                                    &clause.state_payload_bindings,
+                                    &mut discovery_context,
+                                )?;
+                            }
                         }
                     }
                 }
@@ -439,6 +440,127 @@ impl<'a> MessageCaseBuilder<'a> {
     }
 }
 
+fn discover_send_statement(
+    builders: &mut [MessageCaseBuilder<'_>],
+    process: &Process,
+    pattern: &StepPattern,
+    statement: &Statement,
+    bindings: &[DiscoveryValueBinding],
+    state_payload_bindings: &[StatePayloadDiscoveryBinding],
+    context: &mut SendPayloadDiscoveryContext<'_, '_, '_>,
+) -> Result<bool> {
+    let Statement::Send {
+        target,
+        message,
+        payload,
+    } = statement
+    else {
+        return Ok(false);
+    };
+    let target_process_id = resolve_send_target_process_for_discovery(
+        process,
+        context.semantic_index,
+        context.process_refs,
+        pattern,
+        target,
+    )?;
+    let target_variant = context.semantic_index.message_id_for_process(
+        context.module,
+        process.name.as_str(),
+        target_process_id,
+        message,
+    )?;
+    let builder = builders.get_mut(target_process_id.index()).ok_or_else(|| {
+        Error::new(format!(
+            "process id {} is not declared",
+            target_process_id.as_u32()
+        ))
+    })?;
+    add_discovered_send_payload_cases(
+        builder,
+        target_variant,
+        payload.as_ref(),
+        bindings,
+        state_payload_bindings,
+        context,
+    )
+}
+
+fn return_match_discovery_binding_sets(
+    returns: &ReturnExpr,
+    pattern: &StepPattern,
+    message_bindings: &[DiscoveryValueBinding],
+    state_payload_bindings: &[StatePayloadDiscoveryBinding],
+    context: &mut SendPayloadDiscoveryContext<'_, '_, '_>,
+) -> Result<Vec<Vec<DiscoveryValueBinding>>> {
+    let ReturnExpr::Match(match_body) = returns else {
+        return Ok(Vec::new());
+    };
+    if !return_match_scrutinee_can_be_concrete_for_discovery(
+        pattern,
+        state_payload_bindings,
+        &match_body.scrutinee,
+    ) {
+        return Ok(Vec::new());
+    }
+    discovery_value_binding_sets(
+        Some(&ValueExpr::Identifier(match_body.scrutinee.clone())),
+        message_bindings,
+        state_payload_bindings,
+        context,
+    )
+}
+
+fn return_match_scrutinee_can_be_concrete_for_discovery(
+    pattern: &StepPattern,
+    state_payload_bindings: &[StatePayloadDiscoveryBinding],
+    scrutinee: &Identifier,
+) -> bool {
+    if state_payload_bindings
+        .iter()
+        .any(|binding| binding.name == *scrutinee)
+    {
+        return true;
+    }
+    matches!(
+        pattern,
+        StepPattern::Variant {
+            bindings,
+            payload_guard: Some(_),
+            ..
+        } if bindings.iter().any(|binding| binding.name == *scrutinee)
+    )
+}
+
+fn selected_return_match_action_statements_for_discovery(
+    process: &Process,
+    returns: &ReturnExpr,
+    bindings: &[DiscoveryValueBinding],
+    context: &SendPayloadDiscoveryContext<'_, '_, '_>,
+) -> Result<Option<Vec<Statement>>> {
+    let ReturnExpr::Match(match_body) = returns else {
+        return Ok(None);
+    };
+    let Some(binding) = bindings
+        .iter()
+        .find(|binding| binding.name == match_body.scrutinee)
+    else {
+        return Ok(None);
+    };
+    let Some(value) = binding.value.as_ref() else {
+        return Ok(None);
+    };
+    selected_step_return_match_action_statements(
+        context.module,
+        process,
+        context.semantic_index,
+        match_body,
+        &binding.ty,
+        value,
+    )
+    .map(Some)
+}
+
 fn add_discovered_send_payload_cases(
     builder: &mut MessageCaseBuilder<'_>,
     variant_id: CheckedMessageVariantId,
@@ -474,6 +596,12 @@ fn discovery_value_binding_sets(
     };
     let mut binding_sets = vec![message_bindings.to_vec()];
     for binding in state_payload_bindings {
+        if binding_sets
+            .iter()
+            .all(|set| set.iter().any(|existing| existing.name == binding.name))
+        {
+            continue;
+        }
         if !source_value_uses_binding(payload, &binding.name) {
             continue;
         }

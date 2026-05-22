@@ -315,6 +315,159 @@ fn process_return_match_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn process_return_match_arm_prefix_checks_builds_and_runs_on_mantle() {
+    let gate = GateHarness::new();
+    let run = gate.check_build_run(
+        "examples/process_return_match_arm_prefix.str",
+        "target/strata/process_return_match_arm_prefix.mta",
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: stopped Main normally"));
+    assert!(stdout.contains("mantle: stopped Worker normally"));
+    assert!(stdout.contains("mantle: stopped Sink normally"));
+    assert_eq!(stdout.matches("return-match uniform prefix").count(), 2);
+    assert_eq!(stdout.matches("return-match ready arm prefix").count(), 1);
+    assert_eq!(stdout.matches("return-match done arm prefix").count(), 1);
+    assert_eq!(stdout.matches("sink received ready notice").count(), 1);
+    assert_eq!(stdout.matches("sink received done notice").count(), 1);
+
+    let artifact = gate.read_artifact("target/strata/process_return_match_arm_prefix.mta");
+    assert!(
+        artifact
+            .outputs
+            .iter()
+            .any(|output| output == "return-match uniform prefix")
+    );
+    assert!(
+        artifact
+            .outputs
+            .iter()
+            .any(|output| output == "return-match ready arm prefix")
+    );
+    assert!(
+        artifact
+            .outputs
+            .iter()
+            .any(|output| output == "return-match done arm prefix")
+    );
+    assert!(
+        artifact
+            .outputs
+            .iter()
+            .any(|output| output == "sink received ready notice")
+    );
+    assert!(
+        artifact
+            .outputs
+            .iter()
+            .any(|output| output == "sink received done notice")
+    );
+    let worker = artifact_process(&artifact, "Worker");
+    for transition in &worker.transitions {
+        assert_eq!(
+            transition.effects,
+            [
+                ArtifactEffect::Emit,
+                ArtifactEffect::Spawn,
+                ArtifactEffect::Send
+            ]
+        );
+        assert!(
+            matches!(
+                transition.actions.as_slice(),
+                [
+                    ArtifactAction::Emit { .. },
+                    ArtifactAction::Spawn { .. },
+                    ArtifactAction::Emit { .. },
+                    ArtifactAction::Send { .. },
+                ]
+            ),
+            "selected return-match arm prefix must lower as typed actions"
+        );
+    }
+    let sink = artifact_process(&artifact, "Sink");
+    let mut sink_payload_guards = sink
+        .transitions
+        .iter()
+        .map(|transition| {
+            transition
+                .payload_guard
+                .as_ref()
+                .map(|payload| payload.value.label())
+                .expect("Sink transition should have a payload guard")
+        })
+        .collect::<Vec<_>>();
+    sink_payload_guards.sort();
+    assert_eq!(sink_payload_guards, ["Done", "Ready"]);
+
+    let trace = gate.read_trace("process_return_match_arm_prefix");
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""payload":"Assign(Ready)""#,
+            r#""result":"Continue""#,
+            r#""state":"SawReady""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"process_stepped""#,
+            r#""process":"Worker""#,
+            r#""payload":"Assign(Done)""#,
+            r#""result":"Stop""#,
+            r#""state":"Done""#,
+        ],
+    );
+    let worker_uniform_lines = trace
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            [
+                r#""event":"program_output""#,
+                r#""process":"Worker""#,
+                r#""text":"return-match uniform prefix""#,
+            ]
+            .iter()
+            .all(|field| line.contains(field))
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        worker_uniform_lines.len(),
+        2,
+        "Worker uniform prefix should execute once per selected return-match transition"
+    );
+    let ready_arm = trace_line_index_with_fields(
+        &trace,
+        &[
+            r#""event":"program_output""#,
+            r#""process":"Worker""#,
+            r#""text":"return-match ready arm prefix""#,
+        ],
+    );
+    let done_arm = trace_line_index_with_fields(
+        &trace,
+        &[
+            r#""event":"program_output""#,
+            r#""process":"Worker""#,
+            r#""text":"return-match done arm prefix""#,
+        ],
+    );
+    assert!(
+        worker_uniform_lines[0] < ready_arm,
+        "uniform prefix should execute before selected Ready arm prefix"
+    );
+    assert!(
+        ready_arm < worker_uniform_lines[1] && worker_uniform_lines[1] < done_arm,
+        "selected Done transition should execute its own uniform prefix before its arm prefix"
+    );
+}
+
+#[test]
 fn function_record_pattern_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(

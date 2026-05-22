@@ -1,5 +1,6 @@
 use super::*;
-use matches::resolve_step_return_match;
+pub(in crate::language::checker) use matches::selected_step_return_match_action_statements;
+use matches::{resolve_step_return_match, static_step_return_match_arm_state_args};
 
 mod matches;
 
@@ -14,6 +15,7 @@ pub(super) struct StepReturnInput<'a> {
 pub(super) struct ResolvedStepReturn {
     pub(super) step_result: CheckedStepResult,
     pub(super) state_arg: ValueExpr,
+    pub(super) action_statements: Vec<Statement>,
 }
 
 pub(super) struct StepReturnPreadmitContext<'ctx, 'state> {
@@ -24,6 +26,12 @@ pub(super) struct StepReturnPreadmitContext<'ctx, 'state> {
     pub(super) message_cases: &'ctx MessageCaseTable,
     pub(super) state_space: &'ctx mut StateSpace<'state>,
     pub(super) types: &'ctx mut CheckedTypeInterner<'state>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::language::checker) struct StepReturnMatchPreadmitBindings<'source, 'binding> {
+    pub(in crate::language::checker) source: &'source [SourceValueBinding<'binding>],
+    pub(in crate::language::checker) static_match: &'source [SourceValueBinding<'binding>],
 }
 
 pub(super) fn step_source_bindings<'a>(
@@ -131,6 +139,36 @@ pub(super) fn preadmit_step_return_state_value(
     preadmit_step_state_arg(context, input, &state_arg)
 }
 
+pub(in crate::language::checker) fn preadmit_static_step_return_match_state_values(
+    module: &Module,
+    process: &Process,
+    semantic_index: &SemanticIndex,
+    state_space: &mut StateSpace<'_>,
+    types: &mut CheckedTypeInterner<'_>,
+    bindings: StepReturnMatchPreadmitBindings<'_, '_>,
+    match_body: &Match,
+) -> Result<()> {
+    let function_scope = SourceFunctionScope {
+        module,
+        process_name: Some(&process.name),
+        process_functions: &process.functions,
+        semantic_index,
+    };
+    for state_arg in static_step_return_match_arm_state_args(
+        module,
+        process,
+        semantic_index,
+        bindings.source,
+        bindings.static_match,
+        match_body,
+    )? {
+        let state_arg =
+            resolve_source_value_expr(&function_scope, &process.state_type, &state_arg, &[], 0)?;
+        state_space.resolve_state_value(semantic_index, types, &state_arg)?;
+    }
+    Ok(())
+}
+
 fn step_result_call(
     name: &Identifier,
     arg: &ValueExpr,
@@ -145,6 +183,7 @@ fn step_result_call(
     Ok(ResolvedStepReturn {
         step_result,
         state_arg: arg.clone(),
+        action_statements: Vec::new(),
     })
 }
 

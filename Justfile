@@ -129,6 +129,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_prefix.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_prefix.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_prefix.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_collection_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_collection_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_collection_match.mta
@@ -393,6 +396,7 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p mantle-artifact validate_rejects_payload_dependent_map_template_key
     cargo +{{nightly_toolchain}} miri test -p strata parses_and_checks_hello
     cargo +{{nightly_toolchain}} miri test -p strata checks_source_function_subset_map_patterns
+    cargo +{{nightly_toolchain}} miri test -p strata property_generated_uniform_arm_prefix_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
 
 miri-ci: miri-setup miri-smoke

@@ -556,7 +556,7 @@ fn rejects_step_return_match_arm_that_returns_bare_state() {
 }
 
 #[test]
-fn rejects_step_return_match_arm_statement() {
+fn rejects_step_return_match_arm_runtime_if_statement() {
     let source = STEP_RETURN_MATCH
         .replace(
             "fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [] ~ [] @det {",
@@ -564,14 +564,15 @@ fn rejects_step_return_match_arm_statement() {
         )
         .replace(
             "            Ready => {\n                return Continue(SawReady);",
-            "            Ready => {\n                emit \"return-match arm statement is unsupported\";\n                return Continue(SawReady);",
+            "            Ready => {\n                if (Ready == Ready) {\n                    emit \"return-match arm runtime if is unsupported\";\n                } else {\n                    emit \"return-match arm runtime if else is unsupported\";\n                }\n                return Continue(SawReady);",
         );
 
-    let err = check_source(&source).expect_err("return-match arm statements should fail");
+    let err = check_source(&source).expect_err("return-match arm runtime if should fail");
 
     assert!(
-        err.to_string()
-            .contains("process Worker step return match arms must not perform statements"),
+        err.to_string().contains(
+            "process Worker step return match arm cannot perform runtime if in this source slice"
+        ),
         "unexpected error: {err}"
     );
 }

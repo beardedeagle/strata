@@ -22,78 +22,80 @@ Read them in this order:
 11. `function_return_match.str` for helper return-match expressions.
 12. `process_return_match.str` for process step return-match expressions with
     uniform effect prefixes.
-13. `function_record_pattern.str` for source helper record destructuring
+13. `process_return_match_arm_prefix.str` for selected step return-match arm
+    prefixes.
+14. `function_record_pattern.str` for source helper record destructuring
    patterns.
-14. `function_record_return_match.str` for helper return-match record
+15. `function_record_return_match.str` for helper return-match record
    destructuring.
-15. `function_record_body_match.str` for whole-body helper match record
+16. `function_record_body_match.str` for whole-body helper match record
    destructuring.
-16. `state_payload_enum.str` for payload-bearing process state enum transitions.
-17. `collection_state.str` for immutable collection state and payload-dependent
+17. `state_payload_enum.str` for payload-bearing process state enum transitions.
+18. `collection_state.str` for immutable collection state and payload-dependent
    collection next-state templates.
-18. `state_payload_match.str` for matching immutable current process state
+19. `state_payload_match.str` for matching immutable current process state
    payloads.
-19. `actor_instances.str` for multiple runtime instances of one process
+20. `actor_instances.str` for multiple runtime instances of one process
    definition.
-20. `actor_payloads.str` for typed message payloads and immutable payload
+21. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-21. `runtime_if_else.str` for Mantle-backed runtime branching over a message
+22. `runtime_if_else.str` for Mantle-backed runtime branching over a message
    payload.
-22. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
+23. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
    a projected field from an immutable received record payload.
-23. `runtime_payload_projection_next_state.str` for Mantle-backed runtime
+24. `runtime_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable received record
    payload.
-24. `runtime_state_payload_projection_if.str` for Mantle-backed runtime
+25. `runtime_state_payload_projection_if.str` for Mantle-backed runtime
    branching over a projected field from an immutable current-state record
    payload.
-25. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
+26. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable current-state
    record payload.
-26. `runtime_nested_if_actions.str` for one bounded layer of nested
+27. `runtime_nested_if_actions.str` for one bounded layer of nested
    statement-level runtime branch actions.
-27. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
+28. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
    final-position runtime branches.
-28. `runtime_final_if_nested_if_actions.str` for one direct nested
+29. `runtime_final_if_nested_if_actions.str` for one direct nested
    statement-level runtime branch action inside final-position runtime
    branches.
-29. `runtime_final_if_nested_terminal_if.str` for one direct nested terminal
+30. `runtime_final_if_nested_terminal_if.str` for one direct nested terminal
    final-position runtime branch inside final-position runtime branches.
-30. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+31. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
    branch behavior.
-31. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+32. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-32. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-33. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+33. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+34. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-34. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
+35. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
    branch inside a bounded loop-body branch.
-35. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-36. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+36. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+37. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-37. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+38. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
    values through a guarded loop and received direct process reference.
-38. `runtime_loop_element_projection.str` for projecting immutable record
+39. `runtime_loop_element_projection.str` for projecting immutable record
    fields from guarded runtime loop elements.
-39. `actor_payload_match.str` for the same payload binding through a whole-body
+40. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-40. `actor_payload_split_match.str` for payload-sensitive same-message
+41. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-41. `actor_payload_split_signature.str` for payload-sensitive same-message
+42. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-42. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+43. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-43. `actor_payload_state_match_split.str` for payload-sensitive same-message
+44. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-44. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+45. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-45. `nested_patterns.str` for nested immutable constructor, record, list, and
+46. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-46. `actor_reply.str` for transporting typed process references through message
+47. `actor_reply.str` for transporting typed process references through message
    payloads.
-47. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+48. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-48. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+49. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -354,6 +356,29 @@ Key source ideas:
   `Continue(...)` or `Stop(...)` transition before lowering.
 - Mantle executes the emitted typed transition IDs and payload guards; it does
   not dispatch on source strings or helper names.
+
+## Process Return Match Arm Prefix
+
+`examples/process_return_match_arm_prefix.str` extends `step return match` with
+selected arm-local `emit` and typed `send` prefixes before the terminal result.
+
+```sh
+cargo run -p strata --bin strata -- check examples/process_return_match_arm_prefix.str
+cargo run -p strata --bin strata -- build examples/process_return_match_arm_prefix.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_prefix.mta
+```
+
+Key source ideas:
+
+- The checker still selects one concrete return-match arm before lowering.
+- The uniform prefix lowers onto every selected transition before the arm-local
+  prefix.
+- Only the selected arm's typed actions lower onto that transition; the arm-local
+  `send` prefixes also seed the receiver's payload-sensitive transitions before
+  lowering.
+- Arm labels and source binding names are not executable runtime dispatch keys.
+- Arm-local `spawn`, process-reference binding, runtime `if`, runtime `for`,
+  nested return matches, and mutable source state changes remain rejected.
 
 ## Function Record Pattern
 
