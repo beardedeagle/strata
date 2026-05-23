@@ -321,20 +321,22 @@ step_return_match =
     "return" "match" ident "{" match_arm+ "}" ";"
 ```
 
-Every arm body may combine local `emit` / in-scope direct `send` prefixes, at
-most one direct statement-level runtime `if` whose branches contain only those
-admitted action prefixes, and at most one direct bounded runtime `for` over a
-checked runtime `List<T,N>` binding. A loop body may contain local `emit` or
-in-scope direct `send` actions and one direct statement-level runtime `if` whose
-branches contain only those same action prefixes. The checker selects the
-concrete arm before lowering, appends only that arm's typed action prefix after
-any uniform prefix actions, and emits the same typed transition metadata as a
-direct step return. Arm-local `spawn`, process-reference binding, multiple direct
-arm-local runtime `if` statements, nested runtime `if` beyond the one direct
-loop-body branch, multiple or nested runtime `for` statements, `for` inside
-arm-local runtime `if`, final-position runtime `if`, nested return matches,
-dynamic payload catch-all dispatch, source-string selectors, and helper/init
-return-match arm statements remain rejected.
+Every arm body may combine local `emit` / in-scope direct `send` prefixes with
+at most one direct statement-level runtime `if` and at most one direct
+arm-level bounded runtime `for` over a checked runtime `List<T,N>` binding. Each
+direct runtime `if` branch may contain only admitted action prefixes plus at most
+one direct branch-local bounded runtime `for` over a checked runtime `List<T,N>`
+binding. A loop body may contain local `emit` or in-scope direct `send` actions
+and one direct statement-level runtime `if` whose branches contain only those
+same action prefixes. The checker selects the concrete arm before lowering,
+appends only that arm's typed action prefix after any uniform prefix actions, and
+emits the same typed transition metadata as a direct step return. Arm-local
+`spawn`, process-reference binding, multiple direct arm-local runtime `if`
+statements, nested runtime `if` beyond the one direct loop-body branch, multiple
+direct branch-local runtime `for` statements, nested runtime `for` statements,
+final-position runtime `if`, nested return matches, dynamic payload catch-all
+dispatch, source-string selectors, and helper/init return-match arm statements
+remain rejected.
 
 In a pure block-bodied `init`, the return expression may be a match over one
 fieldless enum constructor:

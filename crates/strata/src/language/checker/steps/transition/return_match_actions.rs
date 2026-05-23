@@ -21,11 +21,33 @@ struct ArmTemplateValidation<'a, 'template, 'arm> {
     arm_substitutions: &'a [StaticArmSubstitution<'arm>],
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArmLoopBodyScope {
+    Outside,
+    DirectArmFor,
+    RuntimeIfBranchFor,
+}
+
 #[derive(Clone, Copy)]
 struct ArmStatementValidation<'a, 'template, 'arm> {
     template: ArmTemplateValidation<'a, 'template, 'arm>,
     in_runtime_if_branch: bool,
-    in_loop_body: bool,
+    runtime_if_depth: usize,
+    loop_body: ArmLoopBodyScope,
+}
+
+impl ArmStatementValidation<'_, '_, '_> {
+    const fn allows_loop_body_runtime_if(self) -> bool {
+        match self.loop_body {
+            ArmLoopBodyScope::Outside => false,
+            ArmLoopBodyScope::DirectArmFor => {
+                !self.in_runtime_if_branch && self.runtime_if_depth == 0
+            }
+            ArmLoopBodyScope::RuntimeIfBranchFor => {
+                self.in_runtime_if_branch && self.runtime_if_depth == 1
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -140,7 +162,8 @@ pub(super) fn validate_return_match_arm_action_statements(
                 ArmStatementValidation {
                     template: template_validation,
                     in_runtime_if_branch: false,
-                    in_loop_body: false,
+                    runtime_if_depth: 0,
+                    loop_body: ArmLoopBodyScope::Outside,
                 },
                 statement,
             )?;
@@ -236,7 +259,7 @@ fn validate_step_return_match_arm_action_statement(
             then_body,
             else_body,
         } => {
-            if validation.in_runtime_if_branch {
+            if validation.in_runtime_if_branch && !validation.allows_loop_body_runtime_if() {
                 return Err(Error::new(format!(
                     "process {} step return match arm cannot perform nested runtime if in this source slice",
                     context.process.name
@@ -248,7 +271,7 @@ fn validate_step_return_match_arm_action_statement(
                 function_scope,
                 source_bindings,
                 input,
-                validation.template,
+                validation,
                 ArmRuntimeIf {
                     condition,
                     then_body,
@@ -261,13 +284,14 @@ fn validate_step_return_match_arm_action_statement(
             collection,
             body,
         } => {
-            if validation.in_runtime_if_branch {
+            if validation.in_runtime_if_branch && validation.loop_body != ArmLoopBodyScope::Outside
+            {
                 return Err(Error::new(format!(
                     "process {} step return match arm cannot perform for loops in this source slice",
                     context.process.name
                 )));
             }
-            if validation.in_loop_body {
+            if validation.loop_body != ArmLoopBodyScope::Outside {
                 return Err(Error::new(format!(
                     "process {} step return match arm cannot perform nested for loops in this source slice",
                     context.process.name
@@ -279,7 +303,7 @@ fn validate_step_return_match_arm_action_statement(
                 function_scope,
                 source_bindings,
                 input,
-                validation.template,
+                validation,
                 ArmForEach {
                     item,
                     collection,
@@ -296,7 +320,7 @@ fn validate_step_return_match_arm_runtime_if_statement(
     function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
     input: &StepTransitionInput<'_>,
-    template_validation: ArmTemplateValidation<'_, '_, '_>,
+    validation: ArmStatementValidation<'_, '_, '_>,
     runtime_if: ArmRuntimeIf<'_>,
 ) -> Result<()> {
     validate_step_return_match_arm_runtime_if_condition(
@@ -304,7 +328,7 @@ fn validate_step_return_match_arm_runtime_if_statement(
         types,
         function_scope,
         source_bindings,
-        template_validation,
+        validation.template,
         runtime_if.condition,
     )?;
     if runtime_if.then_body.is_empty() && runtime_if.else_body.is_empty() {
@@ -319,7 +343,7 @@ fn validate_step_return_match_arm_runtime_if_statement(
         function_scope,
         source_bindings,
         input,
-        template_validation,
+        validation,
         runtime_if.then_body,
     )?;
     validate_step_return_match_arm_runtime_if_branch(
@@ -328,7 +352,7 @@ fn validate_step_return_match_arm_runtime_if_statement(
         function_scope,
         source_bindings,
         input,
-        template_validation,
+        validation,
         runtime_if.else_body,
     )
 }
@@ -364,10 +388,20 @@ fn validate_step_return_match_arm_runtime_if_branch(
     function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
     input: &StepTransitionInput<'_>,
-    template_validation: ArmTemplateValidation<'_, '_, '_>,
+    validation: ArmStatementValidation<'_, '_, '_>,
     statements: &[Statement],
 ) -> Result<()> {
+    let mut runtime_for_count = 0usize;
     for statement in statements {
+        if matches!(statement, Statement::ForEach { .. }) {
+            runtime_for_count = runtime_for_count.saturating_add(1);
+            if runtime_for_count > 1 {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot perform more than one for loop in this source slice",
+                    context.process.name
+                )));
+            }
+        }
         validate_step_return_match_arm_action_statement(
             context,
             types,
@@ -375,9 +409,10 @@ fn validate_step_return_match_arm_runtime_if_branch(
             source_bindings,
             input,
             ArmStatementValidation {
-                template: template_validation,
+                template: validation.template,
                 in_runtime_if_branch: true,
-                in_loop_body: false,
+                runtime_if_depth: validation.runtime_if_depth.saturating_add(1),
+                loop_body: validation.loop_body,
             },
             statement,
         )?;

@@ -81,6 +81,8 @@ pub(super) const PROCESS_RETURN_MATCH_ARM_FOR_PREFIX: &str =
     include_str!("../../../../../examples/process_return_match_arm_for_prefix.str");
 pub(super) const PROCESS_RETURN_MATCH_ARM_FOR_IF_PREFIX: &str =
     include_str!("../../../../../examples/process_return_match_arm_for_if_prefix.str");
+pub(super) const PROCESS_RETURN_MATCH_ARM_IF_FOR_PREFIX: &str =
+    include_str!("../../../../../examples/process_return_match_arm_if_for_prefix.str");
 
 pub(super) const ACTOR_PING: &str = r#"
 module actor_ping;

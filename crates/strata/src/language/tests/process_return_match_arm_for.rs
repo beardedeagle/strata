@@ -121,23 +121,6 @@ fn rejects_step_return_match_arm_multiple_for_each_prefixes() {
 }
 
 #[test]
-fn rejects_step_return_match_arm_for_each_inside_runtime_if() {
-    let source = PROCESS_RETURN_MATCH_ARM_FOR_PREFIX.replace(
-        "                for Job { phase: job_phase } in jobs {\n                    emit \"return-match ready loop item\";\n                    send sink Notice(job_phase);\n                }",
-        "                if (phase == Ready) {\n                    for Job { phase: job_phase } in jobs {\n                        emit \"return-match ready nested branch loop item\";\n                        send sink Notice(job_phase);\n                    }\n                } else {\n                    emit \"return-match ready skipped loop\";\n                }",
-    );
-
-    let err = check_source(&source).expect_err("for inside arm-local runtime if should fail");
-
-    assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform for loops in this source slice"
-        ),
-        "unexpected error: {err}"
-    );
-}
-
-#[test]
 fn rejects_step_return_match_arm_nested_for_each_body() {
     let source = PROCESS_RETURN_MATCH_ARM_FOR_PREFIX.replace(
         "                    emit \"return-match ready loop item\";\n                    send sink Notice(job_phase);",

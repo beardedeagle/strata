@@ -1,0 +1,135 @@
+module process_return_match_arm_if_for_prefix;
+
+record MainState;
+record Job {
+    phase: Phase,
+}
+record Assignment {
+    phase: Phase,
+    enabled: Bool,
+    jobs: List<Job,2>,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+enum Route {
+    Assign(Assignment),
+}
+
+enum WorkerState {
+    Idle,
+    SawReady,
+    SawDone,
+}
+
+enum WorkerMsg {
+    Envelope(Route),
+}
+
+record SinkState;
+enum SinkMsg {
+    Notice(Phase),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Assignment {
+            phase: Ready,
+            enabled: True,
+            jobs: List<Job,2>[
+                Job { phase: Ready },
+                Job { phase: Done },
+            ],
+        }));
+        send worker Envelope(Assign(Assignment {
+            phase: Done,
+            enabled: False,
+            jobs: List<Job,2>[
+                Job { phase: Done },
+                Job { phase: Ready },
+            ],
+        }));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(Assignment { phase: phase, enabled: enabled, jobs: jobs }))) -> ProcResult<WorkerState> ! [emit, spawn, send] ~ [] @det {
+        emit "return-match if-for uniform prefix";
+        let sink: ProcessRef<Sink> = spawn Sink;
+        return match phase {
+            Ready => {
+                emit "return-match ready if-for prefix";
+                if (enabled == True) {
+                    emit "return-match ready enabled branch";
+                    for Job { phase: job_phase } in jobs {
+                        emit "return-match ready branch loop item";
+                        send sink Notice(job_phase);
+                    }
+                } else {
+                    emit "return-match ready disabled branch";
+                }
+                return Continue(SawReady);
+            }
+            Done => {
+                emit "return-match done if-for prefix";
+                if (enabled == True) {
+                    emit "return-match done enabled branch";
+                } else {
+                    emit "return-match done disabled branch";
+                    for Job { phase: job_phase } in jobs {
+                        emit "return-match done branch loop item";
+                        send sink Notice(job_phase);
+                    }
+                }
+                return Stop(SawDone);
+            }
+        };
+    }
+}
+
+proc Sink mailbox bounded(2) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Notice(Ready)) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received ready if-for notice";
+        return Continue(state);
+    }
+
+    fn step(state: SinkState, Notice(Done)) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received done if-for notice";
+        return Continue(state);
+    }
+}

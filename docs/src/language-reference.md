@@ -1041,15 +1041,16 @@ effects occur before the selected arm prefix in source program order and remain
 committed runtime actions. Arm-local selected prefixes may combine one direct
 statement-level runtime `if` with one direct bounded runtime `for` over a checked
 runtime `List<T,N>` binding. Direct runtime `if` branches remain action-only and
-may contain only local `emit` or in-scope direct `send` actions. The loop body
+may contain local `emit`, in-scope direct `send`, plus at most one direct
+bounded runtime `for` over a checked runtime `List<T,N>` binding. The loop body
 remains action-only and may contain only local `emit` or in-scope direct `send`
 actions plus one direct statement-level runtime `if` whose branches contain only
-those same actions. Arm-local `spawn`, process-reference binding, multiple
-direct arm-local runtime `if` statements, nested runtime `if` beyond the one
-direct loop-body branch, multiple or nested runtime `for` statements, `for`
-inside arm-local runtime `if`, final-position runtime `if`, nested return
-matches, matching `state`, matching non-enum values, and dynamic payload
-catch-all dispatch are not admitted.
+those same actions. Arm-local `spawn`, process-reference binding, multiple direct
+arm-local runtime `if` statements, nested runtime `if` beyond the one direct
+loop-body branch, multiple direct branch-local runtime `for` statements, nested
+runtime `for` statements, final-position runtime `if`, nested return matches,
+matching `state`, matching non-enum values, and dynamic payload catch-all
+dispatch are not admitted.
 
 Current pattern-matching closure boundaries:
 
@@ -1057,9 +1058,10 @@ Current pattern-matching closure boundaries:
 | --- | --- |
 | `step return match` after uniform pre-return effects | Admitted. Uniform prefix actions lower identically onto each selected typed transition. |
 | `step return match` arm-local `emit` / in-scope direct `send` prefixes | Admitted only after source-time concrete arm selection; selected arm actions lower as typed transition actions before the terminal result. |
-| `step return match` arm-local statement-level runtime `if` prefix | Admitted as one direct runtime branch per arm. Branches may run local `emit` or in-scope direct `send` actions only; selected branch execution is Mantle runtime behavior over typed artifact templates. |
-| `step return match` arm-local bounded runtime `for` prefix | Admitted as one direct loop per arm over a checked runtime `List<T,N>` binding. Loop bodies may run local `emit` or in-scope direct `send` actions only, and loop element projections lower as typed Mantle templates. |
+| `step return match` arm-local statement-level runtime `if` prefix | Admitted as one direct runtime branch per arm. Branches may run local `emit`, in-scope direct `send`, plus at most one direct bounded runtime `for`; selected branch execution is Mantle runtime behavior over typed artifact templates. |
+| `step return match` arm-local bounded runtime `for` prefix | Admitted as one direct loop per arm over a checked runtime `List<T,N>` binding. Loop bodies may run local `emit`, in-scope direct `send`, plus at most one direct action-only runtime branch, and loop element projections lower as typed Mantle templates. |
 | `step return match` arm-local bounded runtime `for` with a direct loop-body runtime `if` | Admitted as one direct loop whose body contains one direct action-only runtime branch. The branch condition and branch actions lower through typed loop-element templates inside the selected arm. |
+| `step return match` arm-local statement-level runtime `if` containing bounded runtime `for` | Admitted as one direct loop per runtime branch over a checked runtime `List<T,N>` binding. Branch-local loops stay selected inside the concrete arm and lower as typed branch actions, not source-label dispatch. |
 | `step return match state` | Rejected. Use whole-body `match state`, then match a concrete state-payload binding when one is proven. |
 | `init match` over payload-bearing arm constructors | Admitted only when every arm returns a state value that does not materialize payload bindings. |
 | `init return match` over payload-bearing constructors | Rejected in this slice. `init return match` selects a static initial state from a fieldless enum scrutinee. |
