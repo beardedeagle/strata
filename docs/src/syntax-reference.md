@@ -321,13 +321,14 @@ step_return_match =
     "return" "match" ident "{" match_arm+ "}" ";"
 ```
 
-Every arm body may combine local `emit` / in-scope direct `send` prefixes, at
-most one direct statement-level runtime `if` whose branches contain only those
-admitted action prefixes plus at most one direct bounded runtime `for`, and at
-most one direct bounded runtime `for` over a checked runtime `List<T,N>` binding
-outside the branch. A loop body may contain local `emit` or in-scope direct `send`
-actions and one direct statement-level runtime `if` whose branches contain only
-those same action prefixes. The checker selects the concrete arm before lowering,
+Every arm body may combine local `emit` / in-scope direct `send` prefixes with
+at most one direct statement-level runtime `if` and at most one direct
+arm-level bounded runtime `for` over a checked runtime `List<T,N>` binding. Each
+direct runtime `if` branch may contain only admitted action prefixes plus at most
+one direct branch-local bounded runtime `for` over a checked runtime `List<T,N>`
+binding. A loop body may contain local `emit` or in-scope direct `send` actions
+and one direct statement-level runtime `if` whose branches contain only those
+same action prefixes. The checker selects the concrete arm before lowering,
 appends only that arm's typed action prefix after any uniform prefix actions, and
 emits the same typed transition metadata as a direct step return. Arm-local
 `spawn`, process-reference binding, multiple direct arm-local runtime `if`
