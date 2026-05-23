@@ -7,7 +7,7 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
     function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
     input: &StepTransitionInput<'_>,
-    template_validation: ArmTemplateValidation<'_, '_, '_>,
+    validation: ArmStatementValidation<'_, '_, '_>,
     for_each: ArmForEach<'_>,
 ) -> Result<()> {
     let ValueExpr::Identifier(collection_name) = for_each.collection else {
@@ -48,7 +48,8 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
             for_each_item_name(for_each.item)
         )));
     }
-    if !template_validation
+    if !validation
+        .template
         .template_bindings
         .iter()
         .any(|binding| binding.name == collection_name)
@@ -72,14 +73,14 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
         0,
     )?;
     let collection =
-        substitute_static_arm_bindings(collection, template_validation.arm_substitutions);
+        substitute_static_arm_bindings(collection, validation.template.arm_substitutions);
     checked_value_template_with_binding(
         context.module,
         context.semantic_index,
         types,
         collection_binding.ty,
         &collection,
-        template_validation.template_bindings,
+        validation.template.template_bindings,
     )?;
 
     let element_ty = types.intern(element_type)?;
@@ -99,7 +100,7 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
         });
     }
     let element_id = CheckedLoopElementId::from_index(0)?;
-    let mut body_template_bindings = template_validation.template_bindings.to_vec();
+    let mut body_template_bindings = validation.template.template_bindings.to_vec();
     for binding in &loop_bindings {
         body_template_bindings.push(ValueTemplateBinding {
             name: binding.name,
@@ -130,10 +131,15 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
             ArmStatementValidation {
                 template: ArmTemplateValidation {
                     template_bindings: &body_template_bindings,
-                    arm_substitutions: template_validation.arm_substitutions,
+                    arm_substitutions: validation.template.arm_substitutions,
                 },
-                in_runtime_if_branch: false,
-                in_loop_body: true,
+                in_runtime_if_branch: validation.in_runtime_if_branch,
+                runtime_if_depth: validation.runtime_if_depth,
+                loop_body: if validation.in_runtime_if_branch {
+                    ArmLoopBodyScope::RuntimeIfBranchFor
+                } else {
+                    ArmLoopBodyScope::DirectArmFor
+                },
             },
             statement,
         )?;

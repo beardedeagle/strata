@@ -128,6 +128,7 @@ The runnable examples are:
 - `examples/process_return_match_arm_runtime_if_prefix.str`;
 - `examples/process_return_match_arm_for_prefix.str`;
 - `examples/process_return_match_arm_for_if_prefix.str`;
+- `examples/process_return_match_arm_if_for_prefix.str`;
 - `examples/function_record_pattern.str`;
 - `examples/function_record_return_match.str`;
 - `examples/function_record_body_match.str`;

@@ -12,6 +12,7 @@ mod process_refs;
 mod process_return_match;
 mod process_return_match_arm_for;
 mod process_return_match_arm_for_if;
+mod process_return_match_arm_if_for;
 mod process_return_match_arm_prefix;
 mod process_return_match_arm_prefix_invalid_templates;
 mod process_return_match_arm_prefix_properties;

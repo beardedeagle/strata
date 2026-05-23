@@ -128,12 +128,20 @@ enum RuntimeIfBranchScope {
     FinalPosition,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepReturnMatchForBodyScope {
+    Outside,
+    DirectArm,
+    RuntimeIfBranch,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ActionCheckScope {
     in_loop_body: bool,
     in_step_return_match_arm: bool,
     runtime_if_branch: RuntimeIfBranchScope,
     statement_if_depth: usize,
+    step_return_match_for_body: StepReturnMatchForBodyScope,
 }
 
 impl ActionCheckScope {
@@ -142,14 +150,26 @@ impl ActionCheckScope {
         in_step_return_match_arm: false,
         runtime_if_branch: RuntimeIfBranchScope::Outside,
         statement_if_depth: 0,
+        step_return_match_for_body: StepReturnMatchForBodyScope::Outside,
     };
 
     const fn for_loop_body(self) -> Self {
+        let step_return_match_for_body = if self.in_step_return_match_arm {
+            match self.runtime_if_branch {
+                RuntimeIfBranchScope::Outside => StepReturnMatchForBodyScope::DirectArm,
+                RuntimeIfBranchScope::Statement | RuntimeIfBranchScope::FinalPosition => {
+                    StepReturnMatchForBodyScope::RuntimeIfBranch
+                }
+            }
+        } else {
+            StepReturnMatchForBodyScope::Outside
+        };
         Self {
             in_loop_body: true,
             in_step_return_match_arm: self.in_step_return_match_arm,
             runtime_if_branch: self.runtime_if_branch,
             statement_if_depth: self.statement_if_depth,
+            step_return_match_for_body,
         }
     }
 
@@ -159,6 +179,7 @@ impl ActionCheckScope {
             in_step_return_match_arm: self.in_step_return_match_arm,
             runtime_if_branch: RuntimeIfBranchScope::Statement,
             statement_if_depth: self.statement_if_depth.saturating_add(1),
+            step_return_match_for_body: self.step_return_match_for_body,
         }
     }
 
@@ -168,6 +189,7 @@ impl ActionCheckScope {
             in_step_return_match_arm: self.in_step_return_match_arm,
             runtime_if_branch: RuntimeIfBranchScope::FinalPosition,
             statement_if_depth: self.statement_if_depth.saturating_add(1),
+            step_return_match_for_body: self.step_return_match_for_body,
         }
     }
 
@@ -177,6 +199,7 @@ impl ActionCheckScope {
             in_step_return_match_arm: true,
             runtime_if_branch: self.runtime_if_branch,
             statement_if_depth: self.statement_if_depth,
+            step_return_match_for_body: self.step_return_match_for_body,
         }
     }
 
@@ -187,6 +210,27 @@ impl ActionCheckScope {
             )));
         }
         Ok(())
+    }
+
+    const fn allows_step_return_match_loop_body_if(self) -> bool {
+        match self.step_return_match_for_body {
+            StepReturnMatchForBodyScope::Outside => false,
+            StepReturnMatchForBodyScope::DirectArm => {
+                matches!(self.runtime_if_branch, RuntimeIfBranchScope::Outside)
+                    && self.statement_if_depth == 0
+            }
+            StepReturnMatchForBodyScope::RuntimeIfBranch => {
+                matches!(self.runtime_if_branch, RuntimeIfBranchScope::Statement)
+                    && self.statement_if_depth == 1
+            }
+        }
+    }
+
+    const fn allows_step_return_match_runtime_if_branch_for(self) -> bool {
+        self.in_step_return_match_arm
+            && !self.in_loop_body
+            && matches!(self.runtime_if_branch, RuntimeIfBranchScope::Statement)
+            && self.statement_if_depth == 1
     }
 
     fn runtime_if_branch_label(self) -> &'static str {
