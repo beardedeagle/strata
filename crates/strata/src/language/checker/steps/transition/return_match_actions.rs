@@ -236,12 +236,6 @@ fn validate_step_return_match_arm_action_statement(
             then_body,
             else_body,
         } => {
-            if validation.in_loop_body {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform nested runtime if in this source slice",
-                    context.process.name
-                )));
-            }
             if validation.in_runtime_if_branch {
                 return Err(Error::new(format!(
                     "process {} step return match arm cannot perform nested runtime if in this source slice",

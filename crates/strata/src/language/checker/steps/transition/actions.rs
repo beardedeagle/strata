@@ -33,6 +33,7 @@ pub(super) fn checked_actions_for_statements(
     statements: &[Statement],
 ) -> Result<Vec<CheckedAction>> {
     let mut actions = Vec::with_capacity(statements.len());
+    let mut step_return_match_loop_body_runtime_if_count = 0usize;
     for statement in statements {
         match statement {
             Statement::Emit(text) => {
@@ -99,11 +100,18 @@ pub(super) fn checked_actions_for_statements(
                 then_body,
                 else_body,
             } => {
-                if input.scope.in_step_return_match_arm && input.scope.in_loop_body {
-                    return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform nested runtime if in this source slice",
-                        context.process.name
-                    )));
+                if input.scope.in_step_return_match_arm
+                    && input.scope.in_loop_body
+                    && matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside)
+                {
+                    step_return_match_loop_body_runtime_if_count =
+                        step_return_match_loop_body_runtime_if_count.saturating_add(1);
+                    if step_return_match_loop_body_runtime_if_count > 1 {
+                        return Err(Error::new(format!(
+                            "process {} step return match arm cannot perform more than one runtime if in this source slice",
+                            context.process.name
+                        )));
+                    }
                 }
                 if input.scope.in_step_return_match_arm
                     && !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside)

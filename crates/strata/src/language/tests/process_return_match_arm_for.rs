@@ -138,23 +138,6 @@ fn rejects_step_return_match_arm_for_each_inside_runtime_if() {
 }
 
 #[test]
-fn rejects_step_return_match_arm_for_each_body_runtime_if() {
-    let source = PROCESS_RETURN_MATCH_ARM_FOR_PREFIX.replace(
-        "                    emit \"return-match ready loop item\";\n                    send sink Notice(job_phase);",
-        "                    if (job_phase == Ready) {\n                        emit \"return-match ready nested loop branch\";\n                    } else {\n                        emit \"return-match ready nested loop branch\";\n                    }",
-    );
-
-    let err = check_source(&source).expect_err("runtime if inside arm-local for body should fail");
-
-    assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform nested runtime if in this source slice"
-        ),
-        "unexpected error: {err}"
-    );
-}
-
-#[test]
 fn rejects_step_return_match_arm_nested_for_each_body() {
     let source = PROCESS_RETURN_MATCH_ARM_FOR_PREFIX.replace(
         "                    emit \"return-match ready loop item\";\n                    send sink Notice(job_phase);",
