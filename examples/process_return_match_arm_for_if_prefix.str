@@ -1,0 +1,133 @@
+module process_return_match_arm_for_if_prefix;
+
+record MainState;
+record Job {
+    phase: Phase,
+    urgent: Bool,
+}
+record Assignment {
+    phase: Phase,
+    jobs: List<Job,2>,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+enum Route {
+    Assign(Assignment),
+}
+
+enum WorkerState {
+    Idle,
+    SawReady,
+    SawDone,
+}
+
+enum WorkerMsg {
+    Envelope(Route),
+}
+
+record SinkState;
+enum SinkMsg {
+    Notice(Phase),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Assignment {
+            phase: Ready,
+            jobs: List<Job,2>[
+                Job { phase: Ready, urgent: True },
+                Job { phase: Done, urgent: False },
+            ],
+        }));
+        send worker Envelope(Assign(Assignment {
+            phase: Done,
+            jobs: List<Job,2>[
+                Job { phase: Done, urgent: True },
+                Job { phase: Ready, urgent: False },
+            ],
+        }));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(Assignment { phase: phase, jobs: jobs }))) -> ProcResult<WorkerState> ! [emit, spawn, send] ~ [] @det {
+        emit "return-match for-if uniform prefix";
+        let sink: ProcessRef<Sink> = spawn Sink;
+        return match phase {
+            Ready => {
+                emit "return-match ready for-if prefix";
+                for Job { phase: job_phase, urgent: job_urgent } in jobs {
+                    if (job_urgent == True) {
+                        emit "return-match ready urgent loop branch";
+                        send sink Notice(job_phase);
+                    } else {
+                        emit "return-match ready normal loop branch";
+                        send sink Notice(job_phase);
+                    }
+                }
+                return Continue(SawReady);
+            }
+            Done => {
+                emit "return-match done for-if prefix";
+                for Job { phase: job_phase, urgent: job_urgent } in jobs {
+                    if (job_urgent == True) {
+                        emit "return-match done urgent loop branch";
+                        send sink Notice(job_phase);
+                    } else {
+                        emit "return-match done normal loop branch";
+                        send sink Notice(job_phase);
+                    }
+                }
+                return Stop(SawDone);
+            }
+        };
+    }
+}
+
+proc Sink mailbox bounded(2) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Notice(Ready)) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received ready for-if notice";
+        return Continue(state);
+    }
+
+    fn step(state: SinkState, Notice(Done)) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received done for-if notice";
+        return Continue(state);
+    }
+}

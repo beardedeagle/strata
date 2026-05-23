@@ -2,6 +2,8 @@ use super::support::*;
 
 #[path = "source_functions/return_match_arm_for.rs"]
 mod return_match_arm_for;
+#[path = "source_functions/return_match_arm_for_if.rs"]
+mod return_match_arm_for_if;
 
 #[test]
 fn function_match_checks_builds_and_runs_on_mantle() {

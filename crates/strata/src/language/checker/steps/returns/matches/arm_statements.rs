@@ -79,6 +79,7 @@ fn validate_step_return_match_arm_for_body(
     process: &Process,
     statements: &[Statement],
 ) -> Result<()> {
+    let mut runtime_if_count = 0usize;
     for statement in statements {
         match statement {
             Statement::Emit(_) | Statement::Send { .. } => {}
@@ -88,11 +89,20 @@ fn validate_step_return_match_arm_for_body(
                     process.name, name
                 )));
             }
-            Statement::IfElse { .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform nested runtime if in this source slice",
-                    process.name
-                )));
+            Statement::IfElse {
+                then_body,
+                else_body,
+                ..
+            } => {
+                runtime_if_count = runtime_if_count.saturating_add(1);
+                if runtime_if_count > 1 {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot perform more than one runtime if in this source slice",
+                        process.name
+                    )));
+                }
+                validate_step_return_match_arm_runtime_if_branch(process, then_body)?;
+                validate_step_return_match_arm_runtime_if_branch(process, else_body)?;
             }
             Statement::ForEach { .. } => {
                 return Err(Error::new(format!(

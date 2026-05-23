@@ -24,7 +24,7 @@ impl ArtifactFields {
 
         let mut lines = contents.lines();
         match lines.next() {
-            Some(ARTIFACT_MAGIC) => {}
+            Some(line) if line == ARTIFACT_MAGIC => {}
             Some(other) => {
                 return Err(Error::new(format!(
                     "invalid Mantle artifact magic {other:?}; expected {ARTIFACT_MAGIC:?}"

@@ -110,7 +110,17 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
             path: &binding.path,
         });
     }
+    let mut runtime_if_count = 0usize;
     for statement in for_each.body {
+        if matches!(statement, Statement::IfElse { .. }) {
+            runtime_if_count = runtime_if_count.saturating_add(1);
+            if runtime_if_count > 1 {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot perform more than one runtime if in this source slice",
+                    context.process.name
+                )));
+            }
+        }
         super::validate_step_return_match_arm_action_statement(
             context,
             types,
