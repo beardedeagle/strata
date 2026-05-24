@@ -31,6 +31,21 @@ acceptance criteria.
 just source-to-runtime-gates
 ```
 
+## Language Surface Assurance
+
+`just language-surface-assurance` runs the executable current-surface inventory.
+The inventory maps declared Strata/Mantle features to required evidence classes
+and verifies that each evidence pointer still names live repository content.
+Source-to-runtime evidence must name active executable check/build/run gate
+coverage.
+This gate is implementation-adjacent: it checks assurance coverage and boundary
+classification, but it does not add language behavior and does not replace
+`.str` source-to-runtime execution.
+
+```sh
+just language-surface-assurance
+```
+
 ## Bounded Assurance
 
 `just bounded-assurance-smoke` runs the focused bounded assurance surface for
@@ -51,7 +66,7 @@ The standard CI workflow installs `just` and calls `just ci-rust` on Linux,
 macOS, and Windows. The Linux quality job calls `just ci-quality`, which runs
 formatting, native and cross-target checks, tests, clippy, performance smoke
 checks, build, tool metadata validation, toolchain policy validation, mdBook,
-source-to-runtime gates, and diff hygiene.
+language surface assurance, source-to-runtime gates, and diff hygiene.
 
 CI uses GitHub-owned, SHA-pinned checkout and cache actions. The cache stores
 Cargo registry/git data and per-job build target directories. It does not cache

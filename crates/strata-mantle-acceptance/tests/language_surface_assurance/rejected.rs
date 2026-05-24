@@ -1,0 +1,115 @@
+use crate::model::{Feature, requirements::*};
+
+pub(crate) const FEATURES: &[Feature] = &[
+    feature!(
+        "rejected-source-mutation-and-statements",
+        "Source mutation and statement-form source functions stay rejected",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "assignment statements are not supported"),
+            NegativeTest => ("crates/strata/src/language/tests/syntax.rs", "rejects_assignment_syntax_in_record_values"),
+            NegativeTest => ("crates/strata/src/language/tests/source_function_core.rs", "rejects_source_function_statements"),
+            Documentation => ("docs/src/language-reference.md", "State changes are immutable whole-value transitions"),
+        ],
+    ),
+    feature!(
+        "rejected-general-match-expressions",
+        "General match expressions stay outside the admitted surface",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "match expressions are only admitted ..."),
+            NegativeTest => ("crates/strata/src/language/tests/syntax.rs", "rejects_general_match_expression_in_step_return_value"),
+            Documentation => ("docs/src/language-reference.md", "Arbitrary/general match expressions outside admitted function"),
+        ],
+    ),
+    feature!(
+        "rejected-step-return-match-state-scrutinee",
+        "Step return-match over state remains non-admitted",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "step return match scrutinee ... must be a concrete enum source value binding"),
+            NegativeTest => ("crates/strata/src/language/tests/process_return_match.rs", "rejects_step_return_match_over_direct_state"),
+            NegativeTest => ("crates/strata/src/language/tests/syntax.rs", "rejects_step_return_match_over_state_parameter"),
+            Documentation => ("docs/src/language-reference.md", "`step return match state`"),
+        ],
+    ),
+    feature!(
+        "rejected-init-return-match-payload-binding",
+        "Init return-match payload materialization stays rejected",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "init return match arm cannot use payload binding"),
+            NegativeTest => ("crates/strata/src/language/tests/init_matching.rs", "rejects_init_return_match_payload_binding_in_returned_state"),
+            Documentation => ("docs/src/language-reference.md", "`init return match` over payload-bearing constructors"),
+        ],
+    ),
+    feature!(
+        "rejected-source-function-loops-and-statements",
+        "Source functions remain pure and statement-free",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "function ... must not declare effects"),
+            NegativeTest => ("crates/strata/src/language/tests/source_function_core.rs", "rejects_source_function_statements"),
+            Documentation => ("docs/src/language-reference.md", "has no runtime statements"),
+        ],
+    ),
+    feature!(
+        "rejected-return-match-nested-loops-and-depth",
+        "Return-match arm nested loops and excessive branch depth stay rejected",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "nested for loops are not supported"),
+            NegativeTest => ("crates/strata/src/language/tests/process_return_match_arm_for.rs", "rejects_step_return_match_arm_nested_for_each_body"),
+            Documentation => ("docs/src/language-reference.md", "still reject nested runtime `for`"),
+        ],
+    ),
+    feature!(
+        "rejected-nested-process-ref-payloads",
+        "Nested process-reference payloads stay rejected",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "process references must be direct message payloads"),
+            NegativeTest => ("crates/strata/src/language/tests/state_payload_values.rs", "rejects_nested_process_ref_message_payload_with_direct_payload_diagnostic"),
+            NegativeTest => ("crates/mantle-artifact/src/tests/process_ref_payloads.rs", "validate_rejects_nested_process_ref_payload_template"),
+            Documentation => ("docs/src/language-reference.md", "Process references nested inside record, enum, list, map"),
+        ],
+    ),
+    feature!(
+        "rejected-dynamic-map-keys",
+        "Dynamic map-key behavior stays rejected",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "map pattern keys must be static source values"),
+            NegativeTest => ("crates/strata/src/language/tests/source_function_collection_patterns/template_keys.rs", "rejects_runtime_dependent_map_key_state_template"),
+            Documentation => ("docs/src/language-reference.md", "Dynamic-key map matching"),
+        ],
+    ),
+    feature!(
+        "rejected-unbounded-collections",
+        "Unbounded collection types stay rejected",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("crates/strata/src/language/tests/source_function_collection_patterns/type_validation.rs", "list type List<Phase> must declare exactly one element type and one numeric capacity"),
+            NegativeTest => ("crates/strata/src/language/tests/source_function_collection_patterns/type_validation.rs", "rejects_unbounded_list_type"),
+            Documentation => ("docs/src/language-reference.md", "Immutable `List<T,N>` and `Map<K,V,N>` source values"),
+        ],
+    ),
+];
