@@ -31,6 +31,8 @@ mod boundary;
 mod docs_only;
 #[path = "language_surface_assurance/process.rs"]
 mod process;
+#[path = "language_surface_assurance/proof_domains.rs"]
+mod proof_domains;
 #[path = "language_surface_assurance/rejected.rs"]
 mod rejected;
 #[path = "language_surface_assurance/runtime.rs"]
@@ -74,7 +76,7 @@ fn every_declared_surface_has_required_evidence_classes() {
 
     assert!(
         violations.is_empty(),
-        "language surface assurance inventory is incomplete:\n{}",
+        "language surface proof substrate inventory is incomplete:\n{}",
         violations.join("\n")
     );
 }
@@ -94,7 +96,7 @@ fn evidence_files_and_markers_exist() {
 
     assert!(
         violations.is_empty(),
-        "language surface assurance evidence points at missing repo content:\n{}",
+        "language surface proof substrate evidence points at missing repo content:\n{}",
         violations.join("\n")
     );
 }
@@ -212,21 +214,72 @@ fn inventory_metadata_stays_stable_and_classified() {
         }
     }
 
-    assert_expected_feature_ids(
+    assert_expected_ids(
         "current implemented surface",
         &current_ids,
         expected::CURRENT_FEATURE_IDS,
     );
-    assert_expected_feature_ids(
+    assert_expected_ids(
         "docs/examples-only surface",
         &docs_only_ids,
         expected::DOCUMENTATION_ONLY_FEATURE_IDS,
     );
-    assert_expected_feature_ids(
+    assert_expected_ids(
         "future or non-admitted surface",
         &rejected_ids,
         expected::FUTURE_OR_REJECTED_FEATURE_IDS,
     );
+}
+
+#[test]
+fn proof_domains_cover_the_declared_language_surface() {
+    let feature_ids = inventory()
+        .map(|feature| feature.id)
+        .collect::<BTreeSet<_>>();
+    let mut domain_ids = BTreeSet::new();
+    let mut covered_feature_ids = BTreeSet::new();
+
+    for domain in proof_domains::DOMAINS {
+        assert_feature_id(domain.id);
+        assert!(
+            !domain.title.trim().is_empty(),
+            "{} must have a human-readable title",
+            domain.id
+        );
+        assert!(
+            !domain.feature_ids.is_empty(),
+            "{} must cite at least one language-surface feature",
+            domain.id
+        );
+        assert!(
+            domain_ids.insert(domain.id),
+            "duplicate proof domain id {}",
+            domain.id
+        );
+
+        for &feature_id in domain.feature_ids {
+            assert!(
+                feature_ids.contains(feature_id),
+                "proof domain {} cites unknown language-surface feature {}",
+                domain.id,
+                feature_id
+            );
+            covered_feature_ids.insert(feature_id);
+        }
+    }
+
+    assert_expected_ids(
+        "proof substrate domain",
+        &domain_ids,
+        expected::PROOF_DOMAIN_IDS,
+    );
+
+    for feature_id in feature_ids {
+        assert!(
+            covered_feature_ids.contains(feature_id),
+            "language-surface feature {feature_id:?} is not included in any proof domain"
+        );
+    }
 }
 
 fn inventory() -> impl Iterator<Item = &'static Feature> {
@@ -254,22 +307,18 @@ fn assert_feature_id(id: &str) {
     );
 }
 
-fn assert_expected_feature_ids(
-    label: &str,
-    actual: &BTreeSet<&'static str>,
-    expected: &[&'static str],
-) {
+fn assert_expected_ids(label: &str, actual: &BTreeSet<&'static str>, expected: &[&'static str]) {
     for expected_id in expected {
         assert!(
             actual.contains(expected_id),
-            "{label} inventory is missing expected feature id {expected_id:?}"
+            "{label} inventory is missing expected id {expected_id:?}"
         );
     }
 
     for actual_id in actual {
         assert!(
             expected.contains(actual_id),
-            "{label} inventory contains unexpected feature id {actual_id:?}"
+            "{label} inventory contains unexpected id {actual_id:?}"
         );
     }
 }

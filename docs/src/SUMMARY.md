@@ -13,7 +13,7 @@
 - [Examples](examples.md)
 - [File Types](file-types.md)
 - [Source-To-Runtime Gates](source-to-runtime-gates.md)
-- [Language Surface Assurance](language-surface-assurance.md)
+- [Language Surface Proof Substrate](language-surface-assurance.md)
 - [Artifact And Runtime Boundary](artifact-runtime-boundary.md)
 - [Implementation Architecture](implementation-architecture.md)
 - [Development Gates](development-gates.md)

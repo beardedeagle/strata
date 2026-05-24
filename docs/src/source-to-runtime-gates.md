@@ -43,11 +43,12 @@ This page intentionally does not enumerate every runtime gate. When a new
 user-visible language or runtime behavior needs source-to-runtime proof, update
 the executable gate and document the example on the examples page.
 
-The language surface assurance inventory checks that current features point at
-the required parser, checker, lowering, artifact, runtime, diagnostics, example,
+The language surface proof substrate checks that the agreed current-surface
+proof domains map to declared features and that those features point at the
+required parser, checker, lowering, artifact, runtime, diagnostics, example,
 test, fuzz, and bounded/property evidence classes where those classes apply.
-That inventory supports the claim that coverage exists; it does not replace
-this executable gate shape.
+That substrate supports implementation claims; it does not replace this
+executable gate shape.
 
 ## Representative Commands
 

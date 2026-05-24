@@ -63,6 +63,13 @@ pub(crate) struct Feature {
     pub(crate) evidence: &'static [Evidence],
 }
 
+#[derive(Debug)]
+pub(crate) struct ProofDomain {
+    pub(crate) id: &'static str,
+    pub(crate) title: &'static str,
+    pub(crate) feature_ids: &'static [&'static str],
+}
+
 pub(crate) mod requirements {
     use super::EvidenceClass;
 
@@ -254,6 +261,41 @@ pub(crate) mod expected {
         "rejected-nested-process-ref-payloads",
         "rejected-dynamic-map-keys",
         "rejected-unbounded-collections",
+    ];
+
+    pub(crate) const PROOF_DOMAIN_IDS: &[&str] = &[
+        "module-declarations-and-top-level-items",
+        "records-enums-fieldless-and-payload-variants",
+        "pure-source-functions",
+        "source-function-calls",
+        "source-function-braced-return-if",
+        "source-function-return-match",
+        "function-whole-body-match",
+        "record-list-map-enum-pattern-destructuring",
+        "static-map-key-behavior",
+        "bool-equality-predicate-value-forms",
+        "process-declarations",
+        "init-and-step",
+        "typed-message-payloads",
+        "process-instances-and-spawn-routing",
+        "step-parameter-patterns",
+        "whole-body-match-msg",
+        "whole-body-match-state",
+        "step-return-match",
+        "message-dispatch-patterns",
+        "terminal-continue-stop-panic",
+        "explicit-effects",
+        "emit-spawn-send",
+        "typed-direct-process-ref-authority",
+        "process-ref-payload-forwarding",
+        "runtime-if",
+        "runtime-for-over-checked-list",
+        "checked-ir-action-templates",
+        "mantle-artifact-admission",
+        "mantle-loaded-artifact-validation",
+        "runtime-trace-observability-boundaries",
+        "rejection-fail-closed-unsupported-forms",
+        "docs-examples-only-surfaces",
     ];
 }
 
