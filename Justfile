@@ -373,7 +373,10 @@ source-to-runtime-failure-gates: build
         exit 1
     fi
 
-quality: fmt-check check cfg-check test lint performance-smoke metadata-check toolchain-policy-check docs source-to-runtime-gates diff-check
+quality: fmt-check check cfg-check test lint performance-smoke metadata-check toolchain-policy-check docs language-surface-assurance source-to-runtime-gates diff-check
+
+language-surface-assurance:
+    cargo +{{stable_toolchain}} test -p strata-mantle-acceptance --test language_surface_assurance
 
 bounded-assurance-smoke:
     cargo +{{stable_toolchain}} test -p strata process_return_match_arm_bounded_assurance --lib

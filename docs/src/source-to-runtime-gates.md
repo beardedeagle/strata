@@ -43,6 +43,14 @@ This page intentionally does not enumerate every runtime gate. When a new
 user-visible language or runtime behavior needs source-to-runtime proof, update
 the executable gate and document the example on the examples page.
 
+The language surface proof substrate checks that the agreed current-surface
+proof domains map to declared features and that those features point at the
+required parser, checker, lowering, boundary, artifact, runtime, diagnostics,
+example, test, fuzz, and bounded/property evidence classes where those classes
+apply. It also checks that each proof domain declares the proof obligations
+implied by those features. That substrate supports implementation claims; it
+does not replace this executable gate shape.
+
 ## Representative Commands
 
 The minimum success gate checks, builds, runs, and traces `hello.str`:
