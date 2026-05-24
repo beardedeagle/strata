@@ -1,0 +1,202 @@
+module process_return_match_arm_action_block;
+
+record MainState;
+record Job {
+    phase: Phase,
+    urgent: Bool,
+}
+record Assignment {
+    phase: Phase,
+    enabled: Bool,
+    jobs: List<Job,2>,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+enum Route {
+    Assign(Assignment),
+}
+
+enum WorkerState {
+    Idle,
+    SawReady,
+    SawDone,
+}
+
+enum WorkerMsg {
+    Envelope(Route),
+}
+
+record SinkState;
+enum SinkMsg {
+    Notice(Phase),
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Assignment {
+            phase: Ready,
+            enabled: True,
+            jobs: List<Job,2>[
+                Job { phase: Ready, urgent: True },
+                Job { phase: Done, urgent: False },
+            ],
+        }));
+        send worker Envelope(Assign(Assignment {
+            phase: Done,
+            enabled: False,
+            jobs: List<Job,2>[
+                Job { phase: Done, urgent: True },
+                Job { phase: Ready, urgent: False },
+            ],
+        }));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(Assignment { phase: route_phase, enabled: route_enabled, jobs: route_jobs }))) -> ProcResult<WorkerState> ! [emit, spawn, send] ~ [] @det {
+        emit "return-match action-block uniform prefix";
+        let sink: ProcessRef<Sink> = spawn Sink;
+        return match route_phase {
+            Ready => {
+                emit "return-match ready action block start";
+                if (route_enabled == True) {
+                    emit "return-match ready enabled outer branch";
+                    if (route_phase == Ready) {
+                        emit "return-match ready nested ready branch";
+                    } else {
+                        emit "return-match ready nested fallback branch";
+                    }
+                    for Job { phase: item_phase, urgent: item_urgent } in route_jobs {
+                        if (item_urgent == True) {
+                            if (item_phase == Ready) {
+                                emit "return-match ready branch loop nested ready";
+                                send sink Notice(item_phase);
+                            } else {
+                                emit "return-match ready branch loop nested fallback";
+                                send sink Notice(item_phase);
+                            }
+                        } else {
+                            emit "return-match ready branch loop normal";
+                            send sink Notice(item_phase);
+                        }
+                    }
+                } else {
+                    emit "return-match ready disabled outer branch";
+                }
+                if (route_phase == Ready) {
+                    emit "return-match ready second if branch";
+                } else {
+                    emit "return-match ready second if fallback";
+                }
+                for Job { phase: item_phase, urgent: item_urgent } in route_jobs {
+                    if (item_urgent == True) {
+                        emit "return-match ready loop urgent branch";
+                        send sink Notice(item_phase);
+                    } else {
+                        emit "return-match ready loop normal branch";
+                        send sink Notice(item_phase);
+                    }
+                }
+                for Job { phase: item_phase, urgent: item_urgent } in route_jobs {
+                    emit "return-match ready second loop item";
+                    send sink Notice(item_phase);
+                }
+                return Continue(SawReady);
+            }
+            Done => {
+                emit "return-match done action block start";
+                if (route_enabled == True) {
+                    emit "return-match done enabled outer branch";
+                } else {
+                    emit "return-match done disabled outer branch";
+                    if (route_phase == Done) {
+                        emit "return-match done nested done branch";
+                    } else {
+                        emit "return-match done nested fallback branch";
+                    }
+                    for Job { phase: item_phase, urgent: item_urgent } in route_jobs {
+                        if (item_urgent == True) {
+                            if (item_phase == Done) {
+                                emit "return-match done branch loop nested done";
+                                send sink Notice(item_phase);
+                            } else {
+                                emit "return-match done branch loop nested fallback";
+                                send sink Notice(item_phase);
+                            }
+                        } else {
+                            emit "return-match done branch loop normal";
+                            send sink Notice(item_phase);
+                        }
+                    }
+                }
+                if (route_phase == Done) {
+                    emit "return-match done second if branch";
+                } else {
+                    emit "return-match done second if fallback";
+                }
+                for Job { phase: item_phase, urgent: item_urgent } in route_jobs {
+                    if (item_urgent == True) {
+                        emit "return-match done loop urgent branch";
+                        send sink Notice(item_phase);
+                    } else {
+                        emit "return-match done loop normal branch";
+                        send sink Notice(item_phase);
+                    }
+                }
+                for Job { phase: item_phase, urgent: item_urgent } in route_jobs {
+                    emit "return-match done second loop item";
+                    send sink Notice(item_phase);
+                }
+                return Stop(SawDone);
+            }
+        };
+    }
+}
+
+proc Sink mailbox bounded(6) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Notice(Ready)) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received action-block ready notice";
+        return Continue(state);
+    }
+
+    fn step(state: SinkState, Notice(Done)) -> ProcResult<SinkState> ! [emit] ~ [] @det {
+        emit "sink received action-block done notice";
+        return Continue(state);
+    }
+}

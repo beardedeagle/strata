@@ -54,10 +54,10 @@ pub(crate) fn assert_nested_worker_pattern_rejected(pattern: &str, expected: &st
     );
 }
 
-pub(crate) fn payload_sensitive_helper_case(route: &str, init_value: &str) -> String {
+pub(crate) fn payload_sensitive_function_case(route: &str, init_value: &str) -> String {
     format!(
         r#"
-module payload_sensitive_helper_case;
+module payload_sensitive_function_case;
 
 record MainState {{ phase: Phase }}
 enum Phase {{ Ready, Done, Other }}
@@ -203,10 +203,10 @@ proc Worker mailbox bounded(1) {{
     )
 }
 
-pub(crate) fn fieldless_helper_mismatch_source(selected_call: &str) -> String {
+pub(crate) fn fieldless_function_mismatch_source(selected_call: &str) -> String {
     format!(
         r#"
-module fieldless_helper_mismatch;
+module fieldless_function_mismatch;
 
 record MainState {{ selected: Phase }}
 enum Phase {{ Ready, Done }}

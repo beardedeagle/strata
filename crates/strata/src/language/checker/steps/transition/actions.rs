@@ -33,8 +33,6 @@ pub(super) fn checked_actions_for_statements(
     statements: &[Statement],
 ) -> Result<Vec<CheckedAction>> {
     let mut actions = Vec::with_capacity(statements.len());
-    let mut step_return_match_loop_body_runtime_if_count = 0usize;
-    let mut step_return_match_runtime_if_branch_for_count = 0usize;
     for statement in statements {
         match statement {
             Statement::Emit(text) => {
@@ -101,32 +99,6 @@ pub(super) fn checked_actions_for_statements(
                 then_body,
                 else_body,
             } => {
-                if input.scope.in_step_return_match_arm {
-                    if input.scope.in_loop_body {
-                        if !input.scope.allows_step_return_match_loop_body_if() {
-                            return Err(Error::new(format!(
-                                "process {} step return match arm cannot perform nested runtime if in this source slice",
-                                context.process.name
-                            )));
-                        }
-                        step_return_match_loop_body_runtime_if_count =
-                            step_return_match_loop_body_runtime_if_count.saturating_add(1);
-                        if step_return_match_loop_body_runtime_if_count > 1 {
-                            return Err(Error::new(format!(
-                                "process {} step return match arm cannot perform more than one runtime if in this source slice",
-                                context.process.name
-                            )));
-                        }
-                    } else if !matches!(
-                        input.scope.runtime_if_branch,
-                        RuntimeIfBranchScope::Outside
-                    ) {
-                        return Err(Error::new(format!(
-                            "process {} step return match arm cannot perform nested runtime if in this source slice",
-                            context.process.name
-                        )));
-                    }
-                }
                 input
                     .scope
                     .validate_statement_if_allowed(&context.process.name)?;
@@ -148,31 +120,6 @@ pub(super) fn checked_actions_for_statements(
                 collection,
                 body,
             } => {
-                if input.scope.in_step_return_match_arm
-                    && !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside)
-                    && !input.scope.allows_step_return_match_runtime_if_branch_for()
-                {
-                    return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform for loops in this source slice",
-                        context.process.name
-                    )));
-                }
-                if input.scope.allows_step_return_match_runtime_if_branch_for() {
-                    step_return_match_runtime_if_branch_for_count =
-                        step_return_match_runtime_if_branch_for_count.saturating_add(1);
-                    if step_return_match_runtime_if_branch_for_count > 1 {
-                        return Err(Error::new(format!(
-                            "process {} step return match arm cannot perform more than one for loop in this source slice",
-                            context.process.name
-                        )));
-                    }
-                }
-                if input.scope.in_step_return_match_arm && input.scope.in_loop_body {
-                    return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform nested for loops in this source slice",
-                        context.process.name
-                    )));
-                }
                 if input.scope.in_loop_body {
                     return Err(Error::new(format!(
                         "process {} nested for loops are not supported in this source slice",

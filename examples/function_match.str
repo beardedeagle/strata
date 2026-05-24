@@ -88,7 +88,7 @@ proc Worker mailbox bounded(1) {
     }
 
     fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-        emit "process helper assigned job";
+        emit "process-local function assigned job";
         return Stop(with_job(job));
     }
 }

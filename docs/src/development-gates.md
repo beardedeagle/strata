@@ -31,6 +31,20 @@ acceptance criteria.
 just source-to-runtime-gates
 ```
 
+## Bounded Assurance
+
+`just bounded-assurance-smoke` runs the focused bounded assurance surface for
+the current selected `step return match` action-block slice. It exhaustively
+generates valid action-block models up to the explicit statement-sequence bound,
+checks source acceptance, compares checked IR action shapes with lowered Mantle
+artifact action shapes, validates the artifact boundary, verifies typed send IDs,
+checks terminal `Continue` / `Stop` / `Panic` lowering, runs an explicit smaller
+bounded runtime execution generator through Mantle, and runs bypass-mutation
+rejection tests for malformed artifact equivalents.
+
+This is machine-checked bounded exhaustiveness for the named slice. It is not a
+theorem-prover proof of the whole language surface.
+
 ## Continuous Integration
 
 The standard CI workflow installs `just` and calls `just ci-rust` on Linux,

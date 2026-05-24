@@ -63,8 +63,8 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let checked = check_source(source).expect("source helper map rest patterns should check");
-    let artifact = lower_to_artifact(&checked, source).expect("map rest helpers should lower");
+    let checked = check_source(source).expect("source function map rest patterns should check");
+    let artifact = lower_to_artifact(&checked, source).expect("map rest functions should lower");
 
     assert_eq!(
         artifact_state_labels(&artifact.processes[0]),

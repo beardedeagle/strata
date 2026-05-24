@@ -42,7 +42,7 @@ A Strata program is organized around processes. A process declares:
 - a state type;
 - a message type;
 - an `init` function that creates the initial state;
-- optional pure helper functions local to the process;
+- optional pure process-local functions;
 - a `step` function that handles messages and returns a transition result.
 
 The entry process is named `Main`. Mantle starts `Main` and delivers its first
@@ -89,9 +89,9 @@ fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ 
 
 ## Source Functions
 
-Strata accepts pure source helper functions at module level and inside
-processes. Helpers are checked and expanded before lowering; Mantle does not
-dispatch by helper names at runtime.
+Strata accepts pure source functions at module level and inside processes.
+Functions are checked and expanded before lowering; Mantle does not dispatch by
+function names at runtime.
 
 ```strata
 fn readiness(Warm) -> Readiness ! [] ~ [] @det {
@@ -110,12 +110,12 @@ fn state_for(mode: StartupMode) -> MainState ! [] ~ [] @det {
 }
 ```
 
-Source helpers are immutable value producers. They perform no statements, use
-`! [] ~ [] @det`, and return whole values. A process-local helper can
+Source functions are immutable value producers. They perform no statements, use
+`! [] ~ [] @det`, and return whole values. A process-local function can
 encapsulate non-message-handling value construction for `init`, `step` results,
 and send payloads.
 
-Payload-bearing enum constructors are source values too. A helper may match
+Payload-bearing enum constructors are source values too. A function may match
 `Assigned(job: Job)` in a signature pattern or whole-body match, and the payload
 binding is an immutable value scoped to that clause or arm.
 

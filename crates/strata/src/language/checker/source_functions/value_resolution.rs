@@ -510,51 +510,119 @@ fn resolve_source_function_block_return_value(
             "source function body must not perform statements",
         ));
     }
-    resolve_source_function_return_value(
+
+    let context = SourceFunctionReturnContext {
         scope,
         function,
-        &body.returns,
         substitutions,
         local_bindings,
         bindings,
-        depth + 1,
-    )
+    };
+    resolve_source_function_return_value(&context, &body.returns, depth + 1)
+}
+
+struct SourceFunctionReturnContext<'a, 'scope> {
+    scope: &'a SourceFunctionScope<'scope>,
+    function: &'a Function,
+    substitutions: &'a [SourceSubstitution],
+    local_bindings: &'a [SourceValueBinding<'a>],
+    bindings: &'a [SourceValueBinding<'a>],
 }
 
 fn resolve_source_function_return_value(
-    scope: &SourceFunctionScope<'_>,
-    function: &Function,
+    context: &SourceFunctionReturnContext<'_, '_>,
     returns: &ReturnExpr,
-    substitutions: &[SourceSubstitution],
-    local_bindings: &[SourceValueBinding<'_>],
-    bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
     match returns {
         ReturnExpr::Value(value) => Ok(substitute_source_value_bindings(
             value.clone(),
-            substitutions,
+            context.substitutions,
         )),
         ReturnExpr::Call { name, arg } => Ok(substitute_source_value_bindings(
             ValueExpr::Call {
                 name: name.clone(),
                 arg: Box::new(arg.clone()),
             },
-            substitutions,
+            context.substitutions,
         )),
         ReturnExpr::Match(match_body) => resolve_source_function_return_match_value(
-            scope,
-            function,
+            context.scope,
+            context.function,
             match_body,
-            substitutions,
-            local_bindings,
-            bindings,
+            context.substitutions,
+            context.local_bindings,
+            context.bindings,
             depth + 1,
         ),
-        ReturnExpr::IfElse { .. } => Err(Error::new(format!(
-            "source function {} must return a pure value expression",
-            function.name
-        ))),
+        ReturnExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => resolve_source_function_return_if_else_value(
+            context,
+            condition,
+            then_branch,
+            else_branch,
+            depth + 1,
+        ),
+    }
+}
+
+fn resolve_source_function_return_if_else_value(
+    context: &SourceFunctionReturnContext<'_, '_>,
+    condition: &ValueExpr,
+    then_branch: &FunctionBlock,
+    else_branch: &FunctionBlock,
+    depth: usize,
+) -> Result<ValueExpr> {
+    let bool_type = context.semantic_index().bool_type(context.scope.module)?;
+    let condition = substitute_source_value_bindings(condition.clone(), context.substitutions);
+    let condition = resolve_source_value_expr(
+        context.scope,
+        &bool_type,
+        &condition,
+        context.bindings,
+        depth + 1,
+    )?;
+    let selected = if concrete_source_return_bool_value(context.scope, &bool_type, &condition)? {
+        then_branch
+    } else {
+        else_branch
+    };
+    resolve_source_function_block_return_value(
+        context.scope,
+        context.function,
+        selected,
+        context.substitutions,
+        context.local_bindings,
+        context.bindings,
+        depth + 1,
+    )
+}
+
+impl SourceFunctionReturnContext<'_, '_> {
+    fn semantic_index(&self) -> &SemanticIndex {
+        self.scope.semantic_index
+    }
+}
+
+fn concrete_source_return_bool_value(
+    scope: &SourceFunctionScope<'_>,
+    bool_type: &TypeRef,
+    value: &ValueExpr,
+) -> Result<bool> {
+    let ValueExpr::Identifier(name) = value else {
+        return Err(Error::new("if condition requires a concrete Bool value"));
+    };
+    let variant = scope
+        .semantic_index
+        .enum_variant_index(scope.module, bool_type, name)
+        .map_err(|_| Error::new("if condition requires a concrete Bool value"))?;
+    match variant {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(Error::new("if condition requires a concrete Bool value")),
     }
 }
 

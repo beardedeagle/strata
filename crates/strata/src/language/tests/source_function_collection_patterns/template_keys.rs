@@ -85,9 +85,9 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
-fn rejects_source_helper_runtime_dependent_map_key_state_template() {
+fn rejects_source_function_runtime_dependent_map_key_state_template() {
     let source = r#"
-module source_helper_runtime_dependent_map_key_state_template;
+module source_function_runtime_dependent_map_key_state_template;
 
 record Unit;
 enum Phase {
@@ -121,7 +121,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let err = check_source(source).expect_err("helper-bound runtime map keys should fail");
+    let err = check_source(source).expect_err("function-bound runtime map keys should fail");
 
     assert!(
         err.to_string()

@@ -6,7 +6,7 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
     types: &mut CheckedTypeInterner<'_>,
     function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
-    input: &StepTransitionInput<'_>,
+    state: &mut ArmStatementValidationState<'_, '_>,
     validation: ArmStatementValidation<'_, '_, '_>,
     for_each: ArmForEach<'_>,
 ) -> Result<()> {
@@ -99,7 +99,7 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
             ty: &binding.ty,
         });
     }
-    let element_id = CheckedLoopElementId::from_index(0)?;
+    let element_id = state.loop_elements.next_id()?;
     let mut body_template_bindings = validation.template.template_bindings.to_vec();
     for binding in &loop_bindings {
         body_template_bindings.push(ValueTemplateBinding {
@@ -111,35 +111,20 @@ pub(super) fn validate_step_return_match_arm_for_each_statement(
             path: &binding.path,
         });
     }
-    let mut runtime_if_count = 0usize;
     for statement in for_each.body {
-        if matches!(statement, Statement::IfElse { .. }) {
-            runtime_if_count = runtime_if_count.saturating_add(1);
-            if runtime_if_count > 1 {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform more than one runtime if in this source slice",
-                    context.process.name
-                )));
-            }
-        }
         super::validate_step_return_match_arm_action_statement(
             context,
             types,
             function_scope,
             &body_source_bindings,
-            input,
+            state,
             ArmStatementValidation {
                 template: ArmTemplateValidation {
                     template_bindings: &body_template_bindings,
                     arm_substitutions: validation.template.arm_substitutions,
                 },
-                in_runtime_if_branch: validation.in_runtime_if_branch,
-                runtime_if_depth: validation.runtime_if_depth,
-                loop_body: if validation.in_runtime_if_branch {
-                    ArmLoopBodyScope::RuntimeIfBranchFor
-                } else {
-                    ArmLoopBodyScope::DirectArmFor
-                },
+                runtime_if_depth: 0,
+                in_loop_body: true,
             },
             statement,
         )?;

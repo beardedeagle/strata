@@ -45,7 +45,7 @@ fn folds_concrete_bool_and_fieldless_enum_equality() {
         .functions
         .iter()
         .find(|function| function.name.as_str() == "bool_eq")
-        .expect("bool_eq helper should parse");
+        .expect("bool_eq function should parse");
     let Some(FunctionBody::Block(body)) = &bool_eq.body else {
         panic!("bool_eq should parse as a block body");
     };

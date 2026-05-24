@@ -260,7 +260,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    check_source(source).expect("source helper return match should check");
+    check_source(source).expect("source function return match should check");
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn rejects_source_function_match_payload_binding_named_like_parameter() {
 }
 
 #[test]
-fn rejects_source_helper_name_colliding_with_payload_constructor() {
+fn rejects_source_function_name_colliding_with_payload_constructor() {
     let source = FUNCTION_PAYLOAD_MATCH.replace(
         "proc Main mailbox bounded(1) {",
         r#"fn Assigned(job: Job) -> WorkStatus ! [] ~ [] @det {
@@ -454,7 +454,7 @@ fn rejects_source_helper_name_colliding_with_payload_constructor() {
 proc Main mailbox bounded(1) {"#,
     );
 
-    let err = check_source(&source).expect_err("constructor helper name collision should fail");
+    let err = check_source(&source).expect_err("constructor function name collision should fail");
 
     assert!(
         err.to_string().contains(

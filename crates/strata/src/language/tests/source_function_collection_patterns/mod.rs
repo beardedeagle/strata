@@ -14,7 +14,7 @@ fn assert_concrete_collection_value_argument_error(source: &str, context: &str, 
     );
 }
 
-mod helper_surfaces;
+mod function_surfaces;
 mod list_rest_patterns;
 mod map_rest_patterns;
 mod non_concrete_dispatch;

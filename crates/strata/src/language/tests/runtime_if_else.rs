@@ -565,7 +565,7 @@ fn runtime_if_else_rejects_missing_else_branch_return_with_precise_diagnostic() 
     assert!(
         error
             .to_string()
-            .contains("runtime return if else branch must contain a top-level return"),
+            .contains("return-if else branch must contain a top-level return"),
         "{error}"
     );
 }

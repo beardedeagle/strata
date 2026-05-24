@@ -107,7 +107,7 @@ accepted and rejected outcomes.
 ### Source Units
 
 A Strata file starts with a module declaration and defines records, enums,
-source helpers, and processes:
+source functions, and processes:
 
 ```strata
 module hello;
@@ -214,8 +214,8 @@ fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ 
 
 ### Pattern Matching
 
-Strata supports checked pattern dispatch in source helpers, step signatures,
-whole-body message matches, state matches, and helper return-match expressions.
+Strata supports checked pattern dispatch in source functions, step signatures,
+whole-body message matches, state matches, and function return-match expressions.
 
 ```strata
 enum JobStatus {
@@ -244,7 +244,7 @@ fn step(state: WorkerState, Holding(List[Job { phase }, ..tail])) -> ProcResult<
 }
 ```
 
-Helper matches may repeat a top-level constructor only when nested typed enum
+Function matches may repeat a top-level constructor only when nested typed enum
 predicates are provably disjoint. Invalid, duplicate, unreachable, and
 overlapping patterns are rejected before lowering.
 

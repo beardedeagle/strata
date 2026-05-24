@@ -1,5 +1,9 @@
 use super::support::*;
 
+#[path = "source_functions/return_match_arm_action_block.rs"]
+mod return_match_arm_action_block;
+#[path = "source_functions/return_match_arm_bounded_runtime.rs"]
+mod return_match_arm_bounded_runtime;
 #[path = "source_functions/return_match_arm_for.rs"]
 mod return_match_arm_for;
 #[path = "source_functions/return_match_arm_for_if.rs"]
@@ -17,7 +21,7 @@ fn function_match_checks_builds_and_runs_on_mantle() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(stdout.contains("source functions selected WarmReady"));
-    assert!(stdout.contains("process helper assigned job"));
+    assert!(stdout.contains("process-local function assigned job"));
     assert!(stdout.contains("mantle: stopped Main normally"));
     assert!(stdout.contains("mantle: stopped Worker normally"));
 
@@ -74,8 +78,8 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
     );
 
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("source helper matched payload enum"));
-    assert!(stdout.contains("process helper wrapped payload enum"));
+    assert!(stdout.contains("source function matched payload enum"));
+    assert!(stdout.contains("process-local function wrapped payload enum"));
     assert!(stdout.contains("mantle: stopped Main normally"));
     assert!(stdout.contains("mantle: stopped Worker normally"));
 
@@ -149,7 +153,9 @@ fn function_if_else_checks_builds_and_runs_on_mantle() {
     let encoded = artifact.encode();
     assert!(!encoded.contains("is_warm"));
     assert!(!encoded.contains("choose"));
+    assert!(!encoded.contains("choose_block"));
     assert!(!encoded.contains("readiness"));
+    assert!(!encoded.contains("readiness_block"));
 
     let trace = gate.read_trace("function_if_else");
     assert!(trace.contains(
@@ -169,7 +175,7 @@ fn function_collection_match_checks_builds_and_runs_on_mantle() {
     );
 
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("source helper collection match selected values"));
+    assert!(stdout.contains("source function collection match selected values"));
     assert!(stdout.contains("mantle: stopped Main normally"));
 
     let artifact = gate.read_artifact("target/strata/function_collection_match.mta");
@@ -184,7 +190,7 @@ fn function_collection_match_checks_builds_and_runs_on_mantle() {
         r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{selected:Ready,tail:List[Done]}""#
     ));
     assert!(trace.contains(
-        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper collection match selected values""#
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source function collection match selected values""#
     ));
 }
 
@@ -219,7 +225,7 @@ fn function_return_match_checks_builds_and_runs_on_mantle() {
     );
 
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("source helper return match selected payload"));
+    assert!(stdout.contains("source function return match selected payload"));
     assert!(stdout.contains("mantle: stopped Main normally"));
 
     let artifact = gate.read_artifact("target/strata/function_return_match.mta");
@@ -234,7 +240,7 @@ fn function_return_match_checks_builds_and_runs_on_mantle() {
         r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{status:Active(Job{phase:Ready})}""#
     ));
     assert!(trace.contains(
-        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper return match selected payload""#
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source function return match selected payload""#
     ));
 }
 
@@ -620,7 +626,7 @@ fn function_record_pattern_checks_builds_and_runs_on_mantle() {
     );
 
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("source helper record pattern selected field"));
+    assert!(stdout.contains("source function record pattern selected field"));
     assert!(stdout.contains("mantle: stopped Main normally"));
 
     let artifact = gate.read_artifact("target/strata/function_record_pattern.mta");
@@ -632,7 +638,7 @@ fn function_record_pattern_checks_builds_and_runs_on_mantle() {
         r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{phase:Ready}""#
     ));
     assert!(trace.contains(
-        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper record pattern selected field""#
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source function record pattern selected field""#
     ));
 }
 
@@ -645,7 +651,7 @@ fn function_record_return_match_checks_builds_and_runs_on_mantle() {
     );
 
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("source helper record return match selected field"));
+    assert!(stdout.contains("source function record return match selected field"));
     assert!(stdout.contains("mantle: stopped Main normally"));
 
     let artifact = gate.read_artifact("target/strata/function_record_return_match.mta");
@@ -657,7 +663,7 @@ fn function_record_return_match_checks_builds_and_runs_on_mantle() {
         r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{phase:Ready}""#
     ));
     assert!(trace.contains(
-        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper record return match selected field""#
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source function record return match selected field""#
     ));
 }
 
@@ -670,7 +676,7 @@ fn function_record_body_match_checks_builds_and_runs_on_mantle() {
     );
 
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains("source helper record body match selected field"));
+    assert!(stdout.contains("source function record body match selected field"));
     assert!(stdout.contains("mantle: stopped Main normally"));
 
     let artifact = gate.read_artifact("target/strata/function_record_body_match.mta");
@@ -682,6 +688,6 @@ fn function_record_body_match_checks_builds_and_runs_on_mantle() {
         r#""event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"MainState{phase:Ready}""#
     ));
     assert!(trace.contains(
-        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source helper record body match selected field""#
+        r#""event":"program_output","pid":1,"process_id":0,"process":"Main","stream":"stdout","output_id":0,"text":"source function record body match selected field""#
     ));
 }

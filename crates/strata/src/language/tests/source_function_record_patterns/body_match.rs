@@ -41,7 +41,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    check_source(source).expect("source helper body match record pattern should check");
+    check_source(source).expect("source function body match record pattern should check");
 }
 
 #[test]
@@ -124,9 +124,9 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
-fn rejects_source_function_record_pattern_non_concrete_helper_call_argument() {
+fn rejects_source_function_record_pattern_non_concrete_function_call_argument() {
     let source = r#"
-module source_function_record_pattern_non_concrete_helper_call;
+module source_function_record_pattern_non_concrete_function_call;
 
 enum JobPhase {
     Ready,

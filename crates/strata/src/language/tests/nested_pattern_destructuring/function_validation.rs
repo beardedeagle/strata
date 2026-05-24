@@ -2,8 +2,8 @@ use super::super::support::*;
 use super::shared::*;
 
 #[test]
-fn rejects_duplicate_payload_sensitive_helper_predicate() {
-    let source = payload_sensitive_helper_case(
+fn rejects_duplicate_payload_sensitive_function_predicate() {
+    let source = payload_sensitive_function_case(
         r#"
 fn route(packet: Packet) -> Phase ! [] ~ [] @det {
     match packet {
@@ -28,8 +28,8 @@ fn route(packet: Packet) -> Phase ! [] ~ [] @det {
 }
 
 #[test]
-fn rejects_guarded_and_unguarded_helper_constructor_overlap() {
-    let source = payload_sensitive_helper_case(
+fn rejects_guarded_and_unguarded_function_constructor_overlap() {
+    let source = payload_sensitive_function_case(
         r#"
 fn route(packet: Packet) -> Phase ! [] ~ [] @det {
     return match packet {
@@ -54,8 +54,8 @@ fn route(packet: Packet) -> Phase ! [] ~ [] @det {
 }
 
 #[test]
-fn rejects_payload_sensitive_helper_predicates_that_are_not_provably_disjoint() {
-    let source = payload_sensitive_helper_case(
+fn rejects_payload_sensitive_function_predicates_that_are_not_provably_disjoint() {
+    let source = payload_sensitive_function_case(
         r#"
 fn route(packet: Packet) -> Phase ! [] ~ [] @det {
     match packet {
@@ -80,8 +80,8 @@ fn route(packet: Packet) -> Phase ! [] ~ [] @det {
 }
 
 #[test]
-fn rejects_uncovered_payload_sensitive_helper_predicate_at_expansion_time() {
-    let source = payload_sensitive_helper_case(
+fn rejects_uncovered_payload_sensitive_function_predicate_at_expansion_time() {
+    let source = payload_sensitive_function_case(
         r#"
 fn route(packet: Packet) -> Phase ! [] ~ [] @det {
     match packet {
@@ -106,7 +106,7 @@ fn route(packet: Packet) -> Phase ! [] ~ [] @det {
 }
 
 #[test]
-fn source_helpers_reject_fieldless_nested_enum_constructor_mismatches() {
+fn source_functions_reject_fieldless_nested_enum_constructor_mismatches() {
     for (selected_call, expected) in [
         (
             "fieldless_signature(Mark(Done))",
@@ -121,9 +121,9 @@ fn source_helpers_reject_fieldless_nested_enum_constructor_mismatches() {
             "function fieldless_return return match nested payload pattern does not match concrete Done",
         ),
     ] {
-        let source = fieldless_helper_mismatch_source(selected_call);
+        let source = fieldless_function_mismatch_source(selected_call);
         let err = check_source(&source)
-            .expect_err("fieldless nested enum constructor helper mismatch should fail checking");
+            .expect_err("fieldless nested enum constructor function mismatch should fail checking");
 
         assert!(
             err.to_string().contains(expected),

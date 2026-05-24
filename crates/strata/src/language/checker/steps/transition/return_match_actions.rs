@@ -21,32 +21,40 @@ struct ArmTemplateValidation<'a, 'template, 'arm> {
     arm_substitutions: &'a [StaticArmSubstitution<'arm>],
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ArmLoopBodyScope {
-    Outside,
-    DirectArmFor,
-    RuntimeIfBranchFor,
-}
-
 #[derive(Clone, Copy)]
 struct ArmStatementValidation<'a, 'template, 'arm> {
     template: ArmTemplateValidation<'a, 'template, 'arm>,
-    in_runtime_if_branch: bool,
     runtime_if_depth: usize,
-    loop_body: ArmLoopBodyScope,
+    in_loop_body: bool,
 }
 
-impl ArmStatementValidation<'_, '_, '_> {
-    const fn allows_loop_body_runtime_if(self) -> bool {
-        match self.loop_body {
-            ArmLoopBodyScope::Outside => false,
-            ArmLoopBodyScope::DirectArmFor => {
-                !self.in_runtime_if_branch && self.runtime_if_depth == 0
-            }
-            ArmLoopBodyScope::RuntimeIfBranchFor => {
-                self.in_runtime_if_branch && self.runtime_if_depth == 1
-            }
+struct ArmStatementValidationState<'a, 'input> {
+    input: &'a StepTransitionInput<'input>,
+    loop_elements: &'a mut ArmLoopElementAllocator,
+}
+
+#[derive(Default)]
+struct ArmLoopElementAllocator {
+    next: usize,
+}
+
+impl ArmLoopElementAllocator {
+    fn with_next(next: usize) -> Self {
+        Self { next }
+    }
+
+    fn next_id(&mut self) -> Result<CheckedLoopElementId> {
+        if self.next >= MAX_VALUE_TEMPLATE_FIELDS {
+            return Err(Error::new(format!(
+                "loop element count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
+            )));
         }
+        let id = CheckedLoopElementId::from_index(self.next)?;
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or_else(|| Error::new("loop element id overflowed"))?;
+        Ok(id)
     }
 }
 
@@ -71,19 +79,26 @@ struct ArmForEach<'a> {
     body: &'a [Statement],
 }
 
+pub(super) struct ReturnMatchArmActionInput<'a, 'source, 'template, 'input> {
+    pub(super) source_bindings: &'a [SourceValueBinding<'source>],
+    pub(super) template_bindings: &'a [ValueTemplateBinding<'template>],
+    pub(super) input: &'a StepTransitionInput<'input>,
+    pub(super) action_scope: ActionCheckScope,
+    pub(super) loop_element_base: usize,
+    pub(super) body: &'a FunctionBlock,
+}
+
 pub(super) fn validate_return_match_arm_action_statements(
     context: &StepCheckContext<'_>,
     types: &mut CheckedTypeInterner<'_>,
     function_scope: &SourceFunctionScope<'_>,
-    source_bindings: &[SourceValueBinding<'_>],
-    template_bindings: &[ValueTemplateBinding<'_>],
-    input: &StepTransitionInput<'_>,
-    body: &FunctionBlock,
+    request: ReturnMatchArmActionInput<'_, '_, '_, '_>,
 ) -> Result<()> {
-    let ReturnExpr::Match(match_body) = &body.returns else {
+    let ReturnExpr::Match(match_body) = &request.body.returns else {
         return Ok(());
     };
-    let scrutinee_binding = source_bindings
+    let scrutinee_binding = request
+        .source_bindings
         .iter()
         .find(|binding| *binding.name == match_body.scrutinee)
         .ok_or_else(|| {
@@ -122,48 +137,32 @@ pub(super) fn validate_return_match_arm_action_statements(
     for (arm, source_arm) in arms.iter().zip(&match_body.arms) {
         let arm_substitutions = static_step_return_match_arm_substitutions(context, &arm.pattern)?;
         let template_validation = ArmTemplateValidation {
-            template_bindings,
+            template_bindings: request.template_bindings,
             arm_substitutions: &arm_substitutions,
         };
         let mut arm_bindings = Vec::new();
         let validation_bindings = step_return_match_arm_source_bindings(
             context,
-            source_bindings,
+            request.source_bindings,
             &arm.pattern,
             &mut arm_bindings,
         )?;
-        let mut runtime_if_count = 0usize;
-        let mut runtime_for_count = 0usize;
+        let mut loop_elements = ArmLoopElementAllocator::with_next(request.loop_element_base);
+        let mut statement_state = ArmStatementValidationState {
+            input: request.input,
+            loop_elements: &mut loop_elements,
+        };
         for statement in &source_arm.body.statements {
-            if matches!(statement, Statement::IfElse { .. }) {
-                runtime_if_count = runtime_if_count.saturating_add(1);
-                if runtime_if_count > 1 {
-                    return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform more than one runtime if in this source slice",
-                        context.process.name
-                    )));
-                }
-            }
-            if matches!(statement, Statement::ForEach { .. }) {
-                runtime_for_count = runtime_for_count.saturating_add(1);
-                if runtime_for_count > 1 {
-                    return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform more than one for loop in this source slice",
-                        context.process.name
-                    )));
-                }
-            }
             validate_step_return_match_arm_action_statement(
                 context,
                 types,
                 function_scope,
                 validation_bindings,
-                input,
+                &mut statement_state,
                 ArmStatementValidation {
                     template: template_validation,
-                    in_runtime_if_branch: false,
-                    runtime_if_depth: 0,
-                    loop_body: ArmLoopBodyScope::Outside,
+                    runtime_if_depth: request.action_scope.statement_if_depth,
+                    in_loop_body: request.action_scope.in_loop_body,
                 },
                 statement,
             )?;
@@ -173,7 +172,7 @@ pub(super) fn validate_return_match_arm_action_statements(
             types,
             function_scope,
             validation_bindings,
-            template_bindings,
+            request.template_bindings,
             &arm_substitutions,
             &source_arm.body.returns,
         )?;
@@ -224,24 +223,24 @@ fn validate_step_return_match_arm_action_statement(
     types: &mut CheckedTypeInterner<'_>,
     function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
-    input: &StepTransitionInput<'_>,
+    state: &mut ArmStatementValidationState<'_, '_>,
     validation: ArmStatementValidation<'_, '_, '_>,
     statement: &Statement,
 ) -> Result<()> {
     match statement {
-        Statement::Emit(_) => validate_step_return_match_arm_effect(input, Effect::Emit),
+        Statement::Emit(_) => validate_step_return_match_arm_effect(state.input, Effect::Emit),
         Statement::Send {
             target,
             message,
             payload,
         } => {
-            validate_step_return_match_arm_effect(input, Effect::Send)?;
+            validate_step_return_match_arm_effect(state.input, Effect::Send)?;
             validate_step_return_match_arm_send(
                 context,
                 types,
                 function_scope,
                 source_bindings,
-                input,
+                state.input,
                 validation.template,
                 ArmSend {
                     target,
@@ -259,10 +258,10 @@ fn validate_step_return_match_arm_action_statement(
             then_body,
             else_body,
         } => {
-            if validation.in_runtime_if_branch && !validation.allows_loop_body_runtime_if() {
+            if validation.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
                 return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform nested runtime if in this source slice",
-                    context.process.name
+                    "process {} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice",
+                    context.process.name,
                 )));
             }
             validate_step_return_match_arm_runtime_if_statement(
@@ -270,7 +269,7 @@ fn validate_step_return_match_arm_action_statement(
                 types,
                 function_scope,
                 source_bindings,
-                input,
+                state,
                 validation,
                 ArmRuntimeIf {
                     condition,
@@ -284,16 +283,9 @@ fn validate_step_return_match_arm_action_statement(
             collection,
             body,
         } => {
-            if validation.in_runtime_if_branch && validation.loop_body != ArmLoopBodyScope::Outside
-            {
+            if validation.in_loop_body {
                 return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform for loops in this source slice",
-                    context.process.name
-                )));
-            }
-            if validation.loop_body != ArmLoopBodyScope::Outside {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform nested for loops in this source slice",
+                    "process {} nested for loops are not supported in this source slice",
                     context.process.name
                 )));
             }
@@ -302,7 +294,7 @@ fn validate_step_return_match_arm_action_statement(
                 types,
                 function_scope,
                 source_bindings,
-                input,
+                state,
                 validation,
                 ArmForEach {
                     item,
@@ -319,7 +311,7 @@ fn validate_step_return_match_arm_runtime_if_statement(
     types: &mut CheckedTypeInterner<'_>,
     function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
-    input: &StepTransitionInput<'_>,
+    state: &mut ArmStatementValidationState<'_, '_>,
     validation: ArmStatementValidation<'_, '_, '_>,
     runtime_if: ArmRuntimeIf<'_>,
 ) -> Result<()> {
@@ -342,7 +334,7 @@ fn validate_step_return_match_arm_runtime_if_statement(
         types,
         function_scope,
         source_bindings,
-        input,
+        state,
         validation,
         runtime_if.then_body,
     )?;
@@ -351,7 +343,7 @@ fn validate_step_return_match_arm_runtime_if_statement(
         types,
         function_scope,
         source_bindings,
-        input,
+        state,
         validation,
         runtime_if.else_body,
     )
@@ -387,32 +379,21 @@ fn validate_step_return_match_arm_runtime_if_branch(
     types: &mut CheckedTypeInterner<'_>,
     function_scope: &SourceFunctionScope<'_>,
     source_bindings: &[SourceValueBinding<'_>],
-    input: &StepTransitionInput<'_>,
+    state: &mut ArmStatementValidationState<'_, '_>,
     validation: ArmStatementValidation<'_, '_, '_>,
     statements: &[Statement],
 ) -> Result<()> {
-    let mut runtime_for_count = 0usize;
     for statement in statements {
-        if matches!(statement, Statement::ForEach { .. }) {
-            runtime_for_count = runtime_for_count.saturating_add(1);
-            if runtime_for_count > 1 {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform more than one for loop in this source slice",
-                    context.process.name
-                )));
-            }
-        }
         validate_step_return_match_arm_action_statement(
             context,
             types,
             function_scope,
             source_bindings,
-            input,
+            state,
             ArmStatementValidation {
                 template: validation.template,
-                in_runtime_if_branch: true,
                 runtime_if_depth: validation.runtime_if_depth.saturating_add(1),
-                loop_body: validation.loop_body,
+                in_loop_body: validation.in_loop_body,
             },
             statement,
         )?;

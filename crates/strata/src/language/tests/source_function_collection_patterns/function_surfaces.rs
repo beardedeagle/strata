@@ -86,7 +86,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let checked = check_source(source).expect("collection source helper patterns should check");
+    let checked = check_source(source).expect("collection source function patterns should check");
     let artifact = lower_to_artifact(&checked, source).expect("collection source should lower");
 
     assert_eq!(
@@ -158,7 +158,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let checked = check_source(source).expect("subset map source helper patterns should check");
+    let checked = check_source(source).expect("subset map source function patterns should check");
     let artifact = lower_to_artifact(&checked, source).expect("subset map source should lower");
 
     assert_eq!(

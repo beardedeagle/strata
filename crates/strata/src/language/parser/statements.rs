@@ -219,8 +219,9 @@ impl Parser {
         self.expect_symbol('{')?;
         let then_branch_start = self.index.saturating_sub(1);
         if !self.block_contains_top_level_return(then_branch_start) {
-            return Err(self
-                .error_previous("runtime return if then branch must contain a top-level return"));
+            return Err(
+                self.error_previous("return-if then branch must contain a top-level return")
+            );
         }
         let then_branch = self.parse_function_block()?;
         self.expect_symbol('}')?;
@@ -228,8 +229,9 @@ impl Parser {
         self.expect_symbol('{')?;
         let else_branch_start = self.index.saturating_sub(1);
         if !self.block_contains_top_level_return(else_branch_start) {
-            return Err(self
-                .error_previous("runtime return if else branch must contain a top-level return"));
+            return Err(
+                self.error_previous("return-if else branch must contain a top-level return")
+            );
         }
         let else_branch = self.parse_function_block()?;
         self.expect_symbol('}')?;

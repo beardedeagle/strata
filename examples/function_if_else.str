@@ -35,8 +35,20 @@ fn choose(flag: Bool) -> Readiness ! [] ~ [] @det {
     return if (flag) { WarmReady } else { ColdReady };
 }
 
+fn choose_block(flag: Bool) -> Readiness ! [] ~ [] @det {
+    if (flag) {
+        return WarmReady;
+    } else {
+        return ColdReady;
+    }
+}
+
 fn readiness(mode: Mode) -> Readiness ! [] ~ [] @det {
     return choose(is_warm(mode));
+}
+
+fn readiness_block(mode: Mode) -> Readiness ! [] ~ [] @det {
+    return choose_block(is_warm(mode));
 }
 
 proc Main mailbox bounded(1) {
@@ -45,7 +57,7 @@ proc Main mailbox bounded(1) {
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState {
-            init: readiness(Warm),
+            init: readiness_block(Warm),
             step: readiness(Cold),
         };
     }
@@ -54,7 +66,7 @@ proc Main mailbox bounded(1) {
         emit "pure conditional selected source values";
         return Stop(MainState {
             init: readiness(Cold),
-            step: readiness(Warm),
+            step: readiness_block(Warm),
         });
     }
 }

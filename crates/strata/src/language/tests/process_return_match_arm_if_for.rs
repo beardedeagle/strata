@@ -157,36 +157,134 @@ fn preserves_step_return_match_arm_runtime_if_branch_for_each_body_runtime_if() 
 }
 
 #[test]
-fn rejects_step_return_match_arm_runtime_if_branch_for_each_body_multiple_runtime_if_prefixes() {
+fn preserves_step_return_match_arm_runtime_if_branch_for_each_body_nested_runtime_if() {
     let source = PROCESS_RETURN_MATCH_ARM_IF_FOR_PREFIX.replace(
         "                        emit \"return-match ready branch loop item\";\n                        send sink Notice(job_phase);",
-        "                        if (job_phase == Ready) {\n                            emit \"return-match ready first nested loop branch\";\n                            send sink Notice(job_phase);\n                        } else {\n                            emit \"return-match ready first nested loop fallback\";\n                            send sink Notice(job_phase);\n                        }\n                        if (job_phase == Done) {\n                            emit \"return-match ready second nested loop branch\";\n                            send sink Notice(job_phase);\n                        } else {\n                            emit \"return-match ready second nested loop fallback\";\n                            send sink Notice(job_phase);\n                        }",
+        "                        if (job_phase == Ready) {\n                            if (enabled == True) {\n                                emit \"return-match ready nested loop inner branch\";\n                                send sink Notice(job_phase);\n                            } else {\n                                emit \"return-match ready nested loop inner fallback\";\n                                send sink Notice(job_phase);\n                            }\n                        } else {\n                            emit \"return-match ready nested loop outer fallback\";\n                            send sink Notice(job_phase);\n                        }",
     );
 
-    let err =
-        check_source(&source).expect_err("second branch-local loop-body runtime if should fail");
+    let checked = check_source(&source)
+        .expect("branch-local for should reset loop-body runtime-if nesting depth");
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("nested branch-local loop if should lower");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform more than one runtime if in this source slice"
-        ),
-        "unexpected error: {err}"
+        artifact.processes.iter().any(|process| {
+            process.debug_name == "Worker"
+                && process.transitions.iter().any(|transition| {
+                    matches!(
+                        transition.actions.as_slice(),
+                        [
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::Spawn { .. },
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::IfElse { then_actions, .. },
+                        ] if matches!(
+                            then_actions.as_slice(),
+                            [
+                                ArtifactAction::Emit { .. },
+                                ArtifactAction::ForEach { body, .. },
+                            ] if loop_body_has_nested_branch(body)
+                        )
+                    )
+                })
+        }),
+        "loop body reached through a selected arm runtime-if branch should preserve nested typed branch actions"
     );
 }
 
 #[test]
-fn rejects_step_return_match_arm_runtime_if_branch_multiple_for_each_prefixes() {
+fn checks_step_return_match_arm_runtime_if_branch_for_each_body_multiple_runtime_if_prefixes() {
+    let source = PROCESS_RETURN_MATCH_ARM_IF_FOR_PREFIX.replace(
+        "                        emit \"return-match ready branch loop item\";\n                        send sink Notice(job_phase);",
+        "                        if (job_phase == Ready) {\n                            emit \"return-match ready first nested loop branch\";\n                            send sink Notice(job_phase);\n                        } else {\n                            emit \"return-match ready first nested loop fallback\";\n                            send sink Notice(job_phase);\n                        }\n                        if (job_phase == Done) {\n                            emit \"return-match ready second nested loop branch\";\n                            send sink Notice(job_phase);\n                        } else {\n                            emit \"return-match ready second nested loop fallback\";\n                            send sink Notice(job_phase);\n                        }",
+    )
+    .replace("proc Sink mailbox bounded(2)", "proc Sink mailbox bounded(4)");
+
+    let checked =
+        check_source(&source).expect("second branch-local loop-body runtime if should check");
+    let artifact = lower_to_artifact(&checked, &source)
+        .expect("second branch-local loop-body runtime if should lower");
+
+    assert!(
+        artifact.processes.iter().any(|process| {
+            process.debug_name == "Worker"
+                && process.transitions.iter().any(|transition| {
+                    matches!(
+                        transition.actions.as_slice(),
+                        [
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::Spawn { .. },
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::IfElse { then_actions, .. },
+                        ] if matches!(
+                            then_actions.as_slice(),
+                            [
+                                ArtifactAction::Emit { .. },
+                                ArtifactAction::ForEach { body, .. },
+                            ] if matches!(
+                                body.as_slice(),
+                                [ArtifactAction::IfElse { .. }, ArtifactAction::IfElse { .. }]
+                            )
+                        )
+                    )
+                })
+        }),
+        "selected branch-local loop body should preserve both runtime-if actions"
+    );
+}
+
+#[test]
+fn checks_step_return_match_arm_runtime_if_branch_multiple_for_each_prefixes() {
     let source = PROCESS_RETURN_MATCH_ARM_IF_FOR_PREFIX.replace(
         "                    }\n                } else {\n                    emit \"return-match ready disabled branch\";",
         "                    }\n                    for Job { phase: job_phase } in jobs {\n                        emit \"return-match ready second branch loop item\";\n                        send sink Notice(job_phase);\n                    }\n                } else {\n                    emit \"return-match ready disabled branch\";",
-    );
+    )
+    .replace("proc Sink mailbox bounded(2)", "proc Sink mailbox bounded(4)");
 
-    let err = check_source(&source).expect_err("second branch-local for should fail");
+    let checked = check_source(&source).expect("second branch-local for should check");
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("second branch-local for should lower");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform more than one for loop in this source slice"
-        ),
+        artifact.processes.iter().any(|process| {
+            process.debug_name == "Worker"
+                && process.transitions.iter().any(|transition| {
+                    matches!(
+                        transition.actions.as_slice(),
+                        [
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::Spawn { .. },
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::IfElse { then_actions, .. },
+                        ] if matches!(
+                            then_actions.as_slice(),
+                            [
+                                ArtifactAction::Emit { .. },
+                                ArtifactAction::ForEach { .. },
+                                ArtifactAction::ForEach { .. },
+                            ]
+                        )
+                    )
+                })
+        }),
+        "selected runtime-if branch should preserve both bounded for actions"
+    );
+}
+
+#[test]
+fn rejects_step_return_match_arm_runtime_if_branch_for_each_body_excessive_nested_runtime_if() {
+    let source = PROCESS_RETURN_MATCH_ARM_IF_FOR_PREFIX.replace(
+        "                        emit \"return-match ready branch loop item\";\n                        send sink Notice(job_phase);",
+        "                        if (job_phase == Ready) {\n                            if (enabled == True) {\n                                if (job_phase == Ready) {\n                                    emit \"return-match ready excessive nested loop branch\";\n                                } else {\n                                    emit \"return-match ready excessive nested loop fallback\";\n                                }\n                            } else {\n                                emit \"return-match ready nested loop inner fallback\";\n                            }\n                        } else {\n                            emit \"return-match ready nested loop outer fallback\";\n                        }",
+    );
+
+    let err = check_source(&source)
+        .expect_err("third loop-body runtime-if nesting level should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("statement-level if action nesting exceeds maximum depth"),
         "unexpected error: {err}"
     );
 }
@@ -202,10 +300,7 @@ fn rejects_step_return_match_arm_runtime_if_branch_for_each_nested_for_each_body
 
     assert!(
         err.to_string()
-            .contains("nested for loops are not supported in this source slice")
-            || err.to_string().contains(
-                "process Worker step return match arm cannot perform nested for loops in this source slice"
-            ),
+            .contains("nested for loops are not supported in this source slice"),
         "unexpected error: {err}"
     );
 }
@@ -249,19 +344,38 @@ fn rejects_unselected_arm_if_branch_loop_invalid_send_payload_template() {
 }
 
 #[test]
-fn rejects_step_return_match_arm_runtime_if_direct_nested_if_still_rejected() {
+fn checks_step_return_match_arm_runtime_if_direct_nested_if() {
     let source = PROCESS_RETURN_MATCH_ARM_IF_FOR_PREFIX.replace(
         "emit \"return-match ready enabled branch\";",
         "if (enabled == True) {\n                        emit \"return-match ready nested branch\";\n                    } else {\n                        emit \"return-match ready nested fallback\";\n                    }",
     );
 
-    let err = check_source(&source).expect_err("direct nested arm-local if should fail");
+    let checked = check_source(&source).expect("direct nested arm-local if should check");
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("direct nested arm-local if should lower");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform nested runtime if in this source slice"
-        ),
-        "unexpected error: {err}"
+        artifact.processes.iter().any(|process| {
+            process.debug_name == "Worker"
+                && process.transitions.iter().any(|transition| {
+                    matches!(
+                        transition.actions.as_slice(),
+                        [
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::Spawn { .. },
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::IfElse { then_actions, .. },
+                        ] if matches!(
+                            then_actions.as_slice(),
+                            [
+                                ArtifactAction::IfElse { .. },
+                                ArtifactAction::ForEach { .. },
+                            ]
+                        )
+                    )
+                })
+        }),
+        "selected arm nested runtime-if should lower as typed branch actions"
     );
 }
 
@@ -350,5 +464,15 @@ fn branch_has_artifact_loop_send(actions: &[ArtifactAction]) -> bool {
                     ArtifactValueTemplate::LoopElement { .. }
                 )
         )
+    )
+}
+
+fn loop_body_has_nested_branch(actions: &[ArtifactAction]) -> bool {
+    matches!(
+        actions,
+        [ArtifactAction::IfElse { then_actions, .. }]
+            if then_actions
+                .iter()
+                .any(|action| matches!(action, ArtifactAction::IfElse { .. }))
     )
 }
