@@ -35,11 +35,11 @@ just source-to-runtime-gates
 
 `just language-surface-assurance` runs the executable current-language-surface
 proof substrate. The inventory maps agreed proof domains to declared
-Strata/Mantle features, maps those features to required evidence classes, and
-verifies that each evidence pointer still names live repository content.
-Source-to-runtime evidence must name active executable check/build/run gate
-coverage. This gate does not add language behavior and does not replace `.str`
-source-to-runtime execution.
+Strata/Mantle features, maps those features to typed proof obligations, maps
+those obligations to required evidence classes, and verifies that each evidence
+pointer still names live repository content. Source-to-runtime evidence must
+name active executable check/build/run gate coverage. This gate does not add
+language behavior and does not replace `.str` source-to-runtime execution.
 
 ```sh
 just language-surface-assurance

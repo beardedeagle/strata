@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[path = "language_surface_assurance/model.rs"]
@@ -33,6 +33,8 @@ mod docs_only;
 mod process;
 #[path = "language_surface_assurance/proof_domains.rs"]
 mod proof_domains;
+#[path = "language_surface_assurance/proof_obligations.rs"]
+mod proof_obligations;
 #[path = "language_surface_assurance/rejected.rs"]
 mod rejected;
 #[path = "language_surface_assurance/runtime.rs"]
@@ -42,7 +44,7 @@ mod source;
 #[path = "language_surface_assurance/validation.rs"]
 mod validation;
 
-use model::{EvidenceClass, Feature, FeatureStatus, SurfaceLayer, expected};
+use model::{EvidenceClass, Feature, FeatureStatus, ProofObligationClass, SurfaceLayer, expected};
 use validation::EvidenceCache;
 
 const FEATURE_GROUPS: &[&[Feature]] = &[
@@ -282,8 +284,123 @@ fn proof_domains_cover_the_declared_language_surface() {
     }
 }
 
+#[test]
+fn proof_domain_obligations_match_surface_layers_and_evidence() {
+    let features = inventory()
+        .map(|feature| (feature.id, feature))
+        .collect::<BTreeMap<_, _>>();
+    let mut violations = Vec::new();
+
+    for domain in proof_domains::DOMAINS {
+        let declared_obligations = domain
+            .obligations
+            .iter()
+            .map(|obligation| obligation.class)
+            .collect::<BTreeSet<_>>();
+        let mut required_obligations = BTreeSet::new();
+        let mut evidence_classes = BTreeSet::new();
+
+        if domain.obligations.is_empty() {
+            violations.push(format!("{} must declare proof obligations", domain.id));
+        }
+
+        for obligation in domain.obligations {
+            if obligation.claim.trim().is_empty() {
+                violations.push(format!(
+                    "{} has empty {} proof claim",
+                    domain.id,
+                    obligation.class.as_str()
+                ));
+            }
+        }
+
+        for &feature_id in domain.feature_ids {
+            let feature = features
+                .get(feature_id)
+                .expect("proof domain feature ids are validated by coverage test");
+            required_obligations.extend(required_obligations_for_feature(feature));
+            evidence_classes.extend(feature.evidence.iter().map(|evidence| evidence.class));
+        }
+
+        for required in required_obligations {
+            if !declared_obligations.contains(&required) {
+                violations.push(format!(
+                    "{} lacks required {} proof obligation",
+                    domain.id,
+                    required.as_str()
+                ));
+            }
+        }
+
+        for obligation in domain.obligations {
+            if !obligation.class.is_supported_by(&evidence_classes) {
+                violations.push(format!(
+                    "{} declares {} proof obligation without supporting evidence",
+                    domain.id,
+                    obligation.class.as_str()
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "language surface proof obligations are incomplete:\n{}",
+        violations.join("\n")
+    );
+}
+
 fn inventory() -> impl Iterator<Item = &'static Feature> {
     FEATURE_GROUPS.iter().flat_map(|features| features.iter())
+}
+
+fn required_obligations_for_feature(feature: &Feature) -> BTreeSet<ProofObligationClass> {
+    let mut required = BTreeSet::new();
+
+    for evidence_class in feature.required {
+        match evidence_class {
+            EvidenceClass::ParserCoverage => {
+                required.insert(ProofObligationClass::SourceSyntax);
+            }
+            EvidenceClass::CheckerValidation => {
+                required.insert(ProofObligationClass::StaticValidation);
+            }
+            EvidenceClass::CheckedIrLowering => {
+                required.insert(ProofObligationClass::CheckedIrProjection);
+                required.insert(ProofObligationClass::StrataMantleBoundary);
+            }
+            EvidenceClass::ArtifactAdmission => {
+                required.insert(ProofObligationClass::ArtifactAdmission);
+                required.insert(ProofObligationClass::StrataMantleBoundary);
+            }
+            EvidenceClass::RuntimeExecution => {
+                required.insert(ProofObligationClass::RuntimeExecution);
+            }
+            EvidenceClass::Diagnostics => {
+                required.insert(ProofObligationClass::Diagnostics);
+            }
+            EvidenceClass::RunnableExample => {
+                required.insert(ProofObligationClass::RunnableExample);
+            }
+            EvidenceClass::PositiveTest | EvidenceClass::NegativeTest => {
+                required.insert(ProofObligationClass::TestCoverage);
+            }
+            EvidenceClass::SourceToRuntimeGate => {
+                required.insert(ProofObligationClass::SourceToRuntimeExecution);
+            }
+            EvidenceClass::FuzzSeed => {
+                required.insert(ProofObligationClass::FuzzSeedCorpus);
+            }
+            EvidenceClass::BoundedOrProperty => {
+                required.insert(ProofObligationClass::BoundedOrProperty);
+            }
+            EvidenceClass::Documentation => {
+                required.insert(ProofObligationClass::Documentation);
+            }
+        }
+    }
+
+    required
 }
 
 fn workspace_root() -> PathBuf {

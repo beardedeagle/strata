@@ -15,7 +15,7 @@ pub(crate) enum SurfaceLayer {
     FutureNonAdmitted,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum EvidenceClass {
     ParserCoverage,
     CheckerValidation,
@@ -28,6 +28,23 @@ pub(crate) enum EvidenceClass {
     NegativeTest,
     SourceToRuntimeGate,
     FuzzSeed,
+    BoundedOrProperty,
+    Documentation,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum ProofObligationClass {
+    SourceSyntax,
+    StaticValidation,
+    CheckedIrProjection,
+    StrataMantleBoundary,
+    ArtifactAdmission,
+    RuntimeExecution,
+    Diagnostics,
+    RunnableExample,
+    TestCoverage,
+    SourceToRuntimeExecution,
+    FuzzSeedCorpus,
     BoundedOrProperty,
     Documentation,
 }
@@ -53,6 +70,18 @@ impl Evidence {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ProofObligation {
+    pub(crate) class: ProofObligationClass,
+    pub(crate) claim: &'static str,
+}
+
+impl ProofObligation {
+    pub(crate) const fn new(class: ProofObligationClass, claim: &'static str) -> Self {
+        Self { class, claim }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Feature {
     pub(crate) id: &'static str,
@@ -68,6 +97,7 @@ pub(crate) struct ProofDomain {
     pub(crate) id: &'static str,
     pub(crate) title: &'static str,
     pub(crate) feature_ids: &'static [&'static str],
+    pub(crate) obligations: &'static [ProofObligation],
 }
 
 pub(crate) mod requirements {
@@ -330,6 +360,82 @@ impl EvidenceClass {
             self,
             EvidenceClass::Diagnostics | EvidenceClass::NegativeTest | EvidenceClass::Documentation
         )
+    }
+}
+
+impl ProofObligationClass {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            ProofObligationClass::SourceSyntax => "source-syntax",
+            ProofObligationClass::StaticValidation => "static-validation",
+            ProofObligationClass::CheckedIrProjection => "checked-ir-projection",
+            ProofObligationClass::StrataMantleBoundary => "strata-mantle-boundary",
+            ProofObligationClass::ArtifactAdmission => "artifact-admission",
+            ProofObligationClass::RuntimeExecution => "runtime-execution",
+            ProofObligationClass::Diagnostics => "diagnostics",
+            ProofObligationClass::RunnableExample => "runnable-example",
+            ProofObligationClass::TestCoverage => "test-coverage",
+            ProofObligationClass::SourceToRuntimeExecution => "source-to-runtime-execution",
+            ProofObligationClass::FuzzSeedCorpus => "fuzz-seed-corpus",
+            ProofObligationClass::BoundedOrProperty => "bounded-property",
+            ProofObligationClass::Documentation => "documentation",
+        }
+    }
+
+    pub(crate) fn is_supported_by(self, evidence_classes: &impl EvidenceClassSet) -> bool {
+        match self {
+            ProofObligationClass::SourceSyntax => {
+                evidence_classes.contains(EvidenceClass::ParserCoverage)
+            }
+            ProofObligationClass::StaticValidation => {
+                evidence_classes.contains(EvidenceClass::CheckerValidation)
+            }
+            ProofObligationClass::CheckedIrProjection => {
+                evidence_classes.contains(EvidenceClass::CheckedIrLowering)
+            }
+            ProofObligationClass::StrataMantleBoundary => {
+                evidence_classes.contains(EvidenceClass::CheckedIrLowering)
+                    || evidence_classes.contains(EvidenceClass::ArtifactAdmission)
+            }
+            ProofObligationClass::ArtifactAdmission => {
+                evidence_classes.contains(EvidenceClass::ArtifactAdmission)
+            }
+            ProofObligationClass::RuntimeExecution => {
+                evidence_classes.contains(EvidenceClass::RuntimeExecution)
+            }
+            ProofObligationClass::Diagnostics => {
+                evidence_classes.contains(EvidenceClass::Diagnostics)
+            }
+            ProofObligationClass::RunnableExample => {
+                evidence_classes.contains(EvidenceClass::RunnableExample)
+            }
+            ProofObligationClass::TestCoverage => {
+                evidence_classes.contains(EvidenceClass::PositiveTest)
+                    || evidence_classes.contains(EvidenceClass::NegativeTest)
+            }
+            ProofObligationClass::SourceToRuntimeExecution => {
+                evidence_classes.contains(EvidenceClass::SourceToRuntimeGate)
+            }
+            ProofObligationClass::FuzzSeedCorpus => {
+                evidence_classes.contains(EvidenceClass::FuzzSeed)
+            }
+            ProofObligationClass::BoundedOrProperty => {
+                evidence_classes.contains(EvidenceClass::BoundedOrProperty)
+            }
+            ProofObligationClass::Documentation => {
+                evidence_classes.contains(EvidenceClass::Documentation)
+            }
+        }
+    }
+}
+
+pub(crate) trait EvidenceClassSet {
+    fn contains(&self, class: EvidenceClass) -> bool;
+}
+
+impl EvidenceClassSet for std::collections::BTreeSet<EvidenceClass> {
+    fn contains(&self, class: EvidenceClass) -> bool {
+        std::collections::BTreeSet::contains(self, &class)
     }
 }
 

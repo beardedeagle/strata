@@ -1,40 +1,47 @@
-use crate::model::ProofDomain;
+use crate::{model::ProofDomain, proof_obligations};
 
 pub(crate) const DOMAINS: &[ProofDomain] = &[
     ProofDomain {
         id: "module-declarations-and-top-level-items",
         title: "Module declarations and top-level item parsing",
         feature_ids: &["source-unit-top-level-items"],
+        obligations: proof_obligations::SOURCE_ONLY,
     },
     ProofDomain {
         id: "records-enums-fieldless-and-payload-variants",
         title: "Records, enums, and fieldless or payload-bearing variants",
         feature_ids: &["records-enums-immutable-values", "typed-message-payloads"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "pure-source-functions",
         title: "Pure source functions",
         feature_ids: &["pure-source-functions-and-calls"],
+        obligations: proof_obligations::CHECKER_LOWERING,
     },
     ProofDomain {
         id: "source-function-calls",
         title: "Source function calls",
         feature_ids: &["pure-source-functions-and-calls"],
+        obligations: proof_obligations::CHECKER_LOWERING,
     },
     ProofDomain {
         id: "source-function-braced-return-if",
         title: "Source function braced return-if selection",
         feature_ids: &["source-function-return-if"],
+        obligations: proof_obligations::CHECKER_LOWERING_FUZZ_BOUNDED,
     },
     ProofDomain {
         id: "source-function-return-match",
         title: "Source function return-match selection",
         feature_ids: &["source-function-return-match"],
+        obligations: proof_obligations::CHECKER_LOWERING,
     },
     ProofDomain {
         id: "function-whole-body-match",
         title: "Function whole-body match selection",
         feature_ids: &["source-function-whole-body-match"],
+        obligations: proof_obligations::CHECKER_LOWERING,
     },
     ProofDomain {
         id: "record-list-map-enum-pattern-destructuring",
@@ -47,6 +54,7 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "whole-body-match-msg",
             "whole-body-match-state",
         ],
+        obligations: proof_obligations::RUNTIME_FUZZ,
     },
     ProofDomain {
         id: "static-map-key-behavior",
@@ -55,16 +63,19 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "static-map-keys-and-collections",
             "rejected-dynamic-map-keys",
         ],
+        obligations: proof_obligations::CHECKER_LOWERING_FUZZ,
     },
     ProofDomain {
         id: "bool-equality-predicate-value-forms",
         title: "Bool, equality, and predicate value forms",
         feature_ids: &["bool-equality-predicates"],
+        obligations: proof_obligations::CHECKER_LOWERING,
     },
     ProofDomain {
         id: "process-declarations",
         title: "Process declarations",
         feature_ids: &["process-init-step-results"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "init-and-step",
@@ -74,36 +85,43 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "init-whole-body-match",
             "init-return-match",
         ],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "typed-message-payloads",
         title: "Typed message payloads",
         feature_ids: &["typed-message-payloads"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "process-instances-and-spawn-routing",
         title: "Process instances and spawn routing",
         feature_ids: &["process-instances-and-spawn-routing"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "step-parameter-patterns",
         title: "Step parameter patterns",
         feature_ids: &["step-parameter-patterns"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "whole-body-match-msg",
         title: "Whole-body match msg dispatch",
         feature_ids: &["whole-body-match-msg"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "whole-body-match-state",
         title: "Whole-body match state dispatch",
         feature_ids: &["whole-body-match-state"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "step-return-match",
         title: "Step return-match dispatch and selected-arm action blocks",
         feature_ids: &["step-return-match", "return-match-action-blocks"],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
     },
     ProofDomain {
         id: "message-dispatch-patterns",
@@ -115,26 +133,31 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "whole-body-match-state",
             "step-return-match",
         ],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "terminal-continue-stop-panic",
         title: "Terminal Continue, Stop, and Panic results",
         feature_ids: &["process-init-step-results"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "explicit-effects",
         title: "Explicit effect declarations and authority checks",
         feature_ids: &["explicit-effects-and-authority"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "emit-spawn-send",
         title: "Emit, spawn, and send action effects",
         feature_ids: &["explicit-effects-and-authority"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "typed-direct-process-ref-authority",
         title: "Typed direct ProcessRef authority",
         feature_ids: &["direct-process-ref-authority"],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "process-ref-payload-forwarding",
@@ -143,6 +166,7 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "direct-process-ref-authority",
             "runtime-for-received-ref-routing",
         ],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "runtime-if",
@@ -155,6 +179,7 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "runtime-if-noop-branches",
             "runtime-if-nested-action-branches",
         ],
+        obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
         id: "runtime-for-over-checked-list",
@@ -166,6 +191,7 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "runtime-for-received-ref-routing",
             "runtime-for-loop-element-projection",
         ],
+        obligations: proof_obligations::RUNTIME_FUZZ,
     },
     ProofDomain {
         id: "checked-ir-action-templates",
@@ -176,21 +202,25 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "runtime-if-control-flow",
             "runtime-for-checked-lists",
         ],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
     },
     ProofDomain {
         id: "mantle-artifact-admission",
         title: "Mantle artifact admission",
         feature_ids: &["mantle-artifact-admission"],
+        obligations: proof_obligations::ARTIFACT_ADMISSION_ONLY,
     },
     ProofDomain {
         id: "mantle-loaded-artifact-validation",
         title: "Mantle runtime loaded-artifact validation",
         feature_ids: &["loaded-runtime-validation"],
+        obligations: proof_obligations::ARTIFACT_ADMISSION_ONLY,
     },
     ProofDomain {
         id: "runtime-trace-observability-boundaries",
         title: "Runtime trace and observability boundaries",
         feature_ids: &["runtime-observability"],
+        obligations: proof_obligations::OBSERVABILITY,
     },
     ProofDomain {
         id: "rejection-fail-closed-unsupported-forms",
@@ -206,10 +236,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "rejected-dynamic-map-keys",
             "rejected-unbounded-collections",
         ],
+        obligations: proof_obligations::REJECTED,
     },
     ProofDomain {
         id: "docs-examples-only-surfaces",
         title: "Documentation and example-only surfaces",
         feature_ids: &["source-to-runtime-documentation-index"],
+        obligations: proof_obligations::DOCS_EXAMPLES,
     },
 ];

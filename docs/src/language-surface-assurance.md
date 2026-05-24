@@ -1,11 +1,12 @@
 # Language Surface Proof Substrate
 
 The current language surface proof substrate is an executable, machine-readable
-inventory of the implemented Strata and Mantle surface. It maps the agreed
-proof domains for the current language surface to declared feature entries, then
-maps those entries to the evidence classes required for that feature: parser
-coverage, checker/static validation, checked IR and lowering coverage, Mantle
-artifact admission, runtime execution, diagnostics, examples, positive tests,
+model of the implemented Strata and Mantle surface. It maps the agreed proof
+domains for the current language surface to declared feature entries, maps those
+entries to typed proof obligations, and maps those obligations to the evidence
+classes required for that feature: parser coverage, checker/static validation,
+checked IR and lowering coverage, Strata/Mantle boundary preservation, Mantle
+artifact admission, runtime execution, diagnostics, examples, positive and
 negative tests, source-to-runtime gates, fuzz seeds, and bounded or property
 coverage where that evidence applies.
 
@@ -29,14 +30,15 @@ crates/strata-mantle-acceptance/tests/language_surface_assurance/
 ```
 
 The gate fails when a declared proof domain is missing, when a declared language
-surface feature is not included in a proof domain, when a feature is missing one
-of its required evidence classes, when an evidence path disappears, or when the
-recorded marker no longer exists in the cited file. Source-to-runtime evidence
-must point at the active `Justfile` check/build/run commands for the cited
-source example. The inventory also fails if an evidence class is incompatible
-with the feature's declared surface layer, so source-only, checker/lowering,
-artifact-admission, runtime, docs/example, and future/non-admitted
-classifications remain distinct.
+surface feature is not included in a proof domain, when a domain omits a proof
+obligation implied by its features, when an obligation has no supporting
+evidence class, when a feature is missing one of its required evidence classes,
+when an evidence path disappears, or when the recorded marker no longer exists
+in the cited file. Source-to-runtime evidence must point at the active
+`Justfile` check/build/run commands for the cited source example. The inventory
+also fails if an evidence class is incompatible with the feature's declared
+surface layer, so source-only, checker/lowering, artifact-admission, runtime,
+docs/example, and future/non-admitted classifications remain distinct.
 
 This gate is the current-language-surface proof substrate for implementation
 claims. It is not a full theorem-prover proof of every semantic rule, and it
