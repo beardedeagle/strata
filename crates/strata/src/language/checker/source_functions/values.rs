@@ -70,10 +70,19 @@ fn validate_source_function_return_expr(
             match_body,
             bindings,
         ),
-        ReturnExpr::IfElse { .. } => Err(Error::new(format!(
-            "source function {} must return a pure value expression",
-            function.name
-        ))),
+        ReturnExpr::IfElse {
+            condition,
+            then_branch,
+            else_branch,
+        } => validate_source_function_return_if_else(
+            scope,
+            function,
+            expected_type,
+            condition,
+            then_branch,
+            else_branch,
+            bindings,
+        ),
     }
 }
 
@@ -250,6 +259,58 @@ fn validate_source_function_if_else_with_bool_type(
         },
     )?;
     Ok(())
+}
+
+fn validate_source_function_return_if_else(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    expected_type: &TypeRef,
+    condition: &ValueExpr,
+    then_branch: &FunctionBlock,
+    else_branch: &FunctionBlock,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    validate_source_function_value_expr(scope, &bool_type, condition, bindings)
+        .map_err(|err| Error::new(format!("if condition must have type {bool_type}: {err}")))?;
+    validate_source_function_return_if_branch(
+        scope,
+        function,
+        expected_type,
+        "then",
+        then_branch,
+        bindings,
+    )?;
+    validate_source_function_return_if_branch(
+        scope,
+        function,
+        expected_type,
+        "else",
+        else_branch,
+        bindings,
+    )
+}
+
+fn validate_source_function_return_if_branch(
+    scope: &SourceFunctionScope<'_>,
+    function: &Function,
+    expected_type: &TypeRef,
+    branch: &str,
+    body: &FunctionBlock,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    if !body.statements.is_empty() {
+        return Err(Error::new(format!(
+            "source function {} return-if {branch} branch must not perform statements",
+            function.name
+        )));
+    }
+    validate_source_function_return_expr(scope, function, expected_type, &body.returns, bindings)
+        .map_err(|err| {
+            Error::new(format!(
+                "if {branch} branch must produce {expected_type}: {err}"
+            ))
+        })
 }
 
 fn validate_source_equality_expr(

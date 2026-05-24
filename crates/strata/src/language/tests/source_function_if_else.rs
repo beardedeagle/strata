@@ -27,8 +27,20 @@ fn choose(flag: Bool) -> Readiness ! [] ~ [] @det {
     return if (flag) { WarmReady } else { ColdReady };
 }
 
+fn choose_block(flag: Bool) -> Readiness ! [] ~ [] @det {
+    if (flag) {
+        return WarmReady;
+    } else {
+        return ColdReady;
+    }
+}
+
 fn readiness(mode: Mode) -> Readiness ! [] ~ [] @det {
     return choose(is_warm(mode));
+}
+
+fn readiness_block(mode: Mode) -> Readiness ! [] ~ [] @det {
+    return choose_block(is_warm(mode));
 }
 
 proc Main mailbox bounded(1) {
@@ -36,11 +48,11 @@ proc Main mailbox bounded(1) {
     type Msg = MainMsg;
 
     fn init() -> MainState ! [] ~ [] @det {
-        return MainState { init: readiness(Warm), step: readiness(Cold) };
+        return MainState { init: readiness_block(Warm), step: readiness(Cold) };
     }
 
     fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
-        return Stop(MainState { init: readiness(Cold), step: readiness(Warm) });
+        return Stop(MainState { init: readiness(Cold), step: readiness_block(Warm) });
     }
 }
 "#;
@@ -52,7 +64,7 @@ fn parses_checks_and_lowers_source_function_if_else() {
         .functions
         .iter()
         .find(|function| function.name.as_str() == "choose")
-        .expect("choose helper should parse");
+        .expect("choose function should parse");
     let Some(FunctionBody::Block(body)) = &choose.body else {
         panic!("choose should parse as a block body");
     };
@@ -83,7 +95,37 @@ fn parses_checks_and_lowers_source_function_if_else() {
     let encoded = artifact.encode();
     assert!(!encoded.contains("is_warm"));
     assert!(!encoded.contains("choose"));
+    assert!(!encoded.contains("choose_block"));
     assert!(!encoded.contains("readiness"));
+    assert!(!encoded.contains("readiness_block"));
+}
+
+#[test]
+fn parses_checks_and_lowers_source_function_braced_return_if_else() {
+    let module = parse_source(FUNCTION_IF_ELSE).expect("if/else source should parse");
+    let choose_block = module
+        .functions
+        .iter()
+        .find(|function| function.name.as_str() == "choose_block")
+        .expect("choose_block function should parse");
+    let Some(FunctionBody::Block(body)) = &choose_block.body else {
+        panic!("choose_block should parse as a block body");
+    };
+    assert!(matches!(body.returns, ReturnExpr::IfElse { .. }));
+
+    let checked = check_module(module).expect("braced source return-if should check");
+    let artifact =
+        lower_to_artifact(&checked, FUNCTION_IF_ELSE).expect("braced return-if should lower");
+    let encoded = artifact.encode();
+    assert!(!encoded.contains("choose_block"));
+    assert!(!encoded.contains("readiness_block"));
+    assert_eq!(
+        artifact_state_labels(&artifact.processes[0]),
+        [
+            "MainState{init:WarmReady,step:ColdReady}",
+            "MainState{init:ColdReady,step:WarmReady}"
+        ]
+    );
 }
 
 #[test]
@@ -282,6 +324,50 @@ fn rejects_if_else_branch_statements_after_value() {
 }
 
 #[test]
+fn rejects_braced_return_if_branch_statements_in_source_function() {
+    let source = FUNCTION_IF_ELSE.replace(
+        "return WarmReady;",
+        "emit \"branch effect\";\n        return WarmReady;",
+    );
+
+    let err = check_source(&source).expect_err("braced return-if statements should fail");
+
+    assert!(err.to_string().contains(
+        "source function choose_block return-if then branch must not perform statements"
+    ));
+}
+
+#[test]
+fn rejects_braced_return_if_missing_branch_return_in_source_function() {
+    let source = FUNCTION_IF_ELSE.replace(
+        "        return ColdReady;",
+        "        emit \"missing return\";",
+    );
+
+    let err =
+        parse_source(&source).expect_err("braced source-function return-if branch must return");
+
+    assert!(
+        err.to_string()
+            .contains("return-if else branch must contain a top-level return"),
+        "{err}"
+    );
+}
+
+#[test]
+fn rejects_braced_return_if_else_branch_type_mismatch() {
+    let source = FUNCTION_IF_ELSE.replace("return ColdReady;", "return True;");
+
+    let err = check_source(&source).expect_err("mismatched braced return-if branch should fail");
+
+    assert!(
+        err.to_string()
+            .contains("if else branch must produce Readiness"),
+        "{err}"
+    );
+}
+
+#[test]
 fn rejects_source_function_call_cycle_through_if_else() {
     let source = FUNCTION_IF_ELSE.replace(
         "return if (flag) { WarmReady } else { ColdReady };",
@@ -294,4 +380,27 @@ fn rejects_source_function_call_cycle_through_if_else() {
         err.to_string()
             .contains("module source function call cycle choose -> choose is not supported")
     );
+}
+
+#[test]
+fn property_generated_braced_return_if_selects_concrete_source_branch() {
+    for (flag, expected) in [("False", "ColdReady"), ("True", "WarmReady")] {
+        let source = FUNCTION_IF_ELSE.replace(
+            "return MainState { init: readiness_block(Warm), step: readiness(Cold) };",
+            &format!("return MainState {{ init: choose_block({flag}), step: readiness(Cold) }};"),
+        );
+
+        let checked = check_source(&source)
+            .unwrap_or_else(|err| panic!("generated braced return-if source should check: {err}"));
+        let artifact = lower_to_artifact(&checked, &source)
+            .unwrap_or_else(|err| panic!("generated braced return-if source should lower: {err}"));
+        assert!(
+            artifact_state_labels(&artifact.processes[0])[0].contains(expected),
+            "generated braced return-if should select {expected}"
+        );
+        assert!(
+            !artifact.encode().contains("choose_block"),
+            "function name must not lower into artifact dispatch"
+        );
+    }
 }

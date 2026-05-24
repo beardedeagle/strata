@@ -238,11 +238,11 @@ fn rejects_process_ref_type_that_does_not_match_spawn_target() {
     let source = ACTOR_PING
         .replace(
             "enum WorkerMsg { Ping }",
-            "enum WorkerMsg { Ping }\nenum HelperState { Idle }\nenum HelperMsg { Ping }",
+            "enum WorkerMsg { Ping }\nenum PeerState { Idle }\nenum PeerMsg { Ping }",
         )
         .replace(
             "let worker: ProcessRef<Worker> = spawn Worker;",
-            "let worker: ProcessRef<Helper> = spawn Worker;",
+            "let worker: ProcessRef<Peer> = spawn Worker;",
         )
         .replace(
             r#"
@@ -275,15 +275,15 @@ proc Worker mailbox bounded(1) {
     }
 }
 
-proc Helper mailbox bounded(1) {
-    type State = HelperState;
-    type Msg = HelperMsg;
+proc Peer mailbox bounded(1) {
+    type State = PeerState;
+    type Msg = PeerMsg;
 
-    fn init() -> HelperState ! [] ~ [] @det {
+    fn init() -> PeerState ! [] ~ [] @det {
         return Idle;
     }
 
-    fn step(state: HelperState, Ping) -> ProcResult<HelperState> ! [] ~ [] @det {
+    fn step(state: PeerState, Ping) -> ProcResult<PeerState> ! [] ~ [] @det {
         return Stop(Idle);
     }
 }
@@ -293,7 +293,7 @@ proc Helper mailbox bounded(1) {
     let err = check_source(&source).expect_err("mismatched process ref type should be rejected");
 
     assert!(err.to_string().contains(
-        "process Main process reference worker has type ProcessRef<Helper> but spawns Worker"
+        "process Main process reference worker has type ProcessRef<Peer> but spawns Worker"
     ));
 }
 
@@ -437,8 +437,8 @@ record MainState;
 enum MainMsg { Start }
 enum WorkerState { Idle }
 enum WorkerMsg { Ping }
-enum HelperState { Idle }
-enum HelperMsg { Ping }
+enum PeerState { Idle }
+enum PeerMsg { Ping }
 
 proc Main mailbox bounded(1) {
     type State = MainState;
@@ -464,21 +464,21 @@ proc Worker mailbox bounded(1) {
     }
 
     fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [spawn, send] ~ [] @det {
-        let helper: ProcessRef<Helper> = spawn Helper;
-        send helper Ping;
+        let peer: ProcessRef<Peer> = spawn Peer;
+        send peer Ping;
         return Continue(Idle);
     }
 }
 
-proc Helper mailbox bounded(1) {
-    type State = HelperState;
-    type Msg = HelperMsg;
+proc Peer mailbox bounded(1) {
+    type State = PeerState;
+    type Msg = PeerMsg;
 
-    fn init() -> HelperState ! [] ~ [] @det {
+    fn init() -> PeerState ! [] ~ [] @det {
         return Idle;
     }
 
-    fn step(state: HelperState, Ping) -> ProcResult<HelperState> ! [spawn, send] ~ [] @det {
+    fn step(state: PeerState, Ping) -> ProcResult<PeerState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
         send worker Ping;
         return Continue(Idle);

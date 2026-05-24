@@ -75,8 +75,8 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let checked = check_source(source).expect("source helper list rest patterns should check");
-    let artifact = lower_to_artifact(&checked, source).expect("list rest helpers should lower");
+    let checked = check_source(source).expect("source function list rest patterns should check");
+    let artifact = lower_to_artifact(&checked, source).expect("list rest functions should lower");
 
     assert_eq!(
         artifact_state_labels(&artifact.processes[0]),
@@ -381,7 +381,7 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
-fn rejects_overlapping_list_rest_helper_body_match() {
+fn rejects_overlapping_list_rest_function_body_match() {
     let source = r#"
 module overlapping_list_rest_body_match;
 
@@ -419,7 +419,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let err = check_source(source).expect_err("overlapping helper body match should fail");
+    let err = check_source(source).expect_err("overlapping function body match should fail");
 
     assert!(
         err.to_string()

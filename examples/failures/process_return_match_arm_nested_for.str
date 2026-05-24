@@ -1,0 +1,62 @@
+module process_return_match_arm_nested_for;
+
+record MainState;
+record Job {
+    phase: Phase,
+}
+record Assignment {
+    phase: Phase,
+    jobs: List<Job,1>,
+}
+
+enum MainMsg { Start }
+enum Phase { Ready, Done }
+enum Route { Assign(Assignment) }
+enum WorkerState { Idle, SawReady, SawDone }
+enum WorkerMsg { Envelope(Route) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Assignment {
+            phase: Ready,
+            jobs: List<Job,1>[
+                Job { phase: Ready },
+            ],
+        }));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(Assignment { phase: route_phase, jobs: route_jobs }))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        return match route_phase {
+            Ready => {
+                for Job { phase: outer_phase } in route_jobs {
+                    for Job { phase: inner_phase } in route_jobs {
+                        emit "nested loop";
+                    }
+                }
+                return Continue(SawReady);
+            }
+            Done => {
+                emit "done";
+                return Stop(SawDone);
+            }
+        };
+    }
+}

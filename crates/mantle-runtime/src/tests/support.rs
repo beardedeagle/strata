@@ -20,8 +20,8 @@ pub(crate) const MAIN_MSG: TypeId = TypeId::new(1);
 pub(crate) const WORKER_STATE: TypeId = TypeId::new(2);
 pub(crate) const WORKER_MSG: TypeId = TypeId::new(3);
 pub(crate) const JOB: TypeId = TypeId::new(4);
-pub(crate) const HELPER_STATE: TypeId = TypeId::new(5);
-pub(crate) const HELPER_MSG: TypeId = TypeId::new(6);
+pub(crate) const PEER_STATE: TypeId = TypeId::new(5);
+pub(crate) const PEER_MSG: TypeId = TypeId::new(6);
 pub(crate) const JOB_LIST: TypeId = TypeId::new(7);
 
 pub(crate) fn valid_artifact() -> MantleArtifact {
@@ -259,7 +259,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
                 message_type: WORKER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: vec![ArtifactProcessRef {
-                    debug_name: "helper".to_string(),
+                    debug_name: "peer".to_string(),
                     target: ProcessId::new(2),
                 }],
                 mailbox_bound: 1,
@@ -285,10 +285,10 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
                 }],
             },
             ArtifactProcess {
-                debug_name: "Helper".to_string(),
-                state_type: HELPER_STATE,
-                state_values: state_values(HELPER_STATE, &["HelperState"]),
-                message_type: HELPER_MSG,
+                debug_name: "Peer".to_string(),
+                state_type: PEER_STATE,
+                state_values: state_values(PEER_STATE, &["PeerState"]),
+                message_type: PEER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
@@ -423,8 +423,8 @@ pub(crate) fn base_types() -> Vec<ArtifactType> {
         ]),
         ArtifactType::value("WorkerMsg"),
         job_record_type(),
-        ArtifactType::value("HelperState"),
-        ArtifactType::value("HelperMsg"),
+        ArtifactType::value("PeerState"),
+        ArtifactType::value("PeerMsg"),
         ArtifactType::list("JobList", JOB, 16),
     ]
 }

@@ -1,0 +1,111 @@
+module process_return_match_arm_action_block_seed;
+
+record MainState;
+record Job { phase: Phase }
+record Assignment {
+    phase: Phase,
+    enabled: Bool,
+    jobs: List<Job,1>,
+}
+enum Bool { False, True }
+enum MainMsg { Start }
+enum Phase { Ready, Done }
+enum Route { Assign(Assignment) }
+enum WorkerState { Idle, SawReady, SawDone }
+enum WorkerMsg { Envelope(Route) }
+record SinkState;
+enum SinkMsg { Ack }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Assignment {
+            phase: Ready,
+            enabled: True,
+            jobs: List<Job,1>[Job { phase: Ready }],
+        }));
+        send worker Envelope(Assign(Assignment {
+            phase: Done,
+            enabled: False,
+            jobs: List<Job,1>[Job { phase: Done }],
+        }));
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Envelope(Assign(Assignment { phase: phase, enabled: enabled, jobs: jobs }))) -> ProcResult<WorkerState> ! [emit, spawn, send] ~ [] @det {
+        let sink: ProcessRef<Sink> = spawn Sink;
+        return match phase {
+            Ready => {
+                if (enabled == True) {
+                    emit "ready branch";
+                } else {
+                    emit "ready fallback";
+                }
+                if (phase == Ready) {
+                    emit "ready second branch";
+                } else {
+                    emit "ready second fallback";
+                }
+                for Job { phase: job_phase } in jobs {
+                    emit "ready loop one";
+                    send sink Ack;
+                }
+                for Job { phase: job_phase } in jobs {
+                    emit "ready loop two";
+                    send sink Ack;
+                }
+                return Continue(SawReady);
+            }
+            Done => {
+                if (enabled == True) {
+                    emit "done branch";
+                } else {
+                    emit "done fallback";
+                }
+                if (phase == Done) {
+                    emit "done second branch";
+                } else {
+                    emit "done second fallback";
+                }
+                for Job { phase: job_phase } in jobs {
+                    emit "done loop one";
+                    send sink Ack;
+                }
+                for Job { phase: job_phase } in jobs {
+                    emit "done loop two";
+                    send sink Ack;
+                }
+                return Stop(SawDone);
+            }
+        };
+    }
+}
+
+proc Sink mailbox bounded(2) {
+    type State = SinkState;
+    type Msg = SinkMsg;
+
+    fn init() -> SinkState ! [] ~ [] @det {
+        return SinkState;
+    }
+
+    fn step(state: SinkState, Ack) -> ProcResult<SinkState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+}

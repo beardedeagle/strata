@@ -10,6 +10,7 @@ mod nested_pattern_destructuring;
 mod payload_limits;
 mod process_refs;
 mod process_return_match;
+mod process_return_match_arm_bounded_assurance;
 mod process_return_match_arm_for;
 mod process_return_match_arm_for_if;
 mod process_return_match_arm_if_for;

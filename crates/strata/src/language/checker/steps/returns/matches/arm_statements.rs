@@ -1,11 +1,89 @@
 use super::*;
+use mantle_artifact::MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH;
+
+#[derive(Clone, Copy)]
+struct ArmStatementScope {
+    runtime_if_depth: usize,
+    in_loop_body: bool,
+}
+
+impl ArmStatementScope {
+    const fn for_runtime_if_branch(self) -> Self {
+        Self {
+            runtime_if_depth: self.runtime_if_depth.saturating_add(1),
+            in_loop_body: self.in_loop_body,
+        }
+    }
+
+    const fn for_loop_body(self) -> Self {
+        Self {
+            runtime_if_depth: 0,
+            in_loop_body: true,
+        }
+    }
+}
 
 pub(super) fn validate_step_return_match_arm_statements(
     process: &Process,
     statements: &[Statement],
 ) -> Result<()> {
-    let mut runtime_if_count = 0usize;
-    let mut runtime_for_count = 0usize;
+    let scope = ArmStatementScope {
+        runtime_if_depth: 0,
+        in_loop_body: false,
+    };
+    for statement in statements {
+        validate_step_return_match_arm_statement(process, scope, statement)?;
+    }
+    Ok(())
+}
+
+fn validate_step_return_match_arm_statement(
+    process: &Process,
+    scope: ArmStatementScope,
+    statement: &Statement,
+) -> Result<()> {
+    match statement {
+        Statement::Emit(_) | Statement::Send { .. } => {}
+        Statement::LetProcessRef { name, .. } => {
+            return Err(Error::new(format!(
+                "process {} step return match arm cannot bind process reference {} in this source slice",
+                process.name, name
+            )));
+        }
+        Statement::IfElse {
+            then_body,
+            else_body,
+            ..
+        } => {
+            if scope.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
+                return Err(Error::new(format!(
+                    "process {} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice",
+                    process.name
+                )));
+            }
+            let branch_scope = scope.for_runtime_if_branch();
+            validate_step_return_match_arm_branch_statements(process, branch_scope, then_body)?;
+            validate_step_return_match_arm_branch_statements(process, branch_scope, else_body)?;
+        }
+        Statement::ForEach { body, .. } => {
+            if scope.in_loop_body {
+                return Err(Error::new(format!(
+                    "process {} nested for loops are not supported in this source slice",
+                    process.name
+                )));
+            }
+            let body_scope = scope.for_loop_body();
+            validate_step_return_match_arm_branch_statements(process, body_scope, body)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_step_return_match_arm_branch_statements(
+    process: &Process,
+    scope: ArmStatementScope,
+    statements: &[Statement],
+) -> Result<()> {
     for statement in statements {
         match statement {
             Statement::Emit(_) | Statement::Send { .. } => {}
@@ -20,130 +98,25 @@ pub(super) fn validate_step_return_match_arm_statements(
                 else_body,
                 ..
             } => {
-                runtime_if_count = runtime_if_count.saturating_add(1);
-                if runtime_if_count > 1 {
+                if scope.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
                     return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform more than one runtime if in this source slice",
+                        "process {} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice",
                         process.name
                     )));
                 }
-                validate_step_return_match_arm_runtime_if_branch(process, then_body)?;
-                validate_step_return_match_arm_runtime_if_branch(process, else_body)?;
+                let branch_scope = scope.for_runtime_if_branch();
+                validate_step_return_match_arm_branch_statements(process, branch_scope, then_body)?;
+                validate_step_return_match_arm_branch_statements(process, branch_scope, else_body)?;
             }
             Statement::ForEach { body, .. } => {
-                runtime_for_count = runtime_for_count.saturating_add(1);
-                if runtime_for_count > 1 {
+                if scope.in_loop_body {
                     return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform more than one for loop in this source slice",
+                        "process {} nested for loops are not supported in this source slice",
                         process.name
                     )));
                 }
-                validate_step_return_match_arm_for_body(process, body)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_step_return_match_arm_runtime_if_branch(
-    process: &Process,
-    statements: &[Statement],
-) -> Result<()> {
-    let mut runtime_for_count = 0usize;
-    for statement in statements {
-        match statement {
-            Statement::Emit(_) | Statement::Send { .. } => {}
-            Statement::LetProcessRef { name, .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot bind process reference {} in this source slice",
-                    process.name, name
-                )));
-            }
-            Statement::IfElse { .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform nested runtime if in this source slice",
-                    process.name
-                )));
-            }
-            Statement::ForEach { body, .. } => {
-                runtime_for_count = runtime_for_count.saturating_add(1);
-                if runtime_for_count > 1 {
-                    return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform more than one for loop in this source slice",
-                        process.name
-                    )));
-                }
-                validate_step_return_match_arm_for_body(process, body)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_step_return_match_arm_for_body(
-    process: &Process,
-    statements: &[Statement],
-) -> Result<()> {
-    let mut runtime_if_count = 0usize;
-    for statement in statements {
-        match statement {
-            Statement::Emit(_) | Statement::Send { .. } => {}
-            Statement::LetProcessRef { name, .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot bind process reference {} in this source slice",
-                    process.name, name
-                )));
-            }
-            Statement::IfElse {
-                then_body,
-                else_body,
-                ..
-            } => {
-                runtime_if_count = runtime_if_count.saturating_add(1);
-                if runtime_if_count > 1 {
-                    return Err(Error::new(format!(
-                        "process {} step return match arm cannot perform more than one runtime if in this source slice",
-                        process.name
-                    )));
-                }
-                validate_step_return_match_arm_action_only_runtime_if_branch(process, then_body)?;
-                validate_step_return_match_arm_action_only_runtime_if_branch(process, else_body)?;
-            }
-            Statement::ForEach { .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform nested for loops in this source slice",
-                    process.name
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_step_return_match_arm_action_only_runtime_if_branch(
-    process: &Process,
-    statements: &[Statement],
-) -> Result<()> {
-    for statement in statements {
-        match statement {
-            Statement::Emit(_) | Statement::Send { .. } => {}
-            Statement::LetProcessRef { name, .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot bind process reference {} in this source slice",
-                    process.name, name
-                )));
-            }
-            Statement::IfElse { .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform nested runtime if in this source slice",
-                    process.name
-                )));
-            }
-            Statement::ForEach { .. } => {
-                return Err(Error::new(format!(
-                    "process {} step return match arm cannot perform for loops in this source slice",
-                    process.name
-                )));
+                let body_scope = scope.for_loop_body();
+                validate_step_return_match_arm_branch_statements(process, body_scope, body)?;
             }
         }
     }

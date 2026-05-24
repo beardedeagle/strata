@@ -13,7 +13,7 @@ fn artifact_value_parse_uses_generic_artifact_value_context() {
 }
 
 #[test]
-fn projection_helpers_reject_duplicate_record_fields() {
+fn projection_functions_reject_duplicate_record_fields() {
     let err = ArtifactValue::parse("Job{phase:Ready,phase:Done}")
         .expect_err("duplicate record fields must fail closed");
 
@@ -112,7 +112,7 @@ fn artifact_value_validate_rejects_programmatic_duplicate_record_fields() {
 }
 
 #[test]
-fn projection_helpers_reject_duplicate_map_keys() {
+fn projection_functions_reject_duplicate_map_keys() {
     let err = ArtifactValue::parse("Map[Ready=>Ready,Ready=>Done]")
         .expect_err("duplicate map keys must fail closed");
 

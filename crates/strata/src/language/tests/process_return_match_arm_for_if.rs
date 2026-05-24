@@ -124,36 +124,72 @@ fn checks_step_return_match_arm_for_each_runtime_if_prefixes_are_selected_and_ty
 }
 
 #[test]
-fn rejects_step_return_match_arm_for_each_body_multiple_runtime_if_prefixes() {
+fn checks_step_return_match_arm_for_each_body_multiple_runtime_if_prefixes() {
     let source = PROCESS_RETURN_MATCH_ARM_FOR_IF_PREFIX.replace(
         "                    }\n                }\n                return Continue(SawReady);",
         "                    }\n                    if (job_urgent == True) {\n                        emit \"return-match ready second loop branch\";\n                    } else {\n                        emit \"return-match ready second loop fallback\";\n                    }\n                }\n                return Continue(SawReady);",
     );
 
-    let err = check_source(&source).expect_err("second loop-body runtime if should fail");
+    let checked = check_source(&source).expect("second loop-body runtime if should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform more than one runtime if in this source slice"
-        ),
-        "unexpected error: {err}"
+        worker.transitions().iter().any(|transition| {
+            matches!(
+                transition.actions(),
+                [
+                    CheckedAction::Emit { .. },
+                    CheckedAction::Spawn { .. },
+                    CheckedAction::Emit { .. },
+                    CheckedAction::ForEach { body, .. },
+                ] if matches!(
+                    body.as_slice(),
+                    [CheckedAction::IfElse { .. }, CheckedAction::IfElse { .. }]
+                )
+            )
+        }),
+        "selected arm loop body should preserve both runtime-if actions in source order"
     );
 }
 
 #[test]
-fn rejects_step_return_match_arm_for_each_body_nested_runtime_if() {
+fn checks_step_return_match_arm_for_each_body_nested_runtime_if() {
     let source = PROCESS_RETURN_MATCH_ARM_FOR_IF_PREFIX.replace(
         "emit \"return-match ready urgent loop branch\";",
         "if (job_urgent == True) {\n                            emit \"return-match ready nested loop branch\";\n                        } else {\n                            emit \"return-match ready nested loop fallback\";\n                        }",
     );
 
-    let err = check_source(&source).expect_err("nested loop-body runtime if should fail");
+    let checked = check_source(&source).expect("nested loop-body runtime if should check");
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("nested loop-body runtime if should lower");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform nested runtime if in this source slice"
-        ),
-        "unexpected error: {err}"
+        artifact.processes.iter().any(|process| {
+            process.debug_name == "Worker"
+                && process.transitions.iter().any(|transition| {
+                    matches!(
+                        transition.actions.as_slice(),
+                        [
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::Spawn { .. },
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::ForEach { body, .. },
+                        ] if matches!(
+                            body.as_slice(),
+                            [ArtifactAction::IfElse { then_actions, .. }]
+                                if matches!(
+                                    then_actions.as_slice(),
+                                    [ArtifactAction::IfElse { .. }, ArtifactAction::Send { .. }]
+                                )
+                        )
+                    )
+                })
+        }),
+        "selected arm loop-body nested runtime-if should lower as typed branch actions"
     );
 }
 
@@ -168,9 +204,8 @@ fn rejects_step_return_match_arm_for_each_body_runtime_if_nested_for_each() {
         check_source(&source).expect_err("nested loop inside loop-body runtime if should fail");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform for loops in this source slice"
-        ),
+        err.to_string()
+            .contains("nested for loops are not supported in this source slice"),
         "unexpected error: {err}"
     );
 }

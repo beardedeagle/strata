@@ -180,35 +180,109 @@ fn rejects_step_return_match_arm_runtime_if_both_branches_empty() {
 }
 
 #[test]
-fn rejects_step_return_match_arm_nested_runtime_if_prefix() {
+fn checks_step_return_match_arm_nested_runtime_if_prefix() {
     let source = PROCESS_RETURN_MATCH_ARM_RUNTIME_IF_PREFIX.replace(
         "emit \"return-match ready true branch\";",
         "if (flag == True) {\n                        emit \"nested ready branch\";\n                    } else {\n                        emit \"nested ready fallback\";\n                    }",
     );
 
-    let err = check_source(&source).expect_err("nested arm-local runtime if should fail");
+    let checked = check_source(&source).expect("nested arm-local runtime if should check");
+    let artifact =
+        lower_to_artifact(&checked, &source).expect("nested arm-local runtime if should lower");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform nested runtime if in this source slice"
-        ),
+        artifact.processes.iter().any(|process| {
+            process.debug_name == "Worker"
+                && process.transitions.iter().any(|transition| {
+                    matches!(
+                        transition.actions.as_slice(),
+                        [
+                            ArtifactAction::Emit { .. },
+                            ArtifactAction::Spawn { .. },
+                            ArtifactAction::IfElse { then_actions, .. },
+                        ] if matches!(
+                            then_actions.as_slice(),
+                            [
+                                ArtifactAction::IfElse { .. },
+                                ArtifactAction::Send { .. },
+                            ]
+                        )
+                    )
+                })
+        }),
+        "selected arm nested runtime-if should lower as typed Mantle branch actions"
+    );
+}
+
+#[test]
+fn rejects_step_return_match_arm_nested_runtime_if_inside_final_runtime_if() {
+    let source = PROCESS_RETURN_MATCH_ARM_RUNTIME_IF_PREFIX
+        .replace("return Stop(SawDone);", "return Continue(SawDone);")
+        .replace(
+            "                    emit \"return-match ready true branch\";",
+            "                    if (flag == True) {\n                        emit \"too deep ready branch\";\n                    } else {\n                        emit \"too deep ready fallback\";\n                    }",
+        )
+        .replace(
+            "        return match phase {\n",
+            "        if (flag == True) {\n            return match phase {\n",
+        )
+        .replace(
+            "        };\n    }\n}\n\nproc Sink",
+            "        };\n        } else {\n            return Continue(SawDone);\n        }\n    }\n}\n\nproc Sink",
+        );
+
+    let err = check_source(&source)
+        .expect_err("return-match arm action depth should inherit final runtime-if depth");
+
+    assert!(
+        err.to_string()
+            .contains("statement-level if action nesting exceeds maximum depth"),
         "unexpected error: {err}"
     );
 }
 
 #[test]
-fn rejects_step_return_match_arm_multiple_runtime_if_prefixes() {
+fn checks_step_return_match_arm_multiple_runtime_if_prefixes() {
     let source = PROCESS_RETURN_MATCH_ARM_RUNTIME_IF_PREFIX.replace(
         "                }\n                return Continue(SawReady);",
         "                }\n                if (flag == True) {\n                    emit \"second ready branch\";\n                } else {\n                    emit \"second ready fallback\";\n                }\n                return Continue(SawReady);",
     );
 
-    let err = check_source(&source).expect_err("second direct arm-local runtime if should fail");
+    let checked = check_source(&source).expect("second direct arm-local runtime if should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform more than one runtime if in this source slice"
-        ),
+        worker.transitions().iter().any(|transition| {
+            matches!(
+                transition.actions(),
+                [
+                    CheckedAction::Emit { .. },
+                    CheckedAction::Spawn { .. },
+                    CheckedAction::IfElse { .. },
+                    CheckedAction::IfElse { .. },
+                ]
+            )
+        }),
+        "selected Ready arm should preserve both runtime-if actions in source order"
+    );
+}
+
+#[test]
+fn rejects_step_return_match_arm_excessive_runtime_if_nesting() {
+    let source = PROCESS_RETURN_MATCH_ARM_RUNTIME_IF_PREFIX.replace(
+        "emit \"return-match ready true branch\";",
+        "if (flag == True) {\n                        if (flag == True) {\n                            emit \"too deep ready branch\";\n                        } else {\n                            emit \"too deep ready fallback\";\n                        }\n                    } else {\n                        emit \"nested ready fallback\";\n                    }",
+    );
+
+    let err = check_source(&source).expect_err("excessive arm-local runtime if depth should fail");
+
+    assert!(
+        err.to_string()
+            .contains("statement-level if action nesting exceeds maximum depth"),
         "unexpected error: {err}"
     );
 }

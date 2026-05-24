@@ -31,7 +31,7 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
-        emit "source helper record return match selected field";
+        emit "source function record return match selected field";
         return Stop(state);
     }
 }

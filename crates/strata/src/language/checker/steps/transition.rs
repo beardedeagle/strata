@@ -10,7 +10,9 @@ mod return_match_actions;
 mod send;
 
 use actions::{ActionCheckInput, checked_actions_for_statements};
-use return_match_actions::validate_return_match_arm_action_statements;
+use return_match_actions::{
+    ReturnMatchArmActionInput, validate_return_match_arm_action_statements,
+};
 
 pub(super) fn check_step_transition(
     context: &mut StepCheckContext<'_>,
@@ -71,6 +73,7 @@ pub(super) fn check_step_transition(
         StepBlockInput {
             body: input.body,
             next_state_if_depth: 0,
+            action_scope: ActionCheckScope::TOP_LEVEL,
         },
     )?;
     let transition = CheckedTransition::new(CheckedTransitionParts {
@@ -105,6 +108,7 @@ struct StepTransitionEnv<'a, 'scope, 'source, 'template, 'input> {
 struct StepBlockInput<'a> {
     body: &'a FunctionBlock,
     next_state_if_depth: usize,
+    action_scope: ActionCheckScope,
 }
 
 #[derive(Clone, Copy)]
@@ -113,6 +117,7 @@ struct RuntimeIfReturnInput<'a> {
     then_branch: &'a FunctionBlock,
     else_branch: &'a FunctionBlock,
     next_state_if_depth: usize,
+    action_scope: ActionCheckScope,
 }
 
 #[derive(Clone, Copy)]
@@ -128,20 +133,12 @@ enum RuntimeIfBranchScope {
     FinalPosition,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StepReturnMatchForBodyScope {
-    Outside,
-    DirectArm,
-    RuntimeIfBranch,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct ActionCheckScope {
     in_loop_body: bool,
     in_step_return_match_arm: bool,
     runtime_if_branch: RuntimeIfBranchScope,
     statement_if_depth: usize,
-    step_return_match_for_body: StepReturnMatchForBodyScope,
 }
 
 impl ActionCheckScope {
@@ -150,26 +147,14 @@ impl ActionCheckScope {
         in_step_return_match_arm: false,
         runtime_if_branch: RuntimeIfBranchScope::Outside,
         statement_if_depth: 0,
-        step_return_match_for_body: StepReturnMatchForBodyScope::Outside,
     };
 
     const fn for_loop_body(self) -> Self {
-        let step_return_match_for_body = if self.in_step_return_match_arm {
-            match self.runtime_if_branch {
-                RuntimeIfBranchScope::Outside => StepReturnMatchForBodyScope::DirectArm,
-                RuntimeIfBranchScope::Statement | RuntimeIfBranchScope::FinalPosition => {
-                    StepReturnMatchForBodyScope::RuntimeIfBranch
-                }
-            }
-        } else {
-            StepReturnMatchForBodyScope::Outside
-        };
         Self {
             in_loop_body: true,
             in_step_return_match_arm: self.in_step_return_match_arm,
-            runtime_if_branch: self.runtime_if_branch,
-            statement_if_depth: self.statement_if_depth,
-            step_return_match_for_body,
+            runtime_if_branch: RuntimeIfBranchScope::Outside,
+            statement_if_depth: 0,
         }
     }
 
@@ -179,7 +164,6 @@ impl ActionCheckScope {
             in_step_return_match_arm: self.in_step_return_match_arm,
             runtime_if_branch: RuntimeIfBranchScope::Statement,
             statement_if_depth: self.statement_if_depth.saturating_add(1),
-            step_return_match_for_body: self.step_return_match_for_body,
         }
     }
 
@@ -189,7 +173,6 @@ impl ActionCheckScope {
             in_step_return_match_arm: self.in_step_return_match_arm,
             runtime_if_branch: RuntimeIfBranchScope::FinalPosition,
             statement_if_depth: self.statement_if_depth.saturating_add(1),
-            step_return_match_for_body: self.step_return_match_for_body,
         }
     }
 
@@ -199,7 +182,6 @@ impl ActionCheckScope {
             in_step_return_match_arm: true,
             runtime_if_branch: self.runtime_if_branch,
             statement_if_depth: self.statement_if_depth,
-            step_return_match_for_body: self.step_return_match_for_body,
         }
     }
 
@@ -210,27 +192,6 @@ impl ActionCheckScope {
             )));
         }
         Ok(())
-    }
-
-    const fn allows_step_return_match_loop_body_if(self) -> bool {
-        match self.step_return_match_for_body {
-            StepReturnMatchForBodyScope::Outside => false,
-            StepReturnMatchForBodyScope::DirectArm => {
-                matches!(self.runtime_if_branch, RuntimeIfBranchScope::Outside)
-                    && self.statement_if_depth == 0
-            }
-            StepReturnMatchForBodyScope::RuntimeIfBranch => {
-                matches!(self.runtime_if_branch, RuntimeIfBranchScope::Statement)
-                    && self.statement_if_depth == 1
-            }
-        }
-    }
-
-    const fn allows_step_return_match_runtime_if_branch_for(self) -> bool {
-        self.in_step_return_match_arm
-            && !self.in_loop_body
-            && matches!(self.runtime_if_branch, RuntimeIfBranchScope::Statement)
-            && self.statement_if_depth == 1
     }
 
     fn runtime_if_branch_label(self) -> &'static str {
@@ -248,6 +209,10 @@ struct LoopElementAllocator {
 }
 
 impl LoopElementAllocator {
+    fn next_index(&self) -> usize {
+        self.next
+    }
+
     fn next_id(&mut self) -> Result<CheckedLoopElementId> {
         if self.next >= MAX_VALUE_TEMPLATE_FIELDS {
             return Err(Error::new(format!(
@@ -282,7 +247,7 @@ fn check_step_block_outcome(
             source_bindings: env.source_bindings,
             template_bindings: env.template_bindings,
             payload_bindings: env.input.payload_bindings,
-            scope: ActionCheckScope::TOP_LEVEL,
+            scope: block.action_scope,
         },
         &block.body.statements,
     )?;
@@ -318,7 +283,7 @@ fn check_runtime_if_branch_block_outcome(
             source_bindings: env.source_bindings,
             template_bindings: env.template_bindings,
             payload_bindings: env.input.payload_bindings,
-            scope: ActionCheckScope::TOP_LEVEL.for_final_runtime_if_branch(),
+            scope: block.action_scope,
         },
         &block.body.statements,
     )?;
@@ -362,6 +327,7 @@ fn checked_return_outcome(
                 then_branch,
                 else_branch,
                 next_state_if_depth: block.next_state_if_depth,
+                action_scope: block.action_scope,
             },
         );
     }
@@ -384,10 +350,14 @@ fn checked_return_outcome(
         context,
         types,
         env.function_scope,
-        env.source_bindings,
-        env.template_bindings,
-        env.input,
-        block.body,
+        ReturnMatchArmActionInput {
+            source_bindings: env.source_bindings,
+            template_bindings: env.template_bindings,
+            input: env.input,
+            action_scope: block.action_scope.for_step_return_match_arm(),
+            loop_element_base: loop_elements.next_index(),
+            body: block.body,
+        },
     )?;
     let next_state = checked_next_state_for_arg(
         context,
@@ -412,7 +382,7 @@ fn checked_return_outcome(
                 source_bindings: env.source_bindings,
                 template_bindings: env.template_bindings,
                 payload_bindings: env.input.payload_bindings,
-                scope: ActionCheckScope::TOP_LEVEL.for_step_return_match_arm(),
+                scope: block.action_scope.for_step_return_match_arm(),
             },
             &step_return.action_statements,
         )?
@@ -437,6 +407,7 @@ fn checked_if_else_return_outcome(
         context.process.name.as_str(),
         runtime_if.next_state_if_depth,
     )?;
+    let branch_action_scope = runtime_if.action_scope.for_final_runtime_if_branch();
     let condition = checked_runtime_bool_condition(
         context,
         types,
@@ -455,6 +426,7 @@ fn checked_if_else_return_outcome(
         StepBlockInput {
             body: runtime_if.then_branch,
             next_state_if_depth: branch_next_state_if_depth,
+            action_scope: branch_action_scope,
         },
     )?;
     let else_outcome = check_runtime_if_branch_block_outcome(
@@ -467,6 +439,7 @@ fn checked_if_else_return_outcome(
         StepBlockInput {
             body: runtime_if.else_branch,
             next_state_if_depth: branch_next_state_if_depth,
+            action_scope: branch_action_scope,
         },
     )?;
     if then_outcome.step_result != else_outcome.step_result {

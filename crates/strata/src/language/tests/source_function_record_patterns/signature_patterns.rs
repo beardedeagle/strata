@@ -37,7 +37,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    check_source(source).expect("source helper record destructuring pattern should check");
+    check_source(source).expect("source function record destructuring pattern should check");
 }
 
 #[test]
@@ -77,7 +77,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    check_source(source).expect("source helper shorthand record pattern should check");
+    check_source(source).expect("source function shorthand record pattern should check");
 }
 
 #[test]

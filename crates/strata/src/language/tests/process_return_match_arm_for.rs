@@ -104,18 +104,180 @@ fn checks_step_return_match_arm_for_prefixes_are_selected_and_typed() {
 }
 
 #[test]
-fn rejects_step_return_match_arm_multiple_for_each_prefixes() {
+fn checks_step_return_match_arm_multiple_for_each_prefixes() {
     let source = PROCESS_RETURN_MATCH_ARM_FOR_PREFIX.replace(
         "                return Continue(SawReady);",
         "                for Job { phase: job_phase } in jobs {\n                    emit \"return-match ready second loop item\";\n                    send sink Notice(job_phase);\n                }\n                return Continue(SawReady);",
-    );
+    )
+    .replace("proc Sink mailbox bounded(2)", "proc Sink mailbox bounded(4)");
 
-    let err = check_source(&source).expect_err("second direct arm-local for should fail");
+    let checked = check_source(&source).expect("second direct arm-local for should check");
+    let worker = checked
+        .processes()
+        .iter()
+        .find(|process| process.debug_name().as_str() == "Worker")
+        .expect("Worker should be checked");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot perform more than one for loop in this source slice"
-        ),
+        worker.transitions().iter().any(|transition| {
+            matches!(
+                transition.actions(),
+                [
+                    CheckedAction::Emit { .. },
+                    CheckedAction::Spawn { .. },
+                    CheckedAction::Emit { .. },
+                    CheckedAction::ForEach { .. },
+                    CheckedAction::ForEach { .. },
+                ]
+            )
+        }),
+        "selected Ready arm should preserve both bounded for actions in source order"
+    );
+}
+
+#[test]
+fn rejects_unselected_step_return_match_arm_too_many_for_each_prefixes() {
+    let unselected_loops = (0..=MAX_VALUE_TEMPLATE_FIELDS)
+        .map(|_| {
+            "                for Job { phase: job_phase } in jobs {\n                    emit \"unselected loop\";\n                }\n"
+        })
+        .collect::<String>();
+    let source = format!(
+        r#"
+module process_return_match_arm_for_unselected_loop_element_limit;
+
+record MainState;
+record Job {{ phase: Phase }}
+record Assignment {{ phase: Phase, jobs: List<Job,1> }}
+
+enum MainMsg {{ Start }}
+enum Phase {{ Ready, Done }}
+enum Route {{ Assign(Assignment) }}
+enum WorkerState {{ Idle, SawReady, Done }}
+enum WorkerMsg {{ Envelope(Route) }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {{
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Assignment {{
+            phase: Ready,
+            jobs: List<Job,1>[Job {{ phase: Ready }}],
+        }}));
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(1) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return Idle;
+    }}
+
+    fn step(state: WorkerState, Envelope(Assign(Assignment {{ phase: phase, jobs: jobs }}))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {{
+        return match phase {{
+            Ready => {{
+                emit "selected ready arm";
+                return Continue(SawReady);
+            }}
+            Done => {{
+{unselected_loops}                return Stop(Done);
+            }}
+        }};
+    }}
+}}
+"#
+    );
+
+    let err =
+        check_source(&source).expect_err("unselected arm loop element count should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("loop element count must be no greater than"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_unselected_step_return_match_arm_for_each_prefixes_after_uniform_loop_budget() {
+    let unselected_loops = (0..MAX_VALUE_TEMPLATE_FIELDS)
+        .map(|_| {
+            "                for Job { phase: job_phase } in jobs {\n                    emit \"unselected arm loop\";\n                }\n"
+        })
+        .collect::<String>();
+    let source = format!(
+        r#"
+module process_return_match_arm_for_composed_loop_element_limit;
+
+record MainState;
+record Job {{ phase: Phase }}
+record Assignment {{ phase: Phase, jobs: List<Job,1> }}
+
+enum MainMsg {{ Start }}
+enum Phase {{ Ready, Done }}
+enum Route {{ Assign(Assignment) }}
+enum WorkerState {{ Idle, SawReady, Done }}
+enum WorkerMsg {{ Envelope(Route) }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {{
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Envelope(Assign(Assignment {{
+            phase: Ready,
+            jobs: List<Job,1>[Job {{ phase: Ready }}],
+        }}));
+        return Stop(state);
+    }}
+}}
+
+proc Worker mailbox bounded(1) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return Idle;
+    }}
+
+    fn step(state: WorkerState, Envelope(Assign(Assignment {{ phase: phase, jobs: jobs }}))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {{
+        for Job {{ phase: prefix_phase }} in jobs {{
+            emit "uniform loop consumes one loop element id";
+        }}
+        return match phase {{
+            Ready => {{
+                emit "selected ready arm";
+                return Continue(SawReady);
+            }}
+            Done => {{
+{unselected_loops}                return Stop(Done);
+            }}
+        }};
+    }}
+}}
+"#
+    );
+
+    let err = check_source(&source)
+        .expect_err("unselected arm loops must count IDs already used before return match");
+
+    assert!(
+        err.to_string()
+            .contains("loop element count must be no greater than"),
         "unexpected error: {err}"
     );
 }

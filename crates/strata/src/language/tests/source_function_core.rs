@@ -145,18 +145,18 @@ proc Main mailbox bounded(1) {"#,
 }
 
 #[test]
-fn rejects_module_source_function_call_to_process_local_helper() {
+fn rejects_module_source_function_call_to_process_local_function() {
     let source = FUNCTION_MATCH.replace(
         "proc Main mailbox bounded(1) {",
-        r#"fn invalid_module_helper(mode: StartupMode) -> MainState ! [] ~ [] @det {
+        r#"fn invalid_module_function(mode: StartupMode) -> MainState ! [] ~ [] @det {
     return state_for(mode);
 }
 
 proc Main mailbox bounded(1) {"#,
     );
 
-    let err =
-        check_source(&source).expect_err("module source function should not see process helpers");
+    let err = check_source(&source)
+        .expect_err("module source function should not see process-local functions");
 
     assert!(
         err.to_string()
@@ -252,7 +252,7 @@ fn rejects_source_function_call_with_wrong_argument_type() {
 fn rejects_source_function_statements() {
     let source = FUNCTION_MATCH.replace(
         "return WorkerState { job: job };",
-        "emit \"helper tried to mutate behavior\";\n        return WorkerState { job: job };",
+        "emit \"function tried to mutate behavior\";\n        return WorkerState { job: job };",
     );
 
     let err = check_source(&source).expect_err("source function statement should fail");

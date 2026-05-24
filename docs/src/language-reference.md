@@ -12,8 +12,8 @@ Mantle artifact internals.
 | Top-level declarations | `record`, `enum`, `fn`, and `proc`. |
 | Classes | Not available. |
 | Methods | Not available. |
-| Top-level functions | Pure deterministic one-argument source helpers. |
-| Process functions | `init`, `step`, and pure deterministic one-argument process-local helpers. |
+| Top-level functions | Pure deterministic one-argument source functions. |
+| Process functions | `init`, `step`, and pure deterministic one-argument process-local functions. |
 | Imports | Not available. |
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
@@ -22,9 +22,9 @@ Mantle artifact internals.
 | Boolean predicates | `!`, `&&`, and `||` over admitted Bool-producing predicates. |
 | Pure conditionals | Source-time expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`. |
 | Runtime branching | Final-position `if (condition) { ... return ...; } else { ... return ...; }` and statement-level effect branches in `step` bodies, lowered to Mantle control flow. |
-| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in helpers, message dispatch, state matches, helper return-match expressions, step return-match expressions with optional uniform and selected-arm action prefixes, and `_` wildcards. |
+| Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in functions, message dispatch, state matches, function return-match expressions, step return-match expressions with optional uniform and selected-arm action prefixes, and `_` wildcards. |
 | Message payloads | `enum WorkerMsg { Assign(Job) }`, `enum WorkerMsg { Work(ProcessRef<Sink>) }`, collection payloads, payload sends, and payload-binding step patterns. |
-| Pattern dispatch | Function signature patterns, source function match bodies, helper return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for helpers, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
+| Pattern dispatch | Function signature patterns, source function match bodies, function return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for source functions, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
 The `module` declaration names a source unit. It does not create an import
@@ -145,13 +145,13 @@ Assigned(Job { phase: Ready })
 ```
 
 The checker resolves this form against the expected enum type. If the identifier
-names a source helper instead, it is expanded as a helper call; constructor and
-helper names cannot collide silently.
+names a source function instead, it is expanded as a function call; constructor
+and function names cannot collide silently.
 
 ## Collections
 
 Lists and maps are immutable source values with explicit numeric capacities.
-They can be used as source helper parameters and return values, record fields,
+They can be used as source function parameters and return values, record fields,
 process state types, and message payloads when their element, key, and value
 types are source value types.
 
@@ -255,7 +255,8 @@ proc Worker mailbox bounded(1) {
 ```
 
 Only the aliases `State` and `Msg` are accepted inside a process. Processes may
-also declare pure deterministic helper functions alongside `init` and `step`.
+also declare pure deterministic process-local functions alongside `init` and
+`step`.
 Each message variant must resolve to exactly one `step` clause, selected by an
 explicit constructor pattern, by one wildcard pattern, or by one whole-body
 `match msg`. A message-specific step clause can also dispatch over current
@@ -303,16 +304,16 @@ Buildable source requires:
 | parameter-pattern `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`. |
 | match `step` | Parameters exactly `state: StateType, msg: MsgType`, returns `ProcResult<StateType>`, uses `~ [] @det`, and has a whole-body `match msg`. |
 | state-match `step` | Parameters exactly `state: StateType, MessagePattern`, returns `ProcResult<StateType>`, uses `~ [] @det`, and has a whole-body `match state`. |
-| source helper | One binding parameter or one pattern parameter, returns a source value type, uses `! [] ~ [] @det`, and has no runtime statements. |
+| source function | One binding parameter or one pattern parameter, returns a source value type, uses `! [] ~ [] @det`, and has no runtime statements. |
 
 The parser recognizes `@nondet`, but buildable source rejects it. The
 may-behavior list after `~` must be empty.
 
 Normal source functions are checked before lowering and expanded into the
 value positions where they are called. They do not become Mantle runtime
-dispatch entries and cannot perform runtime effects. A process-local helper is
-visible only inside that process. A module helper is visible throughout the
-module. Recursive helper call cycles are rejected in this source slice.
+dispatch entries and cannot perform runtime effects. A process-local function is
+visible only inside that process. A module function is visible throughout the
+module. Recursive function call cycles are rejected in this source slice.
 
 Function signature patterns can author enum dispatch:
 
@@ -330,7 +331,7 @@ fn status(Assigned(job: Job)) -> WorkStatus ! [] ~ [] @det {
 }
 ```
 
-A source helper signature may also destructure fields from an immutable record
+A source function signature may also destructure fields from an immutable record
 value:
 
 ```strata
@@ -343,7 +344,7 @@ fn renamed_phase(Job { phase: current }) -> JobPhase ! [] ~ [] @det {
 }
 ```
 
-Source helper signatures may also dispatch on exact immutable collection
+Source function signatures may also dispatch on exact immutable collection
 shapes:
 
 ```strata
@@ -356,7 +357,7 @@ fn lookup(Map<Phase,Phase,1>[Ready => selected]) -> Phase ! [] ~ [] @det {
 }
 ```
 
-Nested helper patterns compose constructor payloads, records, and collection
+Nested function patterns compose constructor payloads, records, and collection
 element/value projections:
 
 ```strata
@@ -369,7 +370,7 @@ fn listed_phase(List<Routed,1>[Assign(Job { phase })]) -> Phase ! [] ~ [] @det {
 }
 ```
 
-A helper may also use a whole-body match over its typed binding parameter:
+A function may also use a whole-body match over its typed binding parameter:
 
 ```strata
 fn readiness_body(mode: StartupMode) -> Readiness ! [] ~ [] @det {
@@ -384,9 +385,9 @@ fn readiness_body(mode: StartupMode) -> Readiness ! [] ~ [] @det {
 }
 ```
 
-Whole-body helper matches and helper return-match expressions may split one
+Whole-body function matches and function return-match expressions may split one
 top-level constructor when nested typed enum predicates are provably disjoint.
-The split remains checker-time source dispatch; helper expansion resolves the
+The split remains checker-time source dispatch; function expansion resolves the
 concrete source value before lowering:
 
 ```strata
@@ -402,7 +403,7 @@ fn route(packet: Packet) -> Phase ! [] ~ [] @det {
 }
 ```
 
-Whole-body helper matches may also destructure a concrete record binding:
+Whole-body function matches may also destructure a concrete record binding:
 
 ```strata
 fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
@@ -414,7 +415,7 @@ fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
 }
 ```
 
-Whole-body helper matches can destructure exact list patterns, suffix-only list
+Whole-body function matches can destructure exact list patterns, suffix-only list
 rest patterns, exact map patterns, and map subset/rest patterns. A wildcard arm
 may provide a fallback for collection shapes that are not listed:
 
@@ -446,7 +447,7 @@ fn status(work: Work) -> WorkStatus ! [] ~ [] @det {
 }
 ```
 
-The same helper return-match form may destructure a concrete record binding:
+The same function return-match form may destructure a concrete record binding:
 
 ```strata
 fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
@@ -473,26 +474,26 @@ fn ready_value(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
 }
 ```
 
-Enum matches are exhaustive and immutable. Source helper whole-body matches and
-helper return-match expressions may repeat a top-level constructor only when the
+Enum matches are exhaustive and immutable. Source function whole-body matches and
+function return-match expressions may repeat a top-level constructor only when the
 nested typed enum predicates are provably disjoint; identical predicates,
-unguarded constructor arms, and unproven overlaps are rejected. Source helper
+unguarded constructor arms, and unproven overlaps are rejected. Source function
 signature groups still keep one clause per top-level constructor. Record body
 matches and return matches use one record pattern arm for the matched record type.
 Collection patterns match exact list length unless they use the trailing
 `..tail` suffix rest binding. Map patterns match exact key sets unless they use
 the trailing `..` subset or rest marker. `_` remains available as a collection
-fallback in helper match bodies and return matches.
-Payload-bearing source helper patterns and record/list/map destructuring
-patterns bind immutable source values. A helper call must provide a concrete
-enum constructor value for signature-pattern, whole-body match, or enum helper
-return-match dispatch. Record and collection destructuring helpers require a
-concrete value argument after source helper expansion. Helpers are still
+fallback in function match bodies and return matches.
+Payload-bearing source function patterns and record/list/map destructuring
+patterns bind immutable source values. A function call must provide a concrete
+enum constructor value for signature-pattern, whole-body match, or function
+return-match dispatch. Record and collection destructuring functions require a
+concrete value argument after source function expansion. Functions are still
 expanded before lowering and do not become runtime dispatch entries.
 
 ## Pure Conditionals
 
-Source helpers and pure value expressions can use a source-time value-level
+Source functions and pure value expressions can use a source-time value-level
 conditional:
 
 ```strata
@@ -503,15 +504,29 @@ fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
 }
 ```
 
+The equivalent braced pure return form is also admitted in source functions:
+
+```strata
+fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
+    if (flag) {
+        return WarmReady;
+    } else {
+        return ColdReady;
+    }
+}
+```
+
 The condition type is exactly the declared fieldless enum
 `Bool { False, True }`. Both branches are source value expressions checked
-against the same expected return, field, state, or payload type. Branches cannot
-perform statements or effects.
+against the same expected return, field, state, or payload type. Braced source
+function return-if branches may contain only the terminal pure return. Branches
+cannot perform `emit`, `send`, `spawn`, runtime `for`, branch-local
+process-reference binding, mutation, or any other runtime statement.
 
-Conditionals are selected during source checking and helper expansion. The
+Conditionals are selected during source checking and source function expansion. The
 selected branch is what lowering sees; Mantle does not receive a conditional
 runtime dispatch entry, a source function name, or a source-string branch key.
-If the condition is not a concrete `True` or `False` value after source helper
+If the condition is not a concrete `True` or `False` value after source function
 expansion, checking fails closed.
 
 ## Typed Equality Predicates
@@ -525,7 +540,7 @@ Both operands must have the same checked type. Concrete source operands fold
 during checking, so lowering sees only the selected `True` or `False` value.
 Runtime-dependent operands lower as typed Mantle value templates and Mantle
 evaluates them from admitted typed values. Equality does not dispatch through
-source names, helper names, debug labels, or parser strings.
+source names, function names, debug labels, or parser strings.
 
 This slice does not admit string equality, structural record/list/map equality,
 payload enum equality, process-reference equality, ordering, arithmetic,
@@ -772,8 +787,8 @@ Current process-reference boundaries:
 
 Patterns are source-level syntax for typed value decomposition. The current
 runnable subset admits constructor patterns, constructor payload bindings,
-nested constructor and record/list/map payload destructuring, helper return-match
-expressions, and wildcards. Normal source helpers may match concrete enum values
+nested constructor and record/list/map payload destructuring, function return-match
+expressions, and wildcards. Normal source functions may match concrete enum values
 or destructure concrete record/list/map values, `init` may use one whole-body
 match over a fieldless enum constructor to select the initial state, and actor
 message dispatch may use one whole-body match over the typed message parameter:
@@ -1013,9 +1028,9 @@ A `step` body may also use `return match` over a concrete enum source value
 binding when the checker can reduce the match to one typed transition before
 lowering. Statements before the `return match` are a uniform action prefix; the
 checker lowers that same typed action list onto every generated transition.
-The selected arm may then perform its own straight-line `emit` or `send` prefix
-to an already in-scope direct process reference before the terminal whole-value
-result:
+The selected arm may then perform its own admitted typed action-block prefix,
+including `emit`, direct in-scope `send`, statement-level runtime `if`, and
+bounded runtime `for` actions, before the terminal whole-value result:
 
 ```strata
 fn step(state: WorkerState, Envelope(Assign(phase: Phase))) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
@@ -1038,19 +1053,14 @@ binding with a concrete value proven during step clause or state-match expansion
 checks every arm as a `ProcResult<StateType>`, selects the matching arm, and
 lowers the selected arm to the existing typed transition shape. Uniform prefix
 effects occur before the selected arm prefix in source program order and remain
-committed runtime actions. Arm-local selected prefixes may combine one direct
-statement-level runtime `if` with one direct bounded runtime `for` over a checked
-runtime `List<T,N>` binding. Direct runtime `if` branches remain action-only and
-may contain local `emit`, in-scope direct `send`, plus at most one direct
-bounded runtime `for` over a checked runtime `List<T,N>` binding. The loop body
-remains action-only and may contain only local `emit` or in-scope direct `send`
-actions plus one direct statement-level runtime `if` whose branches contain only
-those same actions. Arm-local `spawn`, process-reference binding, multiple direct
-arm-local runtime `if` statements, nested runtime `if` beyond the one direct
-loop-body branch, multiple direct branch-local runtime `for` statements, nested
-runtime `for` statements, final-position runtime `if`, nested return matches,
-matching `state`, matching non-enum values, and dynamic payload catch-all
-dispatch are not admitted.
+committed runtime actions. Selected arm prefixes use the same admitted
+statement-level action sequencing as a `step` body: local `emit`, in-scope direct
+`send`, statement-level runtime `if`, and bounded runtime `for` over checked
+runtime `List<T,N>` bindings. The checker still validates every arm template
+fail-closed before selected actions lower as typed Mantle artifact actions.
+Arm-local `spawn`, process-reference binding, nested runtime `for` statements,
+final-position runtime `if`, nested return matches, matching `state`, matching
+non-enum values, and dynamic payload catch-all dispatch are not admitted.
 
 Current pattern-matching closure boundaries:
 
@@ -1058,17 +1068,17 @@ Current pattern-matching closure boundaries:
 | --- | --- |
 | `step return match` after uniform pre-return effects | Admitted. Uniform prefix actions lower identically onto each selected typed transition. |
 | `step return match` arm-local `emit` / in-scope direct `send` prefixes | Admitted only after source-time concrete arm selection; selected arm actions lower as typed transition actions before the terminal result. |
-| `step return match` arm-local statement-level runtime `if` prefix | Admitted as one direct runtime branch per arm. Branches may run local `emit`, in-scope direct `send`, plus at most one direct bounded runtime `for`; selected branch execution is Mantle runtime behavior over typed artifact templates. |
-| `step return match` arm-local bounded runtime `for` prefix | Admitted as one direct loop per arm over a checked runtime `List<T,N>` binding. Loop bodies may run local `emit`, in-scope direct `send`, plus at most one direct action-only runtime branch, and loop element projections lower as typed Mantle templates. |
-| `step return match` arm-local bounded runtime `for` with a direct loop-body runtime `if` | Admitted as one direct loop whose body contains one direct action-only runtime branch. The branch condition and branch actions lower through typed loop-element templates inside the selected arm. |
-| `step return match` arm-local statement-level runtime `if` containing bounded runtime `for` | Admitted as one direct loop per runtime branch over a checked runtime `List<T,N>` binding. Branch-local loops stay selected inside the concrete arm and lower as typed branch actions, not source-label dispatch. |
+| `step return match` arm-local statement-level runtime `if` prefix | Admitted after source-time concrete arm selection. Branches use typed action templates and obey the same statement-level runtime branch nesting bound as ordinary `step` actions. |
+| `step return match` arm-local bounded runtime `for` prefix | Admitted over checked runtime `List<T,N>` bindings. Loop bodies use typed action templates, may include admitted statement-level runtime branches, and still reject nested runtime `for`. |
+| `step return match` arm-local bounded runtime `for` with a loop-body runtime `if` | Admitted under the ordinary statement-level branch nesting bound. Branch conditions and branch actions lower through typed loop-element templates inside the selected arm. |
+| `step return match` arm-local statement-level runtime `if` containing bounded runtime `for` | Admitted for branch-local loops over checked runtime `List<T,N>` bindings. Branch-local loops stay selected inside the concrete arm and lower as typed branch actions, not source-label dispatch. |
 | `step return match state` | Rejected. Use whole-body `match state`, then match a concrete state-payload binding when one is proven. |
 | `init match` over payload-bearing arm constructors | Admitted only when every arm returns a state value that does not materialize payload bindings. |
 | `init return match` over payload-bearing constructors | Rejected in this slice. `init return match` selects a static initial state from a fieldless enum scrutinee. |
 | Init arms materializing payload bindings in the initial state | Rejected. The initial state lowers to one static typed state ID. |
 | Shape-only collection predicates such as `Items(List[_])`, `Lookup(Map[Ready => _])`, or `Lookup(Map[..])` | Rejected. Bind at least one immutable projected value, or match only the enclosing constructor when the payload is ignored. |
 | Dynamic-key map matching | Rejected. Map pattern keys are static source values in this slice. |
-| Arbitrary/general match expressions outside admitted helper, `init`, `step`, `match msg`, and `match state` forms | Future language semantics, not part of the current buildable surface. |
+| Arbitrary/general match expressions outside admitted function, `init`, `step`, `match msg`, and `match state` forms | Future language semantics, not part of the current buildable surface. |
 
 State changes are immutable whole-value transitions. There is no assignment
 statement and no source-visible field mutation.

@@ -69,7 +69,7 @@ fn runtime_final_if_nested_terminal_if_rejects_branch_local_process_ref() {
     let source = RUNTIME_FINAL_IF_NESTED_TERMINAL_IF
         .replace(
             "proc Worker mailbox bounded(1) {",
-            "record HelperState;\n\nenum HelperMsg { Help }\n\nproc Helper mailbox bounded(1) {\n    type State = HelperState;\n    type Msg = HelperMsg;\n\n    fn init() -> HelperState ! [] ~ [] @det {\n        return HelperState;\n    }\n\n    fn step(state: HelperState, Help) -> ProcResult<HelperState> ! [] ~ [] @det {\n        return Continue(state);\n    }\n}\n\nproc Worker mailbox bounded(1) {",
+            "record PeerState;\n\nenum PeerMsg { Help }\n\nproc Peer mailbox bounded(1) {\n    type State = PeerState;\n    type Msg = PeerMsg;\n\n    fn init() -> PeerState ! [] ~ [] @det {\n        return PeerState;\n    }\n\n    fn step(state: PeerState, Help) -> ProcResult<PeerState> ! [] ~ [] @det {\n        return Continue(state);\n    }\n}\n\nproc Worker mailbox bounded(1) {",
         )
         .replace(
             "ProcResult<WorkerState> ! [emit]",
@@ -77,7 +77,7 @@ fn runtime_final_if_nested_terminal_if_rejects_branch_local_process_ref() {
         )
         .replace(
             "                emit \"worker terminal outer true inner true\";",
-            "                let extra: ProcessRef<Helper> = spawn Helper;",
+            "                let extra: ProcessRef<Peer> = spawn Peer;",
         );
     let error = check_source(&source).expect_err("terminal branch process ref must fail");
     assert!(

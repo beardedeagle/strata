@@ -11,19 +11,19 @@ Read them in this order:
    into typed message-keyed transitions.
 5. `init_match.str` for whole-body match authoring in `init`.
 6. `init_return_match.str` for pure init return-match expressions.
-7. `function_match.str` for module functions, process-local helpers, and
+7. `function_match.str` for module functions, process-local functions, and
    pattern matching outside actor dispatch.
 8. `function_payload_match.str` for payload-bearing enum construction and
-   matching in normal source helpers.
+   matching in normal source functions.
 9. `function_if_else.str` for pure value-level conditionals selected before
    lowering.
 10. `function_collection_match.str` for immutable list/map source values and
-   collection patterns in normal source helpers.
-11. `function_return_match.str` for helper return-match expressions.
+   collection patterns in normal source functions.
+11. `function_return_match.str` for function return-match expressions.
 12. `process_return_match.str` for process step return-match expressions with
     uniform effect prefixes.
 13. `process_return_match_arm_prefix.str` for selected step return-match
-    straight-line arm prefixes.
+    arm action prefixes.
 14. `process_return_match_arm_runtime_if_prefix.str` for selected
     step return-match arm-local runtime branch prefixes.
 15. `process_return_match_arm_for_prefix.str` for selected step return-match
@@ -33,78 +33,81 @@ Read them in this order:
     actions.
 17. `process_return_match_arm_if_for_prefix.str` for selected step return-match
     arm-local runtime branch prefixes with bounded runtime loop branch actions.
-18. `function_record_pattern.str` for source helper record destructuring
+18. `process_return_match_arm_action_block.str` for selected step return-match
+    arms using ordinary action-block sequencing with multiple runtime branches
+    and bounded loops.
+19. `function_record_pattern.str` for source function record destructuring
    patterns.
-19. `function_record_return_match.str` for helper return-match record
+20. `function_record_return_match.str` for function return-match record
    destructuring.
-20. `function_record_body_match.str` for whole-body helper match record
+21. `function_record_body_match.str` for whole-body function match record
    destructuring.
-21. `state_payload_enum.str` for payload-bearing process state enum transitions.
-22. `collection_state.str` for immutable collection state and payload-dependent
+22. `state_payload_enum.str` for payload-bearing process state enum transitions.
+23. `collection_state.str` for immutable collection state and payload-dependent
    collection next-state templates.
-23. `state_payload_match.str` for matching immutable current process state
+24. `state_payload_match.str` for matching immutable current process state
    payloads.
-24. `actor_instances.str` for multiple runtime instances of one process
+25. `actor_instances.str` for multiple runtime instances of one process
    definition.
-25. `actor_payloads.str` for typed message payloads and immutable payload
+26. `actor_payloads.str` for typed message payloads and immutable payload
    bindings in actor step parameter patterns.
-26. `runtime_if_else.str` for Mantle-backed runtime branching over a message
+27. `runtime_if_else.str` for Mantle-backed runtime branching over a message
    payload.
-27. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
+28. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
    a projected field from an immutable received record payload.
-28. `runtime_payload_projection_next_state.str` for Mantle-backed runtime
+29. `runtime_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable received record
    payload.
-29. `runtime_state_payload_projection_if.str` for Mantle-backed runtime
+30. `runtime_state_payload_projection_if.str` for Mantle-backed runtime
    branching over a projected field from an immutable current-state record
    payload.
-30. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
+31. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable current-state
    record payload.
-31. `runtime_nested_if_actions.str` for one bounded layer of nested
+32. `runtime_nested_if_actions.str` for one bounded layer of nested
    statement-level runtime branch actions.
-32. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
+33. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
    final-position runtime branches.
-33. `runtime_final_if_nested_if_actions.str` for one direct nested
+34. `runtime_final_if_nested_if_actions.str` for one direct nested
    statement-level runtime branch action inside final-position runtime
    branches.
-34. `runtime_final_if_nested_terminal_if.str` for one direct nested terminal
+35. `runtime_final_if_nested_terminal_if.str` for one direct nested terminal
    final-position runtime branch inside final-position runtime branches.
-35. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+36. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
    branch behavior.
-36. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+37. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-37. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-38. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+38. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+39. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-39. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
+40. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
    branch inside a bounded loop-body branch.
-40. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-41. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+41. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+42. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-42. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+43. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
    values through a guarded loop and received direct process reference.
-43. `runtime_loop_element_projection.str` for projecting immutable record
+44. `runtime_loop_element_projection.str` for projecting immutable record
    fields from guarded runtime loop elements.
-44. `actor_payload_match.str` for the same payload binding through a whole-body
+45. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-45. `actor_payload_split_match.str` for payload-sensitive same-message
+46. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-46. `actor_payload_split_signature.str` for payload-sensitive same-message
+47. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-47. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+48. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-48. `actor_payload_state_match_split.str` for payload-sensitive same-message
+49. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-49. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+50. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-50. `nested_patterns.str` for nested immutable constructor, record, list, and
+51. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-51. `actor_reply.str` for transporting typed process references through message
+52. `actor_reply.str` for transporting typed process references through message
    payloads.
-52. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+53. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-53. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+54. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 ## Hello
@@ -235,8 +238,8 @@ Key source ideas:
 ## Function Match
 
 `examples/function_match.str` exercises normal source functions outside actor
-dispatch. It uses module-level functions and process-local helpers, including
-signature-pattern dispatch and a whole-body match helper.
+dispatch. It uses module-level functions and process-local functions, including
+signature-pattern dispatch and a whole-body match function.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/function_match.str
@@ -250,19 +253,19 @@ Key source ideas:
   clauses selected by typed signature patterns.
 - `readiness_body(mode: StartupMode)` uses a whole-body `match mode` outside
   an actor `step`.
-- `Main` and `Worker` declare process-local helper functions for state
+- `Main` and `Worker` declare process-local functions for state
   construction.
-- `send worker Assign(ready_job(Ready))` proves helper calls are expanded for
+- `send worker Assign(ready_job(Ready))` proves function calls are expanded for
   message payload discovery and lowering.
 - Mantle sees typed state IDs, message IDs, and payload templates, not source
-  helper dispatch names.
+  function dispatch names.
 
 ## Function Payload Match
 
-`examples/function_payload_match.str` extends normal source helpers to
+`examples/function_payload_match.str` extends normal source functions to
 payload-bearing enum values. It constructs source-visible enum payload values,
-matches them through signature patterns and whole-body helper matches, and
-lowers a received actor payload through a process-local helper into an enum
+matches them through signature patterns and whole-body function matches, and
+lowers a received actor payload through a process-local function into an enum
 payload state template.
 
 ```sh
@@ -274,19 +277,21 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/function_payload_m
 Key source ideas:
 
 - `Assigned(Job { phase: Ready })` is resolved as a typed enum value, not a
-  helper call.
+  function call.
 - `status_sig(Assigned(job: Job))` binds the enum payload immutably in a normal
-  source helper signature pattern.
-- `status_body(work: Work)` matches the typed helper parameter and binds the
+  source function signature pattern.
+- `status_body(work: Work)` matches the typed function parameter and binds the
   payload inside the selected arm.
-- `state_for(Assigned(job))` proves a process-local helper can wrap a received
+- `state_for(Assigned(job))` proves a process-local function can wrap a received
   immutable payload into a source enum value before lowering.
 
 ## Function If Else
 
-`examples/function_if_else.str` uses a pure value-level conditional in normal
-source helpers. The checker resolves the explicit `Bool { False, True }`
-condition and selects one immutable branch before lowering.
+`examples/function_if_else.str` uses pure source-time conditionals in normal
+source functions. The checker resolves the explicit `Bool { False, True }`
+condition and selects one immutable branch before lowering. The example includes
+both expression-form `return if (...) { value } else { value };` and braced pure
+return branches.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/function_if_else.str
@@ -299,14 +304,16 @@ Key source ideas:
 - `enum Bool { False, True }` is an exact source contract for conditionals.
 - `if (flag) { WarmReady } else { ColdReady }` is a pure value expression, not
   a statement block.
+- `if (flag) { return WarmReady; } else { return ColdReady; }` is an equivalent
+  pure source-function return branch shape, not a runtime branch.
 - Both branches are checked against the same expected type.
 - Mantle receives selected typed state values, not a conditional branch key or
-  source helper dispatch name.
+  source function dispatch name.
 
 ## Function Collection Match
 
 `examples/function_collection_match.str` uses immutable `List<T,N>` and
-`Map<K,V,N>` source values in normal source helpers.
+`Map<K,V,N>` source values in normal source functions.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/function_collection_match.str
@@ -320,15 +327,15 @@ Key source ideas:
   bounded immutable collection values.
 - `fn first(List<Phase,2>[phase, _])` dispatches on exact list length and binds
   one immutable element.
-- Helper body and return matches can use exact list patterns, list rest patterns
+- Function body and return matches can use exact list patterns, list rest patterns
   such as `List[_, ..tail]`, exact map patterns, and subset map patterns such as
   `Map[Ready => selected, ..rest]` with `_` fallback arms.
-- The helper expansion leaves Mantle with a resolved `MainState` value, not
-  source helper dispatch names.
+- Function expansion leaves Mantle with a resolved `MainState` value, not
+  source function dispatch names.
 
 ## Function Return Match
 
-`examples/function_return_match.str` uses a helper `return match` expression to
+`examples/function_return_match.str` uses a function `return match` expression to
 select an immutable result from an in-scope source value binding.
 
 ```sh
@@ -339,10 +346,10 @@ cargo run -p mantle-runtime --bin mantle -- run target/strata/function_return_ma
 
 Key source ideas:
 
-- `return match work { ... };` is checked as a pure helper return expression.
-- The selected arm binds enum payloads immutably before helper expansion.
+- `return match work { ... };` is checked as a pure function return expression.
+- The selected arm binds enum payloads immutably before function expansion.
 - Mantle receives the resolved `MainState{status:Active(Job{phase:Ready})}`
-  state value, not source helper dispatch.
+  state value, not source function dispatch.
 
 ## Process Return Match
 
@@ -364,7 +371,7 @@ Key source ideas:
 - `return match phase { ... };` is checked and reduced to a typed
   `Continue(...)` or `Stop(...)` transition before lowering.
 - Mantle executes the emitted typed transition IDs and payload guards; it does
-  not dispatch on source strings or helper names.
+  not dispatch on source strings or function names.
 
 ## Process Return Match Arm Prefix
 
@@ -392,7 +399,7 @@ Key source ideas:
 ## Process Return Match Arm Runtime If Prefix
 
 `examples/process_return_match_arm_runtime_if_prefix.str` extends selected
-`step return match` arm prefixes with one direct statement-level runtime `if`.
+`step return match` arm prefixes with statement-level runtime `if` actions.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/process_return_match_arm_runtime_if_prefix.str
@@ -408,18 +415,18 @@ Key source ideas:
   that selected arm prefix, after any uniform prefix actions and before the
   terminal `Continue(...)` or `Stop(...)`.
 - This example keeps branch bodies action-only with local `emit` and in-scope
-  direct `send`; the later
-  `process_return_match_arm_if_for_prefix.str` example covers the admitted
-  direct bounded runtime `for` branch form.
-- Branch-local `spawn`, process-reference binding, nested runtime `if`, branch
-  returns, and final-position runtime `if` remain rejected.
+  direct `send`; `process_return_match_arm_if_for_prefix.str` also covers
+  bounded runtime `for` actions inside selected runtime branches.
+- Branch-local `spawn`, process-reference binding, branch returns, final-position
+  runtime `if`, and runtime branch nesting beyond the artifact bound remain
+  rejected.
 - Mantle selects the runtime branch from typed artifact templates; source arm
   labels and source binding names are not executable dispatch keys.
 
 ## Process Return Match Arm For Prefix
 
 `examples/process_return_match_arm_for_prefix.str` extends selected
-`step return match` arm prefixes with one direct bounded runtime `for` over a
+`step return match` arm prefixes with bounded runtime `for` over a
 checked runtime `List<T,N>` binding.
 
 ```sh
@@ -433,7 +440,7 @@ Key source ideas:
 - The checker still source-selects one concrete return-match arm before
   lowering.
 - The selected arm loop lowers as a typed Mantle `for_each` action after any
-  uniform and arm-local straight-line prefixes, before the terminal
+  uniform and arm-local admitted action prefixes, before the terminal
   `Continue(...)` or `Stop(...)`.
 - Loop collections must be checked runtime `List<T,N>` bindings. Loop element
   projections lower as typed templates, not source-name dispatch.
@@ -444,8 +451,7 @@ Key source ideas:
 ## Process Return Match Arm For-If Prefix
 
 `examples/process_return_match_arm_for_if_prefix.str` extends selected
-`step return match` arm-local bounded loops with one direct loop-body runtime
-`if`.
+`step return match` arm-local bounded loops with loop-body runtime `if` actions.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/process_return_match_arm_for_if_prefix.str
@@ -464,14 +470,14 @@ Key source ideas:
   element bindings, not source aliases or debug strings.
 - Loop-body branches remain action-only: local `emit` and in-scope direct
   `send` actions are admitted, while branch returns, branch-local `spawn`,
-  process-reference binding, nested runtime `if`, and nested runtime `for`
-  remain rejected.
+  process-reference binding, nested runtime `for`, and runtime branch nesting
+  beyond the artifact bound remain rejected.
 
 ## Process Return Match Arm If-For Prefix
 
 `examples/process_return_match_arm_if_for_prefix.str` extends selected
-`step return match` arm-local runtime branches with one direct bounded runtime
-`for` inside each branch.
+`step return match` arm-local runtime branches with bounded runtime `for` actions
+inside branches.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/process_return_match_arm_if_for_prefix.str
@@ -484,18 +490,43 @@ Key source ideas:
 - The checker still source-selects one concrete return-match arm before
   lowering.
 - The selected arm runtime branch lowers as a typed Mantle branch action, and a
-  selected branch may contain one direct bounded typed `for_each` action.
+  selected branch may contain bounded typed `for_each` actions.
 - Loop collections remain checked runtime `List<T,N>` bindings, and loop element
   projections lower through typed templates rather than source aliases.
 - Branch-local loops remain action-only and bounded: local `emit`, in-scope
-  direct `send`, and the already admitted direct loop-body runtime branch are
-  accepted; branch returns, branch-local `spawn`, process-reference binding,
-  nested runtime `for`, and deeper runtime `if` nesting remain rejected.
+  direct `send`, and admitted loop-body runtime branch actions are accepted;
+  branch returns, branch-local `spawn`, process-reference binding, nested
+  runtime `for`, and runtime branch nesting beyond the artifact bound remain
+  rejected.
+
+## Process Return Match Arm Action Block
+
+`examples/process_return_match_arm_action_block.str` exercises selected
+`step return match` arms as ordinary typed step action blocks before their
+terminal result.
+
+```sh
+cargo run -p strata --bin strata -- check examples/process_return_match_arm_action_block.str
+cargo run -p strata --bin strata -- build examples/process_return_match_arm_action_block.str
+cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_action_block.mta
+```
+
+Key source ideas:
+
+- Each selected arm contains multiple statement-level runtime `if` actions and
+  multiple sibling bounded runtime `for` actions in source order.
+- Nested statement-level runtime branches are admitted only up to the shared
+  artifact/runtime branch-action bound.
+- Runtime loops remain bounded over checked `List<T,N>` bindings, and nested
+  runtime loops remain rejected.
+- Arm-local `spawn`, branch-local process-reference binding, final-position
+  runtime `if`, nested return matches, mutation, and source-string dispatch
+  remain rejected.
 
 ## Function Record Pattern
 
 `examples/function_record_pattern.str` destructures an immutable record value in
-a normal source helper signature.
+a normal source function signature.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/function_record_pattern.str
@@ -507,14 +538,14 @@ Key source ideas:
 
 - `fn phase_of(Job { phase })` binds the `phase` field as an immutable source
   value.
-- `field: binding` may rename a record field binding in the helper signature.
-- The helper expands before lowering; Mantle admits the resolved
+- `field: binding` may rename a record field binding in the function signature.
+- The function expands before lowering; Mantle admits the resolved
   `MainState{phase:Ready}` state value.
 
 ## Function Record Return Match
 
 `examples/function_record_return_match.str` destructures an immutable record value
-inside a helper `return match` expression.
+inside a function `return match` expression.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/function_record_return_match.str
@@ -528,13 +559,13 @@ Key source ideas:
   `phase` field as an immutable source value inside the selected arm.
 - Record return-match destructuring requires the scrutinee to be an in-scope
   source binding with a concrete record value.
-- The helper expands before lowering; Mantle admits the resolved
+- The function expands before lowering; Mantle admits the resolved
   `MainState{phase:Ready}` state value.
 
 ## Function Record Body Match
 
 `examples/function_record_body_match.str` destructures an immutable record value
-inside a whole-body source helper match.
+inside a whole-body source function match.
 
 ```sh
 cargo run -p strata --bin strata -- check examples/function_record_body_match.str
@@ -547,8 +578,8 @@ Key source ideas:
 - `match job { Job { phase } => { return phase; } }` binds the `phase` field
   as an immutable source value inside the selected arm.
 - Record body-match destructuring requires one record pattern arm over the
-  helper parameter's concrete record value.
-- The helper expands before lowering; Mantle admits the resolved
+  function parameter's concrete record value.
+- The function expands before lowering; Mantle admits the resolved
   `MainState{phase:Ready}` state value.
 
 ## State Payload Enum

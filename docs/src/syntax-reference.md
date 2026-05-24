@@ -83,7 +83,7 @@ message_alias =
 
 The aliases and functions may appear in any order. `State`, `Msg`, and `init`
 must each appear exactly once. Non-`init`/`step` functions are process-local
-source helpers. Each concrete message case must resolve to exactly one generated
+source functions. Each concrete message case must resolve to exactly one generated
 transition, either through an explicit constructor pattern, through one wildcard
 pattern, through one `match msg` step body, or through a state-match step for a
 constructor or wildcard message pattern. Parameter-pattern, state-match, and
@@ -184,10 +184,11 @@ only when the identifier is followed by `(` or `{`, or when `List`/`Map` is
 followed by optional type arguments and `[`. Otherwise the identifier is an
 immutable binding name.
 
-Buildable source accepts bodies for `init`, `step`, module helpers, and
-process-local helpers. It requires deterministic functions and empty
-may-behavior lists. Normal source helpers are pure: they use `! []`, perform no
-statements, and are expanded before lowering.
+Buildable source accepts bodies for `init`, `step`, module functions, and
+process-local functions. It requires deterministic functions and empty
+may-behavior lists. Normal source functions are pure: they use `! []`, admit only
+source-time value expressions and pure braced return branches, perform no
+runtime statements, and are expanded before lowering.
 
 ## Function Bodies
 
@@ -211,18 +212,18 @@ Patterns are source-level binding and decomposition syntax. This source slice
 admits constructor patterns, constructor payload bindings, constructor payload
 destructuring, record destructuring patterns, list/map collection patterns, and
 `_` wildcards. Buildable semantic consumers are normal source function
-signatures and match bodies, helper return-match expressions, fieldless enum
+signatures and match bodies, function return-match expressions, fieldless enum
 `init` whole-body matches and return-match expressions, actor `step` message
 dispatch, message-specific `match state` step bodies, and step return-match
 expressions with optional uniform action prefixes. Record/list/map
 destructuring patterns are accepted
-in normal source helper signatures, helper match bodies, helper return-match
+in normal source function signatures, function match bodies, function return-match
 expressions, message constructor payloads, and current-state enum payloads when
-the payload has the matching type. Helper signatures, helper match bodies,
-helper return-match expressions, whole-body `match msg` arms, step parameter
+the payload has the matching type. Function signatures, function match bodies,
+function return-match expressions, whole-body `match msg` arms, step parameter
 patterns, state-match step clauses, and step return-match expressions may split
 a top-level constructor by disjoint exact nested typed payload predicates.
-Source helper calls still expand before lowering; enum pattern dispatch
+Source function calls still expand before lowering; enum pattern dispatch
 requires a concrete enum constructor value and record/list/map destructuring
 requires a concrete value.
 
@@ -321,21 +322,16 @@ step_return_match =
     "return" "match" ident "{" match_arm+ "}" ";"
 ```
 
-Every arm body may combine local `emit` / in-scope direct `send` prefixes with
-at most one direct statement-level runtime `if` and at most one direct
-arm-level bounded runtime `for` over a checked runtime `List<T,N>` binding. Each
-direct runtime `if` branch may contain only admitted action prefixes plus at most
-one direct branch-local bounded runtime `for` over a checked runtime `List<T,N>`
-binding. A loop body may contain local `emit` or in-scope direct `send` actions
-and one direct statement-level runtime `if` whose branches contain only those
-same action prefixes. The checker selects the concrete arm before lowering,
-appends only that arm's typed action prefix after any uniform prefix actions, and
-emits the same typed transition metadata as a direct step return. Arm-local
-`spawn`, process-reference binding, multiple direct arm-local runtime `if`
-statements, nested runtime `if` beyond the one direct loop-body branch, multiple
-direct branch-local runtime `for` statements, nested runtime `for` statements,
-final-position runtime `if`, nested return matches, dynamic payload catch-all
-dispatch, source-string selectors, and helper/init return-match arm statements
+Every arm body may use the same admitted statement-level action prefix forms as
+a `step` body before the terminal result: local `emit`, in-scope direct `send`,
+statement-level runtime `if`, and bounded runtime `for` over a checked runtime
+`List<T,N>` binding. The checker still validates every arm template
+fail-closed, selects the concrete arm before lowering, appends only that arm's
+typed action prefix after any uniform prefix actions, and emits the same typed
+transition metadata as a direct step return. Arm-local `spawn`,
+process-reference binding, nested runtime `for` statements, final-position
+runtime `if`, nested return matches, dynamic payload catch-all dispatch,
+source-string selectors, and source-function or `init` return-match arm statements
 remain rejected.
 
 In a pure block-bodied `init`, the return expression may be a match over one
@@ -352,7 +348,7 @@ state as the existing typed state ID. This syntax does not admit effect
 statements before the return match, nested return matches in arms, dynamic
 dispatch, or source-string selectors.
 
-A normal source helper is a module-level function or a process-local function
+A normal source function is a module-level function or a process-local function
 whose name is not `init` or `step`:
 
 ```text
@@ -363,11 +359,26 @@ source_function =
     ("{" block_body "}" | "{" match_body "}")
 ```
 
-Helper block bodies must not contain statements. Helper match bodies match the
-function's typed binding parameter. A helper block may also return a `match`
-over an in-scope source value binding; the match arms are exhaustive,
-duplicate-free, immutable, and still expand before lowering. Helper calls and
-payload-bearing enum values share the same surface syntax:
+Function block bodies must not contain effect statements, process-reference
+bindings, sends, or runtime loops. Function match bodies match the function's
+typed binding parameter. A function block may also return a `match` over an
+in-scope source value binding, or use braced pure return branches:
+
+```strata
+fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
+    if (flag) {
+        return WarmReady;
+    } else {
+        return ColdReady;
+    }
+}
+```
+
+The braced form is source-time control flow for pure returned values. Each branch
+must be statement-free apart from its terminal `return`, and the checker resolves
+one concrete branch during source function expansion. Function return-match arms
+are exhaustive, duplicate-free, immutable, and still expand before lowering.
+Function calls and payload-bearing enum values share the same surface syntax:
 
 ```text
 call_or_payload_constructor =
@@ -375,8 +386,8 @@ call_or_payload_constructor =
 ```
 
 The checker resolves that form against the expected type. A declared enum
-constructor becomes an immutable enum value; a declared helper is expanded in
-`init`, `step` result values, and send payload values. Recursive helper call
+constructor becomes an immutable enum value; a declared function is expanded in
+`init`, `step` result values, and send payload values. Recursive function call
 cycles are rejected.
 
 ## Statements
@@ -526,7 +537,7 @@ map_value_entries =
 ```
 
 Parenthesized value expressions are admitted only as Bool predicate grouping.
-`ident(value)` is a helper call when `ident` names a visible source helper and a
+`ident(value)` is a function call when `ident` names a visible source function and a
 payload-bearing enum value when `ident` names a constructor of the expected enum
 type.
 
@@ -547,7 +558,7 @@ only over `Bool` values, typed equality predicates, or nested composed
 predicates. `!` binds tighter than `&&`, and `&&` binds tighter than `||`; use
 parentheses for explicit grouping. Fully concrete predicates fold during
 checking. Runtime-bound predicates lower as typed Mantle value templates over
-admitted Bool-producing operands, not as source strings or helper names.
+admitted Bool-producing operands, not as source strings or function names.
 
 Pure conditionals require the exact fieldless source contract
 `enum Bool { False, True }`. Both branches are value expressions checked against

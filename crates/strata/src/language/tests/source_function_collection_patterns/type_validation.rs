@@ -45,9 +45,9 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
-fn rejects_duplicate_map_value_keys_in_source_helper() {
+fn rejects_duplicate_map_value_keys_in_source_function() {
     let source = r#"
-module duplicate_map_value_keys_in_source_helper;
+module duplicate_map_value_keys_in_source_function;
 
 enum Phase {
     Ready,

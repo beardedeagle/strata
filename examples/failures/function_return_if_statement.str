@@ -1,0 +1,29 @@
+module function_return_if_statement;
+
+record MainState;
+enum Bool { False, True }
+enum Mode { Cold, Warm }
+enum Readiness { ColdReady, WarmReady }
+enum MainMsg { Start }
+
+fn choose(flag: Bool) -> Readiness ! [] ~ [] @det {
+    if (flag) {
+        emit "function branch effect";
+        return WarmReady;
+    } else {
+        return ColdReady;
+    }
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

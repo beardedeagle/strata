@@ -1,9 +1,9 @@
 use super::super::support::*;
 
 #[test]
-fn source_helpers_bind_nested_patterns_in_signature_body_and_return_match() {
+fn source_functions_bind_nested_patterns_in_signature_body_and_return_match() {
     let source = r#"
-module nested_helper_patterns;
+module nested_function_patterns;
 
 record MainState {
     signature: Phase,
@@ -86,13 +86,13 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    check_source(source).expect("nested source helper patterns should check");
+    check_source(source).expect("nested source function patterns should check");
 }
 
 #[test]
-fn source_helpers_dispatch_same_constructor_by_disjoint_fieldless_nested_predicates() {
+fn source_functions_dispatch_same_constructor_by_disjoint_fieldless_nested_predicates() {
     let source = r#"
-module payload_sensitive_helper_dispatch;
+module payload_sensitive_function_dispatch;
 
 record MainState {
     body_ready: Phase,
@@ -195,6 +195,6 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let checked = check_source(source).expect("payload-sensitive helper dispatch should check");
-    lower_to_artifact(&checked, source).expect("payload-sensitive helper dispatch should lower");
+    let checked = check_source(source).expect("payload-sensitive function dispatch should check");
+    lower_to_artifact(&checked, source).expect("payload-sensitive function dispatch should lower");
 }

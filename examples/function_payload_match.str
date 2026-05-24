@@ -60,7 +60,7 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn, send] ~ [] @det {
-        emit "source helper matched payload enum";
+        emit "source function matched payload enum";
         let worker: ProcessRef<Worker> = spawn Worker;
         send worker Assign(Job { phase: Ready });
         return Stop(state);
@@ -84,7 +84,7 @@ proc Worker mailbox bounded(1) {
     }
 
     fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
-        emit "process helper wrapped payload enum";
+        emit "process-local function wrapped payload enum";
         return Stop(state_for(Assigned(job)));
     }
 }

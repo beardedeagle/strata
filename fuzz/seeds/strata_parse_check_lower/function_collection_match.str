@@ -68,7 +68,7 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
-        emit "source helper collection match selected values";
+        emit "source function collection match selected values";
         return Stop(state);
     }
 }

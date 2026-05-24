@@ -172,6 +172,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_if_for_prefix.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_if_for_prefix.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_if_for_prefix.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_action_block.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_action_block.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_action_block.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_collection_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_collection_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_collection_match.mta
@@ -292,8 +295,12 @@ source-to-runtime-failure-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_panic_no_replay.str
     trace="target/strata/actor_panic_no_replay.observability.jsonl"
     effect_authority_stderr="$(mktemp)"
+    function_return_if_stderr="$(mktemp)"
+    arm_nested_for_stderr="$(mktemp)"
+    arm_excessive_if_stderr="$(mktemp)"
+    arm_final_if_excessive_if_stderr="$(mktemp)"
     run_stderr="$(mktemp)"
-    trap 'rm -f "$effect_authority_stderr" "$run_stderr"' EXIT
+    trap 'rm -f "$effect_authority_stderr" "$function_return_if_stderr" "$arm_nested_for_stderr" "$arm_excessive_if_stderr" "$arm_final_if_excessive_if_stderr" "$run_stderr"' EXIT
 
     if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/effect_authority_missing.str 2>"$effect_authority_stderr"; then
         echo "Error: effect_authority_missing was expected to fail source effect authority checks." >&2
@@ -302,6 +309,42 @@ source-to-runtime-failure-gates: build
     if ! grep -q 'step uses effect send but does not declare it' "$effect_authority_stderr"; then
         echo "Error: effect_authority_missing failed for an unexpected reason." >&2
         cat "$effect_authority_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/function_return_if_statement.str 2>"$function_return_if_stderr"; then
+        echo "Error: function_return_if_statement was expected to fail source function purity checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'source function choose return-if then branch must not perform statements' "$function_return_if_stderr"; then
+        echo "Error: function_return_if_statement failed for an unexpected reason." >&2
+        cat "$function_return_if_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/process_return_match_arm_nested_for.str 2>"$arm_nested_for_stderr"; then
+        echo "Error: process_return_match_arm_nested_for was expected to fail source loop checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'nested for loops are not supported in this source slice' "$arm_nested_for_stderr"; then
+        echo "Error: process_return_match_arm_nested_for failed for an unexpected reason." >&2
+        cat "$arm_nested_for_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/process_return_match_arm_excessive_if.str 2>"$arm_excessive_if_stderr"; then
+        echo "Error: process_return_match_arm_excessive_if was expected to fail source branch-depth checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'statement-level if action nesting exceeds maximum depth' "$arm_excessive_if_stderr"; then
+        echo "Error: process_return_match_arm_excessive_if failed for an unexpected reason." >&2
+        cat "$arm_excessive_if_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/process_return_match_arm_final_if_excessive_if.str 2>"$arm_final_if_excessive_if_stderr"; then
+        echo "Error: process_return_match_arm_final_if_excessive_if was expected to fail source branch-depth checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'statement-level if action nesting exceeds maximum depth' "$arm_final_if_excessive_if_stderr"; then
+        echo "Error: process_return_match_arm_final_if_excessive_if failed for an unexpected reason." >&2
+        cat "$arm_final_if_excessive_if_stderr" >&2
         exit 1
     fi
 
@@ -331,6 +374,13 @@ source-to-runtime-failure-gates: build
     fi
 
 quality: fmt-check check cfg-check test lint performance-smoke metadata-check toolchain-policy-check docs source-to-runtime-gates diff-check
+
+bounded-assurance-smoke:
+    cargo +{{stable_toolchain}} test -p strata process_return_match_arm_bounded_assurance --lib
+    cargo +{{stable_toolchain}} test -p strata process_return_match_arm_prefix_properties --lib
+    cargo +{{stable_toolchain}} test -p strata source_function_if_else --lib
+    cargo +{{stable_toolchain}} test -p strata-mantle-acceptance process_return_match_arm_bounded_runtime --test source_to_runtime_gates
+    cargo +{{stable_toolchain}} test -p strata-mantle-acceptance process_return_match_arm_action_block --test source_to_runtime_gates
 
 ci-native: quality
 
@@ -439,7 +489,9 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p mantle-artifact validate_rejects_payload_dependent_map_template_key
     cargo +{{nightly_toolchain}} miri test -p strata parses_and_checks_hello
     cargo +{{nightly_toolchain}} miri test -p strata checks_source_function_subset_map_patterns
+    cargo +{{nightly_toolchain}} miri test -p strata parses_checks_and_lowers_source_function_braced_return_if_else
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_uniform_arm_prefix_shapes_lower_as_typed_actions
+    cargo +{{nightly_toolchain}} miri test -p strata property_generated_selected_arm_action_block_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
 
 miri-ci: miri-setup miri-smoke

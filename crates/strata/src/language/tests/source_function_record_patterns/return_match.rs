@@ -41,7 +41,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    check_source(source).expect("source helper return match record pattern should check");
+    check_source(source).expect("source function return match record pattern should check");
 }
 
 #[test]
