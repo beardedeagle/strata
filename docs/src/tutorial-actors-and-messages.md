@@ -187,31 +187,19 @@ instance IDs.
 ## Run The Actor Examples
 
 ```sh
-cargo build
+just build
 
-cargo run -p strata --bin strata -- check examples/actor_ping.str
-cargo run -p strata --bin strata -- build examples/actor_ping.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
+just run-example actor_ping
 
-cargo run -p strata --bin strata -- check examples/actor_sequence.str
-cargo run -p strata --bin strata -- build examples/actor_sequence.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
+just run-example actor_sequence
 
-cargo run -p strata --bin strata -- check examples/actor_match.str
-cargo run -p strata --bin strata -- build examples/actor_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
+just run-example actor_match
 
-cargo run -p strata --bin strata -- check examples/actor_instances.str
-cargo run -p strata --bin strata -- build examples/actor_instances.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
+just run-example actor_instances
 
-cargo run -p strata --bin strata -- check examples/actor_payloads.str
-cargo run -p strata --bin strata -- build examples/actor_payloads.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
+just run-example actor_payloads
 
-cargo run -p strata --bin strata -- check examples/actor_reply.str
-cargo run -p strata --bin strata -- build examples/actor_reply.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
+just run-example actor_reply
 ```
 
 For `actor_sequence`, the trace should show `Worker` dequeuing `First`, stepping

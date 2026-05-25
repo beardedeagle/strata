@@ -76,10 +76,7 @@ The effect list is `[emit]` because the body uses exactly one effect.
 ## Run It
 
 ```sh
-cargo build
-cargo run -p strata --bin strata -- check examples/hello.str
-cargo run -p strata --bin strata -- build examples/hello.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+just run-example hello
 ```
 
 The program prints:

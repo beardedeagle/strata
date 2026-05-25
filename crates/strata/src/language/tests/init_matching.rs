@@ -197,7 +197,7 @@ fn rejects_init_return_match_arm_statement() {
 
     assert!(
         err.to_string()
-            .contains("init return match arm must not perform statements in this slice")
+            .contains("init return match arm must not perform statements")
     );
 }
 
@@ -309,7 +309,7 @@ fn rejects_nested_init_return_match_arm() {
     let err = check_source(&source).expect_err("nested init return match should fail");
 
     assert!(err.to_string().contains(
-        "process Main init return match arm nested return match is not supported in init in this source slice"
+        "process Main init return match arm nested return match is not supported in init"
     ));
 }
 
@@ -461,7 +461,7 @@ fn rejects_trailing_statement_after_match_body() {
 
     assert!(
         err.to_string()
-            .contains("match body must be the whole function body in this source slice")
+            .contains("match body must be the whole function body")
     );
 }
 
@@ -484,6 +484,6 @@ fn rejects_nested_match_body_syntax() {
 
     assert!(
         err.to_string()
-            .contains("match body must be the whole function body in this source slice")
+            .contains("match body must be the whole function body")
     );
 }

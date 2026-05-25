@@ -11,7 +11,7 @@ pub(crate) const FEATURES: &[Feature] = &[
             Diagnostics => ("docs/src/diagnostics.md", "assignment statements are not supported"),
             NegativeTest => ("crates/strata/src/language/tests/syntax.rs", "rejects_assignment_syntax_in_record_values"),
             NegativeTest => ("crates/strata/src/language/tests/source_function_core.rs", "rejects_source_function_statements"),
-            Documentation => ("docs/src/language-reference.md", "State changes are immutable whole-value transitions"),
+            Documentation => ("docs/src/runtime-reference.md", "State changes are immutable whole-value transitions"),
         ],
     ),
     feature!(
@@ -21,9 +21,9 @@ pub(crate) const FEATURES: &[Feature] = &[
         FutureNonAdmitted,
         REJECTED_SURFACE_REQUIREMENTS,
         [
-            Diagnostics => ("docs/src/diagnostics.md", "match expressions are only admitted ..."),
+            Diagnostics => ("docs/src/diagnostics.md", "match expressions are only supported ..."),
             NegativeTest => ("crates/strata/src/language/tests/syntax.rs", "rejects_general_match_expression_in_step_return_value"),
-            Documentation => ("docs/src/language-reference.md", "Arbitrary/general match expressions outside admitted function"),
+            Documentation => ("docs/src/runtime-reference.md", "Arbitrary/general match expressions outside supported function"),
         ],
     ),
     feature!(
@@ -36,7 +36,7 @@ pub(crate) const FEATURES: &[Feature] = &[
             Diagnostics => ("docs/src/diagnostics.md", "step return match scrutinee ... must be a concrete enum source value binding"),
             NegativeTest => ("crates/strata/src/language/tests/process_return_match.rs", "rejects_step_return_match_over_direct_state"),
             NegativeTest => ("crates/strata/src/language/tests/syntax.rs", "rejects_step_return_match_over_state_parameter"),
-            Documentation => ("docs/src/language-reference.md", "`step return match state`"),
+            Documentation => ("docs/src/runtime-reference.md", "`step return match state`"),
         ],
     ),
     feature!(
@@ -48,7 +48,7 @@ pub(crate) const FEATURES: &[Feature] = &[
         [
             Diagnostics => ("docs/src/diagnostics.md", "init return match arm cannot use payload binding"),
             NegativeTest => ("crates/strata/src/language/tests/init_matching.rs", "rejects_init_return_match_payload_binding_in_returned_state"),
-            Documentation => ("docs/src/language-reference.md", "`init return match` over payload-bearing constructors"),
+            Documentation => ("docs/src/runtime-reference.md", "`init return match` over payload-bearing constructors"),
         ],
     ),
     feature!(
@@ -72,7 +72,7 @@ pub(crate) const FEATURES: &[Feature] = &[
         [
             Diagnostics => ("docs/src/diagnostics.md", "nested for loops are not supported"),
             NegativeTest => ("crates/strata/src/language/tests/process_return_match_arm_for.rs", "rejects_step_return_match_arm_nested_for_each_body"),
-            Documentation => ("docs/src/language-reference.md", "still reject nested runtime `for`"),
+            Documentation => ("docs/src/runtime-reference.md", "still reject nested runtime `for`"),
         ],
     ),
     feature!(
@@ -85,7 +85,7 @@ pub(crate) const FEATURES: &[Feature] = &[
             Diagnostics => ("docs/src/diagnostics.md", "process references must be direct message payloads"),
             NegativeTest => ("crates/strata/src/language/tests/state_payload_values.rs", "rejects_nested_process_ref_message_payload_with_direct_payload_diagnostic"),
             NegativeTest => ("crates/mantle-artifact/src/tests/process_ref_payloads.rs", "validate_rejects_nested_process_ref_payload_template"),
-            Documentation => ("docs/src/language-reference.md", "Process references nested inside record, enum, list, map"),
+            Documentation => ("docs/src/runtime-reference.md", "Process references nested inside record, enum, list, map"),
         ],
     ),
     feature!(
@@ -97,7 +97,7 @@ pub(crate) const FEATURES: &[Feature] = &[
         [
             Diagnostics => ("docs/src/diagnostics.md", "map pattern keys must be static source values"),
             NegativeTest => ("crates/strata/src/language/tests/source_function_collection_patterns/template_keys.rs", "rejects_runtime_dependent_map_key_state_template"),
-            Documentation => ("docs/src/language-reference.md", "Dynamic-key map matching"),
+            Documentation => ("docs/src/runtime-reference.md", "Dynamic-key map matching"),
         ],
     ),
     feature!(

@@ -205,7 +205,7 @@ fn rejects_step_return_match_arm_for_each_body_runtime_if_nested_for_each() {
 
     assert!(
         err.to_string()
-            .contains("nested for loops are not supported in this source slice"),
+            .contains("nested for loops are not supported"),
         "unexpected error: {err}"
     );
 }

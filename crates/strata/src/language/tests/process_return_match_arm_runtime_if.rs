@@ -298,7 +298,7 @@ fn rejects_step_return_match_arm_runtime_if_process_ref_binding() {
 
     assert!(
         err.to_string()
-            .contains("statement-level if branches cannot bind process references"),
+            .contains("statement-level if branches cannot bind local values or process references"),
         "unexpected error: {err}"
     );
 }

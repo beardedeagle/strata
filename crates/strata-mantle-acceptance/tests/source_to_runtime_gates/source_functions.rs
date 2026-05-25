@@ -1,5 +1,7 @@
 use super::support::*;
 
+#[path = "source_functions/local_bindings.rs"]
+mod local_bindings;
 #[path = "source_functions/return_match_arm_action_block.rs"]
 mod return_match_arm_action_block;
 #[path = "source_functions/return_match_arm_bounded_runtime.rs"]

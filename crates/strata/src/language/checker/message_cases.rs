@@ -314,6 +314,7 @@ impl<'a> MessageCaseBuilder<'a> {
                     module: self.module,
                     process_name: Some(&self.process.name),
                     process_functions: &self.process.functions,
+                    process_refs: None,
                     semantic_index: self.semantic_index,
                 };
                 let source_bindings = bindings

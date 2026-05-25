@@ -1,0 +1,42 @@
+module source_local_binding_process_ref_carrier_enum;
+
+enum Phase { Idle, Active }
+record MainState { selected: Phase }
+record WorkerState;
+enum MainMsg { Start, Route(ProcessRef<Worker>) }
+enum WorkerMsg { Ping }
+
+fn route(phase: Phase) -> Phase ! [] ~ [] @det {
+    let copy: MainMsg = Start;
+    return phase;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { selected: route(Active) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+
+    fn step(state: MainState, Route(worker: ProcessRef<Worker>)) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

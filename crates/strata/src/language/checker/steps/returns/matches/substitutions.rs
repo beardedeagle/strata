@@ -115,7 +115,9 @@ fn substitute_step_return_statement(
     bindings: &[StepReturnSubstitution<'_>],
 ) -> Statement {
     match statement {
-        Statement::Emit(_) | Statement::LetProcessRef { .. } => statement,
+        Statement::Emit(_) | Statement::LetValue { .. } | Statement::LetProcessRef { .. } => {
+            statement
+        }
         Statement::ForEach {
             item,
             collection,

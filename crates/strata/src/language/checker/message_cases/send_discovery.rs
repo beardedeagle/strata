@@ -116,7 +116,9 @@ fn discover_send_statement(
             state_payload_bindings,
             context,
         ),
-        Statement::Emit(_) | Statement::LetProcessRef { .. } => Ok(false),
+        Statement::Emit(_) | Statement::LetValue { .. } | Statement::LetProcessRef { .. } => {
+            Ok(false)
+        }
     }
 }
 

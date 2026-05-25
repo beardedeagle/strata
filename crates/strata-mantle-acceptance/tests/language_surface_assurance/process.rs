@@ -198,7 +198,7 @@ pub(crate) const FEATURES: &[Feature] = &[
             PositiveTest => ("crates/strata-mantle-acceptance/tests/source_to_runtime_gates/basic_runtime.rs", "actor_payloads_checks_builds_and_runs_on_mantle"),
             NegativeTest => ("crates/strata/src/language/tests/message_payload_validation/basic_payloads.rs", "rejects_payload_for_unit_message_variant"),
             SourceToRuntimeGate => ("Justfile", "examples/actor_payloads.str"),
-            Documentation => ("docs/src/language-reference.md", "typed message parameter"),
+            Documentation => ("docs/src/runtime-reference.md", "typed message parameter"),
         ],
     ),
     feature!(
@@ -218,7 +218,7 @@ pub(crate) const FEATURES: &[Feature] = &[
             PositiveTest => ("crates/strata-mantle-acceptance/tests/source_to_runtime_gates/basic_runtime.rs", "actor_instances_checks_builds_and_runs_on_mantle"),
             NegativeTest => ("crates/strata/src/language/tests/process_refs.rs", "rejects_duplicate_process_ref_on_same_path"),
             SourceToRuntimeGate => ("Justfile", "examples/actor_instances.str"),
-            Documentation => ("docs/src/language-reference.md", "Lowering emits a process-reference table ID"),
+            Documentation => ("docs/src/runtime-reference.md", "Lowering emits a process-reference table ID"),
         ],
     ),
     feature!(

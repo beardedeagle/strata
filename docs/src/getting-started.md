@@ -47,12 +47,12 @@ and `just install-miri-tools` only when running the nightly fuzz or Miri gates.
 From the repository root:
 
 ```sh
-cargo build
+just build
 ```
 
 This builds the Strata CLI and Mantle runtime CLI. The executable filenames are
-platform-specific, so the commands below use Cargo to run the right binary on
-the local platform.
+platform-specific, so the commands below use repository `just` recipes to run
+the right binary on the local platform.
 
 ## Check A Strata Program
 
@@ -60,7 +60,7 @@ the local platform.
 artifact.
 
 ```sh
-cargo run -p strata --bin strata -- check examples/hello.str
+just strata-check examples/hello.str
 ```
 
 Expected result:
@@ -75,7 +75,7 @@ strata: checked examples/hello.str (module hello, entry Main)
 `target/strata/` by default.
 
 ```sh
-cargo run -p strata --bin strata -- build examples/hello.str
+just strata-build examples/hello.str
 ```
 
 Expected result:
@@ -86,10 +86,10 @@ strata: built examples/hello.str -> target/strata/hello.mta
 
 ## Run The Program
 
-Mantle admits and executes the generated artifact:
+Mantle validates and executes the generated artifact:
 
 ```sh
-cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+just mantle-run target/strata/hello.mta
 ```
 
 Expected output includes:
@@ -103,7 +103,7 @@ mantle: stopped Main normally
 mantle: trace target/strata/hello.observability.jsonl
 ```
 
-The trace path is important. It records what Mantle actually admitted and
+The trace path is important. It records what Mantle actually validated and
 executed.
 
 ## Run The Standard Gate
@@ -119,6 +119,12 @@ For the source-to-runtime acceptance examples only:
 
 ```sh
 just source-to-runtime-gates
+```
+
+For the bounded/property assurance smoke tests:
+
+```sh
+just bounded-assurance-smoke
 ```
 
 For the docs only:

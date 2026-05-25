@@ -174,7 +174,7 @@ fn validate_static_map_key_template(
 ) -> Result<ArtifactValue> {
     checked_static_source_value(template).ok_or_else(|| {
         Error::new(format!(
-            "map value type {expected_type} keys must be static source values in this source slice"
+            "map value type {expected_type} keys must be static source values"
         ))
     })
 }

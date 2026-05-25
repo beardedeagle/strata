@@ -86,18 +86,17 @@ fn validate_source_function_return_enum_match(
         binding_context: PatternBindingContext::Source { owner: &subject },
     };
     for arm in check_payload_sensitive_typed_match_arms(&pattern_context, &match_body.arms)? {
-        if !arm.body.statements.is_empty() {
-            return Err(Error::new(format!(
-                "function {} return match arms must not perform statements",
-                function.name
-            )));
-        }
         let mut arm_bindings = bindings.to_vec();
         if let TypedMatchPattern::Variant {
             bindings: payload_bindings,
             ..
         } = &arm.pattern
         {
+            validate_source_pattern_binding_scope_conflicts(
+                scope,
+                &format!("function {} return match payload binding", function.name),
+                payload_bindings,
+            )?;
             for payload in payload_bindings {
                 if bindings.iter().any(|binding| binding.name == &payload.name) {
                     return Err(Error::new(format!(
@@ -111,11 +110,11 @@ fn validate_source_function_return_enum_match(
                 });
             }
         }
-        validate_source_function_return_expr(
+        validate_source_function_block_values(
             scope,
             function,
             expected_type,
-            &arm.body.returns,
+            arm.body,
             &arm_bindings,
         )?;
     }
@@ -136,13 +135,6 @@ fn validate_source_function_return_record_match(
             function.name, record_decl.name
         )));
     };
-    if !arm.body.statements.is_empty() {
-        return Err(Error::new(format!(
-            "function {} return match arms must not perform statements",
-            function.name
-        )));
-    }
-
     let Pattern::Record { name, fields } = &arm.pattern else {
         return Err(source_function_record_return_match_pattern_error(
             function,
@@ -160,6 +152,14 @@ fn validate_source_function_return_record_match(
     let subject = format!("function {} return match", function.name);
     let pattern_bindings =
         check_record_pattern_bindings(scope.semantic_index, &subject, record_decl, fields)?;
+    validate_source_pattern_binding_scope_conflicts(
+        scope,
+        &format!(
+            "function {} return match record pattern binding",
+            function.name
+        ),
+        &pattern_bindings,
+    )?;
     let mut arm_bindings = bindings.to_vec();
     for binding in &pattern_bindings {
         if bindings
@@ -177,13 +177,7 @@ fn validate_source_function_return_record_match(
         });
     }
 
-    validate_source_function_return_expr(
-        scope,
-        function,
-        expected_type,
-        &arm.body.returns,
-        &arm_bindings,
-    )
+    validate_source_function_block_values(scope, function, expected_type, &arm.body, &arm_bindings)
 }
 
 fn source_function_record_return_match_pattern_error(
@@ -227,12 +221,6 @@ fn validate_source_function_return_collection_match(
     let mut shapes = Vec::new();
     let capacity = collection_pattern_capacity(scope.semantic_index, collection_type)?;
     for arm in &match_body.arms {
-        if !arm.body.statements.is_empty() {
-            return Err(Error::new(format!(
-                "function {} return match arms must not perform statements",
-                function.name
-            )));
-        }
         let mut arm_bindings = bindings.to_vec();
         match &arm.pattern {
             Pattern::Wildcard => {
@@ -252,6 +240,14 @@ fn validate_source_function_return_collection_match(
                     &subject,
                     collection_type,
                     &arm.pattern,
+                )?;
+                validate_source_pattern_binding_scope_conflicts(
+                    scope,
+                    &format!(
+                        "function {} return match collection pattern binding",
+                        function.name
+                    ),
+                    &pattern_bindings,
                 )?;
                 let shape = collection_pattern_shape(
                     scope.module,
@@ -285,11 +281,11 @@ fn validate_source_function_return_collection_match(
                         ty: &binding.ty,
                     });
                 }
-                validate_source_function_return_expr(
+                validate_source_function_block_values(
                     scope,
                     function,
                     expected_type,
-                    &arm.body.returns,
+                    &arm.body,
                     &arm_bindings,
                 )?;
                 continue;
@@ -307,11 +303,11 @@ fn validate_source_function_return_collection_match(
                 )));
             }
         }
-        validate_source_function_return_expr(
+        validate_source_function_block_values(
             scope,
             function,
             expected_type,
-            &arm.body.returns,
+            &arm.body,
             &arm_bindings,
         )?;
     }

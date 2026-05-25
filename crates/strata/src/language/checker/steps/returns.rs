@@ -119,6 +119,7 @@ pub(super) fn preadmit_step_return_state_value(
         module,
         process_name: Some(&process.name),
         process_functions: &process.functions,
+        process_refs: None,
         semantic_index,
     };
     let resolved = resolve_step_return(
@@ -152,6 +153,7 @@ pub(in crate::language::checker) fn preadmit_static_step_return_match_state_valu
         module,
         process_name: Some(&process.name),
         process_functions: &process.functions,
+        process_refs: None,
         semantic_index,
     };
     for state_arg in static_step_return_match_arm_state_args(

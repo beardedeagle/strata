@@ -11,7 +11,7 @@ The normal gate shape is:
 ```
 
 For fail-closed runtime behavior, the source must check and build, and
-`mantle run` must fail only after Mantle admits the artifact and emits trace
+`mantle run` must fail only after Mantle validates the artifact and emits trace
 evidence for the failure. Source-level rejection gates are different: they must
 fail before build/lowering and must not leave a target artifact behind.
 
@@ -36,12 +36,12 @@ The maintained command list belongs in the executable gate definitions:
 - `crates/strata-mantle-acceptance/tests/source_to_runtime_gates.rs` is the root
   integration harness, with focused gate families under
   `crates/strata-mantle-acceptance/tests/source_to_runtime_gates/`.
-- `docs/src/examples.md` owns the curated list of runnable examples and the
-  behavior each one demonstrates.
+- `docs/src/examples.md` owns the curated list of runnable examples. The
+  grouped example pages document the behavior each example demonstrates.
 
 This page intentionally does not enumerate every runtime gate. When a new
 user-visible language or runtime behavior needs source-to-runtime proof, update
-the executable gate and document the example on the examples page.
+the executable gate and document the example in the grouped example pages.
 
 The language surface proof substrate checks that the agreed current-surface
 proof domains map to declared features and that those features point at the
@@ -56,99 +56,67 @@ does not replace this executable gate shape.
 The minimum success gate checks, builds, runs, and traces `hello.str`:
 
 ```sh
-cargo run -p strata --bin strata -- check examples/hello.str
-cargo run -p strata --bin strata -- build examples/hello.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+just run-example hello
 ```
 
 A richer state/payload gate follows the same shape:
 
 ```sh
-cargo run -p strata --bin strata -- check examples/state_payload_match.str
-cargo run -p strata --bin strata -- build examples/state_payload_match.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta
+just run-example state_payload_match
+```
+
+An immutable source computation gate proves sequential source-local bindings are
+resolved before lowering while Mantle executes only typed artifact data:
+
+```sh
+just run-example function_local_bindings
 ```
 
 A selected return-match arm-prefix gate proves source-selected dispatch before
 Mantle executes typed runtime arm actions:
 
 ```sh
-cargo run -p strata --bin strata -- check examples/process_return_match_arm_runtime_if_prefix.str
-cargo run -p strata --bin strata -- build examples/process_return_match_arm_runtime_if_prefix.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_runtime_if_prefix.mta
-cargo run -p strata --bin strata -- check examples/process_return_match_arm_for_prefix.str
-cargo run -p strata --bin strata -- build examples/process_return_match_arm_for_prefix.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_for_prefix.mta
-cargo run -p strata --bin strata -- check examples/process_return_match_arm_for_if_prefix.str
-cargo run -p strata --bin strata -- build examples/process_return_match_arm_for_if_prefix.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_for_if_prefix.mta
-cargo run -p strata --bin strata -- check examples/process_return_match_arm_if_for_prefix.str
-cargo run -p strata --bin strata -- build examples/process_return_match_arm_if_for_prefix.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_if_for_prefix.mta
+just run-example process_return_match_arm_runtime_if_prefix
+just run-example process_return_match_arm_for_prefix
+just run-example process_return_match_arm_for_if_prefix
+just run-example process_return_match_arm_if_for_prefix
 ```
 
-A runtime control-flow gate checks, builds, admits, runs, and traces typed
+A runtime control-flow gate checks, builds, validates, runs, and traces typed
 Mantle execution:
 
 ```sh
-cargo run -p strata --bin strata -- check examples/runtime_guard_noop.str
-cargo run -p strata --bin strata -- build examples/runtime_guard_noop.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guard_noop.mta
-cargo run -p strata --bin strata -- check examples/runtime_nested_if_actions.str
-cargo run -p strata --bin strata -- build examples/runtime_nested_if_actions.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_nested_if_actions.mta
-cargo run -p strata --bin strata -- check examples/runtime_final_if_guarded_loop.str
-cargo run -p strata --bin strata -- build examples/runtime_final_if_guarded_loop.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_guarded_loop.mta
-cargo run -p strata --bin strata -- check examples/runtime_final_if_nested_if_actions.str
-cargo run -p strata --bin strata -- build examples/runtime_final_if_nested_if_actions.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_if_actions.mta
-cargo run -p strata --bin strata -- check examples/runtime_final_if_nested_terminal_if.str
-cargo run -p strata --bin strata -- build examples/runtime_final_if_nested_terminal_if.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_terminal_if.mta
-cargo run -p strata --bin strata -- check examples/runtime_for_each.str
-cargo run -p strata --bin strata -- build examples/runtime_for_each.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta
-cargo run -p strata --bin strata -- check examples/runtime_for_each_empty.str
-cargo run -p strata --bin strata -- build examples/runtime_for_each_empty.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_empty.mta
-cargo run -p strata --bin strata -- check examples/runtime_for_each_if.str
-cargo run -p strata --bin strata -- build examples/runtime_for_each_if.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_if.mta
-cargo run -p strata --bin strata -- check examples/runtime_for_each_nested_if_actions.str
-cargo run -p strata --bin strata -- build examples/runtime_for_each_nested_if_actions.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_nested_if_actions.mta
-cargo run -p strata --bin strata -- check examples/runtime_guarded_for_each.str
-cargo run -p strata --bin strata -- build examples/runtime_guarded_for_each.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_for_each.mta
-cargo run -p strata --bin strata -- check examples/runtime_guarded_ref_loop.str
-cargo run -p strata --bin strata -- build examples/runtime_guarded_ref_loop.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop.mta
-cargo run -p strata --bin strata -- check examples/runtime_guarded_ref_loop_jobs.str
-cargo run -p strata --bin strata -- build examples/runtime_guarded_ref_loop_jobs.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop_jobs.mta
-cargo run -p strata --bin strata -- check examples/runtime_loop_element_projection.str
-cargo run -p strata --bin strata -- build examples/runtime_loop_element_projection.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/runtime_loop_element_projection.mta
+just run-example runtime_guard_noop
+just run-example runtime_nested_if_actions
+just run-example runtime_final_if_guarded_loop
+just run-example runtime_final_if_nested_if_actions
+just run-example runtime_final_if_nested_terminal_if
+just run-example runtime_for_each
+just run-example runtime_for_each_empty
+just run-example runtime_for_each_if
+just run-example runtime_for_each_nested_if_actions
+just run-example runtime_guarded_for_each
+just run-example runtime_guarded_ref_loop
+just run-example runtime_guarded_ref_loop_jobs
+just run-example runtime_loop_element_projection
 ```
 
 A source rejection gate must fail during checking and must not create a target
 artifact:
 
 ```sh
-cargo run -p strata --bin strata -- check examples/failures/effect_authority_missing.str
+just strata-check examples/failures/effect_authority_missing.str
+just strata-check examples/failures/source_local_binding_process_ref_carrier_enum.str
 ```
 
 A runtime fail-closed gate checks and builds successfully, then returns non-zero
 from Mantle after writing trace evidence:
 
 ```sh
-cargo run -p strata --bin strata -- check examples/actor_panic_no_replay.str
-cargo run -p strata --bin strata -- build examples/actor_panic_no_replay.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta
+just run-example actor_panic_no_replay
 ```
 
-Each successful `mantle run` command must admit the generated `.mta`, execute it,
+Each successful `mantle run` command must validate the generated `.mta`, execute it,
 and emit an observability trace under `target/strata/`. Expected-failure gates
 must return non-zero with source diagnostics or runtime failure evidence at the
 layer being tested.

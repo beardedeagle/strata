@@ -204,7 +204,7 @@ impl<'a> Lexer<'a> {
                 }
                 '\\' => {
                     return Err(Error::new(format!(
-                        "string escapes are not supported in this source slice at byte {offset}"
+                        "string escapes are not supported at byte {offset}"
                     )));
                 }
                 _ => {

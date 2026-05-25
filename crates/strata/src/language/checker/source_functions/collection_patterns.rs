@@ -48,6 +48,7 @@ pub(in crate::language::checker::source_functions) fn validate_list_pattern_sour
     semantic_index: &SemanticIndex,
     owner: &str,
     process: Option<&Process>,
+    process_refs: Option<&BTreeMap<Identifier, CheckedProcessId>>,
     functions: &[&Function],
 ) -> Result<()> {
     validate_collection_pattern_source_function_group(
@@ -55,6 +56,7 @@ pub(in crate::language::checker::source_functions) fn validate_list_pattern_sour
         semantic_index,
         owner,
         process,
+        process_refs,
         functions,
         CollectionPatternKind::List,
     )
@@ -65,6 +67,7 @@ pub(in crate::language::checker::source_functions) fn validate_map_pattern_sourc
     semantic_index: &SemanticIndex,
     owner: &str,
     process: Option<&Process>,
+    process_refs: Option<&BTreeMap<Identifier, CheckedProcessId>>,
     functions: &[&Function],
 ) -> Result<()> {
     validate_collection_pattern_source_function_group(
@@ -72,6 +75,7 @@ pub(in crate::language::checker::source_functions) fn validate_map_pattern_sourc
         semantic_index,
         owner,
         process,
+        process_refs,
         functions,
         CollectionPatternKind::Map,
     )
@@ -361,6 +365,7 @@ fn validate_collection_pattern_source_function_group(
     semantic_index: &SemanticIndex,
     owner: &str,
     process: Option<&Process>,
+    process_refs: Option<&BTreeMap<Identifier, CheckedProcessId>>,
     functions: &[&Function],
     kind: CollectionPatternKind,
 ) -> Result<()> {
@@ -377,6 +382,7 @@ fn validate_collection_pattern_source_function_group(
         module,
         process_name: process.map(|process| &process.name),
         process_functions,
+        process_refs,
         semantic_index,
     };
     let collection_capacity = collection_pattern_capacity(semantic_index, &collection_type)?;
@@ -404,6 +410,14 @@ fn validate_collection_pattern_source_function_group(
             &subject,
             &collection_type,
             pattern,
+        )?;
+        validate_source_pattern_binding_scope_conflicts(
+            &scope,
+            &format!(
+                "{owner} function {} collection pattern binding",
+                function.name
+            ),
+            &pattern_bindings,
         )?;
         let shape = collection_pattern_shape(module, semantic_index, &collection_type, pattern)?;
         if let Some(overlap) =

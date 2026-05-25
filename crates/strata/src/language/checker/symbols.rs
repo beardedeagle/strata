@@ -186,6 +186,7 @@ impl SemanticIndex {
                 if let Some(payload_type) = &variant.payload_type {
                     validate_message_payload_type(
                         MessagePayloadTypeContext {
+                            module,
                             symbols: &symbols,
                             types: &types,
                             processes: &processes,
@@ -203,6 +204,7 @@ impl SemanticIndex {
 
         for record in &module.records {
             validate_record_fields(
+                module,
                 &symbols,
                 &types,
                 process_ref_type,
@@ -390,17 +392,16 @@ impl SemanticIndex {
         }
     }
 
-    pub(super) fn is_source_value_type(&self, ty: &TypeRef) -> bool {
-        self.type_decl(ty).is_ok()
-            || validate_source_value_type(
-                &self.symbols,
-                &self.types,
-                self.process_ref_type,
-                self.list_type,
-                self.map_type,
-                ty,
-            )
-            .is_ok()
+    pub(super) fn validate_source_value_type(&self, module: &Module, ty: &TypeRef) -> Result<()> {
+        validate_source_value_type(
+            module,
+            &self.symbols,
+            &self.types,
+            self.process_ref_type,
+            self.list_type,
+            self.map_type,
+            ty,
+        )
     }
 
     pub(super) fn bool_type(&self, module: &Module) -> Result<TypeRef> {

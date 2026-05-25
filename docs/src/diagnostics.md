@@ -2,14 +2,14 @@
 
 Strata diagnostics are intended to reject invalid source close to the layer
 that can explain it. Parser errors describe source shape. Checker errors
-describe semantic rules. Runtime errors describe admitted execution failures.
+describe semantic rules. Runtime errors describe validated execution failures.
 
 ## Reading A Diagnostic
 
 Run:
 
 ```sh
-cargo run -p strata --bin strata -- check examples/hello.str
+just strata-check examples/hello.str
 ```
 
 If checking fails, fix the first reported error first. Later errors may be a
@@ -22,14 +22,14 @@ result of the first invalid shape.
 | `expected record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `record`, `enum`, `fn`, or `proc` after `module`. |
 | `entry process Main is not declared` | The program has no `Main` process. | Add `proc Main ...`. |
 | `uses reserved prefix __strata_checked_` | A source type name collides with internal checked type metadata. | Rename the source type without the reserved prefix. |
-| `checked type_count exceeds Mantle artifact limit` | The checked program needs more distinct artifact types than Mantle admits. | Reduce the number of distinct state, message, payload, and process-reference types. |
+| `checked type_count exceeds Mantle artifact limit` | The checked program needs more distinct artifact types than the Mantle artifact limit allows. | Reduce the number of distinct state, message, payload, and process-reference types. |
 | `process ... must declare type State` | A process is missing its state alias. | Add `type State = StateType;`. |
 | `process ... must declare type Msg` | A process is missing its message alias. | Add `type Msg = MessageEnum;`. |
 | `init must declare no parameters` | `init` has parameters. | Use `fn init() -> StateType ...`. |
 | `init body must not perform statements` | `init` uses `emit`, `spawn`, or `send`. | Return only the initial state. |
-| `match scrutinee ... fieldless enum variant` | An `init` whole-body match or `init return match` tries to match a non-constructor name or a payload-bearing constructor. | Match one fieldless enum constructor in this init slice. |
+| `match scrutinee ... fieldless enum variant` | An `init` whole-body match or `init return match` tries to match a non-constructor name or a payload-bearing constructor. | Match one fieldless enum constructor in `init`. |
 | `init return match ...` | An `init return match` is non-exhaustive, overlaps an earlier arm, has an unreachable wildcard, or nests another return match in an arm. | Cover each variant once or use one reachable `_`, and return one whole state value from each arm. |
-| `init return match arm cannot use payload binding ... in returned state` | An `init return match` arm tries to materialize an arm payload binding into the initial state. | Return a whole state value that does not depend on match-arm payload bindings in this init slice. |
+| `init return match arm cannot use payload binding ... in returned state` | An `init return match` arm tries to materialize an arm payload binding into the initial state. | Return a whole state value that does not depend on match-arm payload bindings. |
 | `step must declare state parameter and message pattern` | `step` has the wrong parameter count. | Use `state: StateType, MessageConstructor` or `state: StateType, _`. |
 | `step second parameter must be a message constructor pattern or wildcard pattern` | The second `step` parameter is a typed binding instead of a message pattern. | Replace `msg: MsgType` with a message constructor or `_`, or use a whole-body `match msg`. |
 | `step returns ..., expected ProcResult<...>` | `step` return type is wrong. | Return `ProcResult<StateType>`. |
@@ -37,7 +37,7 @@ result of the first invalid shape.
 | `step return match scrutinee ... requires a discovered concrete message payload case` | A `step return match` tries to match a message payload binding from an unguarded transition. | Use a payload-sensitive pattern that lowers to exact discovered payload guards, or move the dispatch to whole-body `match msg`. |
 | `step return match arm cannot bind process reference ...` | A `step return match` arm tries to acquire arm-local authority with `spawn`. | Bind process references before `return match`; selected arm prefixes may use `emit`, in-scope direct `send`, statement-level runtime `if`, and bounded runtime `for` actions. |
 | `step return match arm cannot perform final-position runtime if` | A `step return match` arm tries to use terminal runtime branching. | Move runtime branching outside the return-match arm, or split the behavior into explicit step clauses / whole-body dispatch. |
-| `step return match arm nested return match is not supported` | A `step return match` arm tries to nest another `return match`. | Keep the selected arm as admitted typed action statements followed by one terminal `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
+| `step return match arm nested return match is not supported` | A `step return match` arm tries to nest another `return match`. | Keep the selected arm as typed action statements followed by one terminal `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step return match arm must return Stop..., Continue..., or Panic...` | A `step return match` arm returns a bare state value or another unsupported result form. | Return one whole state value inside `Continue(...)`, `Stop(...)`, or `Panic(...)` from every arm. |
 | `step body must return Stop..., Continue..., or Panic...` | A `step` returns a bare state value or an unsupported result form. | Return one whole state value inside `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step may-behaviors must be empty` | The `~ [...]` list is not empty. | Use `~ []`. |
@@ -56,17 +56,17 @@ result of the first invalid shape.
 | `loop element binding ... is declared more than once` | A loop-element record pattern maps multiple fields to the same local binding. | Use one distinct immutable binding name per projected field. |
 | `loop element binding ... cannot have process reference type` | A loop-element record pattern projects a `ProcessRef<T>` field as ordinary data. | Keep process references out of records, lists, maps, state, and projected loop data. |
 | `loop element binding ... conflicts ...` | A loop element or projected field binding reuses a reserved name, source binding, process reference, process declaration, type, or constructor. | Choose a distinct immutable binding name for the loop body. |
-| `for loop body cannot bind process reference` | A loop body tries to create new authority with `spawn`. | Bind process references before the loop and use only admitted linear loop body effects. |
-| `nested for loops are not supported` | A loop body contains another loop. | Flatten the runtime payload shape or split the behavior into separate admitted steps for this slice. |
+| `for loop body cannot bind process reference` | A loop body tries to create new authority with `spawn`. | Bind process references before the loop and keep the loop body to checked linear effects. |
+| `nested for loops are not supported` | A loop body contains another loop. | Flatten the runtime payload shape or split the behavior into separate steps. |
 | `assignment statements are not supported` | Source code uses assignment-style mutation. | Bind immutable values through declarations or return a whole replacement state value. |
 | `statement-level if branches must not return` | An effect-only runtime branch tries to terminate the step. | Put the final `return` after the statement-level branch, or use final-position runtime `if` when each branch must return. |
-| `statement-level if branches cannot bind process references` | A branch tries to introduce branch-local authority with `spawn`. | Bind process references before the branch and use only admitted branch effects. |
-| `statement-level if action nesting exceeds maximum depth` | Direct statement-level runtime branch nesting goes beyond the single admitted nested layer. | Keep direct branch actions to an outer branch plus one nested branch. |
-| `statement-level if branches cannot both be empty` | A statement-level runtime branch has no admitted actions on either side. | Put an admitted action, such as `emit`, `send`, or a bounded `for` loop, in one branch. Omitted `else` and explicit `else {}` are allowed only when the other branch has admitted work. |
-| `runtime if branch cannot bind process references` | A checked or admitted runtime branch tries to introduce branch-local authority. | Bind process references before the branch and keep branch bodies to declared effects. |
-| `runtime if action nesting exceeds maximum depth` | A checked or admitted runtime branch action exceeds the direct nesting bound. | Keep runtime branch actions to an outer branch plus one nested branch. |
+| `statement-level if branches cannot bind local values or process references` | A runtime branch tries to introduce branch-local source computation or authority. | Use source-local bindings only in pure source functions, bind process references before the branch, and keep runtime branches to checked branch effects. |
+| `statement-level if action nesting exceeds maximum depth` | Direct statement-level runtime branch nesting goes beyond the single supported nested layer. | Keep direct branch actions to an outer branch plus one nested branch. |
+| `statement-level if branches cannot both be empty` | A statement-level runtime branch has no actions on either side. | Put an action, such as `emit`, `send`, or a bounded `for` loop, in one branch. Omitted `else` and explicit `else {}` are allowed only when the other branch has work. |
+| `runtime if branch cannot bind process references` | A checked runtime branch tries to introduce branch-local authority. | Bind process references before the branch and keep branch bodies to declared effects. |
+| `runtime if action nesting exceeds maximum depth` | A checked runtime branch action exceeds the direct nesting bound. | Keep runtime branch actions to an outer branch plus one nested branch. |
 | `next_state runtime if nesting exceeds maximum depth` | Source, checked IR, artifact admission, or loaded-runtime admission sees a third terminal runtime branch. | Keep terminal next-state runtime branching to an outer final-position branch plus one direct nested final-position branch. |
-| `runtime if action branches cannot both be empty` | A decoded or constructed artifact tries to admit a runtime branch action with no actions in either branch. | Keep no-op branches explicit in the typed artifact, but ensure the sibling branch has at least one admitted action. |
+| `runtime if action branches cannot both be empty` | A decoded or constructed artifact tries to validate a runtime branch action with no actions in either branch. | Keep no-op branches explicit in the typed artifact, but ensure the sibling branch has at least one action. |
 
 ## Source Function Errors
 
@@ -74,23 +74,27 @@ result of the first invalid shape.
 | --- | --- | --- |
 | `function ... conflicts with a declared type or value constructor` | A source function name collides with a type or enum constructor. | Choose a distinct function name. |
 | `function ... must declare exactly one parameter` | A normal source function uses an arity outside the current buildable call form. | Use one typed binding parameter or one pattern parameter clause. |
-| `function ... must use a declared record, enum, list, or map type` | A source function parameter or return type names something outside the source value type set. | Use a declared `record` or `enum` type, or `List<T,N>` / `Map<K,V,N>` over source value types. |
+| `function ... must use a declared record, enum, list, or map type without process-reference authority` | A source function parameter or return type names something outside the source value type set, including an enum that carries `ProcessRef<T>` authority. | Use a declared `record` or `enum` type, or `List<T,N>` / `Map<K,V,N>` over source value types that do not contain process references. |
 | `function ... must not declare effects` / `function ... must not perform statements` | A normal source function tries to perform runtime behavior. | Keep normal functions pure; perform `emit`, `spawn`, and `send` only in `step`. |
 | `function ... may-behaviors must be empty` / `function ... must be deterministic` | A normal source function is not in the deterministic buildable subset. | Use `~ [] @det`. |
+| `source function parameter ... conflicts ...` | A source function binding parameter reuses a process-reference binding, type, constructor, process, or source function name. | Choose a distinct immutable parameter name. |
+| `source-local binding ... conflicts ...` | A pure source function binding reuses a parameter, pattern binding, prior local binding, process-reference binding, type, constructor, process, or source function name. | Choose a distinct immutable binding name. |
+| `function ... source-local binding ... must use a declared record, enum, list, or map type without process-reference authority` | A source-local binding annotation is not a source value type, such as `ProcessRef<T>`, an enum that carries `ProcessRef<T>`, or an unknown type. | Bind only records, enums, `List<T,N>`, or `Map<K,V,N>` over source value types that do not contain process references. |
+| `source-local binding ... value must produce ...` | A source-local binding right-hand side is unknown, impure, or does not match the annotated type. | Use a pure source value expression with the exact annotated source value type. |
 | `function ... is not declared` | A value expression calls an unknown function. | Declare a module function or process-local function with that name. |
 | `function ... returns ..., expected ...` | The function return type does not match the value position where it is called. | Call a function returning the expected type or change the annotation. |
 | `source function call cycle ... is not supported` | Source function calls are recursive, but pure functions are expanded before lowering and have no recursion model. | Remove the cycle; pass whole values through non-recursive functions. |
 | `if condition requires enum Bool { False, True }` | A source conditional is used without the explicit fieldless Bool contract. | Declare `enum Bool { False, True }`. |
 | `if condition must have type Bool` | A source conditional condition resolves to a non-Bool source value. | Return or pass `True` or `False` from the declared `Bool` enum. |
 | `if then branch must produce ...` / `if else branch must produce ...` | A conditional branch does not match the expected source value type. | Return the same source value type from both branches. |
-| `if condition requires a concrete Bool value` | A pure source conditional condition remains runtime-bound after source function expansion. | Use a concrete Bool value for source-level `if`, or use an admitted runtime `if` form in a `step` body. |
-| `if branches are pure value expressions and must not perform statements` | A conditional branch contains `emit`, `let`, `send`, or `return`. | Keep branch bodies to one source value expression and move effects to admitted `step` forms. |
-| `source function ... return-if ... branch must not perform statements` | A braced source-function return branch tries to perform `emit`, `send`, `spawn`, a runtime loop, or another statement before returning. | Keep source functions pure; use only terminal pure returns in braced source-function conditionals. |
+| `if condition requires a concrete Bool value` | A pure source conditional condition remains runtime-bound after source function expansion. | Use a concrete Bool value for source-level `if`, or use runtime `if` in a `step` body. |
+| `if branches are pure value expressions and must not perform statements` | A conditional branch contains `emit`, `let`, `send`, or `return`. | Keep branch bodies to one source value expression and move effects to supported `step` forms. |
+| `source function ... return-if ... branch must not perform statements` | A braced source-function return branch tries to perform `emit`, `send`, `spawn`, a runtime loop, or another runtime statement before returning. | Keep source functions pure; use only immutable source-local bindings before the terminal pure return. |
 | `equality operands must have the same type` | A `==` or `!=` expression compares values of different checked types. | Compare two `Bool` values or two fieldless values from the same enum. |
-| `equality operands must be Bool or fieldless enum values` | A `==` or `!=` operand is outside the admitted equality surface. | Use `Bool` or a payload-free enum value; records, lists, maps, strings, and nested expressions are not equality operands in this slice. |
-| `process-reference equality is not supported` | A `==` or `!=` expression compares process-reference authority. | Keep process references as explicit authority handles; do not branch on reference identity in this slice. |
-| `list and map equality are not supported in this source slice` | A `==` or `!=` expression tries to compare a collection type. | Compare an explicit `Bool` or payload-free enum predicate instead. |
-| `record equality is not supported in this source slice` | A `==` or `!=` expression tries to compare a record value. | Compare an explicit `Bool` or payload-free enum predicate instead. |
+| `equality operands must be Bool or fieldless enum values` | A `==` or `!=` operand is outside the equality surface. | Use `Bool` or a payload-free enum value; records, lists, maps, strings, and nested expressions are not equality operands. |
+| `process-reference equality is not supported` | A `==` or `!=` expression compares process-reference authority. | Keep process references as explicit authority handles; do not branch on reference identity. |
+| `list and map equality are not supported` | A `==` or `!=` expression tries to compare a collection type. | Compare an explicit `Bool` or payload-free enum predicate instead. |
+| `record equality is not supported` | A `==` or `!=` expression tries to compare a record value. | Compare an explicit `Bool` or payload-free enum predicate instead. |
 | `equality type ... must not declare payload-bearing enum variants` | A `==` or `!=` expression targets an enum that can carry payload data. | Use a payload-free enum for equality, or add an explicit function/match shape rather than payload equality. |
 | `boolean ! operand must produce Bool` | A `!` predicate operand resolves to a non-Bool value. | Apply `!` only to `Bool`, typed equality, or nested Boolean predicate expressions. |
 | `left operand of && must produce Bool` / `right operand of || must produce Bool` | A `&&` or `||` operand resolves to a non-Bool value; the diagnostic names the failing operator. | Compose only `Bool`, typed equality, or nested Boolean predicate expressions. |
@@ -104,7 +108,7 @@ result of the first invalid shape.
 | `record pattern ... has no field ...` | A source function record pattern names a field outside the matched record. | Bind a declared field from the record. |
 | `record pattern ... binds field ... more than once` | A source function record pattern repeats one field. | Bind each record field at most once. |
 | `record pattern binding ... is declared more than once` | A source function record pattern binds two fields to the same local name. | Use one distinct immutable binding name per field. |
-| `record pattern binding ... conflicts ...` | A source function record pattern binding reuses a reserved, process, type, or constructor name. | Choose a distinct immutable binding name. |
+| `record pattern binding ... conflicts ...` | A source function record pattern binding reuses a reserved, process, process-reference binding, source function, type, or constructor name. | Choose a distinct immutable binding name. |
 | `requires a concrete record value argument` | A record destructuring function or function match is trying to destructure a value that is not concrete after source function expansion. | Pass a concrete record value into the function or match a source binding that resolves to one. |
 | `requires a concrete list value argument` / `requires a concrete map value argument` | A collection destructuring function or function match is trying to destructure a value that is not concrete after source function expansion. | Pass a concrete `List[...]` or `Map[...]` value into the function, or match a source binding that resolves to one. |
 | `map pattern duplicates key ...` / `map value ... duplicates key ...` | A map pattern or map value repeats the same canonical key. | Keep each map key once. |
@@ -114,19 +118,19 @@ result of the first invalid shape.
 | `subset map pattern must declare at least one key` | A subset map pattern used `Map[..]`, which is equivalent to a map-specific catchall and binds nothing. | Use `_` for catchall behavior or list at least one static key before `..`. |
 | `map rest pattern must declare at least one key` | A rest-binding map pattern used `Map[..rest]`, which would bind the original map without proving any key is present. | List at least one static key before `..rest`. |
 | `map rest binding cannot be a wildcard` | A map rest pattern used `.._`, which would look like a binding while intentionally discarding the remainder. | Use `..` to ignore the remainder or `..rest` to bind it. |
-| `map payload pattern keys must be static source values` / `map pattern keys must be static source values` | A map payload or function pattern tries to derive a key from a runtime binding such as current `state` or a payload value. | Use static source keys in this slice; model dynamic-key dictionaries separately once key-set IFC semantics exist. |
-| `map value type ... keys must be static source values` | A runtime-bound map value tries to derive a map key from a payload or state binding. | Use static source keys in this slice; model dynamic-key dictionaries separately once key-set IFC semantics exist. |
-| `collection pattern binding ... conflicts ...` | A list or map function pattern binding reuses an existing source value binding or declared value name. | Choose a distinct immutable binding name. |
+| `map payload pattern keys must be static source values` / `map pattern keys must be static source values` | A map payload or function pattern tries to derive a key from a runtime binding such as current `state` or a payload value. | Use static source keys; model dynamic-key dictionaries separately once key-set IFC semantics exist. |
+| `map value type ... keys must be static source values` | A runtime-bound map value tries to derive a map key from a payload or state binding. | Use static source keys; model dynamic-key dictionaries separately once key-set IFC semantics exist. |
+| `collection pattern binding ... conflicts ...` | A list or map function pattern binding reuses an existing source value binding, process-reference binding, source function, or declared value name. | Choose a distinct immutable binding name. |
 | `list payload pattern must bind at least one value` / `map payload pattern must bind at least one value` | A constructor payload pattern tries to use a collection shape test without binding any projected value. | Bind at least one immutable element/value, or use the message constructor without payload destructuring when the payload can be ignored. |
 | `match record pattern ... must declare exactly one arm` | A source function whole-body match over a record tries to use enum-style multi-arm dispatch. | Use one record destructuring arm for the matched record type. |
 | `match over record ... cannot use a wildcard pattern` | A source function whole-body match over a record tries to use `_`. | Use the record destructuring pattern for the matched record type. |
-| `match record pattern binding ... conflicts ...` | A source function whole-body record match binding reuses an existing source value binding. | Choose a distinct immutable binding name. |
+| `match record pattern binding ... conflicts ...` | A source function whole-body record match binding reuses an existing source value binding, process-reference binding, or source function name. | Choose a distinct immutable binding name. |
 | `return match scrutinee ... must be a source value binding` | A function return-match tries to match a name that is not an in-scope immutable source value. | Match the function parameter or a payload binding introduced by an enclosing source match. |
 | `return match must handle variant ...` | A function return-match is non-exhaustive. | Add the missing constructor arm or one `_` fallback. |
 | `return match record pattern ... must declare exactly one arm` | A function return-match over a record tries to use enum-style multi-arm dispatch. | Use one record destructuring arm for the matched record type. |
-| `return match record pattern binding ... conflicts ...` | A function return-match record binding reuses an existing source value binding. | Choose a distinct immutable binding name. |
+| `return match record pattern binding ... conflicts ...` | A function return-match record binding reuses an existing source value binding, process-reference binding, or source function name. | Choose a distinct immutable binding name. |
 | `payload ... has type ..., expected ...` | A source function or step payload binding annotation does not match the constructor payload type. | Use the declared payload type. |
-| `match payload binding ... conflicts with an existing source value binding` | A source function match arm reuses the function parameter name for a payload binding. | Use a distinct immutable payload binding name. |
+| `match payload binding ... conflicts ...` | A source function match arm reuses a parameter, process-reference binding, or source function name for a payload binding. | Use a distinct immutable payload binding name. |
 | `value ... is not a variant of enum ...` | A payload-constructor expression names a constructor outside the expected enum. | Use a constructor from the expected enum or call a declared function. |
 | `enum variant ... requires a payload` / `does not accept a payload` | A payload-bearing constructor was used as a fieldless value, or a fieldless constructor was called with a payload. | Match the constructor's declared payload shape. |
 
@@ -145,7 +149,7 @@ result of the first invalid shape.
 | `step pattern ... has no discovered payload case` | A step payload predicate does not correspond to a discovered concrete payload case. | Use a concrete payload case that the checker can discover from sends and constructors. |
 | `payload-sensitive step pattern for message ... has no discovered payload case for wildcard fallback` / `payload-sensitive state match step pattern for message ... has no discovered payload case for wildcard fallback` | A wildcard fallback is paired with payload-sensitive step signatures or state-match clauses, but the checker did not discover any concrete payload case for the wildcard to lower. | Send or construct the concrete payload case before it is handled, remove the fallback, or use explicit discovered payload cases. |
 | `match body must be the whole function body` | A `match msg` appears after another statement or has trailing body statements. | Use one whole-body `match msg` form or step parameter patterns. |
-| `match expressions are only admitted ...` | A general `match` is used inside a value expression such as a result constructor argument. | Use an admitted whole-body `match`, `return match`, step parameter pattern, or function return-match form. |
+| `match expressions are only supported ...` | A general `match` is used inside a value expression such as a result constructor argument. | Use a supported whole-body `match`, `return match`, step parameter pattern, or function return-match form. |
 | `match step must declare a typed message parameter` | A match `step` uses a parameter pattern instead of `msg: MsgType`. | Use `fn step(state: StateType, msg: MsgType)`. |
 | `match scrutinee ... must be the step message parameter` | The `match` scrutinee is not the typed message parameter. | Match the declared message parameter, usually `match msg`. |
 | `state match step must use a match body` | A `match state` step was parsed in a non-match body shape. | Make `match state { ... }` the whole step body. |
@@ -172,7 +176,7 @@ result of the first invalid shape.
 
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
-| `match scrutinee ... is not a fieldless enum variant` | An `init` match uses a scrutinee that is not a fieldless enum constructor in this source slice. | Match a declared fieldless enum constructor. |
+| `match scrutinee ... is not a fieldless enum variant` | An `init` match uses a scrutinee that is not a fieldless enum constructor. | Match a declared fieldless enum constructor. |
 | `match pattern ... is not a variant of enum ...` | A match arm names a constructor outside the scrutinee enum. | Use a constructor from the matched enum. |
 | `init match must handle variant` | An `init` match is non-exhaustive. | Add an arm for the missing variant or one `_` arm. |
 | `init match declares duplicate pattern` | More than one arm handles the same constructor. | Keep one arm per constructor. |
@@ -189,8 +193,8 @@ result of the first invalid shape.
 | `record value fields use ':'` | A record value used assignment syntax. | Use `field: value`, not `field = value`. |
 | `process reference payloads are not valid state values` / `process reference templates are not valid next-state values` | A state value or next-state template tries to embed runtime process authority. | Keep process references in direct message payloads; process states must be immutable data values. |
 | `state value state conflicts` | A state enum variant is named `state`. | Rename the variant. |
-| `current state payload template requires a payload-bearing state` | An artifact or checked transition uses a state-payload template without a payload-bearing current state guard. | Ensure the transition is keyed by an admitted payload-bearing state value. |
-| `current_state id ... is not a valid state value` / `is not a loaded state value` | An artifact transition references a current state outside the admitted state table. | Emit only admitted state IDs from lowering; reject or regenerate invalid artifacts. |
+| `current state payload template requires a payload-bearing state` | An artifact or checked transition uses a state-payload template without a payload-bearing current state guard. | Ensure the transition is keyed by a checked payload-bearing state value. |
+| `current_state id ... is not a valid state value` / `is not a loaded state value` | An artifact transition references a current state outside the loaded state table. | Emit only typed state IDs from lowering; reject or regenerate invalid artifacts. |
 
 ## Process And Mailbox Errors
 
@@ -204,7 +208,7 @@ result of the first invalid shape.
 | `duplicates process reference id` | A transition binds the same reference twice. | Use two distinct references or bind once. |
 | `mailbox would exceed bound` | A send would overflow the target mailbox. | Increase the mailbox bound or send fewer messages before the target runs. |
 | `would retain ... unhandled message` | A process can stop while messages remain in its mailbox. | Continue until queued messages are handled or avoid queuing them. |
-| `mailbox_bound must be no greater than` | The mailbox bound exceeds the admitted limit. | Lower the bound. |
+| `mailbox_bound must be no greater than` | The mailbox bound exceeds the validated limit. | Lower the bound. |
 
 ## Runtime Errors
 
@@ -216,14 +220,14 @@ budget exhaustion.
 Use the source gate first:
 
 ```sh
-cargo run -p strata --bin strata -- check path/to/program.str
-cargo run -p strata --bin strata -- build path/to/program.str
+just strata-check path/to/program.str
+just strata-build path/to/program.str
 ```
 
 Then run Mantle:
 
 ```sh
-cargo run -p mantle-runtime --bin mantle -- run target/strata/program.mta
+just mantle-run target/strata/program.mta
 ```
 
 If source checking passes but Mantle rejects an artifact, inspect the artifact

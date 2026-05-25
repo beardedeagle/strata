@@ -314,7 +314,7 @@ proc Main mailbox bounded(1) {
 
     assert!(
         err.to_string().contains(
-            "process Main step pattern map payload pattern keys must be static source values of type Phase in this source slice"
+            "process Main step pattern map payload pattern keys must be static source values of type Phase"
         ),
         "unexpected error: {err}"
     );

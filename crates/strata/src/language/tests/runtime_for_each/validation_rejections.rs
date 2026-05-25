@@ -194,7 +194,7 @@ fn runtime_for_each_if_rejects_spawn_inside_loop_branch() {
     assert!(
         error
             .to_string()
-            .contains("statement-level if branches cannot bind process references"),
+            .contains("statement-level if branches cannot bind local values or process references"),
         "{error}"
     );
 }

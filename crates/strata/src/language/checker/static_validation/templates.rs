@@ -92,7 +92,7 @@ fn validate_next_state_at_depth(
         } => {
             if next_state_if_depth >= MAX_NEXT_STATE_IF_ELSE_DEPTH {
                 return Err(Error::new(format!(
-                    "process {} next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH} in this checked slice",
+                    "process {} next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH} in the checked surface",
                     process.debug_name()
                 )));
             }

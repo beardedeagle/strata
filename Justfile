@@ -63,6 +63,20 @@ performance-smoke:
 build:
     cargo +{{stable_toolchain}} build
 
+strata-check source:
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check "{{source}}"
+
+strata-build source:
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build "{{source}}"
+
+mantle-run artifact:
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "{{artifact}}"
+
+run-example name:
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check "examples/{{name}}.str"
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build "examples/{{name}}.str"
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "target/strata/{{name}}.mta"
+
 metadata-check:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -122,6 +136,13 @@ toolchain-policy-check:
         exit 1
     fi
 
+    project_cargo_regex='(^|[[:space:]])cargo ([+][[:alnum:]_.-]+[[:space:]]+)?(run|test|clippy|check|build)([[:space:]]|$)'
+    if git grep --untracked -n -E "$project_cargo_regex" -- README.md docs; then
+        echo "Error: public docs must route project commands through just recipes." >&2
+        echo "Add or use a Justfile recipe instead of documenting raw cargo run/test/check/build/clippy commands." >&2
+        exit 1
+    fi
+
     echo "Toolchain policy OK: standard gates use stable and nightly gates are explicit."
 
 source-to-runtime-gates: source-to-runtime-success-gates source-to-runtime-failure-gates
@@ -154,6 +175,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_if_else.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_if_else.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_if_else.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_local_bindings.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_local_bindings.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_local_bindings.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match.mta
@@ -296,11 +320,15 @@ source-to-runtime-failure-gates: build
     trace="target/strata/actor_panic_no_replay.observability.jsonl"
     effect_authority_stderr="$(mktemp)"
     function_return_if_stderr="$(mktemp)"
+    source_local_ref_stderr="$(mktemp)"
+    source_local_ref_carrier_stderr="$(mktemp)"
+    source_local_ref_shadow_stderr="$(mktemp)"
+    source_param_ref_shadow_stderr="$(mktemp)"
     arm_nested_for_stderr="$(mktemp)"
     arm_excessive_if_stderr="$(mktemp)"
     arm_final_if_excessive_if_stderr="$(mktemp)"
     run_stderr="$(mktemp)"
-    trap 'rm -f "$effect_authority_stderr" "$function_return_if_stderr" "$arm_nested_for_stderr" "$arm_excessive_if_stderr" "$arm_final_if_excessive_if_stderr" "$run_stderr"' EXIT
+    trap 'rm -f "$effect_authority_stderr" "$function_return_if_stderr" "$source_local_ref_stderr" "$source_local_ref_carrier_stderr" "$source_local_ref_shadow_stderr" "$source_param_ref_shadow_stderr" "$arm_nested_for_stderr" "$arm_excessive_if_stderr" "$arm_final_if_excessive_if_stderr" "$run_stderr"' EXIT
 
     if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/effect_authority_missing.str 2>"$effect_authority_stderr"; then
         echo "Error: effect_authority_missing was expected to fail source effect authority checks." >&2
@@ -320,11 +348,47 @@ source-to-runtime-failure-gates: build
         cat "$function_return_if_stderr" >&2
         exit 1
     fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/source_local_binding_process_ref.str 2>"$source_local_ref_stderr"; then
+        echo "Error: source_local_binding_process_ref was expected to fail source-local binding checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'source-local binding worker_local must use a declared record, enum, list, or map type' "$source_local_ref_stderr"; then
+        echo "Error: source_local_binding_process_ref failed for an unexpected reason." >&2
+        cat "$source_local_ref_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/source_local_binding_process_ref_carrier_enum.str 2>"$source_local_ref_carrier_stderr"; then
+        echo "Error: source_local_binding_process_ref_carrier_enum was expected to fail source-local binding checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'source-local binding copy must use a declared record, enum, list, or map type without process-reference authority' "$source_local_ref_carrier_stderr"; then
+        echo "Error: source_local_binding_process_ref_carrier_enum failed for an unexpected reason." >&2
+        cat "$source_local_ref_carrier_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/source_local_binding_process_ref_shadow.str 2>"$source_local_ref_shadow_stderr"; then
+        echo "Error: source_local_binding_process_ref_shadow was expected to fail source-local binding checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'source-local binding worker conflicts with a process reference binding' "$source_local_ref_shadow_stderr"; then
+        echo "Error: source_local_binding_process_ref_shadow failed for an unexpected reason." >&2
+        cat "$source_local_ref_shadow_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/source_function_parameter_process_ref_shadow.str 2>"$source_param_ref_shadow_stderr"; then
+        echo "Error: source_function_parameter_process_ref_shadow was expected to fail source function parameter checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'source function parameter worker conflicts with a process reference binding' "$source_param_ref_shadow_stderr"; then
+        echo "Error: source_function_parameter_process_ref_shadow failed for an unexpected reason." >&2
+        cat "$source_param_ref_shadow_stderr" >&2
+        exit 1
+    fi
     if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/process_return_match_arm_nested_for.str 2>"$arm_nested_for_stderr"; then
         echo "Error: process_return_match_arm_nested_for was expected to fail source loop checks." >&2
         exit 1
     fi
-    if ! grep -q 'nested for loops are not supported in this source slice' "$arm_nested_for_stderr"; then
+    if ! grep -q 'nested for loops are not supported' "$arm_nested_for_stderr"; then
         echo "Error: process_return_match_arm_nested_for failed for an unexpected reason." >&2
         cat "$arm_nested_for_stderr" >&2
         exit 1
@@ -373,7 +437,9 @@ source-to-runtime-failure-gates: build
         exit 1
     fi
 
-quality: fmt-check check cfg-check test lint performance-smoke metadata-check toolchain-policy-check docs language-surface-assurance source-to-runtime-gates diff-check
+quality: fmt-check check cfg-check test lint performance-smoke metadata-check toolchain-policy-check docs assurance source-to-runtime-gates diff-check
+
+assurance: language-surface-assurance bounded-assurance-smoke
 
 language-surface-assurance:
     cargo +{{stable_toolchain}} test -p strata-mantle-acceptance --test language_surface_assurance
@@ -382,6 +448,7 @@ bounded-assurance-smoke:
     cargo +{{stable_toolchain}} test -p strata process_return_match_arm_bounded_assurance --lib
     cargo +{{stable_toolchain}} test -p strata process_return_match_arm_prefix_properties --lib
     cargo +{{stable_toolchain}} test -p strata source_function_if_else --lib
+    cargo +{{stable_toolchain}} test -p strata source_function_local_bindings --lib
     cargo +{{stable_toolchain}} test -p strata-mantle-acceptance process_return_match_arm_bounded_runtime --test source_to_runtime_gates
     cargo +{{stable_toolchain}} test -p strata-mantle-acceptance process_return_match_arm_action_block --test source_to_runtime_gates
 
@@ -493,6 +560,7 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p strata parses_and_checks_hello
     cargo +{{nightly_toolchain}} miri test -p strata checks_source_function_subset_map_patterns
     cargo +{{nightly_toolchain}} miri test -p strata parses_checks_and_lowers_source_function_braced_return_if_else
+    cargo +{{nightly_toolchain}} miri test -p strata parses_checks_and_lowers_immutable_source_local_bindings
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_uniform_arm_prefix_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_selected_arm_action_block_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink

@@ -181,7 +181,7 @@ fn canonical_map_pattern_key(
 ) -> Result<ArtifactValue> {
     canonical_source_value_with_bindings(module, semantic_index, key_type, key, &[]).map_err(|_| {
         Error::new(format!(
-            "{subject} map pattern keys must be static source values of type {key_type} in this source slice"
+            "{subject} map pattern keys must be static source values of type {key_type}"
         ))
     })
 }

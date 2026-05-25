@@ -401,7 +401,7 @@ proc Main mailbox bounded(1) {
     }
 }
 "#,
-            "record equality is not supported in this source slice",
+            "record equality is not supported",
         ),
         (
             r#"
@@ -428,7 +428,7 @@ proc Main mailbox bounded(1) {
     }
 }
 "#,
-            "list and map equality are not supported in this source slice",
+            "list and map equality are not supported",
         ),
         (
             r#"
@@ -456,7 +456,7 @@ proc Main mailbox bounded(1) {
     }
 }
 "#,
-            "list and map equality are not supported in this source slice",
+            "list and map equality are not supported",
         ),
     ] {
         let err = check_source(source).expect_err("bound invalid equality operand should fail");

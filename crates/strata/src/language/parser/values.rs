@@ -49,9 +49,7 @@ impl Parser {
         if let Some(operator) = self.consume_value_equality_operator() {
             let right = self.parse_value_unary_expr_with_depth(self.next_value_depth(depth)?)?;
             if self.peek_value_equality_operator() {
-                return Err(self.error_here(
-                    "chained equality expressions are not supported in this source slice",
-                ));
+                return Err(self.error_here("chained equality expressions are not supported"));
             }
             return Ok(ValueExpr::Equality {
                 operator,
@@ -90,7 +88,7 @@ impl Parser {
         }
         if self.peek_keyword("match") {
             return Err(self.error_here(
-                "match expressions are only admitted as whole function bodies or return match expressions in this source slice",
+                "match expressions are only supported as whole function bodies or return match expressions",
             ));
         }
         if self.peek_keyword("if") {

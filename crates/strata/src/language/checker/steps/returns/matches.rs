@@ -130,13 +130,13 @@ fn validate_step_return_match_arm(
         ReturnExpr::Call { name, arg } => step_result_call(name, arg, "step return match arm")?,
         ReturnExpr::Match(_) => {
             return Err(Error::new(format!(
-                "process {} step return match arm nested return match is not supported in this source slice",
+                "process {} step return match arm nested return match is not supported",
                 process.name
             )));
         }
         ReturnExpr::IfElse { .. } => {
             return Err(Error::new(format!(
-                "process {} step return match arm cannot perform final-position runtime if in this source slice",
+                "process {} step return match arm cannot perform final-position runtime if",
                 process.name
             )));
         }

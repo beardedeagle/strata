@@ -1,0 +1,65 @@
+module function_local_bindings;
+
+enum Bool { False, True }
+enum Phase { Idle, Active }
+record Work { phase: Phase }
+record Route {
+    selected: Phase,
+    flags: List<Bool,2>,
+    mapping: Map<Phase,Phase,1>,
+}
+record MainState { selected: Phase, echoed: Phase }
+enum MainMsg { Start }
+
+fn status(Work { phase }) -> Phase ! [] ~ [] @det {
+    return phase;
+}
+
+fn select_phase(flag: Bool) -> Phase ! [] ~ [] @det {
+    if (flag) {
+        let selected_if_local: Phase = Active;
+        return selected_if_local;
+    } else {
+        let selected_else_local: Phase = Idle;
+        return selected_else_local;
+    }
+}
+
+fn route(work: Work) -> Route ! [] ~ [] @det {
+    let current_local: Phase = status(work);
+    let active_flag_local: Bool = current_local == Active;
+    let selected_local: Phase = if (active_flag_local) { Active } else { Idle };
+    let routed_local: Phase = select_phase(active_flag_local);
+    let flags_local: List<Bool,2> = List<Bool,2>[active_flag_local, True];
+    let mapping_local: Map<Phase,Phase,1> = Map<Phase,Phase,1>[selected_local => routed_local];
+    return Route { selected: routed_local, flags: flags_local, mapping: mapping_local };
+}
+
+fn echo_route(route_value: Route) -> Phase ! [] ~ [] @det {
+    return match route_value {
+        Route { selected: echo_source_local } => {
+            let echo_local: Phase = echo_source_local;
+            return echo_local;
+        }
+    };
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn process_route(work: Work) -> Phase ! [] ~ [] @det {
+        let route_value_local: Route = route(work);
+        let phase_local: Phase = echo_route(route_value_local);
+        return phase_local;
+    }
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { selected: Idle, echoed: Idle };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit] ~ [] @det {
+        emit "immutable source computation selected active";
+        return Stop(MainState { selected: process_route(Work { phase: Active }), echoed: echo_route(route(Work { phase: Active })) });
+    }
+}

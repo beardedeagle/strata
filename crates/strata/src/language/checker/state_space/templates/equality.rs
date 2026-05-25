@@ -372,14 +372,10 @@ fn validate_equality_template_operand_type(
         return Err(Error::new("process-reference equality is not supported"));
     }
     if semantic_index.collection_type(operand_type)?.is_some() {
-        return Err(Error::new(
-            "list and map equality are not supported in this source slice",
-        ));
+        return Err(Error::new("list and map equality are not supported"));
     }
     if semantic_index.record_decl(module, operand_type).is_ok() {
-        return Err(Error::new(
-            "record equality is not supported in this source slice",
-        ));
+        return Err(Error::new("record equality is not supported"));
     }
     let enum_decl = semantic_index.enum_decl(module, operand_type)?;
     if enum_decl

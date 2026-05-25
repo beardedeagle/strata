@@ -57,9 +57,7 @@ impl Parser {
 
     pub(super) fn parse_function_statement(&mut self) -> Result<Statement> {
         if self.peek_keyword("match") {
-            return Err(
-                self.error_here("match body must be the whole function body in this source slice")
-            );
+            return Err(self.error_here("match body must be the whole function body"));
         }
         if self.peek_keyword("for") {
             return self.parse_for_each_statement();
@@ -79,10 +77,15 @@ impl Parser {
             self.expect_symbol(':')?;
             let ty = self.parse_type()?;
             self.expect_symbol('=')?;
-            self.expect_keyword("spawn")?;
-            let target = self.expect_identifier()?;
+            if self.peek_keyword("spawn") {
+                self.expect_keyword("spawn")?;
+                let target = self.expect_identifier()?;
+                self.expect_symbol(';')?;
+                return Ok(Statement::LetProcessRef { name, ty, target });
+            }
+            let value = self.parse_value_expr()?;
             self.expect_symbol(';')?;
-            return Ok(Statement::LetProcessRef { name, ty, target });
+            return Ok(Statement::LetValue { name, ty, value });
         }
         if self.peek_keyword("send") {
             self.expect_keyword("send")?;
@@ -122,14 +125,12 @@ impl Parser {
         let mut statements = Vec::new();
         while !self.peek_symbol('}') {
             if self.peek_keyword("return") {
-                return Err(self.error_here(
-                    "statement-level if branches must not return in this source slice",
-                ));
+                return Err(self.error_here("statement-level if branches must not return"));
             }
             if self.peek_keyword("if") {
                 if statement_if_depth >= Self::MAX_DIRECT_STATEMENT_IF_DEPTH {
                     return Err(self.error_here(format!(
-                        "statement-level if action nesting exceeds maximum depth of {} in this source slice",
+                        "statement-level if action nesting exceeds maximum depth of {}",
                         Self::MAX_DIRECT_STATEMENT_IF_DEPTH
                     )));
                 }
@@ -140,9 +141,9 @@ impl Parser {
                 continue;
             }
             if self.peek_keyword("let") {
-                return Err(
-                    self.error_here("statement-level if branches cannot bind process references")
-                );
+                return Err(self.error_here(
+                    "statement-level if branches cannot bind local values or process references",
+                ));
             }
             statements.push(self.parse_function_statement()?);
         }
@@ -183,23 +184,17 @@ impl Parser {
         self.expect_keyword("in")?;
         let collection_name = self.expect_identifier()?;
         if !self.peek_symbol('{') {
-            return Err(self.error_here(
-                "for loop collection must be an identifier binding in this source slice",
-            ));
+            return Err(self.error_here("for loop collection must be an identifier binding"));
         }
         let collection = ValueExpr::Identifier(collection_name);
         self.expect_symbol('{')?;
         let mut body = Vec::new();
         while !self.peek_symbol('}') {
             if self.peek_keyword("return") {
-                return Err(
-                    self.error_here("for loop bodies are statement-only in this source slice")
-                );
+                return Err(self.error_here("for loop bodies are statement-only"));
             }
             if self.peek_keyword("for") {
-                return Err(
-                    self.error_here("nested for loops are not supported in this source slice")
-                );
+                return Err(self.error_here("nested for loops are not supported"));
             }
             body.push(self.parse_function_statement()?);
         }

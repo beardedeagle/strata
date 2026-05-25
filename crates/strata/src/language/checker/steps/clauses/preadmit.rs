@@ -285,6 +285,7 @@ fn preadmit_concrete_step_return(
         module,
         process_name: Some(&process.name),
         process_functions: &process.functions,
+        process_refs: None,
         semantic_index,
     };
     let state_arg =
