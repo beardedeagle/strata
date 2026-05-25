@@ -75,3 +75,33 @@ proc Main mailbox bounded(1) {
             .contains("entry message Start must not require a payload")
     );
 }
+
+#[test]
+fn rejects_named_payload_type_with_enum_variant_context() {
+    let source = r#"
+module missing_payload_type;
+
+record MainState;
+enum MainMsg { Start }
+enum WorkerMsg { Assign(Missing) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("missing named payload type should fail");
+
+    assert!(err.to_string().contains(
+        "enum WorkerMsg variant Assign payload type Missing is invalid: type Missing is not declared"
+    ));
+}

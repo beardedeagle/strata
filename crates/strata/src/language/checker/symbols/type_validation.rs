@@ -108,7 +108,13 @@ pub(super) fn validate_message_payload_type(
                 context.list_type,
                 context.map_type,
                 payload_type,
-            )?;
+            )
+            .map_err(|err| {
+                Error::new(format!(
+                    "enum {} variant {} payload type {} is invalid: {err}",
+                    enum_decl.name, variant.name, payload_type
+                ))
+            })?;
         }
         TypeRef::Applied {
             constructor,
