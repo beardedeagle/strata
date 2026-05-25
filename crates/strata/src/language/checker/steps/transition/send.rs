@@ -87,6 +87,7 @@ pub(super) fn resolve_send_message_case(
                     module: context.module,
                     process_name: Some(&context.process.name),
                     process_functions: &context.process.functions,
+                    process_refs: None,
                     semantic_index: context.semantic_index,
                 };
                 resolve_source_value_expr(

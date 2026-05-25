@@ -416,7 +416,7 @@ fn rejects_general_match_expression_in_step_return_value() {
 
     assert!(
         err.to_string().contains(
-            "match expressions are only admitted as whole function bodies or return match expressions in this source slice"
+            "match expressions are only supported as whole function bodies or return match expressions"
         ),
         "unexpected error: {err}"
     );

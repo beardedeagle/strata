@@ -7,6 +7,7 @@ use crate::language::ast::{ValueBooleanOperator, ValueEqualityOperator};
 
 mod body_matches;
 mod calls;
+mod local_bindings;
 mod resolution;
 mod return_matches;
 mod type_check;
@@ -16,6 +17,7 @@ use calls::{
     enum_value_error, enum_variant_for_expected_type, identifier_starts_uppercase,
     source_function_group_option, validate_source_function_call_or_constructor,
 };
+use local_bindings::validate_source_function_block_values;
 pub(in crate::language::checker) use resolution::resolve_source_value_expr;
 use return_matches::validate_source_function_return_match;
 pub(in crate::language::checker) use type_check::check_source_value_type;
@@ -26,11 +28,11 @@ pub(super) fn validate_source_function_body_values(
     bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
     match source_function_body(function)? {
-        FunctionBody::Block(body) => validate_source_function_return_expr(
+        FunctionBody::Block(body) => validate_source_function_block_values(
             scope,
             function,
             &function.return_type,
-            &body.returns,
+            body,
             bindings,
         ),
         FunctionBody::Match(match_body) => validate_source_function_body_match_values(
@@ -299,18 +301,23 @@ fn validate_source_function_return_if_branch(
     body: &FunctionBlock,
     bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
-    if !body.statements.is_empty() {
+    if body
+        .statements
+        .iter()
+        .any(|statement| !matches!(statement, Statement::LetValue { .. }))
+    {
         return Err(Error::new(format!(
             "source function {} return-if {branch} branch must not perform statements",
             function.name
         )));
     }
-    validate_source_function_return_expr(scope, function, expected_type, &body.returns, bindings)
-        .map_err(|err| {
+    validate_source_function_block_values(scope, function, expected_type, body, bindings).map_err(
+        |err| {
             Error::new(format!(
                 "if {branch} branch must produce {expected_type}: {err}"
             ))
-        })
+        },
+    )
 }
 
 fn validate_source_equality_expr(
@@ -555,18 +562,14 @@ fn validate_source_equality_operand_type(
         .collection_type(operand_type)?
         .is_some()
     {
-        return Err(Error::new(
-            "list and map equality are not supported in this source slice",
-        ));
+        return Err(Error::new("list and map equality are not supported"));
     }
     if scope
         .semantic_index
         .record_decl(scope.module, operand_type)
         .is_ok()
     {
-        return Err(Error::new(
-            "record equality is not supported in this source slice",
-        ));
+        return Err(Error::new("record equality is not supported"));
     }
     let enum_decl = scope.semantic_index.enum_decl(scope.module, operand_type)?;
     if enum_decl

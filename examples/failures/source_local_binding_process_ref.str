@@ -1,0 +1,23 @@
+module source_local_binding_process_ref;
+
+enum Phase { Idle, Active }
+record MainState { selected: Phase }
+enum MainMsg { Start }
+
+fn route(phase: Phase) -> Phase ! [] ~ [] @det {
+    let worker_local: ProcessRef<Main> = Active;
+    return phase;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { selected: route(Active) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

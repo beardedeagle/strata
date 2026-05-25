@@ -5,6 +5,7 @@ pub(in crate::language::checker::source_functions) fn validate_record_pattern_so
     semantic_index: &SemanticIndex,
     owner: &str,
     process: Option<&Process>,
+    process_refs: Option<&BTreeMap<Identifier, CheckedProcessId>>,
     functions: &[&Function],
 ) -> Result<()> {
     let Some(function) = functions.first() else {
@@ -43,8 +44,14 @@ pub(in crate::language::checker::source_functions) fn validate_record_pattern_so
         module,
         process_name: process.map(|process| &process.name),
         process_functions,
+        process_refs,
         semantic_index,
     };
+    validate_source_pattern_binding_scope_conflicts(
+        &scope,
+        &format!("{owner} function {} record pattern binding", function.name),
+        &pattern_bindings,
+    )?;
     validate_source_function_body_values(&scope, function, &body_bindings)
 }
 

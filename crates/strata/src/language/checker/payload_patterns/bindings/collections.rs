@@ -38,7 +38,7 @@ pub(super) fn check_list_payload_pattern_bindings(
                 if nested_bindings.is_empty() {
                     let subject = scope.subject();
                     return Err(Error::new(format!(
-                        "{subject} {} list payload nested pattern must bind at least one value in this source slice",
+                        "{subject} {} list payload nested pattern must bind at least one value",
                         scope.context
                     )));
                 }
@@ -69,7 +69,7 @@ pub(super) fn check_list_payload_pattern_bindings(
     if bindings.is_empty() {
         let subject = scope.subject();
         return Err(Error::new(format!(
-            "{subject} {} list payload pattern must bind at least one value in this source slice",
+            "{subject} {} list payload pattern must bind at least one value",
             scope.context
         )));
     }
@@ -158,7 +158,7 @@ pub(super) fn check_map_payload_pattern_bindings(
                 if nested_bindings.is_empty() {
                     let subject = scope.subject();
                     return Err(Error::new(format!(
-                        "{subject} {} map payload nested pattern must bind at least one value in this source slice",
+                        "{subject} {} map payload nested pattern must bind at least one value",
                         scope.context
                     )));
                 }
@@ -186,7 +186,7 @@ pub(super) fn check_map_payload_pattern_bindings(
     if bindings.is_empty() {
         let subject = scope.subject();
         return Err(Error::new(format!(
-            "{subject} {} map payload pattern must bind at least one value in this source slice",
+            "{subject} {} map payload pattern must bind at least one value",
             scope.context
         )));
     }
@@ -202,7 +202,7 @@ fn canonical_map_payload_pattern_key(
         .map_err(|_| {
             let subject = scope.subject();
             Error::new(format!(
-                "{subject} {} map payload pattern keys must be static source values of type {key_type} in this source slice",
+                "{subject} {} map payload pattern keys must be static source values of type {key_type}",
                 scope.context
             ))
         })

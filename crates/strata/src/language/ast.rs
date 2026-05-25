@@ -304,6 +304,11 @@ pub struct MatchArm {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Emit(OutputLiteral),
+    LetValue {
+        name: Identifier,
+        ty: TypeRef,
+        value: ValueExpr,
+    },
     LetProcessRef {
         name: Identifier,
         ty: TypeRef,

@@ -36,6 +36,7 @@ pub(super) fn check_init(
         module,
         process_name: Some(&process.name),
         process_functions: &process.functions,
+        process_refs: None,
         semantic_index,
     };
     let Some(body) = &init.body else {
@@ -146,9 +147,7 @@ fn resolve_init_return_block_value(
     return_match_policy: InitReturnMatchPolicy,
 ) -> Result<ValueExpr> {
     if !body.statements.is_empty() {
-        return Err(Error::new(format!(
-            "{context} must not perform statements in this slice"
-        )));
+        return Err(Error::new(format!("{context} must not perform statements")));
     }
     let value = match &body.returns {
         ReturnExpr::Value(value) => value.clone(),
@@ -169,13 +168,13 @@ fn resolve_init_return_block_value(
         }
         ReturnExpr::Match(_) => {
             return Err(Error::new(format!(
-                "process {} {context} nested return match is not supported in init in this source slice",
+                "process {} {context} nested return match is not supported in init",
                 process.name
             )));
         }
         ReturnExpr::IfElse { .. } => {
             return Err(Error::new(format!(
-                "process {} {context} runtime if is not supported in init in this source slice",
+                "process {} {context} runtime if is not supported in init",
                 process.name
             )));
         }

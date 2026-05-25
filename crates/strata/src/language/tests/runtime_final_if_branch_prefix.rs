@@ -64,7 +64,7 @@ fn runtime_final_if_nested_if_actions_rejects_branch_local_process_ref() {
     assert!(
         error
             .to_string()
-            .contains("statement-level if branches cannot bind process references"),
+            .contains("statement-level if branches cannot bind local values or process references"),
         "{error}"
     );
 }

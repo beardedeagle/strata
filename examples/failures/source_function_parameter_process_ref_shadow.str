@@ -1,0 +1,38 @@
+module source_function_parameter_process_ref_shadow;
+
+enum Phase { Idle, Active }
+record MainState { selected: Phase }
+record WorkerState;
+enum MainMsg { Start }
+enum WorkerMsg { Ping }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn route(worker: Phase) -> Phase ! [] ~ [] @det {
+        return worker;
+    }
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { selected: Idle };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        return Stop(MainState { selected: route(Active) });
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Ping) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

@@ -26,6 +26,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::CHECKER_LOWERING,
     },
     ProofDomain {
+        id: "source-function-local-bindings",
+        title: "Immutable source-local function bindings",
+        feature_ids: &["source-function-local-bindings"],
+        obligations: proof_obligations::CHECKER_LOWERING_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "source-function-braced-return-if",
         title: "Source function braced return-if selection",
         feature_ids: &["source-function-return-if"],

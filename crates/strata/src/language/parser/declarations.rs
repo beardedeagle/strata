@@ -30,7 +30,7 @@ impl Parser {
             }
             if self.peek_keyword("security") {
                 return Err(self.error_here(
-                    "security declarations are not supported in this buildable source slice",
+                    "security declarations are not supported in the buildable language surface",
                 ));
             }
 
@@ -265,9 +265,7 @@ impl Parser {
             let body = if self.peek_keyword("match") {
                 let match_body = self.parse_match_body()?;
                 if !self.peek_symbol('}') {
-                    return Err(self.error_here(
-                        "match body must be the whole function body in this source slice",
-                    ));
+                    return Err(self.error_here("match body must be the whole function body"));
                 }
                 FunctionBody::Match(match_body)
             } else {

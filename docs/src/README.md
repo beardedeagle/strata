@@ -10,7 +10,7 @@ The source-to-runtime boundary is executable behavior:
 .str source -> strata check -> strata build -> .mta artifact -> mantle run
 ```
 
-The runnable slices carry real `.str` programs through checking, Mantle Target
+The runnable gates carry real `.str` programs through checking, Mantle Target
 Artifact build, Mantle admission, execution, and runtime observability.
 
 If you are new to Strata, start with Getting Started, then Language Concepts,

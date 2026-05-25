@@ -173,9 +173,7 @@ gate families under
 source check, artifact build, and runtime execution sequence:
 
 ```sh
-cargo run -p strata --bin strata -- check examples/hello.str
-cargo run -p strata --bin strata -- build examples/hello.str
-cargo run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+just run-example hello
 ```
 
 The same pattern applies to the actor examples. Fail-closed examples check and

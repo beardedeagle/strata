@@ -119,9 +119,8 @@ fn validate_map_template_shape(entries: &[CheckedValueTemplateMapEntry]) -> Resu
     let mut keys = BTreeSet::new();
     for entry in entries {
         validate_value_template_payload_labels(entry.key())?;
-        let key = checked_static_template_value(entry.key()).ok_or_else(|| {
-            Error::new("map template keys must be static source values in this source slice")
-        })?;
+        let key = checked_static_template_value(entry.key())
+            .ok_or_else(|| Error::new("map template keys must be static source values"))?;
         validate_artifact_value("map template key", &key)?;
         if !keys.insert(key.clone()) {
             return Err(Error::new(format!(

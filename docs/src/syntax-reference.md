@@ -93,8 +93,7 @@ disjoint over discovered concrete payload cases. A payload-sensitive state-match
 wildcard fallback may cover discovered concrete payload cases not matched by an
 explicit same-message state-match clause; it lowers exact typed payload guards,
 not an open runtime catch-all. A process cannot mix parameter-pattern/state-match
-step forms with a `match msg` step body in this slice. Other process members are
-rejected.
+step forms with a `match msg` step body. Other process members are rejected.
 
 ## Functions
 
@@ -186,9 +185,10 @@ immutable binding name.
 
 Buildable source accepts bodies for `init`, `step`, module functions, and
 process-local functions. It requires deterministic functions and empty
-may-behavior lists. Normal source functions are pure: they use `! []`, admit only
-source-time value expressions and pure braced return branches, perform no
-runtime statements, and are expanded before lowering.
+may-behavior lists. Normal source functions are pure: they use `! []`, allow only
+source-time value expressions, immutable source-local bindings, and pure braced
+return branches, perform no runtime statements, and are expanded before
+lowering.
 
 ## Function Bodies
 
@@ -199,7 +199,11 @@ function_body =
   | "{" match_body "}"
 
 block_body =
-    statement* (return_statement | return_if_else)
+    block_statement* (return_statement | return_if_else)
+
+block_statement =
+    source_function_statement
+  | runtime_statement
 
 match_body =
     "match" ident "{" match_arm+ "}"
@@ -208,8 +212,8 @@ match_arm =
     pattern "=>" "{" block_body "}"
 ```
 
-Patterns are source-level binding and decomposition syntax. This source slice
-admits constructor patterns, constructor payload bindings, constructor payload
+Patterns are source-level binding and decomposition syntax. Strata supports
+constructor patterns, constructor payload bindings, constructor payload
 destructuring, record destructuring patterns, list/map collection patterns, and
 `_` wildcards. Buildable semantic consumers are normal source function
 signatures and match bodies, function return-match expressions, fieldless enum
@@ -249,7 +253,7 @@ transition-local value. A constructor payload pattern such as
 `Assign(Map[Ready => Job { phase }])` destructures an immutable concrete payload
 and binds only the selected values. A fieldless nested enum constructor such as
 `Ready` is a typed shape predicate and does not introduce a binding. List rest
-patterns are suffix-only in this slice:
+patterns are suffix-only:
 `..tail` must follow at least one fixed-position element and binds an immutable
 whole list containing the unmatched suffix. Map payload patterns are exact unless
 they end with `..`, as in `Assign(Map[Ready => selected, ..])`; the subset marker
@@ -303,12 +307,12 @@ variants may bind their whole payload with an explicit type, such as
 `Working(Job { phase })`. Nested constructor payloads use the same structural
 pattern rules. Fieldless variants must not bind or destructure a
 payload. Bindings are immutable and transition-local. Each generated transition
-is keyed by the message ID and the admitted current state ID. State-match clauses
+is keyed by the message ID and the checked current state ID. State-match clauses
 may share one top-level message constructor by exact disjoint nested typed
 payload predicates; each generated transition is additionally keyed by the exact
 typed payload guard. A wildcard state-match step may cover discovered concrete
 payload cases for the same message that no explicit state-match clause handles;
-each fallback case still expands across admitted current-state cases and lowers
+each fallback case still expands across checked current-state cases and lowers
 with an exact typed payload guard. State changes still occur only by returning a
 whole state value through `Continue(...)`, `Stop(...)`, or `Panic(...)`.
 
@@ -322,7 +326,7 @@ step_return_match =
     "return" "match" ident "{" match_arm+ "}" ";"
 ```
 
-Every arm body may use the same admitted statement-level action prefix forms as
+Every arm body may use the same statement-level action prefix forms as
 a `step` body before the terminal result: local `emit`, in-scope direct `send`,
 statement-level runtime `if`, and bounded runtime `for` over a checked runtime
 `List<T,N>` binding. The checker still validates every arm template
@@ -344,7 +348,7 @@ init_return_match =
 
 Every arm body must be statement-free and must return one whole state value. The
 checker selects the concrete arm before lowering and emits the selected initial
-state as the existing typed state ID. This syntax does not admit effect
+state as the existing typed state ID. This syntax does not allow effect
 statements before the return match, nested return matches in arms, dynamic
 dispatch, or source-string selectors.
 
@@ -360,9 +364,24 @@ source_function =
 ```
 
 Function block bodies must not contain effect statements, process-reference
-bindings, sends, or runtime loops. Function match bodies match the function's
-typed binding parameter. A function block may also return a `match` over an
-in-scope source value binding, or use braced pure return branches:
+bindings, sends, or runtime loops. They may contain zero or more immutable
+source-local value bindings before the terminal return:
+
+```text
+source_local_binding =
+    "let" ident ":" type_ref "=" value_expr ";"
+```
+
+The binding type must be a source value type without process-reference
+authority, and the value expression must be pure. Message enums that carry
+direct `ProcessRef<T>` payloads are message authority surfaces, not
+source-local value types. Source-local bindings are distinct from
+`ProcessRef<T>` spawn bindings and are rejected in `init`, `step`,
+statement-level runtime branches, or runtime loop bodies.
+
+Function match bodies match the function's typed binding parameter. A function
+block may also return a `match` over an in-scope source value binding, or use
+braced pure return branches:
 
 ```strata
 fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
@@ -375,9 +394,10 @@ fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
 ```
 
 The braced form is source-time control flow for pure returned values. Each branch
-must be statement-free apart from its terminal `return`, and the checker resolves
-one concrete branch during source function expansion. Function return-match arms
-are exhaustive, duplicate-free, immutable, and still expand before lowering.
+may contain immutable source-local bindings before its terminal `return`, and the
+checker resolves one concrete branch during source function expansion. Function
+return-match arms are exhaustive, duplicate-free, immutable, and still expand
+before lowering.
 Function calls and payload-bearing enum values share the same surface syntax:
 
 ```text
@@ -393,12 +413,18 @@ cycles are rejected.
 ## Statements
 
 ```text
-statement =
+source_function_statement =
+    source_local_binding
+
+runtime_statement =
     emit_statement
   | process_ref_statement
   | send_statement
   | if_statement
   | for_statement
+
+source_local_binding =
+    "let" ident ":" type_ref "=" value_expr ";"
 
 emit_statement =
     "emit" string_literal ";"
@@ -435,7 +461,12 @@ nested_branch_statement =
   | for_statement
 
 for_statement =
-    "for" for_item "in" ident "{" statement* "}"
+    "for" for_item "in" ident "{" loop_statement* "}"
+
+loop_statement =
+    emit_statement
+  | send_statement
+  | if_statement
 
 for_item =
     ident
@@ -449,9 +480,14 @@ return_if_else =
     "else" "{" block_body "}"
 ```
 
-The identifier after `let` names an immutable process reference value. The
-identifier after `spawn` is the process definition name. The `ProcessRef<T>`
-annotation must name the same process definition.
+Statement admission is contextual. Pure source function blocks admit only
+`source_function_statement`; `init` and `step` runtime blocks admit
+`runtime_statement`. Runtime branches and loop bodies use the narrower
+`branch_statement`, `nested_branch_statement`, and `loop_statement` sets above.
+
+The identifier in `process_ref_statement` names an immutable process reference
+value. The identifier after `spawn` is the process definition name. The
+`ProcessRef<T>` annotation must name the same process definition.
 
 The first identifier in `send` is a local process reference or a received
 payload binding whose type is `ProcessRef<T>`. The second identifier is the
@@ -462,10 +498,10 @@ The `for` collection source is an identifier binding, not an arbitrary
 expression. Checking requires it to be a runtime-bound `List<T,N>` value. The
 element item is either an immutable element binding or a record pattern over the
 element type. Record-pattern fields bind immutable projected values in the loop
-body. This slice admits statement-level runtime `if` inside loop bodies, but
-still rejects nested loops, `return`, `spawn`, branch-local process-reference
-binding, and runtime branch nesting beyond the single admitted direct nested
-branch layer.
+body. Loop bodies support statement-level runtime `if`, but still reject nested
+loops, `return`, `spawn`, branch-local source value or process-reference
+binding, and runtime branch nesting beyond the single direct nested branch
+layer.
 
 ## Types
 
@@ -536,29 +572,29 @@ map_value_entries =
     ("," value_expr "=>" value_expr)* ","?
 ```
 
-Parenthesized value expressions are admitted only as Bool predicate grouping.
+Parenthesized value expressions are accepted only as Bool predicate grouping.
 `ident(value)` is a function call when `ident` names a visible source function and a
 payload-bearing enum value when `ident` names a constructor of the expected enum
 type.
 
 List and map constructors are explicit. Optional type and capacity arguments are
-admitted for readability; the checker still validates each value against the
+accepted for readability; the checker still validates each value against the
 expected bounded source value type.
 
-Typed equality predicates are deliberately narrow in this slice. `left == right`
-and `left != right` are admitted only when both operands have the same checked
+Typed equality predicates are deliberately narrow. `left == right`
+and `left != right` are supported only when both operands have the same checked
 type and that type is `Bool` or a payload-free enum. Fully concrete source
 equality folds during checking. Runtime-bound equality lowers as a typed Mantle
 value template; operands are not runtime dispatch strings. Ordering, arithmetic,
 string equality, record/list/map structural equality, process-reference
 equality, and payload enum equality remain unsupported.
 
-Boolean predicate composition is also narrow. `!`, `&&`, and `||` are admitted
+Boolean predicate composition is also narrow. `!`, `&&`, and `||` are supported
 only over `Bool` values, typed equality predicates, or nested composed
 predicates. `!` binds tighter than `&&`, and `&&` binds tighter than `||`; use
 parentheses for explicit grouping. Fully concrete predicates fold during
 checking. Runtime-bound predicates lower as typed Mantle value templates over
-admitted Bool-producing operands, not as source strings or function names.
+typed Bool-producing operands, not as source strings or function names.
 
 Pure conditionals require the exact fieldless source contract
 `enum Bool { False, True }`. Both branches are value expressions checked against
@@ -570,8 +606,8 @@ condition must have the same `Bool` contract, but it may depend on received
 payload or current-state payload bindings. Each branch is a block body with its
 own statements and terminal return. Branch statement prefixes are limited to
 `emit`, `send`, bounded `for` actions, and one direct statement-level
-`if_statement` action in this slice. A bounded `for` prefix keeps the ordinary
-loop-body surface, including the admitted loop-body branch action. Strata lowers
+`if_statement` action. A bounded `for` prefix keeps the ordinary
+loop-body surface, including the loop-body branch action. Strata lowers
 the checked condition, branch action prefixes, and branch next states to Mantle
 control flow; Mantle executes only the selected branch and traces the branch
 choice. Deeper direct branch-action nesting remains rejected at source checking,
@@ -581,15 +617,15 @@ Statement-level `if_statement` is runtime control flow for effects before the
 enclosing return. Branches may contain `emit`, `send`, and bounded `for`
 statements, plus one direct nested statement-level `if_statement`. The `else`
 branch may be omitted, and one branch body may be empty when the sibling branch
-has at least one admitted effect statement, nested branch action, or
-admitted bounded-loop action; both branches empty are rejected. An omitted
+has at least one effect statement, nested branch action, or bounded-loop action;
+both branches empty are rejected. An omitted
 `else` lowers as an explicit empty branch in the typed Mantle artifact. Branches
-cannot bind process references, return, contain nested loops, or exceed the one
-direct nested branch-action layer. Inside `for`, the condition may use the
-immutable loop element binding or an immutable field projected from a
-loop-element record pattern; lowering emits typed Mantle templates over the loop
-element ID, not the source binding name. Loop-body branch bodies follow the same
-direct nested branch-action bound.
+cannot bind source-local values or process references, return, contain nested
+loops, or exceed the one direct nested branch-action layer. Inside `for`, the
+condition may use the immutable loop element binding or an immutable field
+projected from a loop-element record pattern; lowering emits typed Mantle
+templates over the loop element ID, not the source binding name. Loop-body
+branch bodies follow the same direct nested branch-action bound.
 
 `init` returns a state value or a pure `return match` that the checker reduces
 to one state value before lowering. `step` returns `Continue(value)`,

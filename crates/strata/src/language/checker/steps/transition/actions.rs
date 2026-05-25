@@ -43,13 +43,13 @@ pub(super) fn checked_actions_for_statements(
             Statement::LetProcessRef { name, target, .. } => {
                 if input.scope.in_step_return_match_arm {
                     return Err(Error::new(format!(
-                        "process {} step return match arm cannot bind process reference {} in this source slice",
+                        "process {} step return match arm cannot bind process reference {}",
                         context.process.name, name
                     )));
                 }
                 if !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside) {
                     return Err(Error::new(format!(
-                        "process {} {} cannot bind process reference {} in this source slice",
+                        "process {} {} cannot bind process reference {}",
                         context.process.name,
                         input.scope.runtime_if_branch_label(),
                         name
@@ -57,7 +57,7 @@ pub(super) fn checked_actions_for_statements(
                 }
                 if input.scope.in_loop_body {
                     return Err(Error::new(format!(
-                        "process {} for loop body cannot bind process reference {} in this source slice",
+                        "process {} for loop body cannot bind process reference {}",
                         context.process.name, name
                     )));
                 }
@@ -71,6 +71,12 @@ pub(super) fn checked_actions_for_statements(
                     target: context.semantic_index.process_id(target)?,
                     process_ref: binding.id,
                 });
+            }
+            Statement::LetValue { name, .. } => {
+                return Err(Error::new(format!(
+                    "process {} step source-local value binding {} is only supported in pure source functions",
+                    context.process.name, name
+                )));
             }
             Statement::Send {
                 target,
@@ -122,7 +128,7 @@ pub(super) fn checked_actions_for_statements(
             } => {
                 if input.scope.in_loop_body {
                     return Err(Error::new(format!(
-                        "process {} nested for loops are not supported in this source slice",
+                        "process {} nested for loops are not supported",
                         context.process.name
                     )));
                 }

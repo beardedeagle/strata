@@ -1,47 +1,54 @@
 use super::*;
 
+mod bodies;
 mod collection_patterns;
 mod match_bodies;
+mod names;
+mod process_ref_shadowing;
 mod record_patterns;
+mod substitution;
 mod value_resolution;
 mod values;
 
+use super::steps::collect_message_case_process_refs;
+pub(in crate::language::checker::source_functions) use bodies::{
+    source_function_block, source_function_body, source_function_body_scope,
+    validate_pure_source_function_block,
+};
 use collection_patterns::{
     validate_list_pattern_source_function_group, validate_map_pattern_source_function_group,
 };
 use match_bodies::validate_binding_source_function_match_body;
+pub(in crate::language::checker::source_functions) use names::{
+    validate_source_pattern_binding_name, validate_source_pattern_binding_scope_conflicts,
+    validate_source_value_binding_name,
+};
+use process_ref_shadowing::validate_source_function_process_ref_shadowing;
 use record_patterns::validate_record_pattern_source_function_group;
+use substitution::SourceSubstitution;
 use values::validate_source_function_body_values;
 pub(super) use values::{
     check_source_value_type, resolve_source_value_expr, validate_source_function_value_expr,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::language::checker::source_functions) struct SourceSubstitution {
-    pub(in crate::language::checker::source_functions) name: Identifier,
-    pub(in crate::language::checker::source_functions) value: ValueExpr,
-}
-
-impl SourceSubstitution {
-    pub(in crate::language::checker::source_functions) fn new(
-        name: Identifier,
-        value: ValueExpr,
-    ) -> Self {
-        Self { name, value }
-    }
-}
 
 pub(super) fn validate_source_function_declarations(
     module: &Module,
     semantic_index: &SemanticIndex,
 ) -> Result<()> {
     let mut module_function_names = BTreeSet::new();
-    validate_source_function_groups(module, semantic_index, "module", None, &module.functions)?;
+    validate_source_function_groups(
+        module,
+        semantic_index,
+        "module",
+        None,
+        None,
+        &module.functions,
+    )?;
     for function in &module.functions {
         module_function_names.insert(function.name.as_str());
     }
 
-    for process in &module.processes {
+    for (process_index, process) in module.processes.iter().enumerate() {
         for function in &process.functions {
             if module_function_names.contains(function.name.as_str()) {
                 return Err(Error::new(format!(
@@ -50,12 +57,23 @@ pub(super) fn validate_source_function_declarations(
                 )));
             }
         }
+        let process_ref_names = if process.functions.is_empty() {
+            None
+        } else {
+            let process_id = CheckedProcessId::from_index(process_index)?;
+            Some(collect_message_case_process_refs(
+                process,
+                process_id,
+                semantic_index,
+            )?)
+        };
         let owner = format!("process {}", process.name);
         validate_source_function_groups(
             module,
             semantic_index,
             &owner,
             Some(process),
+            process_ref_names.as_ref(),
             &process.functions,
         )?;
     }
@@ -68,11 +86,15 @@ fn validate_source_function_groups(
     semantic_index: &SemanticIndex,
     owner: &str,
     process: Option<&Process>,
+    process_refs: Option<&BTreeMap<Identifier, CheckedProcessId>>,
     functions: &[Function],
 ) -> Result<()> {
     let mut groups: BTreeMap<&str, Vec<&Function>> = BTreeMap::new();
     for function in functions {
         validate_source_function_name(semantic_index, owner, &function.name)?;
+        if let Some(process_refs) = process_refs {
+            validate_source_function_process_ref_shadowing(owner, function, process_refs)?;
+        }
         groups
             .entry(function.name.as_str())
             .or_default()
@@ -80,7 +102,14 @@ fn validate_source_function_groups(
     }
 
     for group in groups.values() {
-        validate_source_function_group(module, semantic_index, owner, process, group)?;
+        validate_source_function_group(
+            module,
+            semantic_index,
+            owner,
+            process,
+            process_refs,
+            group,
+        )?;
     }
 
     validate_source_function_call_cycles(owner, functions)?;
@@ -119,6 +148,7 @@ fn validate_source_function_group(
     semantic_index: &SemanticIndex,
     owner: &str,
     process: Option<&Process>,
+    process_refs: Option<&BTreeMap<Identifier, CheckedProcessId>>,
     functions: &[&Function],
 ) -> Result<()> {
     let Some(first) = functions.first() else {
@@ -127,7 +157,7 @@ fn validate_source_function_group(
     let first_kind = source_function_param_kind(first)?;
 
     for function in functions {
-        validate_source_function_contract(semantic_index, owner, function)?;
+        validate_source_function_contract(module, semantic_index, owner, function)?;
         if !semantic_index.same_type(&function.return_type, &first.return_type) {
             return Err(Error::new(format!(
                 "{owner} function {} clauses must return {}, found {}",
@@ -151,13 +181,21 @@ fn validate_source_function_group(
                     first.name
                 )));
             }
-            validate_binding_source_function_body(module, semantic_index, owner, process, first)
+            validate_binding_source_function_body(
+                module,
+                semantic_index,
+                owner,
+                process,
+                process_refs,
+                first,
+            )
         }
         SourceFunctionParamKind::EnumPattern => validate_enum_pattern_source_function_group(
             module,
             semantic_index,
             owner,
             process,
+            process_refs,
             functions,
         ),
         SourceFunctionParamKind::RecordPattern => validate_record_pattern_source_function_group(
@@ -165,6 +203,7 @@ fn validate_source_function_group(
             semantic_index,
             owner,
             process,
+            process_refs,
             functions,
         ),
         SourceFunctionParamKind::ListPattern => validate_list_pattern_source_function_group(
@@ -172,6 +211,7 @@ fn validate_source_function_group(
             semantic_index,
             owner,
             process,
+            process_refs,
             functions,
         ),
         SourceFunctionParamKind::MapPattern => validate_map_pattern_source_function_group(
@@ -179,19 +219,21 @@ fn validate_source_function_group(
             semantic_index,
             owner,
             process,
+            process_refs,
             functions,
         ),
     }
 }
 
 fn validate_source_function_contract(
+    module: &Module,
     semantic_index: &SemanticIndex,
     owner: &str,
     function: &Function,
 ) -> Result<()> {
     if function.params.len() != 1 {
         return Err(Error::new(format!(
-            "{owner} function {} must declare exactly one parameter in this source slice",
+            "{owner} function {} must declare exactly one parameter",
             function.name
         )));
     }
@@ -220,6 +262,7 @@ fn validate_source_function_contract(
         )));
     }
     validate_source_function_declared_value_type(
+        module,
         semantic_index,
         owner,
         function,
@@ -228,6 +271,7 @@ fn validate_source_function_contract(
     )?;
     if let [FunctionParam::Binding(param)] = function.params.as_slice() {
         validate_source_function_declared_value_type(
+            module,
             semantic_index,
             owner,
             function,
@@ -239,19 +283,21 @@ fn validate_source_function_contract(
 }
 
 fn validate_source_function_declared_value_type(
+    module: &Module,
     semantic_index: &SemanticIndex,
     owner: &str,
     function: &Function,
     position: &str,
     ty: &TypeRef,
 ) -> Result<()> {
-    if semantic_index.is_source_value_type(ty) {
-        return Ok(());
-    }
-    Err(Error::new(format!(
-        "{owner} function {} {position} must use a declared record, enum, list, or map type, found {ty}",
-        function.name
-    )))
+    semantic_index
+        .validate_source_value_type(module, ty)
+        .map_err(|err| {
+            Error::new(format!(
+                "{owner} function {} {position} must use a declared record, enum, list, or map type without process-reference authority, found {ty}: {err}",
+                function.name
+            ))
+        })
 }
 
 fn validate_source_function_call_cycles(owner: &str, functions: &[Function]) -> Result<()> {
@@ -307,7 +353,7 @@ fn validate_source_function_call_cycle_from<'a>(
                 let mut cycle = stack[position..].to_vec();
                 cycle.push(callee);
                 return Err(Error::new(format!(
-                    "{owner} source function call cycle {} is not supported in this source slice",
+                    "{owner} source function call cycle {} is not supported",
                     cycle.join(" -> ")
                 )));
             }
@@ -324,12 +370,52 @@ fn collect_source_function_calls<'a>(function: &'a Function, calls: &mut BTreeSe
         return;
     };
     match body {
-        FunctionBody::Block(body) => collect_source_return_expr_calls(&body.returns, calls),
+        FunctionBody::Block(body) => collect_source_function_block_calls(body, calls),
         FunctionBody::Match(match_body) => {
             for arm in &match_body.arms {
-                collect_source_return_expr_calls(&arm.body.returns, calls);
+                collect_source_function_block_calls(&arm.body, calls);
             }
         }
+    }
+}
+
+fn collect_source_function_block_calls<'a>(body: &'a FunctionBlock, calls: &mut BTreeSet<&'a str>) {
+    for statement in &body.statements {
+        collect_source_statement_calls(statement, calls);
+    }
+    collect_source_return_expr_calls(&body.returns, calls);
+}
+
+fn collect_source_statement_calls<'a>(statement: &'a Statement, calls: &mut BTreeSet<&'a str>) {
+    match statement {
+        Statement::LetValue { value, .. } => collect_source_value_expr_calls(value, calls),
+        Statement::Send { payload, .. } => {
+            if let Some(payload) = payload {
+                collect_source_value_expr_calls(payload, calls);
+            }
+        }
+        Statement::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_source_value_expr_calls(condition, calls);
+            for statement in then_body {
+                collect_source_statement_calls(statement, calls);
+            }
+            for statement in else_body {
+                collect_source_statement_calls(statement, calls);
+            }
+        }
+        Statement::ForEach {
+            collection, body, ..
+        } => {
+            collect_source_value_expr_calls(collection, calls);
+            for statement in body {
+                collect_source_statement_calls(statement, calls);
+            }
+        }
+        Statement::Emit(_) | Statement::LetProcessRef { .. } => {}
     }
 }
 
@@ -342,7 +428,7 @@ fn collect_source_return_expr_calls<'a>(returns: &'a ReturnExpr, calls: &mut BTr
         }
         ReturnExpr::Match(match_body) => {
             for arm in &match_body.arms {
-                collect_source_return_expr_calls(&arm.body.returns, calls);
+                collect_source_function_block_calls(&arm.body, calls);
             }
         }
         ReturnExpr::IfElse {
@@ -351,8 +437,8 @@ fn collect_source_return_expr_calls<'a>(returns: &'a ReturnExpr, calls: &mut BTr
             else_branch,
         } => {
             collect_source_value_expr_calls(condition, calls);
-            collect_source_return_expr_calls(&then_branch.returns, calls);
-            collect_source_return_expr_calls(&else_branch.returns, calls);
+            collect_source_function_block_calls(then_branch, calls);
+            collect_source_function_block_calls(else_branch, calls);
         }
     }
 }
@@ -419,7 +505,7 @@ fn source_function_param_kind(function: &Function) -> Result<SourceFunctionParam
         [FunctionParam::Pattern(Pattern::Map(_))] => Ok(SourceFunctionParamKind::MapPattern),
         [FunctionParam::Pattern(_)] => Ok(SourceFunctionParamKind::EnumPattern),
         _ => Err(Error::new(format!(
-            "function {} must declare exactly one parameter in this source slice",
+            "function {} must declare exactly one parameter",
             function.name
         ))),
     }
@@ -430,6 +516,7 @@ fn validate_binding_source_function_body(
     semantic_index: &SemanticIndex,
     owner: &str,
     process: Option<&Process>,
+    process_refs: Option<&BTreeMap<Identifier, CheckedProcessId>>,
     function: &Function,
 ) -> Result<()> {
     let FunctionParam::Binding(param) = &function.params[0] else {
@@ -458,8 +545,11 @@ fn validate_binding_source_function_body(
         module,
         process_name: process.map(|process| &process.name),
         process_functions,
+        process_refs,
         semantic_index,
     };
+    validate_source_value_binding_name(&scope, "source function parameter", &[], &param.name)
+        .map_err(|err| Error::new(format!("{owner} function {} {err}", function.name)))?;
     validate_source_function_body_values(
         &scope,
         function,
@@ -475,6 +565,7 @@ fn validate_enum_pattern_source_function_group(
     semantic_index: &SemanticIndex,
     owner: &str,
     process: Option<&Process>,
+    process_refs: Option<&BTreeMap<Identifier, CheckedProcessId>>,
     functions: &[&Function],
 ) -> Result<()> {
     let Some(first) = functions.first() else {
@@ -489,6 +580,7 @@ fn validate_enum_pattern_source_function_group(
         module,
         process_name: process.map(|process| &process.name),
         process_functions,
+        process_refs,
         semantic_index,
     };
     let mut explicit_arms = vec![false; enum_decl.variants.len()];
@@ -542,6 +634,14 @@ fn validate_enum_pattern_source_function_group(
                 )));
             }
         };
+        validate_source_pattern_binding_scope_conflicts(
+            &scope,
+            &format!(
+                "{owner} function {} signature payload binding",
+                function.name
+            ),
+            &pattern_bindings,
+        )?;
         let body_bindings = pattern_bindings
             .iter()
             .map(|binding| SourceValueBinding {
@@ -603,81 +703,4 @@ fn infer_pattern_function_enum_type(
                 .unwrap_or_else(|| "<unknown>".to_string())
         ))
     })
-}
-
-fn validate_pure_source_function_block(
-    owner: &str,
-    function: &Function,
-    body: &FunctionBlock,
-) -> Result<()> {
-    if !body.statements.is_empty() {
-        return Err(Error::new(format!(
-            "{owner} function {} must not perform statements",
-            function.name
-        )));
-    }
-    Ok(())
-}
-
-fn source_function_block(function: &Function) -> Result<&FunctionBlock> {
-    match source_function_body(function)? {
-        FunctionBody::Block(body) => Ok(body),
-        FunctionBody::Match(_) => Err(Error::new(format!(
-            "function {} pattern signature clauses must use block bodies",
-            function.name
-        ))),
-    }
-}
-
-fn source_function_body(function: &Function) -> Result<&FunctionBody> {
-    function.body.as_ref().ok_or_else(|| {
-        Error::new(format!(
-            "function {} must have a body for buildable source",
-            function.name
-        ))
-    })
-}
-
-fn source_function_body_scope<'a>(
-    scope: &SourceFunctionScope<'a>,
-    function: &Function,
-) -> SourceFunctionScope<'a> {
-    if scope
-        .module
-        .functions
-        .iter()
-        .any(|candidate| std::ptr::eq(candidate, function))
-    {
-        SourceFunctionScope {
-            module: scope.module,
-            process_name: None,
-            process_functions: &[],
-            semantic_index: scope.semantic_index,
-        }
-    } else {
-        *scope
-    }
-}
-
-pub(in crate::language::checker::source_functions) fn validate_source_pattern_binding_name(
-    subject: &str,
-    semantic_index: &SemanticIndex,
-    binding: &Identifier,
-) -> Result<()> {
-    if binding.as_str() == STEP_STATE_PARAMETER_NAME {
-        return Err(Error::new(format!(
-            "{subject} pattern binding {binding} conflicts with a reserved state parameter name"
-        )));
-    }
-    if semantic_index.process_id(binding).is_ok() {
-        return Err(Error::new(format!(
-            "{subject} pattern binding {binding} conflicts with a process declaration"
-        )));
-    }
-    if semantic_index.identifier_conflicts_with_declared_value(binding) {
-        return Err(Error::new(format!(
-            "{subject} pattern binding {binding} conflicts with a declared type or value constructor"
-        )));
-    }
-    Ok(())
 }

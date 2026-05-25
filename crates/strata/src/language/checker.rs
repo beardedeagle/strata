@@ -453,6 +453,7 @@ struct SourceFunctionScope<'a> {
     module: &'a Module,
     process_name: Option<&'a Identifier>,
     process_functions: &'a [Function],
+    process_refs: Option<&'a BTreeMap<Identifier, CheckedProcessId>>,
     semantic_index: &'a SemanticIndex,
 }
 
@@ -673,7 +674,7 @@ fn reject_payload_entry_message(
     };
     if first_message.payload_type.is_some() {
         return Err(Error::new(format!(
-            "entry message {} must not require a payload in this source slice",
+            "entry message {} must not require a payload",
             first_message.name
         )));
     }

@@ -52,6 +52,7 @@ pub(super) fn check_step_transition(
         module: context.module,
         process_name: Some(&context.process.name),
         process_functions: &context.process.functions,
+        process_refs: None,
         semantic_index: context.semantic_index,
     };
     let source_bindings =
@@ -188,7 +189,7 @@ impl ActionCheckScope {
     fn validate_statement_if_allowed(self, process: &Identifier) -> Result<()> {
         if self.statement_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
             return Err(Error::new(format!(
-                "process {process} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice"
+                "process {process} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH}"
             )));
         }
         Ok(())
@@ -580,7 +581,7 @@ fn checked_next_state_for_arg(
 fn checked_next_state_if_child_depth(process: &str, depth: usize) -> Result<usize> {
     if depth >= MAX_NEXT_STATE_IF_ELSE_DEPTH {
         return Err(Error::new(format!(
-            "process {process} next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH} in this source slice"
+            "process {process} next_state runtime if nesting exceeds maximum depth of {MAX_NEXT_STATE_IF_ELSE_DEPTH}"
         )));
     }
     Ok(depth + 1)

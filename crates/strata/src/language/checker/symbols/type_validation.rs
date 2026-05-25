@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::MAX_VALUE_TEMPLATE_FIELDS;
 
-use super::super::super::ast::{Enum, EnumVariant, Identifier, Record, TypeRef};
+use super::super::super::ast::{Enum, EnumVariant, Identifier, Module, Record, TypeRef};
 use super::super::super::checked::CheckedProcessId;
 use super::super::super::diagnostic::{Error, Result};
 use super::super::CHECKED_TYPE_LABEL_PREFIX;
@@ -29,6 +29,7 @@ pub(super) fn reject_internal_type_label_prefix(name: &str) -> Result<()> {
 }
 
 pub(super) fn validate_record_fields(
+    module: &Module,
     symbols: &SymbolTable,
     types: &BTreeMap<Symbol, TypeDecl>,
     process_ref_type: Symbol,
@@ -48,6 +49,7 @@ pub(super) fn validate_record_fields(
             )));
         }
         if let Err(err) = validate_source_value_type(
+            module,
             symbols,
             types,
             process_ref_type,
@@ -65,7 +67,7 @@ pub(super) fn validate_record_fields(
                 )));
             }
             return Err(Error::new(format!(
-                "record {} field {} uses undeclared type {}",
+                "record {} field {} type {} is not a source value type: {err}",
                 record.name, field.name, field.ty
             )));
         }
@@ -75,6 +77,7 @@ pub(super) fn validate_record_fields(
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MessagePayloadTypeContext<'a> {
+    pub(super) module: &'a Module,
     pub(super) symbols: &'a SymbolTable,
     pub(super) types: &'a BTreeMap<Symbol, TypeDecl>,
     pub(super) processes: &'a BTreeMap<Symbol, CheckedProcessId>,
@@ -98,19 +101,14 @@ pub(super) fn validate_message_payload_type(
                 )));
             }
             validate_source_value_type(
+                context.module,
                 context.symbols,
                 context.types,
                 context.process_ref_type,
                 context.list_type,
                 context.map_type,
                 payload_type,
-            )
-            .map_err(|_| {
-                Error::new(format!(
-                    "enum {} variant {} uses undeclared payload type {}",
-                    enum_decl.name, variant.name, payload_type
-                ))
-            })?;
+            )?;
         }
         TypeRef::Applied {
             constructor,
@@ -154,6 +152,7 @@ pub(super) fn validate_message_payload_type(
                 )));
             }
             if let Err(err) = validate_source_value_type(
+                context.module,
                 context.symbols,
                 context.types,
                 context.process_ref_type,
@@ -192,6 +191,7 @@ pub(super) fn validate_message_payload_type(
 }
 
 pub(super) fn validate_source_value_type(
+    module: &Module,
     symbols: &SymbolTable,
     types: &BTreeMap<Symbol, TypeDecl>,
     process_ref_type: Symbol,
@@ -199,71 +199,133 @@ pub(super) fn validate_source_value_type(
     map_type: Symbol,
     ty: &TypeRef,
 ) -> Result<()> {
-    match ty {
-        TypeRef::Named(name) => {
-            if is_process_ref_name(symbols, process_ref_type, name) {
-                return Err(Error::new(format!(
-                    "type {ty} is not a source value type; process references must be direct message payloads"
-                )));
-            }
-            type_decl_from_tables(symbols, types, ty)?;
-            Ok(())
+    let mut validator = SourceValueTypeValidator {
+        module,
+        symbols,
+        types,
+        process_ref_type,
+        list_type,
+        map_type,
+        visiting: BTreeSet::new(),
+    };
+    validator.validate(ty)
+}
+
+struct SourceValueTypeValidator<'a> {
+    module: &'a Module,
+    symbols: &'a SymbolTable,
+    types: &'a BTreeMap<Symbol, TypeDecl>,
+    process_ref_type: Symbol,
+    list_type: Symbol,
+    map_type: Symbol,
+    visiting: BTreeSet<Symbol>,
+}
+
+impl SourceValueTypeValidator<'_> {
+    fn validate(&mut self, ty: &TypeRef) -> Result<()> {
+        match ty {
+            TypeRef::Named(name) => self.validate_named(ty, name),
+            TypeRef::Applied {
+                constructor,
+                args,
+                const_args,
+            } => self.validate_applied(ty, constructor, args, const_args),
         }
-        TypeRef::Applied {
-            constructor,
-            args,
-            const_args,
-        } => {
-            let constructor_symbol = symbols
-                .resolve(constructor.as_str())
-                .ok_or_else(|| Error::new(format!("type {ty} is not declared")))?;
-            if constructor_symbol == process_ref_type {
-                return Err(Error::new(format!(
-                    "type {ty} is not a source value type; process references must be direct message payloads"
-                )));
-            }
-            if constructor_symbol == list_type && args.len() == 1 && const_args.len() == 1 {
-                validate_collection_capacity(ty, const_args[0])?;
-                return validate_source_value_type(
-                    symbols,
-                    types,
-                    process_ref_type,
-                    list_type,
-                    map_type,
-                    &args[0],
-                );
-            }
-            if constructor_symbol == list_type {
-                return Err(Error::new(format!(
-                    "list type {ty} must declare exactly one element type and one numeric capacity"
-                )));
-            }
-            if constructor_symbol == map_type && args.len() == 2 && const_args.len() == 1 {
-                validate_collection_capacity(ty, const_args[0])?;
-                validate_source_value_type(
-                    symbols,
-                    types,
-                    process_ref_type,
-                    list_type,
-                    map_type,
-                    &args[0],
-                )?;
-                return validate_source_value_type(
-                    symbols,
-                    types,
-                    process_ref_type,
-                    list_type,
-                    map_type,
-                    &args[1],
-                );
-            }
-            if constructor_symbol == map_type {
-                return Err(Error::new(format!(
-                    "map type {ty} must declare exactly two type arguments and one numeric capacity"
-                )));
-            }
-            Err(Error::new(format!("type {ty} is not declared")))
+    }
+
+    fn validate_named(&mut self, ty: &TypeRef, name: &Identifier) -> Result<()> {
+        if is_process_ref_name(self.symbols, self.process_ref_type, name) {
+            return Err(Error::new(format!(
+                "type {ty} is not a source value type; process references must be direct message payloads"
+            )));
         }
+        let symbol = self
+            .symbols
+            .resolve(name.as_str())
+            .ok_or_else(|| Error::new(format!("type {name} is not declared")))?;
+        let decl = self
+            .types
+            .get(&symbol)
+            .copied()
+            .ok_or_else(|| Error::new(format!("type {name} is not declared")))?;
+        if !self.visiting.insert(symbol) {
+            return Ok(());
+        }
+        let result = match decl {
+            TypeDecl::Record(index) => self.validate_record(ty, index),
+            TypeDecl::Enum(index) => self.validate_enum(ty, index),
+        };
+        self.visiting.remove(&symbol);
+        result
+    }
+
+    fn validate_applied(
+        &mut self,
+        ty: &TypeRef,
+        constructor: &Identifier,
+        args: &[TypeRef],
+        const_args: &[usize],
+    ) -> Result<()> {
+        let constructor_symbol = self
+            .symbols
+            .resolve(constructor.as_str())
+            .ok_or_else(|| Error::new(format!("type {ty} is not declared")))?;
+        if constructor_symbol == self.process_ref_type {
+            return Err(Error::new(format!(
+                "type {ty} is not a source value type; process references must be direct message payloads"
+            )));
+        }
+        if constructor_symbol == self.list_type && args.len() == 1 && const_args.len() == 1 {
+            validate_collection_capacity(ty, const_args[0])?;
+            return self.validate(&args[0]);
+        }
+        if constructor_symbol == self.list_type {
+            return Err(Error::new(format!(
+                "list type {ty} must declare exactly one element type and one numeric capacity"
+            )));
+        }
+        if constructor_symbol == self.map_type && args.len() == 2 && const_args.len() == 1 {
+            validate_collection_capacity(ty, const_args[0])?;
+            self.validate(&args[0])?;
+            return self.validate(&args[1]);
+        }
+        if constructor_symbol == self.map_type {
+            return Err(Error::new(format!(
+                "map type {ty} must declare exactly two type arguments and one numeric capacity"
+            )));
+        }
+        Err(Error::new(format!("type {ty} is not declared")))
+    }
+
+    fn validate_record(&mut self, ty: &TypeRef, index: usize) -> Result<()> {
+        let record = self.module.records.get(index).ok_or_else(|| {
+            Error::new(format!(
+                "record index {index} is not declared for type {ty}"
+            ))
+        })?;
+        for field in &record.fields {
+            if type_contains_process_ref(self.symbols, self.process_ref_type, &field.ty) {
+                return Err(Error::new(format!(
+                    "record {} field {} type {} contains a process reference; process references must be direct message payloads",
+                    record.name, field.name, field.ty
+                )));
+            }
+            self.validate(&field.ty)?;
+        }
+        Ok(())
+    }
+
+    fn validate_enum(&mut self, ty: &TypeRef, index: usize) -> Result<()> {
+        let enum_decl = self.module.enums.get(index).ok_or_else(|| {
+            Error::new(format!("enum index {index} is not declared for type {ty}"))
+        })?;
+        for variant in &enum_decl.variants {
+            let Some(payload_type) = &variant.payload_type else {
+                continue;
+            };
+            self.validate(payload_type)?;
+        }
+        Ok(())
     }
 }
 
@@ -321,23 +383,6 @@ fn collection_type_signature_error(
             || const_args[0] > MAX_VALUE_TEMPLATE_FIELDS;
     }
     false
-}
-
-fn type_decl_from_tables(
-    symbols: &SymbolTable,
-    types: &BTreeMap<Symbol, TypeDecl>,
-    ty: &TypeRef,
-) -> Result<TypeDecl> {
-    let Some(name) = ty.as_named() else {
-        return Err(Error::new(format!("type {ty} is not declared")));
-    };
-    let symbol = symbols
-        .resolve(name)
-        .ok_or_else(|| Error::new(format!("type {name} is not declared")))?;
-    types
-        .get(&symbol)
-        .copied()
-        .ok_or_else(|| Error::new(format!("type {name} is not declared")))
 }
 
 pub(super) fn validate_collection_capacity(ty: &TypeRef, capacity: usize) -> Result<()> {

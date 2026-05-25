@@ -150,7 +150,7 @@ proc Worker mailbox bounded(1) {
 }
 
 #[test]
-fn rejects_nested_process_reference_payload_binding() {
+fn rejects_nested_process_reference_payload_type() {
     let source = r#"
 module nested_process_reference_pattern;
 
@@ -200,11 +200,11 @@ proc Worker mailbox bounded(1) {
 }
 "#;
 
-    let err = check_source(source).expect_err("nested process reference binding should fail");
+    let err = check_source(source).expect_err("nested process reference payload should fail");
     assert!(
         err.to_string().contains(
-            "nested constructor payload reply_to cannot bind process reference payload type ProcessRef<Sink>; process references must be direct message payload bindings"
+            "type ProcessRef<Sink> is not a source value type; process references must be direct message payloads"
         ),
-        "expected nested process reference diagnostic, got {err}"
+        "expected nested process reference source type diagnostic, got {err}"
     );
 }

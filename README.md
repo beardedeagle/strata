@@ -13,14 +13,14 @@ part of the checked interface of the program:
 
 - which effects a function or transition may perform;
 - which process can send which message;
-- which state transitions are admitted;
+- which state transitions are valid;
 - which values can carry process authority;
 - which operations are deterministic;
 - which runtime events prove what happened.
 
 ## Status
 
-This repository is a buildable source-to-runtime implementation slice. A real
+This repository contains a buildable source-to-runtime implementation. A real
 `.str` program can be checked, lowered into a `.mta` artifact, and executed by
 Mantle with an observability trace.
 
@@ -46,7 +46,7 @@ cryptographic obligations, policy-facing semantic artifacts, provenance, and
 reproducibility rules. Lowering owns the explicit conversion from checked Strata
 IR into Mantle target artifacts.
 
-Mantle owns the operational contract for admitted artifacts: process identity
+Mantle owns the operational contract for validated artifacts: process identity
 and scheduling, bounded mailboxes, isolated process state, supervision, effect
 dispatch, runtime capability validation, artifact admission, archive validation,
 repository/code-distribution behavior, host boundaries, transport, membership,
@@ -73,9 +73,9 @@ The intended language surface includes:
 - distribution as a typed semantic fact, not a transparent call boundary:
   transport reachability is never authority, remote failure is typed, partition
   behavior is observable, and cross-cluster operations require explicit
-  admitted capability and policy;
+  capability and policy authorization;
 - post-quantum cryptographic trust as a core semantic and admission
-  requirement: ML-DSA signatures, ML-KEM or policy-admitted hybrid key
+  requirement: ML-DSA signatures, ML-KEM or policy-approved hybrid key
   establishment, crypto manifests, and active policy checks for signed
   artifacts, capability attestations, node identity, cluster membership,
   repository admission, artifact admission, and node-to-node sessions;
@@ -94,11 +94,11 @@ The intended language surface includes:
 
 Source names are for syntax, diagnostics, traces, provenance, and metadata.
 Executable semantics cross the Strata/Mantle boundary as typed IDs and typed
-artifact structures, not as source strings. Runtime dispatch uses admitted
-typed tables and loaded runtime identities, not source text.
+artifact structures, not as source strings. Runtime dispatch uses loaded typed
+tables and runtime identities, not source text.
 
 The end state is not proof artifacts in place of behavior. The closure bar is a
-checked `.str` program lowered to a language-neutral `.mta` artifact, admitted
+checked `.str` program lowered to a language-neutral `.mta` artifact, validated
 and executed by Mantle, with observability and evidence that explain both
 accepted and rejected outcomes.
 
@@ -181,7 +181,7 @@ send worker Ping;
 ```
 
 Process references can also travel as typed immutable message payloads when the
-payload type admits them.
+message declares a direct `ProcessRef<T>` payload.
 
 ### Records, Enums, And Payloads
 
@@ -211,6 +211,32 @@ fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ 
     return Continue(Working(job));
 }
 ```
+
+### Pure Source Computation
+
+Pure source functions can name sequential immutable intermediate values before
+their terminal return:
+
+```strata
+enum Bool { False, True }
+enum Phase { Idle, Active }
+record Work { phase: Phase }
+
+fn status(Work { phase }) -> Phase ! [] ~ [] @det {
+    return phase;
+}
+
+fn route(work: Work) -> Phase ! [] ~ [] @det {
+    let current: Phase = status(work);
+    let selected: Phase = if (current == Active) { Active } else { Idle };
+    return selected;
+}
+```
+
+Source-local bindings are source-time names. The checker resolves them before
+lowering, so Mantle receives typed values, typed templates, and typed IDs rather
+than source-local variable names. Types that carry `ProcessRef<T>` authority are
+not source-local computation values.
 
 ### Pattern Matching
 
@@ -273,26 +299,25 @@ fn selected(Map<Phase,Phase,2>[Ready => phase, ..rest]) -> Phase ! [] ~ [] @det 
 }
 ```
 
-Collection rest bindings are whole values, not mutable views. This slice does
-not expose collection mutation, iteration APIs, dynamic-key map dispatch, or
-source-visible in-place update. Nested collection patterns stay within typed
-projection paths and static map-key semantics.
+Collection rest bindings are whole values, not mutable views. The buildable
+language surface does not expose collection mutation, source-level collection
+iteration APIs, dynamic-key map dispatch, or source-visible in-place update.
+Nested collection patterns stay within typed projection paths and static
+map-key semantics.
 
 ### Mantle Artifacts And Runtime Evidence
 
-Lowering converts checked Strata IR into a typed `.mta` artifact. Mantle admits
-the artifact, executes admitted transitions, and writes line-delimited runtime
-evidence such as process spawn, message delivery, state update, output, stop,
-and failure events.
+Lowering converts checked Strata IR into a typed `.mta` artifact. Mantle
+validates the artifact, executes typed transitions, and writes line-delimited
+runtime evidence such as process spawn, message delivery, state update, output,
+stop, and failure events.
 
 ## Try It
 
 Run the smallest source-to-runtime gate:
 
 ```sh
-cargo +stable run -p strata --bin strata -- check examples/hello.str
-cargo +stable run -p strata --bin strata -- build examples/hello.str
-cargo +stable run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
+just run-example hello
 ```
 
 The program emits:

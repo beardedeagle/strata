@@ -86,7 +86,7 @@ impl<'a> ActionReferenceScope<'a> {
         };
         if runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
             return Err(Error::new(format!(
-                "process {} runtime if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice",
+                "process {} runtime if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH}",
                 process.debug_name()
             )));
         }
@@ -252,7 +252,7 @@ fn validate_action_reference(
         } => {
             if scope.is_inside_runtime_if_branch() {
                 return Err(Error::new(format!(
-                    "process {} runtime if branch cannot bind process references in this source slice",
+                    "process {} runtime if branch cannot bind process references",
                     process.debug_name()
                 )));
             }
@@ -381,7 +381,7 @@ fn validate_action_reference(
         } => {
             if scope.inside_loop {
                 return Err(Error::new(format!(
-                    "process {} nested for loops are not supported in this source slice",
+                    "process {} nested for loops are not supported",
                     process.debug_name()
                 )));
             }

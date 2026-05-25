@@ -231,9 +231,8 @@ proc Sink mailbox bounded(1) {
     let err = check_source(source).expect_err("arm-local process ref binding should fail");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm cannot bind process reference sink in this source slice"
-        ),
+        err.to_string()
+            .contains("process Worker step return match arm cannot bind process reference sink"),
         "unexpected error: {err}"
     );
 }
@@ -322,7 +321,7 @@ fn rejects_step_return_match_arm_terminal_runtime_if() {
 
     assert!(
         err.to_string().contains(
-            "process Worker step return match arm cannot perform final-position runtime if in this source slice"
+            "process Worker step return match arm cannot perform final-position runtime if"
         ),
         "unexpected error: {err}"
     );
@@ -338,9 +337,8 @@ fn rejects_step_return_match_arm_nested_return_match() {
     let err = check_source(&source).expect_err("nested arm-local return match should fail");
 
     assert!(
-        err.to_string().contains(
-            "process Worker step return match arm nested return match is not supported in this source slice"
-        ),
+        err.to_string()
+            .contains("process Worker step return match arm nested return match is not supported"),
         "unexpected error: {err}"
     );
 }

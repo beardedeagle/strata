@@ -250,7 +250,11 @@ fn validate_step_return_match_arm_action_statement(
             )
         }
         Statement::LetProcessRef { name, .. } => Err(Error::new(format!(
-            "process {} step return match arm cannot bind process reference {} in this source slice",
+            "process {} step return match arm cannot bind process reference {}",
+            context.process.name, name
+        ))),
+        Statement::LetValue { name, .. } => Err(Error::new(format!(
+            "process {} step return match arm cannot bind source-local value {}",
             context.process.name, name
         ))),
         Statement::IfElse {
@@ -260,7 +264,7 @@ fn validate_step_return_match_arm_action_statement(
         } => {
             if validation.runtime_if_depth >= MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH {
                 return Err(Error::new(format!(
-                    "process {} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH} in this source slice",
+                    "process {} statement-level if action nesting exceeds maximum depth of {MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH}",
                     context.process.name,
                 )));
             }
@@ -285,7 +289,7 @@ fn validate_step_return_match_arm_action_statement(
         } => {
             if validation.in_loop_body {
                 return Err(Error::new(format!(
-                    "process {} nested for loops are not supported in this source slice",
+                    "process {} nested for loops are not supported",
                     context.process.name
                 )));
             }

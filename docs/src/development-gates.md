@@ -16,12 +16,11 @@ steps that switch the whole checkout to nightly Rust. Nightly-only tools must be
 invoked per command with `+nightly`.
 
 The quality bundle includes `just cfg-check`, which typechecks the workspace for
-representative Linux, macOS, and Windows Rust targets using `cargo check
---workspace --all-targets --target ...`. This keeps platform-specific and
-test-only `#[cfg]` paths covered by real compiler evidence without changing
-source visibility or suppressing rust-analyzer's weak inactive-code hints. If a
-target is missing locally, install the reported target with `rustup target add
---toolchain stable ...`.
+representative Linux, macOS, and Windows Rust targets through the repository
+recipe. This keeps platform-specific and test-only `#[cfg]` paths covered by
+real compiler evidence without changing source visibility or suppressing
+rust-analyzer's weak inactive-code hints. If a target is missing locally,
+install the reported target with `rustup target add --toolchain stable ...`.
 
 Run the source-to-runtime gates after changes that affect syntax,
 checking, lowering, artifacts, runtime behavior, diagnostics, examples, or
@@ -48,15 +47,15 @@ just language-surface-assurance
 ## Bounded Assurance
 
 `just bounded-assurance-smoke` runs the focused bounded assurance surface for
-the current selected `step return match` action-block slice. It exhaustively
-generates valid action-block models up to the explicit statement-sequence bound,
-checks source acceptance, compares checked IR action shapes with lowered Mantle
-artifact action shapes, validates the artifact boundary, verifies typed send IDs,
-checks terminal `Continue` / `Stop` / `Panic` lowering, runs an explicit smaller
-bounded runtime execution generator through Mantle, and runs bypass-mutation
-rejection tests for malformed artifact equivalents.
+the current bounded language surfaces. It covers immutable source-local binding
+chains and pure source-function `if` selection. It also covers selected
+`step return match` action blocks. The gate compares checked IR shapes with
+lowered Mantle artifact shapes, validates the artifact boundary, verifies typed
+send IDs, checks terminal `Continue` / `Stop` / `Panic` lowering, runs an
+explicit smaller bounded runtime execution generator through Mantle, and runs
+bypass-mutation rejection tests for malformed artifact equivalents.
 
-This is machine-checked bounded exhaustiveness for the named slice. It is not a
+This is machine-checked bounded exhaustiveness for the named surface. It is not a
 theorem-prover proof of the whole language surface.
 
 ## Continuous Integration
@@ -140,7 +139,9 @@ just fuzz-ci
 ## Miri
 
 Miri runs on nightly Rust. The Miri gate is a smoke suite focused on pure or
-in-memory paths rather than filesystem-specific CLI behavior.
+in-memory paths rather than filesystem-specific CLI behavior. It includes a
+targeted immutable source-local binding check/lower smoke for the source
+resolution path; this surface does not add a new unsafe-adjacent runtime path.
 
 Useful local commands:
 
@@ -149,6 +150,6 @@ just install-miri-tools
 just miri-ci
 ```
 
-Every slice that changes user-facing syntax, artifact schema, runtime behavior,
+Every change that affects user-facing syntax, artifact schema, runtime behavior,
 diagnostics, examples, or acceptance gates should update this book and pass
 `mdbook build docs`.

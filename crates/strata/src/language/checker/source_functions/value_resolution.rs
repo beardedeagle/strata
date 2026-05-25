@@ -8,9 +8,11 @@ use super::*;
 
 mod body_matches;
 mod return_matches;
+mod substitution;
 
 use body_matches::resolve_source_function_body_match_value;
 use return_matches::resolve_source_function_return_match_value;
+use substitution::substitute_source_value_bindings;
 
 type RecordPatternValueResolution = (Vec<SourceSubstitution>, Vec<PatternPayloadParam>);
 
@@ -505,32 +507,41 @@ fn resolve_source_function_block_return_value(
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
-    if !body.statements.is_empty() {
-        return Err(Error::new(
-            "source function body must not perform statements",
-        ));
+    let mut block_substitutions = substitutions.to_vec();
+    let mut block_bindings = local_bindings.to_vec();
+    for statement in &body.statements {
+        let Statement::LetValue { name, ty, value } = statement else {
+            return Err(Error::new(
+                "source function body must not perform runtime statements",
+            ));
+        };
+        let value = substitute_source_value_bindings(value.clone(), &block_substitutions);
+        let resolved = resolve_source_value_expr(scope, ty, &value, bindings, depth + 1)?;
+        check_source_value_type(scope, ty, &resolved, bindings)?;
+        block_substitutions.push(SourceSubstitution::new(name.clone(), resolved));
+        block_bindings.push(SourceValueBinding { name, ty });
     }
 
     let context = SourceFunctionReturnContext {
         scope,
         function,
-        substitutions,
-        local_bindings,
+        substitutions: &block_substitutions,
+        local_bindings: &block_bindings,
         bindings,
     };
     resolve_source_function_return_value(&context, &body.returns, depth + 1)
 }
 
-struct SourceFunctionReturnContext<'a, 'scope> {
-    scope: &'a SourceFunctionScope<'scope>,
-    function: &'a Function,
-    substitutions: &'a [SourceSubstitution],
-    local_bindings: &'a [SourceValueBinding<'a>],
-    bindings: &'a [SourceValueBinding<'a>],
+struct SourceFunctionReturnContext<'ctx, 'scope, 'local, 'outer> {
+    scope: &'ctx SourceFunctionScope<'scope>,
+    function: &'ctx Function,
+    substitutions: &'ctx [SourceSubstitution],
+    local_bindings: &'ctx [SourceValueBinding<'local>],
+    bindings: &'ctx [SourceValueBinding<'outer>],
 }
 
 fn resolve_source_function_return_value(
-    context: &SourceFunctionReturnContext<'_, '_>,
+    context: &SourceFunctionReturnContext<'_, '_, '_, '_>,
     returns: &ReturnExpr,
     depth: usize,
 ) -> Result<ValueExpr> {
@@ -570,7 +581,7 @@ fn resolve_source_function_return_value(
 }
 
 fn resolve_source_function_return_if_else_value(
-    context: &SourceFunctionReturnContext<'_, '_>,
+    context: &SourceFunctionReturnContext<'_, '_, '_, '_>,
     condition: &ValueExpr,
     then_branch: &FunctionBlock,
     else_branch: &FunctionBlock,
@@ -601,7 +612,7 @@ fn resolve_source_function_return_if_else_value(
     )
 }
 
-impl SourceFunctionReturnContext<'_, '_> {
+impl SourceFunctionReturnContext<'_, '_, '_, '_> {
     fn semantic_index(&self) -> &SemanticIndex {
         self.scope.semantic_index
     }
@@ -669,91 +680,5 @@ fn concrete_source_record_value<'a>(
         ValueExpr::List(_) | ValueExpr::Map(_) => Err(Error::new(format!(
             "function {function_name} {usage} requires a concrete record value argument"
         ))),
-    }
-}
-
-fn substitute_source_value_bindings(
-    value: ValueExpr,
-    bindings: &[SourceSubstitution],
-) -> ValueExpr {
-    match value {
-        ValueExpr::Identifier(name) => bindings
-            .iter()
-            .find_map(|binding| (name == binding.name).then(|| binding.value.clone()))
-            .unwrap_or(ValueExpr::Identifier(name)),
-        ValueExpr::Call { name, arg } => ValueExpr::Call {
-            name,
-            arg: Box::new(substitute_source_value_bindings(*arg, bindings)),
-        },
-        ValueExpr::EnumVariant { name, payload } => ValueExpr::EnumVariant {
-            name,
-            payload: Box::new(substitute_source_value_bindings(*payload, bindings)),
-        },
-        ValueExpr::Record(record) => ValueExpr::Record(RecordValue {
-            name: record.name,
-            fields: record
-                .fields
-                .into_iter()
-                .map(|field| RecordValueField {
-                    name: field.name,
-                    value: substitute_source_value_bindings(field.value, bindings),
-                })
-                .collect(),
-        }),
-        ValueExpr::List(list) => ValueExpr::List(ListValue {
-            element_type: list.element_type,
-            capacity: list.capacity,
-            items: list
-                .items
-                .into_iter()
-                .map(|item| substitute_source_value_bindings(item, bindings))
-                .collect(),
-        }),
-        ValueExpr::Map(map) => ValueExpr::Map(MapValue {
-            key_type: map.key_type,
-            value_type: map.value_type,
-            capacity: map.capacity,
-            entries: map
-                .entries
-                .into_iter()
-                .map(|entry| MapValueEntry {
-                    key: substitute_source_value_bindings(entry.key, bindings),
-                    value: substitute_source_value_bindings(entry.value, bindings),
-                })
-                .collect(),
-        }),
-        ValueExpr::IfElse {
-            condition,
-            then_branch,
-            else_branch,
-        } => ValueExpr::IfElse {
-            condition: Box::new(substitute_source_value_bindings(*condition, bindings)),
-            then_branch: Box::new(substitute_source_value_bindings(*then_branch, bindings)),
-            else_branch: Box::new(substitute_source_value_bindings(*else_branch, bindings)),
-        },
-        ValueExpr::Equality {
-            operator,
-            left,
-            right,
-        } => ValueExpr::Equality {
-            operator,
-            left: Box::new(substitute_source_value_bindings(*left, bindings)),
-            right: Box::new(substitute_source_value_bindings(*right, bindings)),
-        },
-        ValueExpr::BooleanNot { operand } => ValueExpr::BooleanNot {
-            operand: Box::new(substitute_source_value_bindings(*operand, bindings)),
-        },
-        ValueExpr::BooleanBinary {
-            operator,
-            left,
-            right,
-        } => ValueExpr::BooleanBinary {
-            operator,
-            left: Box::new(substitute_source_value_bindings(*left, bindings)),
-            right: Box::new(substitute_source_value_bindings(*right, bindings)),
-        },
-        ValueExpr::Grouped { value } => ValueExpr::Grouped {
-            value: Box::new(substitute_source_value_bindings(*value, bindings)),
-        },
     }
 }
