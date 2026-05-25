@@ -41,7 +41,7 @@ The maintained command list belongs in the executable gate definitions:
 
 This page intentionally does not enumerate every runtime gate. When a new
 user-visible language or runtime behavior needs source-to-runtime proof, update
-the executable gate and document the example in the examples pages.
+the executable gate and document the example in the grouped example pages.
 
 The language surface proof substrate checks that the agreed current-surface
 proof domains map to declared features and that those features point at the
