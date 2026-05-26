@@ -6,14 +6,22 @@ use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, 
 use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
 use super::super::{
-    BOOL_FALSE, BOOL_TRUE, BOOL_TYPE, LIST_TYPE, MAP_TYPE, PROC_RESULT_TYPE, PROCESS_REF_TYPE,
+    BOOL_FALSE, BOOL_TRUE, BOOL_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE, PROC_RESULT_TYPE,
+    PROCESS_REF_TYPE, RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, UNIT_TYPE,
 };
+mod builtins;
+mod collection_type;
+mod type_decls;
 mod type_validation;
 
+use builtins::is_builtin_value_constructor_name;
+pub(super) use builtins::{BuiltinValueShape, ValueEnumVariant, ValueEnumVariantInfo};
+pub(super) use collection_type::CollectionType;
+use type_decls::{TypeDecl, TypeDeclMap};
 use type_validation::{
-    MessagePayloadTypeContext, reject_internal_type_label_prefix, reject_reserved_type_name,
-    validate_collection_capacity, validate_message_payload_type, validate_record_fields,
-    validate_source_value_type,
+    BuiltinTypeSymbols, MessagePayloadTypeContext, SourceValueTypeContext,
+    reject_internal_type_label_prefix, reject_reserved_type_name, validate_collection_capacity,
+    validate_message_payload_type, validate_record_fields, validate_source_value_type,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -34,7 +42,10 @@ struct SymbolTable {
 
 impl SymbolTable {
     fn intern(&mut self, value: &Identifier) -> Result<Symbol> {
-        let value = value.as_str();
+        self.intern_str(value.as_str())
+    }
+
+    fn intern_str(&mut self, value: &str) -> Result<Symbol> {
         if let Some(symbol) = self.by_text.get(value) {
             return Ok(*symbol);
         }
@@ -45,23 +56,6 @@ impl SymbolTable {
 
     fn resolve(&self, value: &str) -> Option<Symbol> {
         self.by_text.get(value).copied()
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TypeDecl {
-    Scalar(ArtifactScalarType),
-    Record(usize),
-    Enum(usize),
-}
-
-impl TypeDecl {
-    fn kind(self) -> &'static str {
-        match self {
-            Self::Scalar(_) => "scalar",
-            Self::Record(_) => "record",
-            Self::Enum(_) => "enum",
-        }
     }
 }
 
@@ -93,7 +87,12 @@ pub(super) struct SemanticIndex {
     process_ref_type: Symbol,
     list_type: Symbol,
     map_type: Symbol,
-    types: BTreeMap<Symbol, TypeDecl>,
+    unit_type: Symbol,
+    option_type: Symbol,
+    result_type: Symbol,
+    send_error_type: Symbol,
+    spawn_error_type: Symbol,
+    types: TypeDeclMap,
     processes: BTreeMap<Symbol, CheckedProcessId>,
     enum_variants: Vec<BTreeMap<Symbol, usize>>,
 }
@@ -101,23 +100,35 @@ pub(super) struct SemanticIndex {
 impl SemanticIndex {
     pub(super) fn build(module: &Module) -> Result<Self> {
         let mut symbols = SymbolTable::default();
-        let mut types = BTreeMap::new();
+        let mut types = TypeDeclMap::default();
         let mut records = BTreeMap::new();
         let mut enums = BTreeMap::new();
         let mut enum_variants = Vec::with_capacity(module.enums.len());
         let mut processes = BTreeMap::new();
 
         let _module_symbol = symbols.intern(&module.name)?;
-        let proc_result_type = symbols.intern(&Identifier::new(PROC_RESULT_TYPE)?)?;
-        let process_ref_type = symbols.intern(&Identifier::new(PROCESS_REF_TYPE)?)?;
-        let list_type = symbols.intern(&Identifier::new(LIST_TYPE)?)?;
-        let map_type = symbols.intern(&Identifier::new(MAP_TYPE)?)?;
+        let proc_result_type = symbols.intern_str(PROC_RESULT_TYPE)?;
+        let process_ref_type = symbols.intern_str(PROCESS_REF_TYPE)?;
+        let list_type = symbols.intern_str(LIST_TYPE)?;
+        let map_type = symbols.intern_str(MAP_TYPE)?;
+        let unit_type = symbols.intern_str(UNIT_TYPE)?;
+        let option_type = symbols.intern_str(OPTION_TYPE)?;
+        let result_type = symbols.intern_str(RESULT_TYPE)?;
+        let send_error_type = symbols.intern_str(SEND_ERROR_TYPE)?;
+        let spawn_error_type = symbols.intern_str(SPAWN_ERROR_TYPE)?;
+        types.insert(unit_type, TypeDecl::Unit);
         let mut scalar_type_symbols = Vec::with_capacity(ArtifactScalarType::ALL.len());
         for scalar in ArtifactScalarType::ALL {
-            let symbol = symbols.intern(&Identifier::new(scalar.source_name())?)?;
+            let symbol = symbols.intern_str(scalar.source_name())?;
             types.insert(symbol, TypeDecl::Scalar(scalar));
             scalar_type_symbols.push(symbol);
         }
+        let builtin_types = BuiltinTypeSymbols {
+            option: option_type,
+            result: result_type,
+            send_error: send_error_type,
+            spawn_error: spawn_error_type,
+        };
 
         for (index, record) in module.records.iter().enumerate() {
             let symbol = symbols.intern(&record.name)?;
@@ -125,6 +136,11 @@ impl SemanticIndex {
             reject_reserved_type_name(record.name.as_str(), symbol, process_ref_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, map_type)?;
+            reject_reserved_type_name(record.name.as_str(), symbol, unit_type)?;
+            reject_reserved_type_name(record.name.as_str(), symbol, option_type)?;
+            reject_reserved_type_name(record.name.as_str(), symbol, result_type)?;
+            reject_reserved_type_name(record.name.as_str(), symbol, send_error_type)?;
+            reject_reserved_type_name(record.name.as_str(), symbol, spawn_error_type)?;
             for scalar_symbol in &scalar_type_symbols {
                 reject_reserved_type_name(record.name.as_str(), symbol, *scalar_symbol)?;
             }
@@ -153,6 +169,11 @@ impl SemanticIndex {
             reject_reserved_type_name(item.name.as_str(), symbol, process_ref_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, map_type)?;
+            reject_reserved_type_name(item.name.as_str(), symbol, unit_type)?;
+            reject_reserved_type_name(item.name.as_str(), symbol, option_type)?;
+            reject_reserved_type_name(item.name.as_str(), symbol, result_type)?;
+            reject_reserved_type_name(item.name.as_str(), symbol, send_error_type)?;
+            reject_reserved_type_name(item.name.as_str(), symbol, spawn_error_type)?;
             for scalar_symbol in &scalar_type_symbols {
                 reject_reserved_type_name(item.name.as_str(), symbol, *scalar_symbol)?;
             }
@@ -173,6 +194,12 @@ impl SemanticIndex {
 
             let mut variants = BTreeMap::new();
             for (variant_index, variant) in item.variants.iter().enumerate() {
+                if is_builtin_value_constructor_name(variant.name.as_str()) {
+                    return Err(Error::new(format!(
+                        "enum {} variant {} uses reserved builtin value constructor name",
+                        item.name, variant.name
+                    )));
+                }
                 let variant_symbol = symbols.intern(&variant.name)?;
                 if variants.insert(variant_symbol, variant_index).is_some() {
                     return Err(Error::new(format!(
@@ -209,6 +236,7 @@ impl SemanticIndex {
                             process_ref_type,
                             list_type,
                             map_type,
+                            builtin_types,
                         },
                         item,
                         variant,
@@ -220,12 +248,15 @@ impl SemanticIndex {
 
         for record in &module.records {
             validate_record_fields(
-                module,
-                &symbols,
-                &types,
-                process_ref_type,
-                list_type,
-                map_type,
+                SourceValueTypeContext {
+                    module,
+                    symbols: &symbols,
+                    types: &types,
+                    process_ref_type,
+                    list_type,
+                    map_type,
+                    builtin_types,
+                },
                 record,
             )?;
         }
@@ -236,6 +267,11 @@ impl SemanticIndex {
             process_ref_type,
             list_type,
             map_type,
+            unit_type,
+            option_type,
+            result_type,
+            send_error_type,
+            spawn_error_type,
             types,
             processes,
             enum_variants,
@@ -389,15 +425,14 @@ impl SemanticIndex {
             .resolve(name)
             .ok_or_else(|| Error::new(format!("type {name} is not declared")))?;
         self.types
-            .get(&symbol)
-            .copied()
+            .get(symbol)
             .ok_or_else(|| Error::new(format!("type {name} is not declared")))
     }
 
     pub(super) fn enum_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Enum> {
         match self.type_decl(ty)? {
             TypeDecl::Enum(index) => Ok(&module.enums[index]),
-            TypeDecl::Record(_) | TypeDecl::Scalar(_) => {
+            TypeDecl::Record(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
                 Err(Error::new(format!("type {ty} is not declared as an enum")))
             }
         }
@@ -406,7 +441,7 @@ impl SemanticIndex {
     pub(super) fn record_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Record> {
         match self.type_decl(ty)? {
             TypeDecl::Record(index) => Ok(&module.records[index]),
-            TypeDecl::Enum(_) | TypeDecl::Scalar(_) => {
+            TypeDecl::Enum(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
                 Err(Error::new(format!("type {ty} is not declared as a record")))
             }
         }
@@ -418,19 +453,22 @@ impl SemanticIndex {
         }
         match self.type_decl(ty) {
             Ok(TypeDecl::Scalar(scalar)) => Ok(Some(scalar)),
-            Ok(TypeDecl::Record(_) | TypeDecl::Enum(_)) => Ok(None),
+            Ok(TypeDecl::Unit | TypeDecl::Record(_) | TypeDecl::Enum(_)) => Ok(None),
             Err(err) => Err(err),
         }
     }
 
     pub(super) fn validate_source_value_type(&self, module: &Module, ty: &TypeRef) -> Result<()> {
         validate_source_value_type(
-            module,
-            &self.symbols,
-            &self.types,
-            self.process_ref_type,
-            self.list_type,
-            self.map_type,
+            SourceValueTypeContext {
+                module,
+                symbols: &self.symbols,
+                types: &self.types,
+                process_ref_type: self.process_ref_type,
+                list_type: self.list_type,
+                map_type: self.map_type,
+                builtin_types: self.builtin_type_symbols(),
+            },
             ty,
         )
     }
@@ -440,7 +478,7 @@ impl SemanticIndex {
             .symbols
             .resolve(BOOL_TYPE)
             .ok_or_else(bool_contract_error)?;
-        let Some(TypeDecl::Enum(index)) = self.types.get(&symbol).copied() else {
+        let Some(TypeDecl::Enum(index)) = self.types.get(symbol) else {
             return Err(bool_contract_error());
         };
         let enum_decl = module
@@ -466,9 +504,12 @@ impl SemanticIndex {
         ty: &TypeRef,
         variant: &Identifier,
     ) -> Result<usize> {
+        if let Some(index) = self.builtin_value_enum_variant_index(ty, variant)? {
+            return Ok(index);
+        }
         let enum_index = match self.type_decl(ty)? {
             TypeDecl::Enum(index) => index,
-            TypeDecl::Record(_) | TypeDecl::Scalar(_) => {
+            TypeDecl::Record(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
                 return Err(Error::new(format!("type {ty} is not declared as an enum")));
             }
         };
@@ -626,7 +667,7 @@ impl SemanticIndex {
             .ok_or_else(|| context.not_accepted_error(process, message))?;
         let enum_index = match self.type_decl(&process.msg_type)? {
             TypeDecl::Enum(index) => index,
-            TypeDecl::Record(_) | TypeDecl::Scalar(_) => {
+            TypeDecl::Record(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
                 return Err(Error::new(format!(
                     "type {} is not declared as an enum",
                     process.msg_type
@@ -666,13 +707,16 @@ impl SemanticIndex {
     }
 
     pub(super) fn identifier_conflicts_with_declared_value(&self, name: &Identifier) -> bool {
+        if is_builtin_value_constructor_name(name.as_str()) {
+            return true;
+        }
         let Some(symbol) = self.symbols.resolve(name.as_str()) else {
             return false;
         };
         if symbol == self.list_type || symbol == self.map_type {
             return true;
         }
-        self.types.contains_key(&symbol)
+        self.types.contains_key(symbol)
             || self
                 .enum_variants
                 .iter()
@@ -682,17 +726,4 @@ impl SemanticIndex {
 
 fn bool_contract_error() -> Error {
     Error::new("if condition requires enum Bool { False, True }")
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) enum CollectionType<'a> {
-    List {
-        element: &'a TypeRef,
-        capacity: usize,
-    },
-    Map {
-        key: &'a TypeRef,
-        value: &'a TypeRef,
-        capacity: usize,
-    },
 }

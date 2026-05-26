@@ -1,5 +1,6 @@
 use crate::language::ast::{ValueBooleanOperator, ValueEqualityOperator};
 use crate::language::checked::{CheckedValueBooleanOperator, CheckedValueEqualityOperator};
+use crate::language::checker::symbols::{BuiltinValueShape, ValueEnumVariant};
 
 use super::scalars::scalar_template_expr_type;
 use super::*;
@@ -49,7 +50,13 @@ pub(super) fn checked_equality_template(
         equality.right,
         input.bindings,
     )?;
-    validate_equality_template_operand_type(input.module, input.semantic_index, &operand_type)?;
+    validate_equality_template_operands(
+        input.module,
+        input.semantic_index,
+        &operand_type,
+        equality.left,
+        equality.right,
+    )?;
     let operand_ty = types.intern(&operand_type)?;
     Ok(CheckedValueTemplate::Equality {
         ty: types.intern(&bool_type)?,
@@ -191,14 +198,10 @@ fn equality_template_operand_pair_type(
     let left_type = equality_template_operand_type(module, semantic_index, left, bindings, None);
     let right_type = equality_template_operand_type(module, semantic_index, right, bindings, None);
     match (left_type, right_type) {
-        (Ok(left_type), Ok(right_type)) => validate_matching_equality_template_operand_types(
-            module,
-            semantic_index,
-            left_type,
-            right_type,
-        ),
+        (Ok(left_type), Ok(right_type)) => {
+            validate_matching_equality_template_operand_types(semantic_index, left_type, right_type)
+        }
         (Ok(left_type), Err(_)) => {
-            validate_equality_template_operand_type(module, semantic_index, &left_type)?;
             let right_type = equality_template_operand_type(
                 module,
                 semantic_index,
@@ -206,15 +209,9 @@ fn equality_template_operand_pair_type(
                 bindings,
                 Some(&left_type),
             )?;
-            validate_matching_equality_template_operand_types(
-                module,
-                semantic_index,
-                left_type,
-                right_type,
-            )
+            validate_matching_equality_template_operand_types(semantic_index, left_type, right_type)
         }
         (Err(_), Ok(right_type)) => {
-            validate_equality_template_operand_type(module, semantic_index, &right_type)?;
             let left_type = equality_template_operand_type(
                 module,
                 semantic_index,
@@ -222,25 +219,17 @@ fn equality_template_operand_pair_type(
                 bindings,
                 Some(&right_type),
             )?;
-            validate_matching_equality_template_operand_types(
-                module,
-                semantic_index,
-                left_type,
-                right_type,
-            )
+            validate_matching_equality_template_operand_types(semantic_index, left_type, right_type)
         }
         (Err(left_error), Err(_)) => Err(left_error),
     }
 }
 
 fn validate_matching_equality_template_operand_types(
-    module: &Module,
     semantic_index: &SemanticIndex,
     left_type: TypeRef,
     right_type: TypeRef,
 ) -> Result<TypeRef> {
-    validate_equality_template_operand_type(module, semantic_index, &left_type)?;
-    validate_equality_template_operand_type(module, semantic_index, &right_type)?;
     if !semantic_index.same_type(&left_type, &right_type) {
         return Err(Error::new(format!(
             "equality operands must have the same type; left has {left_type}, right has {right_type}"
@@ -290,14 +279,9 @@ fn equality_template_operand_type(
         }
         ValueExpr::EnumVariant { name, .. } => {
             if let Some(expected_type) = expected_type
-                && let Some(variant) =
-                    enum_variant_for_expected_type(module, semantic_index, expected_type, name)?
+                && enum_variant_for_expected_type(module, semantic_index, expected_type, name)?
+                    .is_some()
             {
-                if variant.payload_type.is_some() {
-                    return Err(Error::new(format!(
-                        "equality operand enum variant {name} carries a payload"
-                    )));
-                }
                 return Ok(expected_type.clone());
             }
             let ty = semantic_index.enum_variant_type(module, name)?;
@@ -349,18 +333,18 @@ fn equality_template_fieldless_variant_matches_type(
     Ok(true)
 }
 
-fn enum_variant_for_expected_type<'module>(
-    module: &'module Module,
+fn enum_variant_for_expected_type(
+    module: &Module,
     semantic_index: &SemanticIndex,
     expected_type: &TypeRef,
     name: &Identifier,
-) -> Result<Option<&'module crate::language::ast::EnumVariant>> {
-    let Ok(enum_decl) = semantic_index.enum_decl(module, expected_type) else {
+) -> Result<Option<ValueEnumVariant>> {
+    let Ok(value_enum) = semantic_index.value_enum(module, expected_type) else {
         return Ok(None);
     };
-    Ok(enum_decl
+    Ok(value_enum
         .variants
-        .iter()
+        .into_iter()
         .find(|variant| variant.name == *name))
 }
 
@@ -369,6 +353,23 @@ fn validate_equality_template_operand_type(
     semantic_index: &SemanticIndex,
     operand_type: &TypeRef,
 ) -> Result<()> {
+    validate_equality_template_operand_type_at_depth(module, semantic_index, operand_type, 0)
+}
+
+fn validate_equality_template_operand_type_at_depth(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    operand_type: &TypeRef,
+    depth: usize,
+) -> Result<()> {
+    if depth > MAX_VALUE_NESTING {
+        return Err(Error::new(format!(
+            "equality operand type nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+        )));
+    }
+    if semantic_index.is_unit_type(operand_type)? {
+        return Ok(());
+    }
     let bool_type = semantic_index.bool_type(module)?;
     if semantic_index.same_type(operand_type, &bool_type) {
         return Ok(());
@@ -388,8 +389,28 @@ fn validate_equality_template_operand_type(
     if semantic_index.record_decl(module, operand_type).is_ok() {
         return Err(Error::new("record equality is not supported"));
     }
-    let enum_decl = semantic_index.enum_decl(module, operand_type)?;
-    if enum_decl
+    if let Some(BuiltinValueShape::Enum(value_enum)) =
+        semantic_index.builtin_value_shape(operand_type)?
+    {
+        for variant in value_enum.variants {
+            if let Some(payload_type) = variant.payload_type {
+                validate_equality_template_operand_type_at_depth(
+                    module,
+                    semantic_index,
+                    &payload_type,
+                    depth + 1,
+                )
+                .map_err(|err| {
+                    Error::new(format!(
+                        "equality payload type {payload_type} is not supported: {err}"
+                    ))
+                })?;
+            }
+        }
+        return Ok(());
+    }
+    let value_enum = semantic_index.value_enum(module, operand_type)?;
+    if value_enum
         .variants
         .iter()
         .any(|variant| variant.payload_type.is_some())
@@ -399,4 +420,80 @@ fn validate_equality_template_operand_type(
         )));
     }
     Ok(())
+}
+
+fn validate_equality_template_operands(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    operand_type: &TypeRef,
+    left: &ValueExpr,
+    right: &ValueExpr,
+) -> Result<()> {
+    let full_error =
+        match validate_equality_template_operand_type(module, semantic_index, operand_type) {
+            Ok(()) => return Ok(()),
+            Err(err) => err,
+        };
+    if template_builtin_variant_equality_pattern(module, semantic_index, operand_type, left)?
+        || template_builtin_variant_equality_pattern(module, semantic_index, operand_type, right)?
+    {
+        Ok(())
+    } else {
+        Err(full_error)
+    }
+}
+
+fn template_builtin_variant_equality_pattern(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    operand_type: &TypeRef,
+    value: &ValueExpr,
+) -> Result<bool> {
+    let value = match value {
+        ValueExpr::Grouped { value } => value.as_ref(),
+        _ => value,
+    };
+    let Some(BuiltinValueShape::Enum(value_enum)) =
+        semantic_index.builtin_value_shape(operand_type)?
+    else {
+        return Ok(false);
+    };
+    match value {
+        ValueExpr::Identifier(name) => {
+            let Some(variant) = value_enum
+                .variants
+                .iter()
+                .find(|variant| variant.name == *name)
+            else {
+                return Ok(false);
+            };
+            Ok(variant.payload_type.is_none())
+        }
+        ValueExpr::EnumVariant { name, payload } => {
+            let Some(variant) = value_enum
+                .variants
+                .iter()
+                .find(|variant| variant.name == *name)
+            else {
+                return Ok(false);
+            };
+            let Some(payload_type) = &variant.payload_type else {
+                return Ok(false);
+            };
+            template_equality_payload_pattern_is_safe(module, semantic_index, payload_type, payload)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn template_equality_payload_pattern_is_safe(
+    module: &Module,
+    semantic_index: &SemanticIndex,
+    payload_type: &TypeRef,
+    payload: &ValueExpr,
+) -> Result<bool> {
+    if validate_equality_template_operand_type(module, semantic_index, payload_type).is_ok() {
+        return Ok(true);
+    }
+    template_builtin_variant_equality_pattern(module, semantic_index, payload_type, payload)
 }

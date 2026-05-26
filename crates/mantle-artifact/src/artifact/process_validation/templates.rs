@@ -11,6 +11,9 @@ pub(in crate::artifact) fn validate_template_loop_elements(
         | ArtifactValueTemplate::ReceivedPayload { .. }
         | ArtifactValueTemplate::CurrentStatePayload { .. }
         | ArtifactValueTemplate::ProcessRef { .. } => Ok(()),
+        ArtifactValueTemplate::EffectOutcome { ty, .. } => {
+            artifact.validate_value_type(&format!("{field}.type_id"), *ty)
+        }
         ArtifactValueTemplate::LoopElement { ty, element } => {
             artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
             let Some(active) = active_loop_elements
@@ -231,6 +234,7 @@ fn validate_bool_condition_template_shape(
         | ArtifactValueTemplate::ListPrefixElement { .. }
         | ArtifactValueTemplate::MapValue { .. }
         | ArtifactValueTemplate::LoopElement { .. }
+        | ArtifactValueTemplate::EffectOutcome { .. }
         | ArtifactValueTemplate::Equality { .. }
         | ArtifactValueTemplate::ScalarOrdering { .. }
         | ArtifactValueTemplate::IfElse { .. }
@@ -255,7 +259,10 @@ fn validate_static_bool_condition_value(
     condition: &ArtifactValueTemplate,
     current_state_payload: Option<&ArtifactPayload>,
 ) -> Result<()> {
-    if condition.depends_on_received_payload() || condition.depends_on_loop_element() {
+    if condition.depends_on_received_payload()
+        || condition.depends_on_loop_element()
+        || condition.depends_on_effect_outcome()
+    {
         return Ok(());
     }
 

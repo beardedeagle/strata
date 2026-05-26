@@ -7,7 +7,8 @@ pub(in crate::language::checker::static_validation) fn validate_value_template_p
         CheckedValueTemplate::Literal(value) => validate_checked_payload_value(value),
         CheckedValueTemplate::ReceivedPayload { .. }
         | CheckedValueTemplate::CurrentStatePayload { .. }
-        | CheckedValueTemplate::LoopElement { .. } => Ok(()),
+        | CheckedValueTemplate::LoopElement { .. }
+        | CheckedValueTemplate::EffectOutcome { .. } => Ok(()),
         CheckedValueTemplate::EnumPayload { value, .. } => {
             validate_value_template_payload_labels(value)
         }
@@ -104,9 +105,11 @@ fn validate_record_template_shape(fields: &[CheckedValueTemplateField]) -> Resul
             "record template field_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
         )));
     }
-    let mut names = BTreeSet::new();
-    for field in fields {
-        if !names.insert(field.name().as_str()) {
+    for (index, field) in fields.iter().enumerate() {
+        if fields[..index]
+            .iter()
+            .any(|previous| previous.name() == field.name())
+        {
             return Err(Error::new(format!(
                 "record template duplicates field {}",
                 field.name()
@@ -131,18 +134,19 @@ fn validate_map_template_shape(entries: &[CheckedValueTemplateMapEntry]) -> Resu
             "map template entry_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
         )));
     }
-    let mut keys = BTreeSet::new();
+    let mut keys = Vec::with_capacity(entries.len());
     for entry in entries {
         validate_value_template_payload_labels(entry.key())?;
         let key = checked_static_template_value(entry.key())
             .ok_or_else(|| Error::new("map template keys must be static source values"))?;
         validate_artifact_value("map template key", &key)?;
-        if !keys.insert(key.clone()) {
+        if keys.iter().any(|previous| previous == &key) {
             return Err(Error::new(format!(
                 "map template duplicates key {}",
                 key.label()
             )));
         }
+        keys.push(key);
         validate_value_template_payload_labels(entry.value())?;
     }
     Ok(())
@@ -183,6 +187,7 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. }
         | CheckedValueTemplate::LoopElement { .. }
+        | CheckedValueTemplate::EffectOutcome { .. }
         | CheckedValueTemplate::Equality { .. }
         | CheckedValueTemplate::ScalarArithmetic { .. }
         | CheckedValueTemplate::ScalarOrdering { .. }
@@ -199,9 +204,11 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         }),
         CheckedValueTemplate::Record { ty, fields } => {
             let mut values = Vec::with_capacity(fields.len());
-            let mut seen = BTreeSet::new();
-            for field in fields {
-                if !seen.insert(field.name()) {
+            for (index, field) in fields.iter().enumerate() {
+                if fields[..index]
+                    .iter()
+                    .any(|previous| previous.name() == field.name())
+                {
                     return None;
                 }
                 values.push(ArtifactRecordField {
@@ -222,12 +229,11 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
             Some(ArtifactValue::List(values))
         }
         CheckedValueTemplate::Map { entries, .. } => {
-            let mut values = Vec::with_capacity(entries.len());
-            let mut seen = BTreeSet::new();
+            let mut values: Vec<ArtifactMapEntry> = Vec::with_capacity(entries.len());
             for entry in entries {
                 let key = checked_static_template_value(entry.key())?;
                 let value = checked_static_template_value(entry.value())?;
-                if !seen.insert(key.clone()) {
+                if values.iter().any(|previous| previous.key == key) {
                     return None;
                 }
                 values.push(ArtifactMapEntry { key, value });
@@ -316,22 +322,23 @@ fn validate_map_key_set(field: &str, keys: &[ArtifactValue], kind: MapKeySetKind
             "{field} key_count must be no greater than {MAX_VALUE_TEMPLATE_FIELDS}"
         )));
     }
-    let mut seen = BTreeSet::new();
     for map_key in keys {
         validate_artifact_value(&format!("{field} {}", kind.field_label()), map_key)?;
-        if !seen.insert(map_key.clone()) {
+    }
+    for adjacent in keys.windows(2) {
+        if adjacent[0] == adjacent[1] {
             return Err(Error::new(format!(
                 "{field} duplicates {} {}",
                 kind.singular(),
-                map_key.label()
+                adjacent[0].label()
             )));
         }
-    }
-    if seen.into_iter().collect::<Vec<_>>() != keys {
-        return Err(Error::new(format!(
-            "{field} {} must be sorted canonically",
-            kind.plural()
-        )));
+        if adjacent[0] > adjacent[1] {
+            return Err(Error::new(format!(
+                "{field} {} must be sorted canonically",
+                kind.plural()
+            )));
+        }
     }
     Ok(())
 }

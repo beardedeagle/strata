@@ -1,5 +1,6 @@
 mod action_effects;
 mod codec;
+mod effect_outcomes;
 mod identity_and_labels;
 mod io;
 mod message_payloads;

@@ -179,12 +179,14 @@ fn insert_concrete_state_payload_domain(
         .iter_mut()
         .find(|domain| semantic_index.same_type(&domain.ty, &ty))
     {
-        domain.values.insert(value);
+        if !domain.values.iter().any(|existing| existing == &value) {
+            domain.values.push(value);
+        }
         return;
     }
     domains.push(ConcreteStatePayloadDomain {
         ty,
-        values: BTreeSet::from([value]),
+        values: vec![value],
     });
 }
 
@@ -277,6 +279,7 @@ fn preadmit_concrete_step_return(
             .source
             .iter()
             .any(|binding| source_value_uses_binding(state_arg, binding.name))
+        || body_effect_outcome_bindings_used(body, state_arg)
     {
         return Ok(());
     }
@@ -292,4 +295,13 @@ fn preadmit_concrete_step_return(
         resolve_source_value_expr(&function_scope, &process.state_type, state_arg, &[], 0)?;
     state_space.resolve_state_value(semantic_index, types, &state_arg)?;
     Ok(())
+}
+
+fn body_effect_outcome_bindings_used(body: &FunctionBlock, value: &ValueExpr) -> bool {
+    body.statements.iter().any(|statement| match statement {
+        Statement::LetSendOutcome { name, .. } | Statement::LetSpawnOutcome { name, .. } => {
+            source_value_uses_binding(value, name)
+        }
+        _ => false,
+    })
 }

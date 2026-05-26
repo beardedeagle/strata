@@ -163,6 +163,18 @@ fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @
 This is deliberately stricter than "allow anything in the list." A declared but
 unused effect is rejected.
 
+Effectful local sends can also be bound as immutable typed outcomes:
+
+```strata
+let sent: Result<Unit,SendError<WorkerMsg>> = send worker Ping;
+```
+
+The outcome is a source-visible value, not an exception path. Mantle commits an
+accepted message and returns `Ok(Unit)`. If local delivery fails before
+acceptance, the `SendError<WorkerMsg>` value preserves the original message.
+Local spawn outcomes use `Result<ProcessRef<TargetProcess>,SpawnError<Unit>>`;
+accepted spawns return the committed process reference as step-local authority.
+
 ## Determinism And May-Behaviors
 
 Function signatures include determinism and may-behavior positions:

@@ -134,9 +134,10 @@ fn substitute_step_return_statement(
     bindings: &[StepReturnSubstitution<'_>],
 ) -> Statement {
     match statement {
-        Statement::Emit(_) | Statement::LetValue { .. } | Statement::LetProcessRef { .. } => {
-            statement
-        }
+        Statement::Emit(_)
+        | Statement::LetValue { .. }
+        | Statement::LetProcessRef { .. }
+        | Statement::LetSpawnOutcome { .. } => statement,
         Statement::ForEach {
             item,
             collection,
@@ -163,6 +164,19 @@ fn substitute_step_return_statement(
             message,
             payload,
         } => Statement::Send {
+            target,
+            message,
+            payload: payload.map(|payload| substitute_step_return_bindings(payload, bindings)),
+        },
+        Statement::LetSendOutcome {
+            name,
+            ty,
+            target,
+            message,
+            payload,
+        } => Statement::LetSendOutcome {
+            name,
+            ty,
             target,
             message,
             payload: payload.map(|payload| substitute_step_return_bindings(payload, bindings)),

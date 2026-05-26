@@ -81,7 +81,19 @@ pub(in crate::language) enum CheckedAction {
         target: CheckedProcessId,
         process_ref: CheckedProcessRefId,
     },
+    SpawnOutcome {
+        outcome: super::CheckedEffectOutcomeId,
+        outcome_ty: CheckedTypeRef,
+        target: CheckedProcessId,
+    },
     Send {
+        target: CheckedSendTarget,
+        message: CheckedMessageId,
+        payload: Option<Box<CheckedValueTemplate>>,
+    },
+    SendOutcome {
+        outcome: super::CheckedEffectOutcomeId,
+        outcome_ty: CheckedTypeRef,
         target: CheckedSendTarget,
         message: CheckedMessageId,
         payload: Option<Box<CheckedValueTemplate>>,
@@ -105,10 +117,10 @@ impl CheckedAction {
             Self::Emit { .. } => {
                 effects.insert(Effect::Emit);
             }
-            Self::Spawn { .. } => {
+            Self::Spawn { .. } | Self::SpawnOutcome { .. } => {
                 effects.insert(Effect::Spawn);
             }
-            Self::Send { .. } => {
+            Self::Send { .. } | Self::SendOutcome { .. } => {
                 effects.insert(Effect::Send);
             }
             Self::IfElse {
@@ -133,7 +145,11 @@ impl CheckedAction {
 
     pub(in crate::language) fn action_count(&self) -> Result<usize> {
         match self {
-            Self::Emit { .. } | Self::Spawn { .. } | Self::Send { .. } => Ok(1),
+            Self::Emit { .. }
+            | Self::Spawn { .. }
+            | Self::SpawnOutcome { .. }
+            | Self::Send { .. }
+            | Self::SendOutcome { .. } => Ok(1),
             Self::IfElse {
                 then_actions,
                 else_actions,

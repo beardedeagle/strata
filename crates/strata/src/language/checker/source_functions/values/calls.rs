@@ -1,6 +1,7 @@
 use super::super::collection_patterns::collection_pattern_type;
 use super::super::record_patterns::record_pattern_type;
 use super::*;
+use crate::language::checker::symbols::ValueEnumVariantInfo;
 
 pub(super) fn validate_source_function_call_or_constructor(
     scope: &SourceFunctionScope<'_>,
@@ -21,16 +22,16 @@ pub(super) fn validate_source_function_call_or_constructor(
     }
     let Some(functions) = functions else {
         if identifier_starts_uppercase(name)
-            && let Ok(enum_decl) = scope.semantic_index.enum_decl(scope.module, expected_type)
+            && let Ok(value_enum) = scope.semantic_index.value_enum(scope.module, expected_type)
         {
             return Err(Error::new(format!(
                 "value {name} is not a variant of enum {}",
-                enum_decl.name
+                value_enum.name
             )));
         }
         return Err(Error::new(format!("function {name} is not declared")));
     };
-    validate_source_function_call(scope, expected_type, name, arg, bindings, &functions)
+    validate_source_function_call(scope, expected_type, name, arg, bindings, functions)
 }
 
 fn validate_source_function_call(
@@ -39,7 +40,7 @@ fn validate_source_function_call(
     name: &Identifier,
     arg: &ValueExpr,
     bindings: &[SourceValueBinding<'_>],
-    functions: &[&Function],
+    functions: SourceFunctionGroup<'_, '_>,
 ) -> Result<()> {
     let first = functions
         .first()
@@ -72,7 +73,8 @@ fn validate_source_function_call(
                 scope.module,
                 scope.semantic_index,
                 "source",
-                functions,
+                functions.iter(),
+                functions.first().map(|function| &function.name),
             )?;
             validate_source_function_value_expr(scope, &enum_type, arg, bindings)
         }
@@ -101,7 +103,7 @@ fn validate_source_enum_payload_value(
 ) -> Result<()> {
     let variant = enum_variant_for_expected_type(scope, expected_type, name)?
         .ok_or_else(|| enum_value_error(scope, expected_type, name))?;
-    let Some(payload_type) = &variant.payload_type else {
+    let Some(payload_type) = variant.payload_type.as_ref() else {
         return Err(Error::new(format!(
             "enum variant {name} does not accept a payload"
         )));
@@ -109,18 +111,14 @@ fn validate_source_enum_payload_value(
     validate_source_function_value_expr(scope, payload_type, payload, bindings)
 }
 
-pub(super) fn enum_variant_for_expected_type<'module>(
-    scope: &SourceFunctionScope<'module>,
+pub(super) fn enum_variant_for_expected_type(
+    scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
     name: &Identifier,
-) -> Result<Option<&'module EnumVariant>> {
-    let Ok(enum_decl) = scope.semantic_index.enum_decl(scope.module, expected_type) else {
-        return Ok(None);
-    };
-    Ok(enum_decl
-        .variants
-        .iter()
-        .find(|variant| variant.name == *name))
+) -> Result<Option<ValueEnumVariantInfo>> {
+    scope
+        .semantic_index
+        .value_enum_variant_option(scope.module, expected_type, name)
 }
 
 pub(super) fn enum_value_error(
@@ -128,10 +126,13 @@ pub(super) fn enum_value_error(
     expected_type: &TypeRef,
     name: &Identifier,
 ) -> Error {
-    match scope.semantic_index.enum_decl(scope.module, expected_type) {
-        Ok(enum_decl) => Error::new(format!(
+    match scope
+        .semantic_index
+        .value_enum_name(scope.module, expected_type)
+    {
+        Ok(enum_name) => Error::new(format!(
             "value {name} is not a variant of enum {}",
-            enum_decl.name
+            enum_name
         )),
         Err(_) => Error::new(format!(
             "value {name} cannot construct non-enum value of type {expected_type}"
@@ -146,31 +147,37 @@ pub(super) fn identifier_starts_uppercase(name: &Identifier) -> bool {
         .is_some_and(|ch| ch.is_ascii_uppercase())
 }
 
-pub(super) fn source_function_group_option<'a>(
+pub(super) fn source_function_group_option<'a, 'name>(
     scope: &SourceFunctionScope<'a>,
-    name: &Identifier,
-) -> Result<Option<Vec<&'a Function>>> {
-    let local: Vec<_> = scope
-        .process_functions
-        .iter()
-        .filter(|function| function.name == *name)
-        .collect();
-    let module: Vec<_> = scope
-        .module
-        .functions
-        .iter()
-        .filter(|function| function.name == *name)
-        .collect();
+    name: &'name Identifier,
+) -> Result<Option<SourceFunctionGroup<'a, 'name>>> {
+    let local_len = named_source_function_count(scope.process_functions, name);
+    let module_len = named_source_function_count(&scope.module.functions, name);
 
-    match (local.is_empty(), module.is_empty()) {
-        (false, false) => Err(Error::new(format!(
+    match (local_len, module_len) {
+        (local_len, 0) if local_len > 0 => Ok(Some(SourceFunctionGroup::new(
+            scope.process_functions,
+            name,
+            local_len,
+        ))),
+        (0, module_len) if module_len > 0 => Ok(Some(SourceFunctionGroup::new(
+            &scope.module.functions,
+            name,
+            module_len,
+        ))),
+        (local_len, module_len) if local_len > 0 && module_len > 0 => Err(Error::new(format!(
             "{} function {name} conflicts with module function {name}",
             source_function_scope_label(scope)
         ))),
-        (false, true) => Ok(Some(local)),
-        (true, false) => Ok(Some(module)),
-        (true, true) => Ok(None),
+        _ => Ok(None),
     }
+}
+
+fn named_source_function_count(functions: &[Function], name: &Identifier) -> usize {
+    functions
+        .iter()
+        .filter(|function| function.name == *name)
+        .count()
 }
 
 fn source_function_scope_label(scope: &SourceFunctionScope<'_>) -> String {

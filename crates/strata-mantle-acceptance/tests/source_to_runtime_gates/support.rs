@@ -6,8 +6,9 @@ use std::sync::Once;
 pub(crate) use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactSendTarget, ArtifactTransition,
     ArtifactTypeKind, ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
-    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
-    EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId, StateId, TypeId, read_artifact,
+    ArtifactValueShape, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, EffectOutcomeId, EnumVariantId, MantleArtifact, MessageId,
+    NextState, ProcessId, StateId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();

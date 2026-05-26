@@ -1,11 +1,9 @@
-use std::collections::BTreeSet;
-
 use mantle_artifact::{
     ArtifactPayload, ArtifactProcessRefPayload, ArtifactScalarArithmeticOperator,
     ArtifactScalarOrderingOperator, ArtifactStateValue, ArtifactValue,
     ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueTemplate,
-    ArtifactValueTemplateMapEntry, EnumVariantId, Error, LoopElementId, MAX_VALUE_TEMPLATE_FIELDS,
-    MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
+    ArtifactValueTemplateMapEntry, EffectOutcomeId, EnumVariantId, Error, LoopElementId,
+    MAX_VALUE_TEMPLATE_FIELDS, MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
     validate_state_value_identity_label,
 };
 
@@ -135,6 +133,25 @@ impl RuntimePayload {
         })
     }
 
+    pub(crate) fn value_with_embedded_process_ref(
+        ty: TypeId,
+        value: RuntimeValue,
+        target_process: ProcessId,
+        pid: RuntimeProcessId,
+    ) -> Result<Self> {
+        value.validate("embedded process reference payload value")?;
+        validate_single_embedded_process_ref(&value, pid.as_u64())?;
+        Ok(Self {
+            ty,
+            label: value.label(),
+            value,
+            process_ref: Some(ArtifactProcessRefPayload {
+                target_process,
+                pid: pid.as_u64(),
+            }),
+        })
+    }
+
     pub fn type_id(&self) -> TypeId {
         self.ty
     }
@@ -248,6 +265,10 @@ pub(crate) enum LoadedValueTemplate {
         ty: TypeId,
         element: LoopElementId,
     },
+    EffectOutcome {
+        ty: TypeId,
+        outcome: EffectOutcomeId,
+    },
     EnumVariant {
         ty: TypeId,
         variant: EnumVariantId,
@@ -322,6 +343,10 @@ impl LoadedValueTemplate {
             ArtifactValueTemplate::CurrentStatePayload { ty } => {
                 Ok(Self::CurrentStatePayload { ty: *ty })
             }
+            ArtifactValueTemplate::EffectOutcome { ty, outcome } => Ok(Self::EffectOutcome {
+                ty: *ty,
+                outcome: *outcome,
+            }),
             ArtifactValueTemplate::EnumPayload { ty, value, variant } => Ok(Self::EnumPayload {
                 ty: *ty,
                 value: Box::new(Self::from_artifact(value)?),
@@ -520,6 +545,7 @@ impl LoadedValueTemplate {
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
             | Self::LoopElement { ty, .. }
+            | Self::EffectOutcome { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
@@ -583,10 +609,9 @@ fn validate_map_key_set(field: &str, keys: &[RuntimeValue], kind: MapKeySetKind)
             "{field}.key_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
         )));
     }
-    let mut seen = BTreeSet::new();
-    for map_key in keys {
+    for (index, map_key) in keys.iter().enumerate() {
         validate_non_process_ref_value(&format!("{field}.{}", kind.field_name()), map_key)?;
-        if !seen.insert(map_key.clone()) {
+        if keys[..index].iter().any(|previous| previous == map_key) {
             return Err(Error::new(format!(
                 "{field} duplicates {} {}",
                 kind.singular(),
@@ -594,7 +619,7 @@ fn validate_map_key_set(field: &str, keys: &[RuntimeValue], kind: MapKeySetKind)
             )));
         }
     }
-    if seen.into_iter().collect::<Vec<_>>() != keys {
+    if keys.windows(2).any(|pair| pair[0] > pair[1]) {
         return Err(Error::new(format!(
             "{field} {} must be sorted canonically",
             kind.plural()
@@ -609,6 +634,57 @@ pub(super) fn validate_non_process_ref_value(field: &str, value: &RuntimeValue) 
         return Err(Error::new(format!(
             "{field} must not contain a process reference value"
         )));
+    }
+    Ok(())
+}
+
+fn validate_single_embedded_process_ref(value: &RuntimeValue, pid: u64) -> Result<()> {
+    fn visit(value: &RuntimeValue, pid: u64, seen: &mut bool) -> Result<()> {
+        match value {
+            RuntimeValue::ProcessRef { pid: actual, .. } => {
+                if *seen {
+                    return Err(Error::new(
+                        "embedded process reference payload contains more than one process reference",
+                    ));
+                }
+                if *actual != pid {
+                    return Err(Error::new(format!(
+                        "embedded process reference payload pid {actual} does not match metadata pid {pid}"
+                    )));
+                }
+                *seen = true;
+                Ok(())
+            }
+            RuntimeValue::EnumVariant { payload, .. } => visit(payload, pid, seen),
+            RuntimeValue::Record { fields, .. } => {
+                for field in fields {
+                    visit(&field.value, pid, seen)?;
+                }
+                Ok(())
+            }
+            RuntimeValue::List(items) => {
+                for item in items {
+                    visit(item, pid, seen)?;
+                }
+                Ok(())
+            }
+            RuntimeValue::Map(entries) => {
+                for entry in entries {
+                    visit(&entry.key, pid, seen)?;
+                    visit(&entry.value, pid, seen)?;
+                }
+                Ok(())
+            }
+            RuntimeValue::Atom(_) | RuntimeValue::Scalar(_) => Ok(()),
+        }
+    }
+
+    let mut seen = false;
+    visit(value, pid, &mut seen)?;
+    if !seen {
+        return Err(Error::new(
+            "embedded process reference payload requires a process reference value",
+        ));
     }
     Ok(())
 }

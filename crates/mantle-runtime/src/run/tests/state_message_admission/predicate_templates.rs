@@ -92,6 +92,7 @@ fn runtime_rejects_loaded_if_else_dynamic_non_unit_bool_shape_before_artifact_lo
         vec!["False".to_string(), "True".to_string()],
     ));
     artifact.processes[1].message_variants[0].payload_type = Some(bool_type);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[1].transitions[0].next_state = NextState::IfElse {
         condition: ArtifactValueTemplate::ReceivedPayload { ty: bool_type },
         then_state: Box::new(NextState::Current),

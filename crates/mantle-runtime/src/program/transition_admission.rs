@@ -1,6 +1,7 @@
 use super::templates::{
     LoadedTemplateAdmission, evaluate_loaded_state_value,
-    loaded_template_depends_on_received_payload, validate_loaded_bool_condition,
+    loaded_template_depends_on_effect_outcome, loaded_template_depends_on_received_payload,
+    validate_loaded_bool_condition,
 };
 use super::*;
 
@@ -14,6 +15,14 @@ impl LoadedTransitionValueTypes<'_> {
     fn current_state_payload_type(self) -> Option<TypeId> {
         self.current_state_payload.map(|payload| payload.ty)
     }
+}
+
+#[derive(Clone, Copy)]
+struct NextStateAdmissionContext<'a> {
+    program: &'a LoadedProgram,
+    process: &'a LoadedProcess,
+    value_types: LoadedTransitionValueTypes<'a>,
+    effect_outcomes: &'a [(EffectOutcomeId, TypeId)],
 }
 
 impl LoadedTransition {
@@ -41,22 +50,40 @@ impl LoadedTransition {
         &self,
         program: &LoadedProgram,
         process: &LoadedProcess,
+        process_id: ProcessId,
         message: MessageId,
     ) -> Result<()> {
-        self.validate_next_state(program, process, message)?;
         self.validate_payload_guard(program, process, message)?;
 
         let current_state_payload = transition_current_state_payload(process, self)?;
         let mut spawned_refs = vec![false; process.process_refs.len()];
+        let mut effect_outcomes = Vec::new();
+        let mut prestate_prefix_open = true;
         for action in &self.actions {
+            if !prestate_prefix_open && is_loaded_effect_outcome_action(action) {
+                return Err(Error::new(format!(
+                    "process {} transition {} effect outcome action appears after ordinary effects",
+                    process.debug_name,
+                    message.as_u32()
+                )));
+            }
             action.validate_admission(
-                program,
-                process,
-                message,
-                current_state_payload,
+                ActionAdmissionContext {
+                    program,
+                    process,
+                    process_id,
+                    message,
+                    current_state_payload,
+                    effect_outcomes: &effect_outcomes,
+                },
                 &mut spawned_refs,
             )?;
+            self.record_action_effect_outcome(process, message, action, &mut effect_outcomes)?;
+            if loaded_action_closes_prestate_prefix(action) {
+                prestate_prefix_open = false;
+            }
         }
+        self.validate_next_state(program, process, message, &effect_outcomes)?;
         Ok(())
     }
 
@@ -121,6 +148,7 @@ impl LoadedTransition {
         program: &LoadedProgram,
         process: &LoadedProcess,
         message: MessageId,
+        effect_outcomes: &[(EffectOutcomeId, TypeId)],
     ) -> Result<()> {
         let context = self.transition_context(message);
         let value_types = LoadedTransitionValueTypes {
@@ -137,18 +165,27 @@ impl LoadedTransition {
                 .payload_type,
             current_state_payload: transition_current_state_payload(process, self)?,
         };
-        self.validate_next_state_node(program, process, &context, &self.next_state, value_types, 0)
+        self.validate_next_state_node(
+            NextStateAdmissionContext {
+                program,
+                process,
+                value_types,
+                effect_outcomes,
+            },
+            &context,
+            &self.next_state,
+            0,
+        )
     }
 
     fn validate_next_state_node(
         &self,
-        program: &LoadedProgram,
-        process: &LoadedProcess,
+        admission: NextStateAdmissionContext<'_>,
         context: &str,
         next_state: &LoadedNextState,
-        value_types: LoadedTransitionValueTypes,
         depth: usize,
     ) -> Result<()> {
+        let process = admission.process;
         match next_state {
             LoadedNextState::Current => Ok(()),
             LoadedNextState::Value(state) => {
@@ -165,11 +202,13 @@ impl LoadedTransition {
             LoadedNextState::Template(template) => {
                 LoadedTemplateAdmission {
                     expected_type: Some(process.state_type),
-                    received_payload_type: value_types.received_payload,
-                    current_state_payload_type: value_types.current_state_payload_type(),
+                    received_payload_type: admission.value_types.received_payload,
+                    current_state_payload_type: admission.value_types.current_state_payload_type(),
                     allow_direct_process_ref: false,
+                    allow_process_ref_effect_outcome: false,
                     loop_elements: &[],
-                    program,
+                    effect_outcomes: admission.effect_outcomes,
+                    program: admission.program,
                     process,
                     spawned_refs: &[],
                 }
@@ -180,14 +219,16 @@ impl LoadedTransition {
                     ),
                     template,
                 )?;
-                if loaded_template_depends_on_received_payload(template) {
+                if loaded_template_depends_on_received_payload(template)
+                    || loaded_template_depends_on_effect_outcome(template)
+                {
                     return Ok(());
                 }
                 let value = evaluate_loaded_state_value(
-                    program,
+                    admission.program,
                     template,
                     None,
-                    value_types.current_state_payload,
+                    admission.value_types.current_state_payload,
                 )?;
                 if process.state_values.iter().any(|state_value| {
                     state_value.ty == value.ty && state_value.value == value.value
@@ -212,34 +253,70 @@ impl LoadedTransition {
                 }
                 let branch_depth = depth + 1;
                 validate_loaded_bool_condition(
-                    program,
+                    admission.program,
                     process,
                     &format!(
                         "process {} {} next_state_condition",
                         process.debug_name, context
                     ),
                     condition,
-                    value_types.received_payload,
-                    value_types.current_state_payload,
+                    admission.value_types.received_payload,
+                    admission.value_types.current_state_payload,
+                    admission.effect_outcomes,
                 )?;
                 self.validate_next_state_node(
-                    program,
-                    process,
+                    admission,
                     &format!("{context} then"),
                     then_state,
-                    value_types,
                     branch_depth,
                 )?;
                 self.validate_next_state_node(
-                    program,
-                    process,
+                    admission,
                     &format!("{context} else"),
                     else_state,
-                    value_types,
                     branch_depth,
                 )
             }
         }
+    }
+
+    fn record_action_effect_outcome(
+        &self,
+        process: &LoadedProcess,
+        message: MessageId,
+        action: &LoadedAction,
+        effect_outcomes: &mut Vec<(EffectOutcomeId, TypeId)>,
+    ) -> Result<()> {
+        let (outcome, outcome_ty) = match action {
+            LoadedAction::SpawnOutcome {
+                outcome,
+                outcome_ty,
+                ..
+            }
+            | LoadedAction::SendOutcome {
+                outcome,
+                outcome_ty,
+                ..
+            } => (*outcome, *outcome_ty),
+            _ => return Ok(()),
+        };
+        if effect_outcomes.len() >= MAX_EFFECT_OUTCOMES_PER_TRANSITION {
+            return Err(Error::new(format!(
+                "process {} transition {} binds more than {MAX_EFFECT_OUTCOMES_PER_TRANSITION} effect outcomes",
+                process.debug_name,
+                message.as_u32()
+            )));
+        }
+        if effect_outcomes.iter().any(|(id, _)| *id == outcome) {
+            return Err(Error::new(format!(
+                "process {} transition {} duplicates effect outcome id {}",
+                process.debug_name,
+                message.as_u32(),
+                outcome.as_u32()
+            )));
+        }
+        effect_outcomes.push((outcome, outcome_ty));
+        Ok(())
     }
 
     fn transition_context(&self, message: MessageId) -> String {
@@ -252,6 +329,23 @@ impl LoadedTransition {
             None => format!("message id {}", message.as_u32()),
         }
     }
+}
+
+const fn is_loaded_effect_outcome_action(action: &LoadedAction) -> bool {
+    matches!(
+        action,
+        LoadedAction::SpawnOutcome { .. } | LoadedAction::SendOutcome { .. }
+    )
+}
+
+const fn loaded_action_closes_prestate_prefix(action: &LoadedAction) -> bool {
+    matches!(
+        action,
+        LoadedAction::Emit { .. }
+            | LoadedAction::Send { .. }
+            | LoadedAction::IfElse { .. }
+            | LoadedAction::ForEach { .. }
+    )
 }
 
 impl LoadedNextState {

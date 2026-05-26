@@ -5,6 +5,7 @@ fn runtime_rejects_loaded_dynamic_for_each_non_list_collection_before_artifact_l
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[1].message_variants[0].payload_type = Some(JOB);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[0].transitions[0].effect_authority =
         crate::program::LoadedEffectAuthority::from_artifact(&[
             ArtifactEffect::Spawn,
@@ -48,6 +49,7 @@ fn runtime_rejects_loaded_dynamic_for_each_collection_element_mismatch_before_ar
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let box_list = push_list_type(&mut program, "BoxList", BOX, 1);
     program.processes[1].message_variants[0].payload_type = Some(box_list);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[0].transitions[0].effect_authority =
         crate::program::LoadedEffectAuthority::from_artifact(&[
             ArtifactEffect::Spawn,

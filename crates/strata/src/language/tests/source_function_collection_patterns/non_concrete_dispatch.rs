@@ -5,7 +5,6 @@ fn rejects_source_function_list_signature_non_concrete_argument() {
     let source = r#"
 module list_signature_non_concrete_argument;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -49,7 +48,6 @@ fn rejects_source_function_map_signature_non_concrete_argument() {
     let source = r#"
 module map_signature_non_concrete_argument;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -93,7 +91,6 @@ fn rejects_source_function_list_body_match_non_concrete_scrutinee() {
     let source = r#"
 module list_body_match_non_concrete_scrutinee;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -141,7 +138,6 @@ fn rejects_source_function_map_body_match_non_concrete_scrutinee() {
     let source = r#"
 module map_body_match_non_concrete_scrutinee;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -189,7 +185,6 @@ fn rejects_source_function_list_return_match_non_concrete_scrutinee() {
     let source = r#"
 module list_return_match_non_concrete_scrutinee;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -237,7 +232,6 @@ fn rejects_source_function_map_return_match_non_concrete_scrutinee() {
     let source = r#"
 module map_return_match_non_concrete_scrutinee;
 
-record Unit;
 enum Phase {
     Ready,
     Done,

@@ -22,6 +22,7 @@ pub(super) fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) 
         | LoadedValueTemplate::MapRest { .. }
         | LoadedValueTemplate::ProcessRef { .. }
         | LoadedValueTemplate::LoopElement { .. }
+        | LoadedValueTemplate::EffectOutcome { .. }
         | LoadedValueTemplate::IfElse { .. }
         | LoadedValueTemplate::Equality { .. }
         | LoadedValueTemplate::BooleanNot { .. }

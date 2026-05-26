@@ -1,5 +1,3 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use mantle_artifact::{
     ArtifactMapEntry, ArtifactRecordField, ArtifactValue, MAX_STATE_VALUES_PER_PROCESS,
     validate_state_value_label,
@@ -18,6 +16,7 @@ mod scalars;
 
 use scalars::{canonical_scalar_arithmetic_value, canonical_scalar_ordering_value};
 
+#[derive(Clone)]
 pub(in crate::language::checker) struct ValueBinding<'a> {
     pub(in crate::language::checker) name: &'a Identifier,
     pub(in crate::language::checker) ty: &'a TypeRef,
@@ -218,6 +217,14 @@ pub(super) fn canonical_value(
             "parenthesized value expression must be resolved before checking value of type {expected_type}"
         )));
     }
+    if semantic_index.is_unit_type(expected_type)? {
+        return match value {
+            ValueExpr::Identifier(name) if name.as_str() == "Unit" => {
+                Ok(ArtifactValue::Atom(name.to_string()))
+            }
+            _ => Err(Error::new("provided value is not the Unit value")),
+        };
+    }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
         return canonical_record_value(
             module,
@@ -323,39 +330,28 @@ fn canonical_enum_value(
     context: CanonicalValueContext,
     depth: usize,
 ) -> Result<ArtifactValue> {
-    let enum_decl = semantic_index.enum_decl(module, expected_type)?;
     match value {
         ValueExpr::Identifier(name) => {
-            if let Some(variant) = enum_decl
-                .variants
-                .iter()
-                .find(|variant| variant.name == *name)
-            {
-                if variant.payload_type.is_some() {
-                    return Err(Error::new(format!(
-                        "enum variant {} requires a payload and cannot be used as a fieldless value",
-                        variant.name
-                    )));
+            match semantic_index.value_enum_variant(module, expected_type, name) {
+                Ok(variant) => {
+                    if variant.payload_type.is_some() {
+                        return Err(Error::new(format!(
+                            "enum variant {name} requires a payload and cannot be used as a fieldless value"
+                        )));
+                    }
+                    Ok(ArtifactValue::Atom(name.to_string()))
                 }
-                return Ok(ArtifactValue::Atom(name.to_string()));
+                Err(_) => {
+                    let enum_name = semantic_index.value_enum_name(module, expected_type)?;
+                    Err(Error::new(format!(
+                        "value {name} is not a variant of enum {enum_name}"
+                    )))
+                }
             }
-            Err(Error::new(format!(
-                "value {name} is not a variant of enum {}",
-                enum_decl.name
-            )))
         }
         ValueExpr::EnumVariant { name, payload } => {
-            let variant = enum_decl
-                .variants
-                .iter()
-                .find(|variant| variant.name == *name)
-                .ok_or_else(|| {
-                    Error::new(format!(
-                        "value {name} is not a variant of enum {}",
-                        enum_decl.name
-                    ))
-                })?;
-            let Some(payload_type) = &variant.payload_type else {
+            let variant = semantic_index.value_enum_variant(module, expected_type, name)?;
+            let Some(payload_type) = variant.payload_type.as_ref() else {
                 return Err(Error::new(format!(
                     "enum variant {name} does not accept a payload"
                 )));
@@ -389,7 +385,7 @@ fn canonical_enum_value(
         | ValueExpr::BooleanBinary { .. }
         | ValueExpr::Grouped { .. } => Err(Error::new(format!(
             "expected enum variant value for enum {}",
-            enum_decl.name
+            semantic_index.value_enum_name(module, expected_type)?
         ))),
     }
 }
@@ -441,8 +437,7 @@ fn canonical_collection_value(
                 )));
             };
             validate_map_value_type(semantic_index, expected_type, map, key, item, capacity)?;
-            let mut entries = Vec::with_capacity(map.entries.len());
-            let mut seen = BTreeSet::new();
+            let mut entries: Vec<ArtifactMapEntry> = Vec::with_capacity(map.entries.len());
             for entry in &map.entries {
                 let key_value = canonical_value(
                     module,
@@ -462,7 +457,7 @@ fn canonical_collection_value(
                     context,
                     depth + 1,
                 )?;
-                if !seen.insert(key_value.clone()) {
+                if entries.iter().any(|previous| previous.key == key_value) {
                     let key_label = key_value.label();
                     return Err(Error::new(format!(
                         "map value {expected_type} duplicates key {key_label}"
@@ -591,21 +586,22 @@ fn canonical_record_value(
         )));
     }
 
-    let declared_fields = record
-        .fields
-        .iter()
-        .map(|field| (field.name.as_str(), &field.ty))
-        .collect::<BTreeMap<_, _>>();
-    let mut provided = BTreeSet::new();
     let mut fields = Vec::with_capacity(record.fields.len());
-    for field in &value.fields {
-        if !provided.insert(field.name.as_str()) {
+    for (index, field) in value.fields.iter().enumerate() {
+        if value.fields[..index]
+            .iter()
+            .any(|previous| previous.name == field.name)
+        {
             return Err(Error::new(format!(
                 "record value {} duplicates field {}",
                 record.name, field.name
             )));
         }
-        let Some(field_ty) = declared_fields.get(field.name.as_str()) else {
+        let Some(record_field) = record
+            .fields
+            .iter()
+            .find(|candidate| candidate.name == field.name)
+        else {
             return Err(Error::new(format!(
                 "record value {} declares unknown field {}",
                 record.name, field.name
@@ -614,7 +610,7 @@ fn canonical_record_value(
         let field_value = canonical_value(
             module,
             semantic_index,
-            field_ty,
+            &record_field.ty,
             &field.value,
             bindings,
             context,
@@ -626,7 +622,11 @@ fn canonical_record_value(
         });
     }
     for field in &record.fields {
-        if !provided.contains(field.name.as_str()) {
+        if !value
+            .fields
+            .iter()
+            .any(|provided| provided.name == field.name)
+        {
             return Err(Error::new(format!(
                 "record value {} is missing field {}",
                 record.name, field.name

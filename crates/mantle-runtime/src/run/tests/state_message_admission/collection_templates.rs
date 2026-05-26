@@ -8,6 +8,7 @@ fn runtime_rejects_loaded_payload_dependent_map_template_key_before_artifact_loa
     program.processes[1].state_type = map_ty;
     program.processes[1].state_values = loaded_state_values(map_ty, &["Map[]"]);
     program.processes[1].message_variants[0].payload_type = Some(JOB);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[1].transitions[0].next_state =
         loaded_next_state(NextState::Template(ArtifactValueTemplate::Map {
             ty: map_ty,

@@ -1,0 +1,64 @@
+module effect_outcomes;
+
+record MainState {
+    sent: Result<Unit,SendError<WorkerMsg>>,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum WorkerState {
+    Idle,
+    Done,
+}
+
+enum WorkerMsg {
+    Work,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState {
+            sent: Err(Full(Work)),
+        };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn, send] ~ [] @det {
+        let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let send_result: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+        if (spawn_result != Err(Exhausted(Unit))) {
+            emit "spawn accepted";
+        } else {
+            emit "spawn rejected";
+        }
+        if (send_result == Ok(Unit)) {
+            emit "send accepted";
+        } else {
+            emit "send not accepted";
+        }
+        return Stop(MainState { sent: send_result });
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(Done);
+    }
+}

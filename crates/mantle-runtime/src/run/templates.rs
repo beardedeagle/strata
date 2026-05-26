@@ -1,13 +1,11 @@
-use std::collections::BTreeSet;
-
 use mantle_artifact::{
     ArtifactMapEntry, ArtifactRecordField, ArtifactScalarValue, ArtifactValueBooleanOperator,
     ArtifactValueEqualityOperator, Error, Result,
 };
 
-use super::RuntimeLoopElement;
 use super::model::ActiveStep;
 use super::process_refs::LocalProcessRefs;
+use super::{RuntimeEffectOutcome, RuntimeLoopElement};
 use crate::program::{LoadedProgram, LoadedValueTemplate, RuntimePayload, RuntimeValue};
 
 pub(super) fn evaluate_runtime_template(
@@ -17,6 +15,7 @@ pub(super) fn evaluate_runtime_template(
     step: &ActiveStep,
     process_refs: &LocalProcessRefs,
     loop_elements: &[RuntimeLoopElement],
+    effect_outcomes: &[RuntimeEffectOutcome],
 ) -> Result<RuntimePayload> {
     match template {
         LoadedValueTemplate::Literal { ty, value } => {
@@ -44,6 +43,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let variant = program.enum_variant_label(value.ty, *variant)?;
             program.runtime_payload_value(
@@ -60,6 +60,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             program.runtime_payload_value(
                 "record field projection value",
@@ -80,6 +81,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             program.runtime_payload_value(
                 "list element projection value",
@@ -100,6 +102,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             program.runtime_payload_value(
                 "list prefix projection value",
@@ -120,6 +123,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             program.runtime_payload_value(
                 "list rest projection value",
@@ -141,6 +145,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             program.runtime_payload_value(
                 "map value projection value",
@@ -160,6 +165,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             program.runtime_payload_value(
                 "map rest projection value",
@@ -203,6 +209,28 @@ pub(super) fn evaluate_runtime_template(
             }
             Ok(payload.clone())
         }
+        LoadedValueTemplate::EffectOutcome { ty, outcome } => {
+            let payload = effect_outcomes
+                .iter()
+                .find(|binding| binding.id == *outcome)
+                .map(|binding| &binding.payload)
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} references unbound effect outcome id {}",
+                        step.process_name,
+                        outcome.as_u32()
+                    ))
+                })?;
+            if payload.ty != *ty {
+                return Err(Error::new(format!(
+                    "effect outcome id {} has type id {}, expected {}",
+                    outcome.as_u32(),
+                    payload.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            Ok(payload.clone())
+        }
         LoadedValueTemplate::EnumVariant {
             ty,
             variant,
@@ -215,6 +243,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             program.runtime_payload_value(
                 "enum variant template value",
@@ -228,8 +257,7 @@ pub(super) fn evaluate_runtime_template(
         LoadedValueTemplate::Record { ty, fields } => {
             let type_label = program.type_label(*ty)?;
             let mut values = Vec::with_capacity(fields.len());
-            let mut seen = BTreeSet::new();
-            for field in fields {
+            for (field_index, field) in fields.iter().enumerate() {
                 let value = evaluate_runtime_template(
                     program,
                     &field.value,
@@ -237,8 +265,12 @@ pub(super) fn evaluate_runtime_template(
                     step,
                     process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
-                if !seen.insert(field.name.as_str()) {
+                if fields[..field_index]
+                    .iter()
+                    .any(|previous| previous.name == field.name)
+                {
                     return Err(Error::new(format!(
                         "record template duplicates field {}",
                         field.name
@@ -268,14 +300,14 @@ pub(super) fn evaluate_runtime_template(
                     step,
                     process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
                 values.push(value.value);
             }
             program.runtime_payload_value("list template value", *ty, RuntimeValue::List(values))
         }
         LoadedValueTemplate::Map { ty, entries } => {
-            let mut values = Vec::with_capacity(entries.len());
-            let mut seen = BTreeSet::new();
+            let mut values: Vec<ArtifactMapEntry> = Vec::with_capacity(entries.len());
             for entry in entries {
                 let key = evaluate_runtime_template(
                     program,
@@ -284,6 +316,7 @@ pub(super) fn evaluate_runtime_template(
                     step,
                     process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
                 let value = evaluate_runtime_template(
                     program,
@@ -292,8 +325,9 @@ pub(super) fn evaluate_runtime_template(
                     step,
                     process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
-                if !seen.insert(key.value.clone()) {
+                if values.iter().any(|previous| previous.key == key.value) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
                         key.value.label()
@@ -319,6 +353,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let selected = if runtime_bool_value(&condition.value)? {
                 then_value
@@ -332,6 +367,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if value.ty != *ty {
                 return Err(Error::new(format!(
@@ -356,6 +392,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if left.ty != *operand_ty {
                 return Err(Error::new(format!(
@@ -371,6 +408,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if right.ty != *operand_ty {
                 return Err(Error::new(format!(
@@ -403,6 +441,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if left.ty != *ty {
                 return Err(Error::new(format!(
@@ -418,6 +457,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if right.ty != *ty {
                 return Err(Error::new(format!(
@@ -455,6 +495,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if left.ty != *operand_ty {
                 return Err(Error::new(format!(
@@ -470,6 +511,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if right.ty != *operand_ty {
                 return Err(Error::new(format!(
@@ -501,6 +543,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             program.runtime_payload_value(
                 "boolean predicate template value",
@@ -521,6 +564,7 @@ pub(super) fn evaluate_runtime_template(
                 step,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let left = runtime_bool_value(&left.value)?;
             let selected = match operator {
@@ -533,6 +577,7 @@ pub(super) fn evaluate_runtime_template(
                             step,
                             process_refs,
                             loop_elements,
+                            effect_outcomes,
                         )?
                         .value,
                     )?
@@ -546,6 +591,7 @@ pub(super) fn evaluate_runtime_template(
                             step,
                             process_refs,
                             loop_elements,
+                            effect_outcomes,
                         )?
                         .value,
                     )?

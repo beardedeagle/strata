@@ -108,6 +108,9 @@ just run-example runtime_guarded_for_each
 just run-example runtime_guarded_ref_loop
 just run-example runtime_guarded_ref_loop_jobs
 just run-example runtime_loop_element_projection
+just run-example effect_outcomes
+just run-example effect_outcome_mailbox_full
+just run-example effect_outcome_stopped_target
 ```
 
 A source rejection gate must fail during checking and must not create a target

@@ -357,11 +357,15 @@ fn state_match_payload_domain(
     payload_type: &TypeRef,
     checked_payload_type: &CheckedTypeRef,
 ) -> Result<Vec<CheckedPayloadValue>> {
-    let mut payloads = BTreeMap::new();
+    let mut payloads = Vec::new();
     for state in context.state_space.values() {
         if let Some(payload) = state.payload() {
             if payload.ty() == checked_payload_type {
-                payloads.insert(PayloadDomainKey::from_payload(payload)?, payload.clone());
+                insert_state_match_payload(
+                    &mut payloads,
+                    PayloadDomainKey::from_payload(payload)?,
+                    payload.clone(),
+                );
             }
         }
     }
@@ -383,8 +387,25 @@ fn state_match_payload_domain(
             .message_cases
             .payload_values(context.process_id, variant_id)?
         {
-            payloads.insert(PayloadDomainKey::from_payload(payload)?, payload.clone());
+            insert_state_match_payload(
+                &mut payloads,
+                PayloadDomainKey::from_payload(payload)?,
+                payload.clone(),
+            );
         }
     }
-    Ok(payloads.into_values().collect())
+    payloads.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(payloads.into_iter().map(|(_, payload)| payload).collect())
+}
+
+fn insert_state_match_payload(
+    payloads: &mut Vec<(PayloadDomainKey, CheckedPayloadValue)>,
+    key: PayloadDomainKey,
+    payload: CheckedPayloadValue,
+) {
+    if let Some((_, existing)) = payloads.iter_mut().find(|(existing, _)| existing == &key) {
+        *existing = payload;
+        return;
+    }
+    payloads.push((key, payload));
 }

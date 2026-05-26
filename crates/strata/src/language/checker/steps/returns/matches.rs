@@ -566,7 +566,7 @@ fn artifact_collection_to_source_value(
     match (collection, value) {
         (CollectionType::List { element, capacity }, ArtifactValue::List(items)) => {
             let mut source_items = Vec::with_capacity(items.len());
-            for item in items {
+            for item in items.iter() {
                 source_items.push(artifact_to_source_value(
                     module,
                     semantic_index,

@@ -11,8 +11,10 @@ enum ArmPrefixKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActionKind {
     Spawn,
+    SpawnOutcome,
     Emit,
     Send,
+    SendOutcome,
     IfElse,
     ForEach,
 }
@@ -53,4 +55,3 @@ const BOUNDED_ARM_STATEMENT_KINDS: [BoundedArmStatementKind; 4] = [
     BoundedArmStatementKind::IfWithFor,
     BoundedArmStatementKind::ForWithIf,
 ];
-

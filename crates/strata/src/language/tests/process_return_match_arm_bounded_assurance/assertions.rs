@@ -122,7 +122,9 @@ fn checked_action_shapes(actions: &[CheckedAction]) -> Vec<ActionShape> {
         .map(|action| match action {
             CheckedAction::Emit { .. } => ActionShape::Emit,
             CheckedAction::Spawn { .. } => ActionShape::Spawn,
+            CheckedAction::SpawnOutcome { .. } => ActionShape::SpawnOutcome,
             CheckedAction::Send { .. } => ActionShape::Send,
+            CheckedAction::SendOutcome { .. } => ActionShape::SendOutcome,
             CheckedAction::IfElse {
                 then_actions,
                 else_actions,
@@ -144,7 +146,9 @@ fn artifact_action_shapes(actions: &[ArtifactAction]) -> Vec<ActionShape> {
         .map(|action| match action {
             ArtifactAction::Emit { .. } => ActionShape::Emit,
             ArtifactAction::Spawn { .. } => ActionShape::Spawn,
+            ArtifactAction::SpawnOutcome { .. } => ActionShape::SpawnOutcome,
             ArtifactAction::Send { .. } => ActionShape::Send,
+            ArtifactAction::SendOutcome { .. } => ActionShape::SendOutcome,
             ArtifactAction::IfElse {
                 then_actions,
                 else_actions,
@@ -201,7 +205,14 @@ fn assert_nested_artifact_send_actions_use_ids(
             ArtifactAction::ForEach { body, .. } => {
                 assert_nested_artifact_send_actions_use_ids(artifact, owner_process, body);
             }
-            ArtifactAction::Emit { .. } | ArtifactAction::Spawn { .. } => {}
+            ArtifactAction::Emit { .. }
+            | ArtifactAction::Spawn { .. }
+            | ArtifactAction::SpawnOutcome { .. } => {}
+            ArtifactAction::SendOutcome { payload, .. } => {
+                if let Some(payload) = payload {
+                    assert_template_has_no_source_bindings(payload);
+                }
+            }
         }
     }
 }
@@ -231,8 +242,15 @@ fn assert_no_encoded_source_binding_leak(artifact: &MantleArtifact) {
 fn assert_actions_have_no_source_bindings(actions: &[ArtifactAction]) {
     for action in actions {
         match action {
-            ArtifactAction::Emit { .. } | ArtifactAction::Spawn { .. } => {}
+            ArtifactAction::Emit { .. }
+            | ArtifactAction::Spawn { .. }
+            | ArtifactAction::SpawnOutcome { .. } => {}
             ArtifactAction::Send { payload, .. } => {
+                if let Some(payload) = payload {
+                    assert_template_has_no_source_bindings(payload);
+                }
+            }
+            ArtifactAction::SendOutcome { payload, .. } => {
                 if let Some(payload) = payload {
                     assert_template_has_no_source_bindings(payload);
                 }
@@ -280,7 +298,8 @@ fn assert_template_has_no_source_bindings(template: &ArtifactValueTemplate) {
         ArtifactValueTemplate::ReceivedPayload { .. }
         | ArtifactValueTemplate::CurrentStatePayload { .. }
         | ArtifactValueTemplate::ProcessRef { .. }
-        | ArtifactValueTemplate::LoopElement { .. } => {}
+        | ArtifactValueTemplate::LoopElement { .. }
+        | ArtifactValueTemplate::EffectOutcome { .. } => {}
         ArtifactValueTemplate::EnumPayload { value, .. }
         | ArtifactValueTemplate::ListElement { list: value, .. }
         | ArtifactValueTemplate::ListPrefixElement { list: value, .. }

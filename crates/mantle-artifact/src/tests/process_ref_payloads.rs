@@ -3,10 +3,14 @@ use super::support::*;
 #[test]
 fn validate_accepts_process_ref_type_id_at_boundary() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
-        "Assign",
-        PROCESS_REF_WORKER,
-    )];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload(
+            "Assign",
+            PROCESS_REF_WORKER,
+        )],
+    );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -25,7 +29,11 @@ fn validate_accepts_process_ref_type_id_at_boundary() {
 #[test]
 fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Assign", JOB)],
+    );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -59,7 +67,11 @@ fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
 #[test]
 fn validate_rejects_process_ref_template_with_non_process_ref_type() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Assign", JOB)],
+    );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -82,8 +94,11 @@ fn validate_rejects_process_ref_template_with_non_process_ref_type() {
 #[test]
 fn validate_rejects_process_ref_template_target_type_mismatch() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants =
-        vec![ArtifactMessageVariant::payload("Assign", PROCESS_REF_MAIN)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Assign", PROCESS_REF_MAIN)],
+    );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -106,10 +121,14 @@ fn validate_rejects_process_ref_template_target_type_mismatch() {
 #[test]
 fn validate_rejects_received_payload_send_target_type_mismatch() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
-        "Assign",
-        PROCESS_REF_WORKER,
-    )];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload(
+            "Assign",
+            PROCESS_REF_WORKER,
+        )],
+    );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -152,7 +171,11 @@ fn validate_rejects_nested_process_ref_payload_template() {
             ty: MAIN_STATE,
         }],
     );
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", BOX)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Assign", BOX)],
+    );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -181,10 +204,14 @@ fn validate_rejects_nested_process_ref_payload_template() {
 #[test]
 fn validate_rejects_projected_process_ref_payload_template() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload(
-        "Assign",
-        PROCESS_REF_WORKER,
-    )];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload(
+            "Assign",
+            PROCESS_REF_WORKER,
+        )],
+    );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -210,7 +237,11 @@ fn validate_rejects_projected_process_ref_payload_template() {
 #[test]
 fn validate_rejects_received_payload_template_without_payload_message() {
     let mut artifact = valid_artifact();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Assign", JOB)],
+    );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -256,6 +287,7 @@ fn validate_rejects_process_ref_payload_enum_next_state_template() {
     );
     artifact.processes[1].message_variants[0] =
         ArtifactMessageVariant::payload("Route", PROCESS_REF_WORKER);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::EnumVariant {
             ty: WORKER_STATE,

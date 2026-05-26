@@ -1,4 +1,4 @@
-use mantle_artifact::{ArtifactTransition, ArtifactValueShape};
+use mantle_artifact::{ArtifactEnumVariant, ArtifactTransition, ArtifactType, ArtifactValueShape};
 
 use super::super::support::*;
 
@@ -201,8 +201,22 @@ fn runtime_loop_element_projection_rejects_wrong_projected_field_type_before_run
         projection_seed_artifact("runtime_loop_element_projection_bad_field_type_seed.mta");
     let bool_type = value_type_id(&artifact, "Bool");
     let phase_type = value_type_id(&artifact, "Phase");
-    artifact_process_mut(&mut artifact, "Worker").message_variants[0].payload_type =
-        Some(bool_type);
+    let (worker_message_type, worker_message_variants) = {
+        let worker = artifact_process_mut(&mut artifact, "Worker");
+        worker.message_variants[0].payload_type = Some(bool_type);
+        let variants = worker
+            .message_variants
+            .iter()
+            .map(|variant| ArtifactEnumVariant {
+                label: variant.label.clone(),
+                payload_type: variant.payload_type,
+            })
+            .collect();
+        (worker.message_type, variants)
+    };
+    let worker_message_label = artifact.types[worker_message_type.index()].label.clone();
+    artifact.types[worker_message_type.index()] =
+        ArtifactType::enum_value_with_payloads(worker_message_label, worker_message_variants);
     if let ArtifactValueTemplate::RecordField { ty, .. } = phase_send_projection_mut(&mut artifact)
     {
         *ty = bool_type;

@@ -106,6 +106,8 @@ fn deepen_first_nested_if(actions: &mut [ArtifactAction]) -> bool {
             }
             ArtifactAction::Emit { .. }
             | ArtifactAction::Spawn { .. }
+            | ArtifactAction::SpawnOutcome { .. }
+            | ArtifactAction::SendOutcome { .. }
             | ArtifactAction::Send { .. } => {}
         }
     }
@@ -150,6 +152,8 @@ fn push_into_first_if_branch(actions: &mut [ArtifactAction], inserted: ArtifactA
             }
             ArtifactAction::Emit { .. }
             | ArtifactAction::Spawn { .. }
+            | ArtifactAction::SpawnOutcome { .. }
+            | ArtifactAction::SendOutcome { .. }
             | ArtifactAction::Send { .. } => {}
         }
     }
@@ -175,6 +179,8 @@ fn empty_first_if(actions: &mut [ArtifactAction]) -> bool {
             }
             ArtifactAction::Emit { .. }
             | ArtifactAction::Spawn { .. }
+            | ArtifactAction::SpawnOutcome { .. }
+            | ArtifactAction::SendOutcome { .. }
             | ArtifactAction::Send { .. } => {}
         }
     }

@@ -75,7 +75,9 @@ fn validate_statement(
         Statement::LetValue { .. }
         | Statement::Emit(_)
         | Statement::LetProcessRef { .. }
-        | Statement::Send { .. } => Ok(()),
+        | Statement::LetSpawnOutcome { .. }
+        | Statement::Send { .. }
+        | Statement::LetSendOutcome { .. } => Ok(()),
     }
 }
 

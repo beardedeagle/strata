@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use super::model::{ArtifactValue, MapProjectionMode};
 use super::parsing::parse_value;
 use super::projection::{
@@ -26,7 +24,7 @@ impl ArtifactValue {
 
     pub fn validate(&self, field: &str) -> Result<()> {
         self.validate_shape(field, 0)?;
-        validate_value_label(field, &self.label())
+        self.validate_generated_label_len(field)
     }
 
     pub(crate) fn validate_without_process_ref(&self, field: &str) -> Result<()> {
@@ -63,11 +61,13 @@ impl ArtifactValue {
                     1,
                     MAX_VALUE_TEMPLATE_FIELDS,
                 )?;
-                let mut seen = BTreeSet::new();
-                for entry in fields {
+                for (index, entry) in fields.iter().enumerate() {
                     let name = entry.name.as_str();
                     validate_ident_field(&format!("{field}.field"), name)?;
-                    if !seen.insert(name) {
+                    if fields[..index]
+                        .iter()
+                        .any(|previous| previous.name == entry.name)
+                    {
                         return Err(Error::new(format!(
                             "{field} duplicates field {}",
                             entry.name
@@ -98,12 +98,14 @@ impl ArtifactValue {
                     0,
                     MAX_VALUE_TEMPLATE_FIELDS,
                 )?;
-                let mut keys = BTreeSet::new();
                 for (index, entry) in entries.iter().enumerate() {
                     entry
                         .key
                         .validate_shape(&format!("{field}.entry.{index}.key"), depth + 1)?;
-                    if !keys.insert(entry.key.clone()) {
+                    if entries[..index]
+                        .iter()
+                        .any(|previous| previous.key == entry.key)
+                    {
                         return Err(Error::new(format!(
                             "{field} duplicates key {}",
                             entry.key.label()
@@ -162,6 +164,150 @@ impl ArtifactValue {
             ),
             Self::ProcessRef { type_id, pid } => format!("type{}#{pid}", type_id.as_u32()),
         }
+    }
+
+    pub(crate) fn label_len(&self) -> Result<usize> {
+        match self {
+            Self::Atom(value) => Ok(value.len()),
+            Self::Scalar(value) => {
+                checked_add_len(decimal_len_i128(value.value()), value.ty().suffix().len())
+            }
+            Self::EnumVariant { variant, payload } => {
+                checked_add_lens([variant.len(), 1, payload.label_len()?, 1])
+            }
+            Self::Record {
+                constructor,
+                fields,
+            } => {
+                let mut len = checked_add_len(constructor.len(), 2)?;
+                for (index, field) in fields.iter().enumerate() {
+                    if index > 0 {
+                        len = checked_add_len(len, 1)?;
+                    }
+                    len = checked_add_lens([len, field.name.len(), 1, field.value.label_len()?])?;
+                }
+                Ok(len)
+            }
+            Self::List(items) => {
+                let mut len = "List[]".len();
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        len = checked_add_len(len, 1)?;
+                    }
+                    len = checked_add_len(len, item.label_len()?)?;
+                }
+                Ok(len)
+            }
+            Self::Map(entries) => {
+                let mut len = "Map[]".len();
+                for (index, entry) in entries.iter().enumerate() {
+                    if index > 0 {
+                        len = checked_add_len(len, 1)?;
+                    }
+                    len = checked_add_lens([
+                        len,
+                        entry.key.label_len()?,
+                        2,
+                        entry.value.label_len()?,
+                    ])?;
+                }
+                Ok(len)
+            }
+            Self::ProcessRef { type_id, pid } => checked_add_lens([
+                "type".len(),
+                decimal_len_u32(type_id.as_u32()),
+                1,
+                decimal_len_u64(*pid),
+            ]),
+        }
+    }
+
+    pub(crate) fn label_matches(&self, label: &str) -> bool {
+        let mut remaining = label;
+        self.consume_label(&mut remaining) && remaining.is_empty()
+    }
+
+    fn consume_label(&self, input: &mut &str) -> bool {
+        match self {
+            Self::Atom(value) => consume_literal(input, value),
+            Self::Scalar(value) => {
+                consume_i128(input, value.value()) && consume_literal(input, value.ty().suffix())
+            }
+            Self::EnumVariant { variant, payload } => {
+                consume_literal(input, variant)
+                    && consume_literal(input, "(")
+                    && payload.consume_label(input)
+                    && consume_literal(input, ")")
+            }
+            Self::Record {
+                constructor,
+                fields,
+            } => {
+                if !consume_literal(input, constructor) || !consume_literal(input, "{") {
+                    return false;
+                }
+                for (index, field) in fields.iter().enumerate() {
+                    if index > 0 && !consume_literal(input, ",") {
+                        return false;
+                    }
+                    if !consume_literal(input, &field.name)
+                        || !consume_literal(input, ":")
+                        || !field.value.consume_label(input)
+                    {
+                        return false;
+                    }
+                }
+                consume_literal(input, "}")
+            }
+            Self::List(items) => {
+                if !consume_literal(input, "List[") {
+                    return false;
+                }
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 && !consume_literal(input, ",") {
+                        return false;
+                    }
+                    if !item.consume_label(input) {
+                        return false;
+                    }
+                }
+                consume_literal(input, "]")
+            }
+            Self::Map(entries) => {
+                if !consume_literal(input, "Map[") {
+                    return false;
+                }
+                for (index, entry) in entries.iter().enumerate() {
+                    if index > 0 && !consume_literal(input, ",") {
+                        return false;
+                    }
+                    if !entry.key.consume_label(input)
+                        || !consume_literal(input, "=>")
+                        || !entry.value.consume_label(input)
+                    {
+                        return false;
+                    }
+                }
+                consume_literal(input, "]")
+            }
+            Self::ProcessRef { type_id, pid } => {
+                consume_literal(input, "type")
+                    && consume_u128(input, u128::from(type_id.as_u32()))
+                    && consume_literal(input, "#")
+                    && consume_u128(input, u128::from(*pid))
+            }
+        }
+    }
+
+    fn validate_generated_label_len(&self, field: &str) -> Result<()> {
+        let len = self.label_len()?;
+        if len > crate::MAX_FIELD_VALUE_BYTES {
+            return Err(Error::new(format!(
+                "{field} exceeds maximum length of {} bytes",
+                crate::MAX_FIELD_VALUE_BYTES
+            )));
+        }
+        Ok(())
     }
 
     pub fn contains_process_ref(&self) -> bool {
@@ -377,4 +523,81 @@ impl ArtifactValue {
                 .collect(),
         ))
     }
+}
+
+fn checked_add_len(left: usize, right: usize) -> Result<usize> {
+    left.checked_add(right)
+        .ok_or_else(|| Error::new("artifact value label length overflowed"))
+}
+
+fn checked_add_lens<const N: usize>(parts: [usize; N]) -> Result<usize> {
+    let mut total = 0usize;
+    for part in parts {
+        total = checked_add_len(total, part)?;
+    }
+    Ok(total)
+}
+
+fn consume_literal(input: &mut &str, expected: &str) -> bool {
+    let Some(remaining) = input.strip_prefix(expected) else {
+        return false;
+    };
+    *input = remaining;
+    true
+}
+
+fn consume_i128(input: &mut &str, value: i128) -> bool {
+    if value < 0 {
+        consume_literal(input, "-") && consume_u128(input, value.unsigned_abs())
+    } else {
+        consume_u128(input, value as u128)
+    }
+}
+
+fn consume_u128(input: &mut &str, value: u128) -> bool {
+    let len = decimal_len_u128(value);
+    if input.len() < len {
+        return false;
+    }
+    let (digits, remaining) = input.split_at(len);
+    if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    match digits.parse::<u128>() {
+        Ok(parsed) if parsed == value => {
+            *input = remaining;
+            true
+        }
+        _ => false,
+    }
+}
+
+const fn decimal_len_i128(value: i128) -> usize {
+    if value < 0 {
+        1 + decimal_len_u128(value.unsigned_abs())
+    } else {
+        decimal_len_u128(value as u128)
+    }
+}
+
+const fn decimal_len_u32(value: u32) -> usize {
+    decimal_len_u64(value as u64)
+}
+
+const fn decimal_len_u64(mut value: u64) -> usize {
+    let mut len = 1usize;
+    while value >= 10 {
+        value /= 10;
+        len += 1;
+    }
+    len
+}
+
+const fn decimal_len_u128(mut value: u128) -> usize {
+    let mut len = 1usize;
+    while value >= 10 {
+        value /= 10;
+        len += 1;
+    }
+    len
 }

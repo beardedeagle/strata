@@ -1,8 +1,20 @@
 use super::admission::LoadedTemplateAdmission;
 use super::dependencies::{
-    loaded_template_depends_on_loop_element, loaded_template_depends_on_received_payload,
+    loaded_template_depends_on_effect_outcome, loaded_template_depends_on_loop_element,
+    loaded_template_depends_on_received_payload,
 };
 use super::support::*;
+
+#[derive(Clone, Copy)]
+pub(in crate::program) struct LoadedBoolConditionAdmission<'a> {
+    pub(in crate::program) program: &'a LoadedProgram,
+    pub(in crate::program) process: &'a LoadedProcess,
+    pub(in crate::program) field: &'a str,
+    pub(in crate::program) received_payload_type: Option<TypeId>,
+    pub(in crate::program) current_state_payload: Option<&'a RuntimePayload>,
+    pub(in crate::program) loop_elements: &'a [LoadedLoopElement],
+    pub(in crate::program) effect_outcomes: &'a [(EffectOutcomeId, TypeId)],
+}
 
 pub(in crate::program) fn evaluate_loaded_state_value(
     program: &LoadedProgram,
@@ -22,29 +34,28 @@ pub(in crate::program) fn validate_loaded_bool_condition(
     condition: &LoadedValueTemplate,
     received_payload_type: Option<TypeId>,
     current_state_payload: Option<&RuntimePayload>,
+    effect_outcomes: &[(EffectOutcomeId, TypeId)],
 ) -> Result<()> {
     validate_loaded_bool_condition_with_loop_elements(
-        program,
-        process,
-        field,
+        LoadedBoolConditionAdmission {
+            program,
+            process,
+            field,
+            received_payload_type,
+            current_state_payload,
+            loop_elements: &[],
+            effect_outcomes,
+        },
         condition,
-        received_payload_type,
-        current_state_payload,
-        &[],
     )
 }
 
 pub(in crate::program) fn validate_loaded_bool_condition_with_loop_elements(
-    program: &LoadedProgram,
-    process: &LoadedProcess,
-    field: &str,
+    admission: LoadedBoolConditionAdmission<'_>,
     condition: &LoadedValueTemplate,
-    received_payload_type: Option<TypeId>,
-    current_state_payload: Option<&RuntimePayload>,
-    loop_elements: &[LoadedLoopElement],
 ) -> Result<()> {
     let bool_type = condition.result_type();
-    let ty = program.type_entry(bool_type)?;
+    let ty = admission.program.type_entry(bool_type)?;
     let is_bool_contract = matches!(
         ty.value_shape(),
         Ok(ArtifactValueShape::Enum { variants })
@@ -56,22 +67,30 @@ pub(in crate::program) fn validate_loaded_bool_condition_with_loop_elements(
     );
     if !is_bool_contract {
         return Err(Error::new(format!(
-            "{field} must have type enum Bool {{ False, True }}"
+            "{} must have type enum Bool {{ False, True }}",
+            admission.field
         )));
     }
-    validate_loaded_bool_condition_shape(field, condition)?;
+    validate_loaded_bool_condition_shape(admission.field, condition)?;
     LoadedTemplateAdmission {
         expected_type: Some(bool_type),
-        received_payload_type,
-        current_state_payload_type: current_state_payload.map(|payload| payload.ty),
+        received_payload_type: admission.received_payload_type,
+        current_state_payload_type: admission.current_state_payload.map(|payload| payload.ty),
         allow_direct_process_ref: false,
-        loop_elements,
-        program,
-        process,
+        allow_process_ref_effect_outcome: false,
+        loop_elements: admission.loop_elements,
+        effect_outcomes: admission.effect_outcomes,
+        program: admission.program,
+        process: admission.process,
         spawned_refs: &[],
     }
-    .validate(field, condition)?;
-    validate_loaded_static_bool_condition_value(program, field, condition, current_state_payload)
+    .validate(admission.field, condition)?;
+    validate_loaded_static_bool_condition_value(
+        admission.program,
+        admission.field,
+        condition,
+        admission.current_state_payload,
+    )
 }
 
 fn validate_loaded_bool_condition_shape(
@@ -88,6 +107,7 @@ fn validate_loaded_bool_condition_shape(
         | LoadedValueTemplate::ListPrefixElement { .. }
         | LoadedValueTemplate::MapValue { .. }
         | LoadedValueTemplate::LoopElement { .. }
+        | LoadedValueTemplate::EffectOutcome { .. }
         | LoadedValueTemplate::Equality { .. }
         | LoadedValueTemplate::ScalarOrdering { .. }
         | LoadedValueTemplate::IfElse { .. }
@@ -114,6 +134,7 @@ fn validate_loaded_static_bool_condition_value(
 ) -> Result<()> {
     if loaded_template_depends_on_received_payload(condition)
         || loaded_template_depends_on_loop_element(condition)
+        || loaded_template_depends_on_effect_outcome(condition)
     {
         return Ok(());
     }
@@ -278,6 +299,9 @@ fn evaluate_loaded_payload_value(
         LoadedValueTemplate::LoopElement { .. } => Err(Error::new(
             "loop element template requires runtime loop element bindings",
         )),
+        LoadedValueTemplate::EffectOutcome { .. } => Err(Error::new(
+            "effect outcome template requires runtime effect outcome bindings",
+        )),
         LoadedValueTemplate::EnumVariant {
             ty,
             variant,
@@ -300,15 +324,17 @@ fn evaluate_loaded_payload_value(
         }
         LoadedValueTemplate::Record { ty, fields } => {
             let mut values = Vec::with_capacity(fields.len());
-            let mut seen = BTreeSet::new();
-            for field in fields {
+            for (index, field) in fields.iter().enumerate() {
                 let value = evaluate_loaded_payload_value(
                     program,
                     &field.value,
                     received_payload,
                     current_state_payload,
                 )?;
-                if !seen.insert(field.name.as_str()) {
+                if fields[..index]
+                    .iter()
+                    .any(|previous| previous.name == field.name)
+                {
                     return Err(Error::new(format!(
                         "record template duplicates field {}",
                         field.name
@@ -344,8 +370,7 @@ fn evaluate_loaded_payload_value(
             program.runtime_payload_value("list template value", *ty, RuntimeValue::List(values))
         }
         LoadedValueTemplate::Map { ty, entries } => {
-            let mut values = Vec::with_capacity(entries.len());
-            let mut seen = BTreeSet::new();
+            let mut values: Vec<ArtifactMapEntry> = Vec::with_capacity(entries.len());
             for entry in entries {
                 let key = evaluate_loaded_payload_value(
                     program,
@@ -359,7 +384,7 @@ fn evaluate_loaded_payload_value(
                     received_payload,
                     current_state_payload,
                 )?;
-                if !seen.insert(key.value.clone()) {
+                if values.iter().any(|previous| previous.key == key.value) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
                         key.value.label()

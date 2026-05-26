@@ -29,6 +29,7 @@ define_checked_id!(CheckedOutputId);
 define_checked_id!(CheckedTypeId);
 define_checked_id!(CheckedEnumVariantId);
 define_checked_id!(CheckedLoopElementId);
+define_checked_id!(CheckedEffectOutcomeId);
 
 impl CheckedProcessId {
     pub(in crate::language) fn index(self) -> usize {

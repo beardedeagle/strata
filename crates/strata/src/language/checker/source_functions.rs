@@ -2,6 +2,7 @@ use super::*;
 
 mod bodies;
 mod collection_patterns;
+mod groups;
 mod match_bodies;
 mod names;
 mod process_ref_shadowing;
@@ -18,6 +19,7 @@ pub(in crate::language::checker::source_functions) use bodies::{
 use collection_patterns::{
     validate_list_pattern_source_function_group, validate_map_pattern_source_function_group,
 };
+pub(in crate::language::checker::source_functions) use groups::SourceFunctionGroup;
 use match_bodies::validate_binding_source_function_match_body;
 pub(in crate::language::checker::source_functions) use names::{
     validate_source_pattern_binding_name, validate_source_pattern_binding_scope_conflicts,
@@ -389,7 +391,7 @@ fn collect_source_function_block_calls<'a>(body: &'a FunctionBlock, calls: &mut 
 fn collect_source_statement_calls<'a>(statement: &'a Statement, calls: &mut BTreeSet<&'a str>) {
     match statement {
         Statement::LetValue { value, .. } => collect_source_value_expr_calls(value, calls),
-        Statement::Send { payload, .. } => {
+        Statement::Send { payload, .. } | Statement::LetSendOutcome { payload, .. } => {
             if let Some(payload) = payload {
                 collect_source_value_expr_calls(payload, calls);
             }
@@ -415,7 +417,9 @@ fn collect_source_statement_calls<'a>(statement: &'a Statement, calls: &mut BTre
                 collect_source_statement_calls(statement, calls);
             }
         }
-        Statement::Emit(_) | Statement::LetProcessRef { .. } => {}
+        Statement::Emit(_)
+        | Statement::LetProcessRef { .. }
+        | Statement::LetSpawnOutcome { .. } => {}
     }
 }
 
@@ -576,7 +580,13 @@ fn validate_enum_pattern_source_function_group(
     let Some(first) = functions.first() else {
         return Ok(());
     };
-    let enum_type = infer_pattern_function_enum_type(module, semantic_index, owner, functions)?;
+    let enum_type = infer_pattern_function_enum_type(
+        module,
+        semantic_index,
+        owner,
+        functions.iter().copied(),
+        functions.first().map(|function| &function.name),
+    )?;
     let enum_decl = semantic_index.enum_decl(module, &enum_type)?;
     let process_functions = process
         .map(|process| process.functions.as_slice())
@@ -676,11 +686,12 @@ fn validate_enum_pattern_source_function_group(
     Ok(())
 }
 
-fn infer_pattern_function_enum_type(
+fn infer_pattern_function_enum_type<'a>(
     module: &Module,
     semantic_index: &SemanticIndex,
     owner: &str,
-    functions: &[&Function],
+    functions: impl IntoIterator<Item = &'a Function>,
+    first_function_name: Option<&Identifier>,
 ) -> Result<TypeRef> {
     let mut inferred = None;
     for function in functions {
@@ -702,9 +713,8 @@ fn infer_pattern_function_enum_type(
     inferred.ok_or_else(|| {
         Error::new(format!(
             "{owner} function {} wildcard pattern cannot infer a matched enum type",
-            functions
-                .first()
-                .map(|function| function.name.to_string())
+            first_function_name
+                .map(|name| name.to_string())
                 .unwrap_or_else(|| "<unknown>".to_string())
         ))
     })

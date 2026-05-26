@@ -1,5 +1,27 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeliveryPreflightFailure {
+    Full,
+    Stopped,
+    Crashed,
+}
+
+impl DeliveryPreflightFailure {
+    pub(super) const fn send_error_variant(self) -> &'static str {
+        match self {
+            Self::Full => "Full",
+            Self::Stopped => "Stopped",
+            Self::Crashed => "Crashed",
+        }
+    }
+}
+
+enum DeliveryPreflight {
+    Accepted(usize),
+    Failed(DeliveryPreflightFailure),
+}
+
 impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     pub(super) fn send_message(
         &mut self,
@@ -43,7 +65,27 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     pub(super) fn preflight_delivery_target(&self, target: RuntimeProcessId) -> Result<usize> {
         let process_index = self.process_index_for_pid(target)?;
-        self.preflight_delivery_target_index(process_index, 0)
+        match self.preflight_delivery_target_index(process_index, 0)? {
+            DeliveryPreflight::Accepted(process_index) => Ok(process_index),
+            DeliveryPreflight::Failed(failure) => {
+                let process = &self.processes[process_index];
+                let process_label = self.program.process_label(process.process_id)?;
+                Err(delivery_preflight_error(process_label, failure))
+            }
+        }
+    }
+
+    pub(super) fn preflight_delivery_target_outcome(
+        &self,
+        target: RuntimeProcessId,
+    ) -> Result<std::result::Result<usize, DeliveryPreflightFailure>> {
+        let process_index = self.process_index_for_pid(target)?;
+        Ok(
+            match self.preflight_delivery_target_index(process_index, 0)? {
+                DeliveryPreflight::Accepted(process_index) => Ok(process_index),
+                DeliveryPreflight::Failed(failure) => Err(failure),
+            },
+        )
     }
 
     pub(super) fn preflight_delivery_target_with_queued_messages(
@@ -58,31 +100,33 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             .ok_or_else(|| {
                 Error::new("runtime loop preflight mailbox accounting is inconsistent")
             })?;
-        self.preflight_delivery_target_index(process_index, queued_messages)
+        match self.preflight_delivery_target_index(process_index, queued_messages)? {
+            DeliveryPreflight::Accepted(process_index) => Ok(process_index),
+            DeliveryPreflight::Failed(failure) => {
+                let process = &self.processes[process_index];
+                let process_label = self.program.process_label(process.process_id)?;
+                Err(delivery_preflight_error(process_label, failure))
+            }
+        }
     }
 
     fn preflight_delivery_target_index(
         &self,
         process_index: usize,
         queued_messages: usize,
-    ) -> Result<usize> {
+    ) -> Result<DeliveryPreflight> {
         let process = self.processes.get(process_index).ok_or_else(|| {
             Error::new(format!(
                 "runtime process index {process_index} is not available for mailbox preflight"
             ))
         })?;
-        let process_label = self.program.process_label(process.process_id)?;
         match process.status {
             ProcessStatus::Running => {}
             ProcessStatus::Stopped => {
-                return Err(Error::new(format!(
-                    "send to process {process_label} failed because it is stopped"
-                )));
+                return Ok(DeliveryPreflight::Failed(DeliveryPreflightFailure::Stopped));
             }
             ProcessStatus::Failed => {
-                return Err(Error::new(format!(
-                    "send to process {process_label} failed because it has failed"
-                )));
+                return Ok(DeliveryPreflight::Failed(DeliveryPreflightFailure::Crashed));
             }
         }
         let projected_depth = process
@@ -91,12 +135,9 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             .checked_add(queued_messages)
             .ok_or_else(|| Error::new("runtime mailbox preflight depth overflowed"))?;
         if projected_depth >= process.mailbox_bound {
-            return Err(Error::new(format!(
-                "mailbox for process {} is full; message was not accepted",
-                process_label
-            )));
+            return Ok(DeliveryPreflight::Failed(DeliveryPreflightFailure::Full));
         }
-        Ok(process_index)
+        Ok(DeliveryPreflight::Accepted(process_index))
     }
 
     pub(super) fn process_index_for_pid(&self, pid: RuntimeProcessId) -> Result<usize> {
@@ -152,5 +193,20 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         self.processes.iter().position(|process| {
             process.status == ProcessStatus::Running && !process.mailbox.is_empty()
         })
+    }
+}
+
+fn delivery_preflight_error(process_label: &str, failure: DeliveryPreflightFailure) -> Error {
+    match failure {
+        DeliveryPreflightFailure::Full => Error::new(format!(
+            "mailbox for process {} is full; message was not accepted",
+            process_label
+        )),
+        DeliveryPreflightFailure::Stopped => Error::new(format!(
+            "send to process {process_label} failed because it is stopped"
+        )),
+        DeliveryPreflightFailure::Crashed => Error::new(format!(
+            "send to process {process_label} failed because it has failed"
+        )),
     }
 }

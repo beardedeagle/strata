@@ -44,6 +44,12 @@ fn validate_step_return_match_arm_statement(
 ) -> Result<()> {
     match statement {
         Statement::Emit(_) | Statement::Send { .. } => {}
+        Statement::LetSendOutcome { name, .. } | Statement::LetSpawnOutcome { name, .. } => {
+            return Err(Error::new(format!(
+                "process {} step return match arm cannot bind effect outcome {}",
+                process.name, name
+            )));
+        }
         Statement::LetValue { name, .. } => {
             return Err(Error::new(format!(
                 "process {} step return match arm cannot bind source-local value {}",
@@ -93,6 +99,12 @@ fn validate_step_return_match_arm_branch_statements(
     for statement in statements {
         match statement {
             Statement::Emit(_) | Statement::Send { .. } => {}
+            Statement::LetSendOutcome { name, .. } | Statement::LetSpawnOutcome { name, .. } => {
+                return Err(Error::new(format!(
+                    "process {} step return match arm cannot bind effect outcome {}",
+                    process.name, name
+                )));
+            }
             Statement::LetValue { name, .. } => {
                 return Err(Error::new(format!(
                     "process {} step return match arm cannot bind source-local value {}",

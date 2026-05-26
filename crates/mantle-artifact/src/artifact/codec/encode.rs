@@ -347,6 +347,13 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
                 element.as_u32()
             ));
         }
+        ArtifactValueTemplate::EffectOutcome { ty, outcome } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=effect_outcome\n{prefix}.type_id={}\n{prefix}.outcome={}\n",
+                ty.as_u32(),
+                outcome.as_u32()
+            ));
+        }
         ArtifactValueTemplate::EnumVariant {
             ty,
             variant,
@@ -521,12 +528,54 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
                 process_ref.as_u32()
             ));
         }
+        ArtifactAction::SpawnOutcome {
+            outcome,
+            outcome_ty,
+            target,
+        } => {
+            encoded.push_str(&format!(
+                "{action_prefix}.kind=spawn_outcome\n{action_prefix}.outcome={}\n{action_prefix}.outcome_type_id={}\n{action_prefix}.target_process={}\n",
+                outcome.as_u32(),
+                outcome_ty.as_u32(),
+                target.as_u32()
+            ));
+        }
         ArtifactAction::Send {
             target,
             message,
             payload,
         } => {
             encoded.push_str(&format!("{action_prefix}.kind=send\n"));
+            encode_send_target(encoded, action_prefix, target);
+            encoded.push_str(&format!(
+                "{action_prefix}.message={}\n{action_prefix}.payload={}\n",
+                message.as_u32(),
+                if payload.is_some() {
+                    "template"
+                } else {
+                    "none"
+                }
+            ));
+            if let Some(payload) = payload {
+                encode_value_template(
+                    encoded,
+                    &format!("{action_prefix}.payload_template"),
+                    payload,
+                );
+            }
+        }
+        ArtifactAction::SendOutcome {
+            outcome,
+            outcome_ty,
+            target,
+            message,
+            payload,
+        } => {
+            encoded.push_str(&format!(
+                "{action_prefix}.kind=send_outcome\n{action_prefix}.outcome={}\n{action_prefix}.outcome_type_id={}\n",
+                outcome.as_u32(),
+                outcome_ty.as_u32()
+            ));
             encode_send_target(encoded, action_prefix, target);
             encoded.push_str(&format!(
                 "{action_prefix}.message={}\n{action_prefix}.payload={}\n",

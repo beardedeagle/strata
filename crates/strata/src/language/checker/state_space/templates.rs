@@ -1,12 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use mantle_artifact::ArtifactValue;
 
 use super::super::super::MAX_VALUE_NESTING;
 use super::super::super::ast::{Identifier, Module, Record, TypeRef, ValueExpr};
 use super::super::super::checked::{
-    CheckedEnumVariantId, CheckedLoopElementId, CheckedPayloadValue, CheckedTypeRef,
-    CheckedValueTemplate, CheckedValueTemplateField,
+    CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId, CheckedPayloadValue,
+    CheckedTypeRef, CheckedValueTemplate, CheckedValueTemplateField,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::CheckedTypeInterner;
@@ -44,6 +42,7 @@ pub(in crate::language::checker) enum ValueTemplateSource {
     ReceivedPayload,
     CurrentStatePayload,
     LoopElement(CheckedLoopElementId),
+    EffectOutcome(CheckedEffectOutcomeId),
 }
 
 pub(in crate::language::checker) fn checked_value_template_with_binding(
@@ -292,7 +291,10 @@ fn checked_value_template(
         module,
         semantic_index,
         types,
-        record,
+        RecordTemplateTarget {
+            ty: expected_type,
+            decl: record,
+        },
         value,
         bindings,
         depth,
@@ -313,6 +315,10 @@ fn checked_binding_value_template(
         ValueTemplateSource::LoopElement(element) => CheckedValueTemplate::LoopElement {
             ty: binding.root_checked_ty.clone(),
             element,
+        },
+        ValueTemplateSource::EffectOutcome(outcome) => CheckedValueTemplate::EffectOutcome {
+            ty: binding.root_checked_ty.clone(),
+            outcome,
         },
     };
     for segment in binding.path.segments() {
@@ -392,22 +398,15 @@ fn checked_enum_variant_template(
             "expected enum variant value for enum {expected_type}"
         )));
     };
-    let enum_decl = semantic_index.enum_decl(module, expected_type)?;
-    let variant_index = semantic_index.enum_variant_index(module, expected_type, name)?;
-    let variant = enum_decl.variants.get(variant_index).ok_or_else(|| {
-        Error::new(format!(
-            "value {name} is not a variant of enum {}",
-            enum_decl.name
-        ))
-    })?;
-    let Some(payload_type) = &variant.payload_type else {
+    let variant = semantic_index.value_enum_variant(module, expected_type, name)?;
+    let Some(payload_type) = variant.payload_type.as_ref() else {
         return Err(Error::new(format!(
             "enum variant {name} does not accept a payload"
         )));
     };
     Ok(CheckedValueTemplate::EnumVariant {
         ty: types.intern(expected_type)?,
-        variant: CheckedEnumVariantId::from_index(variant_index)?,
+        variant: CheckedEnumVariantId::from_index(variant.index)?,
         payload: Box::new(checked_value_template(
             module,
             semantic_index,
@@ -420,15 +419,21 @@ fn checked_enum_variant_template(
     })
 }
 
+struct RecordTemplateTarget<'a> {
+    ty: &'a TypeRef,
+    decl: &'a Record,
+}
+
 fn checked_record_template(
     module: &Module,
     semantic_index: &SemanticIndex,
     types: &mut CheckedTypeInterner<'_>,
-    record: &Record,
+    target: RecordTemplateTarget<'_>,
     value: &ValueExpr,
     bindings: &[ValueTemplateBinding<'_>],
     depth: usize,
 ) -> Result<CheckedValueTemplate> {
+    let record = target.decl;
     let ValueExpr::Record(value) = value else {
         return Err(Error::new(format!(
             "record type {} must be constructed with {} {{ ... }}",
@@ -448,21 +453,22 @@ fn checked_record_template(
         )));
     }
 
-    let declared_fields = record
-        .fields
-        .iter()
-        .map(|field| (field.name.as_str(), &field.ty))
-        .collect::<BTreeMap<_, _>>();
-    let mut provided = BTreeSet::new();
     let mut fields = Vec::with_capacity(record.fields.len());
-    for field in &value.fields {
-        if !provided.insert(field.name.as_str()) {
+    for (index, field) in value.fields.iter().enumerate() {
+        if value.fields[..index]
+            .iter()
+            .any(|previous| previous.name == field.name)
+        {
             return Err(Error::new(format!(
                 "record value {} duplicates field {}",
                 record.name, field.name
             )));
         }
-        let Some(field_ty) = declared_fields.get(field.name.as_str()) else {
+        let Some(record_field) = record
+            .fields
+            .iter()
+            .find(|candidate| candidate.name == field.name)
+        else {
             return Err(Error::new(format!(
                 "record value {} declares unknown field {}",
                 record.name, field.name
@@ -474,7 +480,7 @@ fn checked_record_template(
                 module,
                 semantic_index,
                 types,
-                field_ty,
+                &record_field.ty,
                 &field.value,
                 bindings,
                 depth + 1,
@@ -482,7 +488,11 @@ fn checked_record_template(
         ));
     }
     for field in &record.fields {
-        if !provided.contains(field.name.as_str()) {
+        if !value
+            .fields
+            .iter()
+            .any(|provided| provided.name == field.name)
+        {
             return Err(Error::new(format!(
                 "record value {} is missing field {}",
                 record.name, field.name
@@ -491,7 +501,7 @@ fn checked_record_template(
     }
 
     Ok(CheckedValueTemplate::Record {
-        ty: types.intern(&TypeRef::Named(record.name.clone()))?,
+        ty: types.intern(target.ty)?,
         fields,
     })
 }

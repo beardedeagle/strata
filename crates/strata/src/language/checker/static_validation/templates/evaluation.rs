@@ -1,131 +1,5 @@
 use super::*;
 
-pub(in crate::language::checker::static_validation) fn checked_template_depends_on_received_payload(
-    template: &CheckedValueTemplate,
-) -> bool {
-    match template {
-        CheckedValueTemplate::Literal(_) => false,
-        CheckedValueTemplate::ReceivedPayload { .. } => true,
-        CheckedValueTemplate::CurrentStatePayload { .. } => false,
-        CheckedValueTemplate::EnumPayload { value, .. } => {
-            checked_template_depends_on_received_payload(value)
-        }
-        CheckedValueTemplate::RecordField { record, .. } => {
-            checked_template_depends_on_received_payload(record)
-        }
-        CheckedValueTemplate::ListElement { list, .. }
-        | CheckedValueTemplate::ListPrefixElement { list, .. }
-        | CheckedValueTemplate::ListRest { list, .. } => {
-            checked_template_depends_on_received_payload(list)
-        }
-        CheckedValueTemplate::MapValue { map, .. } => {
-            checked_template_depends_on_received_payload(map)
-        }
-        CheckedValueTemplate::MapRest { map, .. } => {
-            checked_template_depends_on_received_payload(map)
-        }
-        CheckedValueTemplate::ProcessRef { .. } => false,
-        CheckedValueTemplate::LoopElement { .. } => false,
-        CheckedValueTemplate::EnumVariant { payload, .. } => {
-            checked_template_depends_on_received_payload(payload)
-        }
-        CheckedValueTemplate::Record { fields, .. } => fields
-            .iter()
-            .any(|field| checked_template_depends_on_received_payload(field.value())),
-        CheckedValueTemplate::List { items, .. } => items
-            .iter()
-            .any(checked_template_depends_on_received_payload),
-        CheckedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
-            checked_template_depends_on_received_payload(entry.key())
-                || checked_template_depends_on_received_payload(entry.value())
-        }),
-        CheckedValueTemplate::IfElse {
-            condition,
-            then_value,
-            else_value,
-            ..
-        } => {
-            checked_template_depends_on_received_payload(condition)
-                || checked_template_depends_on_received_payload(then_value)
-                || checked_template_depends_on_received_payload(else_value)
-        }
-        CheckedValueTemplate::Equality { left, right, .. }
-        | CheckedValueTemplate::ScalarArithmetic { left, right, .. }
-        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
-            checked_template_depends_on_received_payload(left)
-                || checked_template_depends_on_received_payload(right)
-        }
-        CheckedValueTemplate::BooleanNot { operand, .. } => {
-            checked_template_depends_on_received_payload(operand)
-        }
-        CheckedValueTemplate::BooleanBinary { left, right, .. } => {
-            checked_template_depends_on_received_payload(left)
-                || checked_template_depends_on_received_payload(right)
-        }
-    }
-}
-
-pub(in crate::language::checker::static_validation) fn checked_template_depends_on_loop_element(
-    template: &CheckedValueTemplate,
-) -> bool {
-    match template {
-        CheckedValueTemplate::LoopElement { .. } => true,
-        CheckedValueTemplate::Literal(_)
-        | CheckedValueTemplate::ReceivedPayload { .. }
-        | CheckedValueTemplate::CurrentStatePayload { .. }
-        | CheckedValueTemplate::ProcessRef { .. } => false,
-        CheckedValueTemplate::EnumPayload { value, .. } => {
-            checked_template_depends_on_loop_element(value)
-        }
-        CheckedValueTemplate::RecordField { record, .. } => {
-            checked_template_depends_on_loop_element(record)
-        }
-        CheckedValueTemplate::ListElement { list, .. }
-        | CheckedValueTemplate::ListPrefixElement { list, .. }
-        | CheckedValueTemplate::ListRest { list, .. } => {
-            checked_template_depends_on_loop_element(list)
-        }
-        CheckedValueTemplate::MapValue { map, .. } => checked_template_depends_on_loop_element(map),
-        CheckedValueTemplate::MapRest { map, .. } => checked_template_depends_on_loop_element(map),
-        CheckedValueTemplate::EnumVariant { payload, .. } => {
-            checked_template_depends_on_loop_element(payload)
-        }
-        CheckedValueTemplate::Record { fields, .. } => fields
-            .iter()
-            .any(|field| checked_template_depends_on_loop_element(field.value())),
-        CheckedValueTemplate::List { items, .. } => {
-            items.iter().any(checked_template_depends_on_loop_element)
-        }
-        CheckedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
-            checked_template_depends_on_loop_element(entry.key())
-                || checked_template_depends_on_loop_element(entry.value())
-        }),
-        CheckedValueTemplate::IfElse {
-            condition,
-            then_value,
-            else_value,
-            ..
-        } => {
-            checked_template_depends_on_loop_element(condition)
-                || checked_template_depends_on_loop_element(then_value)
-                || checked_template_depends_on_loop_element(else_value)
-        }
-        CheckedValueTemplate::Equality { left, right, .. }
-        | CheckedValueTemplate::ScalarArithmetic { left, right, .. }
-        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
-            checked_template_depends_on_loop_element(left)
-                || checked_template_depends_on_loop_element(right)
-        }
-        CheckedValueTemplate::BooleanNot { operand, .. } => {
-            checked_template_depends_on_loop_element(operand)
-        }
-        CheckedValueTemplate::BooleanBinary { left, right, .. } => {
-            checked_template_depends_on_loop_element(left)
-                || checked_template_depends_on_loop_element(right)
-        }
-    }
-}
-
 pub(in crate::language::checker::static_validation) fn evaluate_checked_template(
     template: &CheckedValueTemplate,
     received_payload: Option<&CheckedPayloadValue>,
@@ -151,6 +25,9 @@ pub(in crate::language::checker::static_validation) fn evaluate_checked_template
             }
             Ok(payload.clone())
         }
+        CheckedValueTemplate::EffectOutcome { .. } => Err(Error::new(
+            "effect outcome templates require runtime effect outcome bindings",
+        )),
         CheckedValueTemplate::CurrentStatePayload { ty } => {
             let payload = current_state_payload.ok_or_else(|| {
                 Error::new("current state payload template requires a payload-bearing state")
@@ -262,14 +139,16 @@ pub(in crate::language::checker::static_validation) fn evaluate_checked_template
         }
         CheckedValueTemplate::Record { ty, fields } => {
             let mut values = Vec::with_capacity(fields.len());
-            let mut seen = BTreeSet::new();
-            for field in fields {
+            for (index, field) in fields.iter().enumerate() {
                 let value = evaluate_checked_template(
                     field.value(),
                     received_payload,
                     current_state_payload,
                 )?;
-                if !seen.insert(field.name()) {
+                if fields[..index]
+                    .iter()
+                    .any(|previous| previous.name() == field.name())
+                {
                     return Err(Error::new(format!(
                         "record template duplicates field {}",
                         field.name()
@@ -301,8 +180,7 @@ pub(in crate::language::checker::static_validation) fn evaluate_checked_template
             ))
         }
         CheckedValueTemplate::Map { ty, entries } => {
-            let mut values = Vec::with_capacity(entries.len());
-            let mut seen = BTreeSet::new();
+            let mut values: Vec<ArtifactMapEntry> = Vec::with_capacity(entries.len());
             for entry in entries {
                 let key = evaluate_checked_template(
                     entry.key(),
@@ -316,7 +194,7 @@ pub(in crate::language::checker::static_validation) fn evaluate_checked_template
                 )?;
                 let key_value = checked_payload_value(&key)?;
                 let item_value = checked_payload_value(&value)?;
-                if !seen.insert(key_value.clone()) {
+                if values.iter().any(|previous| previous.key == key_value) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
                         key_value.label()
@@ -609,75 +487,6 @@ pub(in crate::language::checker::static_validation) fn resolve_checked_template_
             ))
         })?;
     CheckedStateId::from_index(state_index)
-}
-
-pub(in crate::language::checker::static_validation) fn resolve_checked_next_state(
-    process: &CheckedProcess,
-    current_state: CheckedStateId,
-    next_state: &CheckedNextState,
-    received_payload: Option<&CheckedPayloadValue>,
-) -> Result<CheckedStateId> {
-    let current_state_payload = process
-        .state_values()
-        .get(current_state.index())
-        .and_then(|state| state.payload());
-    match next_state {
-        CheckedNextState::Current => Ok(current_state),
-        CheckedNextState::Value(state) => Ok(*state),
-        CheckedNextState::Template(template) => resolve_checked_template_state(
-            process,
-            template,
-            received_payload,
-            current_state_payload,
-        ),
-        CheckedNextState::IfElse {
-            condition,
-            then_state,
-            else_state,
-        } => {
-            let selected_state = match checked_bool_condition_value(
-                process,
-                condition,
-                received_payload,
-                current_state_payload,
-            )? {
-                true => then_state,
-                false => else_state,
-            };
-            resolve_checked_next_state(process, current_state, selected_state, received_payload)
-        }
-    }
-}
-
-fn checked_bool_condition_value(
-    process: &CheckedProcess,
-    condition: &CheckedValueTemplate,
-    received_payload: Option<&CheckedPayloadValue>,
-    current_state_payload: Option<&CheckedPayloadValue>,
-) -> Result<bool> {
-    let value = evaluate_checked_template(condition, received_payload, current_state_payload)?;
-    let value = value.value().ok_or_else(|| {
-        Error::new(format!(
-            "process {} if condition produced a process reference payload",
-            process.debug_name()
-        ))
-    })?;
-    let ArtifactValue::Atom(label) = value else {
-        return Err(Error::new(format!(
-            "process {} if condition produced non-Bool value {}",
-            process.debug_name(),
-            value.label()
-        )));
-    };
-    match label.as_str() {
-        "True" => Ok(true),
-        "False" => Ok(false),
-        _ => Err(Error::new(format!(
-            "process {} if condition produced invalid Bool value {}",
-            process.debug_name(),
-            label
-        ))),
-    }
 }
 
 fn checked_bool_value(value: &CheckedPayloadValue) -> Result<bool> {

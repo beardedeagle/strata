@@ -16,6 +16,66 @@ pub(super) fn reject_projected_process_ref_type(
     Ok(())
 }
 
+pub(super) fn reject_type_containing_process_ref(
+    artifact: &MantleArtifact,
+    field: &str,
+    ty: TypeId,
+) -> Result<()> {
+    if type_contains_process_ref_at_depth(artifact, ty, 0)? {
+        return Err(Error::new(format!(
+            "{field} process reference outcome must remain step-local"
+        )));
+    }
+    Ok(())
+}
+
+fn type_contains_process_ref_at_depth(
+    artifact: &MantleArtifact,
+    ty: TypeId,
+    depth: usize,
+) -> Result<bool> {
+    if depth > MAX_VALUE_TEMPLATE_DEPTH {
+        return Err(Error::new(format!(
+            "type id {} nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}",
+            ty.as_u32()
+        )));
+    }
+    let type_entry = artifact.type_entry(ty)?;
+    match &type_entry.kind {
+        ArtifactTypeKind::ProcessRef { .. } => Ok(true),
+        ArtifactTypeKind::Value => match type_entry.value_shape()? {
+            ArtifactValueShape::Atom | ArtifactValueShape::Scalar { .. } => Ok(false),
+            ArtifactValueShape::Record { fields } => {
+                for field in fields {
+                    if type_contains_process_ref_at_depth(artifact, field.ty, depth + 1)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            ArtifactValueShape::Enum { variants } => {
+                for variant in variants {
+                    if let Some(payload_type) = variant.payload_type
+                        && type_contains_process_ref_at_depth(artifact, payload_type, depth + 1)?
+                    {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            ArtifactValueShape::List { element, .. } => {
+                type_contains_process_ref_at_depth(artifact, *element, depth + 1)
+            }
+            ArtifactValueShape::Map { key, value, .. } => {
+                Ok(
+                    type_contains_process_ref_at_depth(artifact, *key, depth + 1)?
+                        || type_contains_process_ref_at_depth(artifact, *value, depth + 1)?,
+                )
+            }
+        },
+    }
+}
+
 pub(super) fn validate_record_field_projection_type(
     artifact: &MantleArtifact,
     field: &str,

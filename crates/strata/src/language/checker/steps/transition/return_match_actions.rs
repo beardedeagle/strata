@@ -253,6 +253,12 @@ fn validate_step_return_match_arm_action_statement(
             "process {} step return match arm cannot bind process reference {}",
             context.process.name, name
         ))),
+        Statement::LetSpawnOutcome { name, .. } | Statement::LetSendOutcome { name, .. } => {
+            Err(Error::new(format!(
+                "process {} step return match arm cannot bind effect outcome {}",
+                context.process.name, name
+            )))
+        }
         Statement::LetValue { name, .. } => Err(Error::new(format!(
             "process {} step return match arm cannot bind source-local value {}",
             context.process.name, name

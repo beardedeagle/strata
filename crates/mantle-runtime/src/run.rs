@@ -16,17 +16,19 @@ use crate::event::{
 use crate::host::RuntimeHost;
 use crate::limits::RunLimits;
 use crate::program::{
-    LoadedAction, LoadedLoopElement, LoadedNextState, LoadedProgram, LoadedValueTemplate,
-    RuntimePayload,
+    LoadedAction, LoadedNextState, LoadedProgram, LoadedValueTemplate, RuntimePayload,
 };
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
 mod accounting;
 mod control_flow;
 mod delivery;
+mod effect_outcomes;
 mod model;
 mod process_refs;
 mod templates;
+
+use effect_outcomes::RuntimeEffectOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeLoopElement {
@@ -42,6 +44,7 @@ struct BranchSelection<'a> {
     condition: &'a LoadedValueTemplate,
     local_process_refs: &'a LocalProcessRefs,
     loop_elements: &'a [RuntimeLoopElement],
+    effect_outcomes: &'a [RuntimeEffectOutcome],
 }
 
 pub fn run_artifact_with_host<H: RuntimeHost>(
@@ -230,17 +233,49 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let next_state = transition.next_state.clone();
         let step_result = transition.step_result;
         let mut local_process_refs = LocalProcessRefs::new(definition.process_refs.len());
+        let mut effect_outcomes = Vec::new();
+        let mut preexecuted_prefix_len = 0usize;
 
-        let final_state =
-            self.resolve_next_state(process_index, &step, &next_state, RuntimeBranchPath::root())?;
+        let mut prestate_prefix_open = true;
+        for (action_index, action) in transition.actions.iter().enumerate() {
+            if prestate_prefix_open && is_prestate_prefix_action(action) {
+                self.execute_prestate_action(
+                    &mut local_process_refs,
+                    &step,
+                    action,
+                    &mut effect_outcomes,
+                )?;
+                preexecuted_prefix_len = action_index.saturating_add(1);
+                continue;
+            }
+            prestate_prefix_open = false;
+            if is_effect_outcome_action(action) {
+                return Err(Error::new(format!(
+                    "process {} effect outcome action appears after ordinary effects",
+                    step.process_name
+                )));
+            }
+        }
+
+        let final_state = self.resolve_next_state(
+            process_index,
+            &step,
+            &next_state,
+            RuntimeBranchPath::root(),
+            &effect_outcomes,
+        )?;
 
         for (action_index, action) in transition.actions.iter().enumerate() {
+            if action_index < preexecuted_prefix_len {
+                continue;
+            }
             self.execute_action(
                 &mut local_process_refs,
                 &step,
                 action,
                 RuntimeBranchPath::root().child(RuntimeBranchPathSegment::action(action_index)?)?,
                 &[],
+                &effect_outcomes,
             )?;
         }
 
@@ -255,6 +290,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         action: &LoadedAction,
         branch_path: RuntimeBranchPath,
         loop_elements: &[RuntimeLoopElement],
+        effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<()> {
         match action {
             LoadedAction::Emit { output } => self.emit_output(step, *output),
@@ -277,6 +313,12 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 self.bind_process_ref(local_process_refs, step, *process_ref, pid)?;
                 Ok(())
             }
+            LoadedAction::SpawnOutcome { .. } | LoadedAction::SendOutcome { .. } => {
+                Err(Error::new(format!(
+                    "process {} nested effect outcome action reached ordinary execution",
+                    step.process_name
+                )))
+            }
             LoadedAction::Send {
                 target,
                 message,
@@ -295,6 +337,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         step,
                         local_process_refs,
                         loop_elements,
+                        effect_outcomes,
                     )?),
                     None => None,
                 };
@@ -316,6 +359,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     condition,
                     local_process_refs,
                     loop_elements,
+                    effect_outcomes,
                 })?;
                 let selected_actions = match branch {
                     ArtifactBranch::Then => then_actions,
@@ -331,6 +375,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         action,
                         selected_branch_path,
                         loop_elements,
+                        effect_outcomes,
                     )?;
                 }
                 Ok(())
@@ -348,6 +393,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     step,
                     local_process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
                 let collection_type = collection.ty;
                 let items = match collection.value {
@@ -383,7 +429,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         )
                     })
                     .collect::<Result<Vec<_>>>()?;
-                self.preflight_loop_body(local_process_refs, step, element, body, &loop_payloads)?;
+                self.preflight_loop_body(
+                    local_process_refs,
+                    step,
+                    element,
+                    body,
+                    &loop_payloads,
+                    effect_outcomes,
+                )?;
                 self.record_loop_started(
                     step,
                     element.id,
@@ -408,124 +461,13 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                             action,
                             body_action_path,
                             &active,
+                            effect_outcomes,
                         )?;
                     }
                 }
                 self.record_loop_completed(step, element.id, item_count)?;
                 Ok(())
             }
-        }
-    }
-
-    fn preflight_loop_body(
-        &self,
-        local_process_refs: &LocalProcessRefs,
-        step: &ActiveStep,
-        element: &LoadedLoopElement,
-        body: &[LoadedAction],
-        loop_payloads: &[RuntimePayload],
-    ) -> Result<()> {
-        if loop_payloads.is_empty() {
-            return Ok(());
-        }
-
-        let mut queued_mailbox_messages = None;
-        for (index, payload) in loop_payloads.iter().enumerate() {
-            let active = [RuntimeLoopElement {
-                id: element.id,
-                index,
-                payload: payload.clone(),
-            }];
-            for action in body {
-                self.preflight_loop_action(
-                    local_process_refs,
-                    step,
-                    action,
-                    &active,
-                    &mut queued_mailbox_messages,
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    fn preflight_loop_action(
-        &self,
-        local_process_refs: &LocalProcessRefs,
-        step: &ActiveStep,
-        action: &LoadedAction,
-        loop_elements: &[RuntimeLoopElement],
-        queued_mailbox_messages: &mut Option<Vec<usize>>,
-    ) -> Result<()> {
-        match action {
-            LoadedAction::Emit { .. } => Ok(()),
-            LoadedAction::Spawn { .. } => Err(Error::new(format!(
-                "process {} for loop body cannot bind process references",
-                step.process_name
-            ))),
-            LoadedAction::Send {
-                target,
-                message,
-                payload,
-            } => {
-                let pid = self.resolve_send_target(local_process_refs, step, target)?;
-                let queued_mailbox_messages = queued_mailbox_messages
-                    .get_or_insert_with(|| vec![0usize; self.processes.len()]);
-                let target_process_index = self
-                    .preflight_delivery_target_with_queued_messages(pid, queued_mailbox_messages)?;
-                let target_process_id = self.processes[target_process_index].process_id;
-                self.program
-                    .message_payload_type(target_process_id, *message)?;
-                if let Some(payload) = payload {
-                    evaluate_runtime_template(
-                        self.program,
-                        payload,
-                        step.payload.as_ref(),
-                        step,
-                        local_process_refs,
-                        loop_elements,
-                    )?;
-                }
-                let queued_messages = queued_mailbox_messages
-                    .get_mut(target_process_index)
-                    .ok_or_else(|| {
-                        Error::new("runtime loop preflight mailbox accounting is inconsistent")
-                    })?;
-                *queued_messages = queued_messages
-                    .checked_add(1)
-                    .ok_or_else(|| Error::new("runtime mailbox preflight count overflowed"))?;
-                Ok(())
-            }
-            LoadedAction::IfElse {
-                condition,
-                then_actions,
-                else_actions,
-            } => {
-                let (branch, _) = self.evaluate_bool_condition(
-                    step,
-                    condition,
-                    local_process_refs,
-                    loop_elements,
-                )?;
-                let selected_actions = match branch {
-                    ArtifactBranch::Then => then_actions,
-                    ArtifactBranch::Else => else_actions,
-                };
-                for action in selected_actions {
-                    self.preflight_loop_action(
-                        local_process_refs,
-                        step,
-                        action,
-                        loop_elements,
-                        queued_mailbox_messages,
-                    )?;
-                }
-                Ok(())
-            }
-            LoadedAction::ForEach { .. } => Err(Error::new(format!(
-                "process {} nested for loops are not supported in this artifact slice",
-                step.process_name
-            ))),
         }
     }
 
@@ -556,8 +498,9 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &self,
         step: &ActiveStep,
         template: &LoadedValueTemplate,
+        effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<StateId> {
-        let value = self.evaluate_state_template(template, step)?;
+        let value = self.evaluate_state_template(template, step, effect_outcomes)?;
         let process = self.program.process(step.process_id)?;
         let state_index = process
             .state_values
@@ -577,6 +520,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &self,
         template: &LoadedValueTemplate,
         step: &ActiveStep,
+        effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<RuntimePayload> {
         evaluate_runtime_template(
             self.program,
@@ -585,6 +529,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             step,
             &LocalProcessRefs::empty(),
             &[],
+            effect_outcomes,
         )
     }
 
@@ -594,11 +539,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         next_state: &LoadedNextState,
         branch_path: RuntimeBranchPath,
+        effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<StateId> {
         match next_state {
             LoadedNextState::Current => Ok(self.processes[process_index].state),
             LoadedNextState::Value(state) => Ok(*state),
-            LoadedNextState::Template(template) => self.resolve_template_state(step, template),
+            LoadedNextState::Template(template) => {
+                self.resolve_template_state(step, template, effect_outcomes)
+            }
             LoadedNextState::IfElse {
                 condition,
                 then_state,
@@ -612,6 +560,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     condition,
                     local_process_refs: &empty_process_refs,
                     loop_elements: &[],
+                    effect_outcomes,
                 })?;
                 let selected_state = match branch {
                     ArtifactBranch::Then => then_state,
@@ -622,6 +571,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     step,
                     selected_state,
                     branch_path.child(RuntimeBranchPathSegment::next_state_branch(branch))?,
+                    effect_outcomes,
                 )
             }
         }
@@ -725,6 +675,22 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         }
         Ok(())
     }
+}
+
+const fn is_prestate_prefix_action(action: &LoadedAction) -> bool {
+    matches!(
+        action,
+        LoadedAction::Spawn { .. }
+            | LoadedAction::SpawnOutcome { .. }
+            | LoadedAction::SendOutcome { .. }
+    )
+}
+
+const fn is_effect_outcome_action(action: &LoadedAction) -> bool {
+    matches!(
+        action,
+        LoadedAction::SpawnOutcome { .. } | LoadedAction::SendOutcome { .. }
+    )
 }
 
 #[cfg(test)]

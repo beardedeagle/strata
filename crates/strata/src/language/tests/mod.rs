@@ -1,3 +1,5 @@
+mod builtin_value_shapes;
+mod effect_outcomes;
 mod effects;
 mod examples;
 mod fixtures;

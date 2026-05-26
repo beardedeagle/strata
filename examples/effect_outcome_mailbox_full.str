@@ -1,0 +1,42 @@
+module effect_outcome_mailbox_full;
+
+record MainState { sent: Result<Unit,SendError<WorkerMsg>> }
+
+enum MainMsg { Start }
+enum Bool { False, True }
+enum WorkerState { Idle, Done }
+enum WorkerMsg { Work }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { sent: Err(Stopped(Work)) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let first: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+        let second: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+        if (second == Err(Full(Work))) {
+            emit "mailbox full";
+        } else {
+            emit "unexpected mailbox outcome";
+        }
+        return Stop(MainState { sent: second });
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(Done);
+    }
+}

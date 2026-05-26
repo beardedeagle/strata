@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 mod admission;
 mod dependencies;
 mod evaluation;
@@ -25,6 +23,7 @@ pub(in crate::artifact) struct ValueTemplatePayloadValidation {
     received_payload_type: Option<TypeId>,
     current_state_payload_type: Option<TypeId>,
     allow_direct_process_ref: bool,
+    allow_process_ref_effect_outcome: bool,
 }
 
 impl ValueTemplatePayloadValidation {
@@ -39,6 +38,7 @@ impl ValueTemplatePayloadValidation {
             received_payload_type,
             current_state_payload_type,
             allow_direct_process_ref,
+            allow_process_ref_effect_outcome: false,
         }
     }
 
@@ -46,6 +46,7 @@ impl ValueTemplatePayloadValidation {
         Self {
             expected_type: None,
             allow_direct_process_ref: false,
+            allow_process_ref_effect_outcome: false,
             ..self
         }
     }
@@ -53,6 +54,13 @@ impl ValueTemplatePayloadValidation {
     const fn with_expected_type(self, expected_type: Option<TypeId>) -> Self {
         Self {
             expected_type,
+            ..self
+        }
+    }
+
+    const fn with_process_ref_effect_outcome(self, allowed: bool) -> Self {
+        Self {
+            allow_process_ref_effect_outcome: allowed,
             ..self
         }
     }
@@ -73,6 +81,7 @@ impl ArtifactValueTemplate {
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
             | Self::LoopElement { ty, .. }
+            | Self::EffectOutcome { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }

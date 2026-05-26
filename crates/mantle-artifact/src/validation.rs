@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use crate::{
     ArtifactMessageVariant, ArtifactStateValue, ArtifactValue, Error, MAX_FIELD_VALUE_BYTES,
     MAX_IDENTIFIER_BYTES, Result,
@@ -30,10 +28,12 @@ pub(crate) fn validate_unique_message_variant_list(
     if values.is_empty() {
         return Err(Error::new("message label list must not be empty"));
     }
-    let mut seen = BTreeSet::new();
-    for value in values {
+    for (index, value) in values.iter().enumerate() {
         validate_message_label(&value.label)?;
-        if !seen.insert(value.label.as_str()) {
+        if values[..index]
+            .iter()
+            .any(|previous| previous.label == value.label)
+        {
             return Err(Error::new(format!(
                 "duplicate message label {}",
                 value.label
@@ -61,11 +61,13 @@ pub(crate) fn validate_unique_state_value_list(values: &[ArtifactStateValue]) ->
     if values.is_empty() {
         return Err(Error::new("state value list must not be empty"));
     }
-    let mut seen = BTreeSet::new();
-    for value in values {
+    for (index, value) in values.iter().enumerate() {
         value.value.validate_without_process_ref("state value")?;
         validate_state_value_identity_label(&value.value, &value.label)?;
-        if !seen.insert((value.ty, value.value.clone())) {
+        if values[..index]
+            .iter()
+            .any(|previous| previous.ty == value.ty && previous.value == value.value)
+        {
             return Err(Error::new(format!(
                 "duplicate state value {} with type id {}",
                 value.value.label(),
@@ -93,8 +95,8 @@ pub fn validate_state_value_label(value: &str) -> Result<()> {
 
 pub fn validate_state_value_identity_label(value: &ArtifactValue, label: &str) -> Result<()> {
     validate_state_value_label(label)?;
-    let expected_label = value.label();
-    if label != expected_label {
+    if !value.label_matches(label) {
+        let expected_label = value.label();
         return Err(Error::new(format!(
             "state value label {label} does not match ordered value label {expected_label}"
         )));

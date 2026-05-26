@@ -145,7 +145,11 @@ pub(crate) fn payload_artifact() -> MantleArtifact {
         &["Working(Job{phase:Done})", "Working(Job{phase:Ready})"],
     );
     artifact.processes[1].message_type = WORKER_MSG;
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Assign", JOB)],
+    );
     artifact.processes[1].transitions[0] = ArtifactTransition {
         current_state: None,
         message: MessageId::new(0),
@@ -193,7 +197,11 @@ pub(crate) fn for_each_artifact(items: &str, max_items: usize) -> MantleArtifact
             }],
         },
     ];
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Ping", JOB)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Ping", JOB)],
+    );
     artifact.processes[1].mailbox_bound = max_items.max(1);
     artifact.processes[1].transitions[0] = ArtifactTransition {
         current_state: None,
@@ -322,7 +330,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
 }
 
 pub(crate) fn sequence_artifact() -> MantleArtifact {
-    MantleArtifact {
+    let mut artifact = MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
         schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
         source_language: TEST_SOURCE_LANGUAGE.to_string(),
@@ -411,20 +419,22 @@ pub(crate) fn sequence_artifact() -> MantleArtifact {
             },
         ],
         source_hash_fnv1a64: "0000000000000000".to_string(),
-    }
+    };
+    align_process_message_type(&mut artifact, 1);
+    artifact
 }
 
 pub(crate) fn base_types() -> Vec<ArtifactType> {
     vec![
         ArtifactType::value("MainState"),
-        ArtifactType::value("MainMsg"),
+        ArtifactType::enum_value("MainMsg", vec!["Start".to_string()]),
         worker_state_type(&[
             "Idle", "Handled", "Working", "Done", "Routed", "Ready", "Other", "Spoofed",
         ]),
-        ArtifactType::value("WorkerMsg"),
+        ArtifactType::enum_value("WorkerMsg", vec!["Ping".to_string()]),
         job_record_type(),
         ArtifactType::value("PeerState"),
-        ArtifactType::value("PeerMsg"),
+        ArtifactType::enum_value("PeerMsg", vec!["Ping".to_string()]),
         ArtifactType::list("JobList", JOB, 16),
     ]
 }
@@ -474,6 +484,29 @@ pub(crate) fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValu
 
 pub(crate) fn artifact_value(value: &str) -> ArtifactValue {
     ArtifactValue::parse(value).expect("test artifact value should be valid")
+}
+
+pub(crate) fn replace_process_message_variants(
+    artifact: &mut MantleArtifact,
+    process_index: usize,
+    variants: Vec<ArtifactMessageVariant>,
+) {
+    artifact.processes[process_index].message_variants = variants;
+    align_process_message_type(artifact, process_index);
+}
+
+pub(crate) fn align_process_message_type(artifact: &mut MantleArtifact, process_index: usize) {
+    let message_type = artifact.processes[process_index].message_type;
+    let label = artifact.types[message_type.index()].label.clone();
+    let variants = artifact.processes[process_index]
+        .message_variants
+        .iter()
+        .map(|variant| ArtifactEnumVariant {
+            label: variant.label.clone(),
+            payload_type: variant.payload_type,
+        })
+        .collect();
+    artifact.types[message_type.index()] = ArtifactType::enum_value_with_payloads(label, variants);
 }
 
 pub(crate) fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {

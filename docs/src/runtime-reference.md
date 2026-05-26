@@ -499,6 +499,74 @@ Arm-local `spawn`, process-reference binding, nested runtime `for` statements,
 final-position runtime `if`, nested return matches, matching `state`, matching
 non-enum values, and dynamic payload catch-all dispatch are rejected.
 
+## Typed Effect Outcomes
+
+Local send and spawn operations can bind typed immutable outcomes in `step`
+bodies:
+
+```strata
+let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;
+let send_result: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+return Stop(MainState { sent: send_result });
+```
+
+These bindings lower to typed Mantle effect-outcome IDs and typed value
+templates. Source binding names are not runtime dispatch keys. When an outcome
+template is used as a next-state value, the checker admits the finite outcome
+states required by that transition before artifact execution. Spawn outcome
+successes carry process references, so they are kept as step-local authority
+values and are not admitted as ordinary source state.
+
+The source checker enforces declaration order for outcome bindings. An outcome
+is visible only after its binding statement, and outcome bindings must precede
+ordinary effect statements. Process-reference spawns in that prefix are executed
+before state resolution so outcome sends can target them. Process-reference
+spawns after ordinary effects execute in ordinary source order and cannot be
+used by later outcome bindings.
+
+For local send outcomes, Mantle checks the target process, status, and mailbox
+capacity before accepting the message. Accepted sends are committed and return
+`Ok(Unit)`. Pre-acceptance local failures return `Err(Full(message))`,
+`Err(Stopped(message))`, or `Err(Crashed(message))` with the original message
+value preserved. If the message carries a direct `ProcessRef<T>` payload, the
+failure outcome preserves the runtime process-reference metadata with the message
+value; it does not turn that authority into storable source state.
+
+For local spawn outcomes, accepted spawns commit the new process and return
+`Ok(process_ref)` with a typed `ProcessRef<TargetProcess>` payload. If process
+capacity is exhausted before the spawn is accepted, Mantle returns
+`Err(Exhausted(Unit))`. Bare statement `send` and `spawn` still fail closed:
+pre-acceptance failure is reported as a runtime error instead of being silently
+dropped.
+
+Outcome values can also drive follow-up effects through ordinary immutable
+branching:
+
+```strata
+if (spawn_result != Err(Exhausted(Unit))) {
+    emit "spawn accepted";
+} else {
+    emit "spawn rejected";
+}
+
+if (send_result == Ok(Unit)) {
+    emit "send accepted";
+} else {
+    emit "send not accepted";
+}
+```
+
+These conditions branch on a typed built-in variant pattern. They do not add
+structural equality for preserved message payloads, and they do not compare
+process-reference identities from `Ok(process_ref)` spawn outcomes.
+
+`examples/effect_outcome_mailbox_full.str` and
+`examples/effect_outcome_stopped_target.str` exercise source-to-runtime
+pre-acceptance failure outcomes. Direct Mantle runtime tests exercise
+`Crashed(M)` for targets already failed before acceptance. A source-created
+`Panic(...)` currently records failure evidence and fails the run before a
+later source sender can observe that crashed target.
+
 Current pattern-matching closure boundaries:
 
 | Surface | Current status |

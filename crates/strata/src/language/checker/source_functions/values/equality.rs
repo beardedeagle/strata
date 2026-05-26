@@ -1,0 +1,331 @@
+use super::*;
+use crate::language::checker::symbols::BuiltinValueShape;
+
+pub(super) fn validate_source_equality_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    _operator: ValueEqualityOperator,
+    left: &ValueExpr,
+    right: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    if !scope.semantic_index.same_type(expected_type, &bool_type) {
+        return Err(Error::new(format!(
+            "equality expression produces {bool_type}, expected {expected_type}"
+        )));
+    }
+    let operand_type = source_equality_operand_pair_type(scope, left, right, bindings)?;
+    validate_source_equality_operands(scope, &operand_type, left, right)?;
+    validate_source_function_value_expr(scope, &operand_type, left, bindings).map_err(|err| {
+        Error::new(format!(
+            "left equality operand must produce {operand_type}: {err}"
+        ))
+    })?;
+    validate_source_function_value_expr(scope, &operand_type, right, bindings).map_err(|err| {
+        Error::new(format!(
+            "right equality operand must produce {operand_type}: {err}"
+        ))
+    })
+}
+
+pub(super) fn source_equality_operand_pair_type(
+    scope: &SourceFunctionScope<'_>,
+    left: &ValueExpr,
+    right: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<TypeRef> {
+    let left_type = source_equality_operand_type(scope, left, bindings, None);
+    let right_type = source_equality_operand_type(scope, right, bindings, None);
+    match (left_type, right_type) {
+        (Ok(left_type), Ok(right_type)) => {
+            validate_matching_source_equality_operand_types(scope, left_type, right_type)
+        }
+        (Ok(left_type), Err(_)) => {
+            let right_type =
+                source_equality_operand_type(scope, right, bindings, Some(&left_type))?;
+            validate_matching_source_equality_operand_types(scope, left_type, right_type)
+        }
+        (Err(_), Ok(right_type)) => {
+            let left_type = source_equality_operand_type(scope, left, bindings, Some(&right_type))?;
+            validate_matching_source_equality_operand_types(scope, left_type, right_type)
+        }
+        (Err(left_error), Err(_)) => Err(left_error),
+    }
+}
+
+fn validate_matching_source_equality_operand_types(
+    scope: &SourceFunctionScope<'_>,
+    left_type: TypeRef,
+    right_type: TypeRef,
+) -> Result<TypeRef> {
+    if !scope.semantic_index.same_type(&left_type, &right_type) {
+        return Err(Error::new(format!(
+            "equality operands must have the same type; left has {left_type}, right has {right_type}"
+        )));
+    }
+    Ok(left_type)
+}
+
+fn source_equality_operand_type(
+    scope: &SourceFunctionScope<'_>,
+    value: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    expected_type: Option<&TypeRef>,
+) -> Result<TypeRef> {
+    match value {
+        ValueExpr::Identifier(name) => {
+            if let Some(binding) = bindings.iter().find(|binding| binding.name == name) {
+                return Ok(binding.ty.clone());
+            }
+            if let Some(expected_type) = expected_type
+                && source_equality_fieldless_variant_matches_type(scope, expected_type, name)?
+            {
+                return Ok(expected_type.clone());
+            }
+            scope
+                .semantic_index
+                .equality_fieldless_enum_variant_type(scope.module, name)
+                .map_err(|err| {
+                    Error::new(format!(
+                        "equality operand {name} must be a Bool, scalar value, or fieldless enum value: {err}"
+                    ))
+                })
+        }
+        ValueExpr::ScalarLiteral(_) | ValueExpr::ScalarArithmetic { .. } => {
+            source_scalar_expr_type(scope, value, bindings, expected_type)
+        }
+        ValueExpr::Call { name, .. } => {
+            if let Some(expected_type) = expected_type {
+                if enum_variant_for_expected_type(scope, expected_type, name)?.is_some() {
+                    return Ok(expected_type.clone());
+                }
+                if scope.semantic_index.scalar_type(expected_type)?.is_some() {
+                    return source_scalar_expr_type(scope, value, bindings, Some(expected_type));
+                }
+            } else if let Some(function) =
+                source_function_group_option(scope, name)?.and_then(|functions| functions.first())
+            {
+                return Ok(function.return_type.clone());
+            }
+            Err(Error::new(
+                "equality operands must be Bool, scalar values, or fieldless enum values",
+            ))
+        }
+        ValueExpr::IfElse { .. } => {
+            let Some(expected_type) = expected_type else {
+                return Err(Error::new(
+                    "scalar equality operand type is ambiguous; use a typed local binding or scalar literal",
+                ));
+            };
+            if scope.semantic_index.scalar_type(expected_type)?.is_some() {
+                return source_scalar_expr_type(scope, value, bindings, Some(expected_type));
+            }
+            Err(Error::new(
+                "equality operands must be Bool, scalar values, or fieldless enum values",
+            ))
+        }
+        ValueExpr::Grouped { value } => {
+            source_equality_operand_type(scope, value, bindings, expected_type)
+        }
+        ValueExpr::EnumVariant { name, .. } => {
+            if let Some(expected_type) = expected_type
+                && enum_variant_for_expected_type(scope, expected_type, name)?.is_some()
+            {
+                return Ok(expected_type.clone());
+            }
+            let ty = scope.semantic_index.enum_variant_type(scope.module, name)?;
+            let enum_decl = scope.semantic_index.enum_decl(scope.module, &ty)?;
+            let variant_index = scope
+                .semantic_index
+                .enum_variant_index(scope.module, &ty, name)?;
+            let variant = enum_decl.variants.get(variant_index).ok_or_else(|| {
+                Error::new(format!(
+                    "enum {} variant index {variant_index} is not declared",
+                    enum_decl.name
+                ))
+            })?;
+            if variant.payload_type.is_some() {
+                return Err(Error::new(format!(
+                    "equality operand enum variant {name} carries a payload"
+                )));
+            }
+            Ok(ty)
+        }
+        ValueExpr::Record(_)
+        | ValueExpr::List(_)
+        | ValueExpr::Map(_)
+        | ValueExpr::Equality { .. }
+        | ValueExpr::ScalarOrdering { .. }
+        | ValueExpr::BooleanNot { .. }
+        | ValueExpr::BooleanBinary { .. } => Err(Error::new(
+            "equality operands must be Bool, scalar values, or fieldless enum values",
+        )),
+    }
+}
+
+fn source_equality_fieldless_variant_matches_type(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    name: &Identifier,
+) -> Result<bool> {
+    let Some(variant) = enum_variant_for_expected_type(scope, expected_type, name)? else {
+        return Ok(false);
+    };
+    if variant.payload_type.is_some() {
+        return Err(Error::new(format!(
+            "equality operand enum variant {name} carries a payload"
+        )));
+    }
+    Ok(true)
+}
+
+fn validate_source_equality_operand_type(
+    scope: &SourceFunctionScope<'_>,
+    operand_type: &TypeRef,
+) -> Result<()> {
+    validate_source_equality_operand_type_at_depth(scope, operand_type, 0)
+}
+
+fn validate_source_equality_operand_type_at_depth(
+    scope: &SourceFunctionScope<'_>,
+    operand_type: &TypeRef,
+    depth: usize,
+) -> Result<()> {
+    if depth > MAX_VALUE_NESTING {
+        return Err(Error::new(format!(
+            "equality operand type nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
+        )));
+    }
+    if scope.semantic_index.is_unit_type(operand_type)? {
+        return Ok(());
+    }
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    if scope.semantic_index.same_type(operand_type, &bool_type) {
+        return Ok(());
+    }
+    if scope.semantic_index.scalar_type(operand_type)?.is_some() {
+        return validate_source_scalar_operand_type(scope, operand_type);
+    }
+    if scope
+        .semantic_index
+        .process_ref_target_type(operand_type)?
+        .is_some()
+    {
+        return Err(Error::new("process-reference equality is not supported"));
+    }
+    if scope
+        .semantic_index
+        .collection_type(operand_type)?
+        .is_some()
+    {
+        return Err(Error::new("list and map equality are not supported"));
+    }
+    if scope
+        .semantic_index
+        .record_decl(scope.module, operand_type)
+        .is_ok()
+    {
+        return Err(Error::new("record equality is not supported"));
+    }
+    if let Some(BuiltinValueShape::Enum(value_enum)) =
+        scope.semantic_index.builtin_value_shape(operand_type)?
+    {
+        for variant in value_enum.variants {
+            if let Some(payload_type) = variant.payload_type {
+                validate_source_equality_operand_type_at_depth(scope, &payload_type, depth + 1)
+                    .map_err(|err| {
+                        Error::new(format!(
+                            "equality payload type {payload_type} is not supported: {err}"
+                        ))
+                    })?;
+            }
+        }
+        return Ok(());
+    }
+    let value_enum = scope
+        .semantic_index
+        .value_enum(scope.module, operand_type)?;
+    if value_enum
+        .variants
+        .iter()
+        .any(|variant| variant.payload_type.is_some())
+    {
+        return Err(Error::new(format!(
+            "equality type {operand_type} must not declare payload-bearing enum variants"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_source_equality_operands(
+    scope: &SourceFunctionScope<'_>,
+    operand_type: &TypeRef,
+    left: &ValueExpr,
+    right: &ValueExpr,
+) -> Result<()> {
+    let full_error = match validate_source_equality_operand_type(scope, operand_type) {
+        Ok(()) => return Ok(()),
+        Err(err) => err,
+    };
+    if source_builtin_variant_equality_pattern(scope, operand_type, left)?
+        || source_builtin_variant_equality_pattern(scope, operand_type, right)?
+    {
+        Ok(())
+    } else {
+        Err(full_error)
+    }
+}
+
+fn source_builtin_variant_equality_pattern(
+    scope: &SourceFunctionScope<'_>,
+    operand_type: &TypeRef,
+    value: &ValueExpr,
+) -> Result<bool> {
+    let value = match value {
+        ValueExpr::Grouped { value } => value.as_ref(),
+        _ => value,
+    };
+    let Some(BuiltinValueShape::Enum(value_enum)) =
+        scope.semantic_index.builtin_value_shape(operand_type)?
+    else {
+        return Ok(false);
+    };
+    match value {
+        ValueExpr::Identifier(name) => {
+            let Some(variant) = value_enum
+                .variants
+                .iter()
+                .find(|variant| variant.name == *name)
+            else {
+                return Ok(false);
+            };
+            Ok(variant.payload_type.is_none())
+        }
+        ValueExpr::Call { name, arg } | ValueExpr::EnumVariant { name, payload: arg } => {
+            let Some(variant) = value_enum
+                .variants
+                .iter()
+                .find(|variant| variant.name == *name)
+            else {
+                return Ok(false);
+            };
+            let Some(payload_type) = &variant.payload_type else {
+                return Ok(false);
+            };
+            source_equality_payload_pattern_is_safe(scope, payload_type, arg)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn source_equality_payload_pattern_is_safe(
+    scope: &SourceFunctionScope<'_>,
+    payload_type: &TypeRef,
+    payload: &ValueExpr,
+) -> Result<bool> {
+    if validate_source_equality_operand_type(scope, payload_type).is_ok() {
+        return Ok(true);
+    }
+    source_builtin_variant_equality_pattern(scope, payload_type, payload)
+}

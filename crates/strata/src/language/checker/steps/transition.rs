@@ -6,13 +6,19 @@ use mantle_artifact::{
 };
 
 mod actions;
+mod effect_outcomes;
 mod return_match_actions;
 mod send;
+mod state_values;
 
 use actions::{ActionCheckInput, checked_actions_for_statements};
+use effect_outcomes::{
+    EffectOutcomeBinding, checked_effect_outcome_bindings, validate_effect_outcome_statement_order,
+};
 use return_match_actions::{
     ReturnMatchArmActionInput, validate_return_match_arm_action_statements,
 };
+use state_values::populate_template_state_values;
 
 pub(super) fn check_step_transition(
     context: &mut StepCheckContext<'_>,
@@ -21,6 +27,11 @@ pub(super) fn check_step_transition(
     types: &mut CheckedTypeInterner<'_>,
     input: StepTransitionInput<'_>,
 ) -> Result<CheckedTransition> {
+    let mut source_bindings =
+        step_source_bindings(input.payload_bindings, input.state_payload_bindings);
+    let outcome_bindings =
+        checked_effect_outcome_bindings(context, types, &input.body.statements, &source_bindings)?;
+    validate_effect_outcome_statement_order(context, &input.body.statements, &outcome_bindings)?;
     let payload_template_bindings =
         input
             .payload_bindings
@@ -45,9 +56,19 @@ pub(super) fn check_step_transition(
                 source: ValueTemplateSource::CurrentStatePayload,
                 path: &binding.path,
             });
-    let template_bindings = payload_template_bindings
+    let mut template_bindings = payload_template_bindings
         .chain(state_template_bindings)
         .collect::<Vec<_>>();
+    for binding in &outcome_bindings {
+        template_bindings.push(ValueTemplateBinding {
+            name: binding.name,
+            ty: binding.ty,
+            checked_ty: &binding.checked_ty,
+            root_checked_ty: &binding.checked_ty,
+            source: ValueTemplateSource::EffectOutcome(binding.id),
+            path: &binding.path,
+        });
+    }
     let function_scope = SourceFunctionScope {
         module: context.module,
         process_name: Some(&context.process.name),
@@ -55,14 +76,19 @@ pub(super) fn check_step_transition(
         process_refs: None,
         semantic_index: context.semantic_index,
     };
-    let source_bindings =
-        step_source_bindings(input.payload_bindings, input.state_payload_bindings);
+    for binding in &outcome_bindings {
+        source_bindings.push(SourceValueBinding {
+            name: binding.name,
+            ty: binding.ty,
+        });
+    }
     let mut loop_elements = LoopElementAllocator::default();
     let transition_env = StepTransitionEnv {
         function_scope: &function_scope,
         source_bindings: &source_bindings,
         template_bindings: &template_bindings,
         input: &input,
+        outcome_bindings: &outcome_bindings,
     };
     let outcome = check_step_block_outcome(
         context,
@@ -103,6 +129,7 @@ struct StepTransitionEnv<'a, 'scope, 'source, 'template, 'input> {
     source_bindings: &'a [SourceValueBinding<'source>],
     template_bindings: &'a [ValueTemplateBinding<'template>],
     input: &'a StepTransitionInput<'input>,
+    outcome_bindings: &'a [EffectOutcomeBinding<'source>],
 }
 
 #[derive(Clone, Copy)]
@@ -248,6 +275,7 @@ fn check_step_block_outcome(
             source_bindings: env.source_bindings,
             template_bindings: env.template_bindings,
             payload_bindings: env.input.payload_bindings,
+            outcome_bindings: env.outcome_bindings,
             scope: block.action_scope,
         },
         &block.body.statements,
@@ -284,6 +312,7 @@ fn check_runtime_if_branch_block_outcome(
             source_bindings: env.source_bindings,
             template_bindings: env.template_bindings,
             payload_bindings: env.input.payload_bindings,
+            outcome_bindings: env.outcome_bindings,
             scope: block.action_scope,
         },
         &block.body.statements,
@@ -383,6 +412,7 @@ fn checked_return_outcome(
                 source_bindings: env.source_bindings,
                 template_bindings: env.template_bindings,
                 payload_bindings: env.input.payload_bindings,
+                outcome_bindings: env.outcome_bindings,
                 scope: block.action_scope.for_step_return_match_arm(),
             },
             &step_return.action_statements,
@@ -585,95 +615,4 @@ fn checked_next_state_if_child_depth(process: &str, depth: usize) -> Result<usiz
         )));
     }
     Ok(depth + 1)
-}
-
-fn populate_template_state_values(
-    context: &StepCheckContext<'_>,
-    state_space: &mut StateSpace<'_>,
-    types: &mut CheckedTypeInterner<'_>,
-    env: StepTransitionEnv<'_, '_, '_, '_, '_>,
-    state_arg: &ValueExpr,
-) -> Result<()> {
-    if !env.input.payload_bindings.is_empty() {
-        let payloads = match env.input.payload_guard {
-            Some(payload) => vec![payload],
-            None => context
-                .message_cases
-                .payload_values(context.process_id, env.input.variant)?
-                .iter()
-                .collect::<Vec<_>>(),
-        };
-        for payload in payloads {
-            let payload_values = env
-                .input
-                .payload_bindings
-                .iter()
-                .map(|binding| {
-                    checked_payload_binding(
-                        context.module,
-                        context.semantic_index,
-                        payload,
-                        &PatternPayloadParam {
-                            name: binding.name.clone(),
-                            ty: binding.ty.clone(),
-                            path: binding.path.clone(),
-                        },
-                    )?
-                    .ok_or_else(|| {
-                        Error::new(format!(
-                            "process {} message payload {} does not match step pattern binding {}",
-                            context.process.name,
-                            payload.label(),
-                            binding.name
-                        ))
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let mut bindings = Vec::new();
-            for (binding, (label, value)) in env.input.payload_bindings.iter().zip(&payload_values)
-            {
-                bindings.push(ValueBinding {
-                    name: &binding.name,
-                    ty: &binding.ty,
-                    label: label.clone(),
-                    value: value.clone(),
-                });
-            }
-            for state_binding in env.input.state_payload_bindings {
-                bindings.push(ValueBinding {
-                    name: &state_binding.name,
-                    ty: &state_binding.ty,
-                    label: state_binding.label.clone(),
-                    value: Some(state_binding.value.clone()),
-                });
-            }
-            state_space.resolve_state_value_with_bindings(
-                context.semantic_index,
-                types,
-                state_arg,
-                &bindings,
-            )?;
-        }
-        return Ok(());
-    }
-    if !env.input.state_payload_bindings.is_empty() {
-        let bindings = env
-            .input
-            .state_payload_bindings
-            .iter()
-            .map(|binding| ValueBinding {
-                name: &binding.name,
-                ty: &binding.ty,
-                label: binding.label.clone(),
-                value: Some(binding.value.clone()),
-            })
-            .collect::<Vec<_>>();
-        state_space.resolve_state_value_with_bindings(
-            context.semantic_index,
-            types,
-            state_arg,
-            &bindings,
-        )?;
-    }
-    Ok(())
 }
