@@ -219,18 +219,23 @@ ordinary immutable `if` conditions such as `send_result == Ok(Unit)` or
 built-in variant shape, not the preserved message payload or the successful
 process-reference payload. Top-level pre-state effect bindings are declaration
 ordered: an outcome is usable only after its `let` statement, and outcome
-bindings must appear before ordinary effect statements that would otherwise be
-reordered around the commit-or-return boundary.
+bindings must appear before ordinary non-prefix effect statements that would
+otherwise be reordered around the commit-or-return boundary. A top-level
+process-reference `spawn` may remain in the same pre-state prefix so later
+outcome sends can target it.
 `SendError<M>`
 preserves the original message value for pre-acceptance failures, including the
 runtime metadata for a direct `ProcessRef<T>` message payload. That authority
 remains a send/message boundary value and is not admitted into ordinary process
 state. The admitted variants are
-`Full(M)`, `Stopped(M)`, and `Crashed(M)`; the current runtime distinguishes
-full, stopped, and targets already failed before
-acceptance in direct runtime execution. A source transition that creates the
-crash with `Panic(...)` still fails the run after recording no-replay evidence
-before a later source sender can observe the target as crashed. `SpawnError<A>`
+`Full(M)`, `Stopped(M)`, `Crashed(M)`, and `MailboxClosed(M)`. The current
+runtime distinguishes full, stopped, and targets already failed before
+acceptance in direct runtime execution. It does not yet expose a distinct
+source-created closed-mailbox lifecycle, but the typed shape is admitted at
+source, artifact, and runtime-loaded boundaries. A source transition that
+creates the crash with `Panic(...)` still fails the run after recording no-replay
+evidence before a later source sender can observe the target as crashed.
+`SpawnError<A>`
 admits `Denied(A)`, `Exhausted(A)`, and
 `BackendUnavailable(A)`; the current local runtime reports exhausted process
 capacity.

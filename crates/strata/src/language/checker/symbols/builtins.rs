@@ -14,6 +14,7 @@ pub(super) fn is_builtin_value_constructor_name(name: &str) -> bool {
             | "Full"
             | "Stopped"
             | "Crashed"
+            | "MailboxClosed"
             | "Denied"
             | "Exhausted"
             | "BackendUnavailable"
@@ -204,6 +205,7 @@ impl SemanticIndex {
                     ("Full", Some(args[0].clone())),
                     ("Stopped", Some(args[0].clone())),
                     ("Crashed", Some(args[0].clone())),
+                    ("MailboxClosed", Some(args[0].clone())),
                 ],
             )?));
         }
@@ -289,6 +291,7 @@ impl SemanticIndex {
                     ("Full", Some(&args[0])),
                     ("Stopped", Some(&args[0])),
                     ("Crashed", Some(&args[0])),
+                    ("MailboxClosed", Some(&args[0])),
                 ],
                 variant,
             ));

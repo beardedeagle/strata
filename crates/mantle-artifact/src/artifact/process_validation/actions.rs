@@ -573,7 +573,7 @@ fn validate_send_outcome_type(
         artifact,
         "send outcome error type",
         err_ty,
-        &["Full", "Stopped", "Crashed"],
+        &["Full", "Stopped", "Crashed", "MailboxClosed"],
         message_ty,
     )
 }

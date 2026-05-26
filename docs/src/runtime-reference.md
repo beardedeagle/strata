@@ -527,10 +527,13 @@ used by later outcome bindings.
 For local send outcomes, Mantle checks the target process, status, and mailbox
 capacity before accepting the message. Accepted sends are committed and return
 `Ok(Unit)`. Pre-acceptance local failures return `Err(Full(message))`,
-`Err(Stopped(message))`, or `Err(Crashed(message))` with the original message
-value preserved. If the message carries a direct `ProcessRef<T>` payload, the
-failure outcome preserves the runtime process-reference metadata with the message
-value; it does not turn that authority into storable source state.
+`Err(Stopped(message))`, `Err(Crashed(message))`, or
+`Err(MailboxClosed(message))` with the original message value preserved. The
+current local runtime can produce full, stopped, and already-failed crashed
+outcomes; it does not yet expose a distinct source-created closed-mailbox
+lifecycle. If the message carries a direct `ProcessRef<T>` payload, the failure
+outcome preserves the runtime process-reference metadata with the message value;
+it does not turn that authority into storable source state.
 
 For local spawn outcomes, accepted spawns commit the new process and return
 `Ok(process_ref)` with a typed `ProcessRef<TargetProcess>` payload. If process
@@ -563,9 +566,10 @@ process-reference identities from `Ok(process_ref)` spawn outcomes.
 `examples/effect_outcome_mailbox_full.str` and
 `examples/effect_outcome_stopped_target.str` exercise source-to-runtime
 pre-acceptance failure outcomes. Direct Mantle runtime tests exercise
-`Crashed(M)` for targets already failed before acceptance. A source-created
-`Panic(...)` currently records failure evidence and fails the run before a
-later source sender can observe that crashed target.
+`Crashed(M)` for targets already failed before acceptance, and admission tests
+cover the required `MailboxClosed(M)` send-error shape. A source-created
+`Panic(...)` currently records failure evidence and fails the run before a later
+source sender can observe that crashed target.
 
 Current pattern-matching closure boundaries:
 

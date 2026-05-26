@@ -145,6 +145,9 @@ Key source ideas:
 - `let send_result: Result<Unit,SendError<WorkerMsg>> = send worker Work;`
   returns `Ok(Unit)` after Mantle accepts the message, or a typed
   `SendError<WorkerMsg>` before acceptance.
+- `SendError<WorkerMsg>` admits `Full`, `Stopped`, `Crashed`, and
+  `MailboxClosed`; the current local runtime does not yet expose a distinct
+  source-created closed-mailbox lifecycle.
 - `if (send_result == Ok(Unit))` branches over the immutable outcome to choose a
   follow-up effect.
 - The next state stores `send_result`. `spawn_result` stays step-local because
@@ -157,7 +160,8 @@ Key source ideas:
   pre-acceptance failure outcomes. `examples/effect_outcome_crashed_target.str`
   checks and builds, then proves the current source-created panic boundary fails
   closed before a later sender can observe `Err(Crashed(...))`; the direct
-  Mantle runtime outcome test covers already-failed targets.
+  Mantle runtime outcome test covers already-failed targets, and admission tests
+  cover the required `MailboxClosed` shape.
 
 ## Runtime If Else
 

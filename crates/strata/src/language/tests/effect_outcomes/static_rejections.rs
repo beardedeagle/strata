@@ -303,11 +303,12 @@ fn bounded_effect_outcome_state_admission_matches_commit_or_return_model() {
         .map(|state| state.label())
         .collect::<BTreeSet<_>>();
 
-    assert_eq!(main.state_values().len(), 4);
+    assert_eq!(main.state_values().len(), 5);
     assert!(labels.contains("MainState{sent:Ok(Unit)}"));
     assert!(labels.contains("MainState{sent:Err(Full(Work))}"));
     assert!(labels.contains("MainState{sent:Err(Stopped(Work))}"));
     assert!(labels.contains("MainState{sent:Err(Crashed(Work))}"));
+    assert!(labels.contains("MainState{sent:Err(MailboxClosed(Work))}"));
 }
 
 #[test]

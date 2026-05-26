@@ -45,6 +45,23 @@ fn validate_rejects_send_outcome_type_that_does_not_preserve_message_type() {
 }
 
 #[test]
+fn validate_rejects_send_outcome_type_without_mailbox_closed_variant() {
+    let mut artifact = outcome_artifact();
+    artifact.types[TypeId::new(11).index()] =
+        send_error_type_with_labels(WORKER_MSG, &["Full", "Stopped", "Crashed"]);
+
+    let err = artifact
+        .validate()
+        .expect_err("SendError without MailboxClosed should fail");
+
+    assert!(
+        err.to_string()
+            .contains("send outcome error type type id 11 has 3 variants, expected 4"),
+        "{err}"
+    );
+}
+
+#[test]
 fn validate_rejects_effect_outcome_template_type_mismatch() {
     let mut artifact = outcome_artifact();
     artifact.processes[0].transitions[0].next_state =
@@ -405,12 +422,16 @@ fn result_type(ok: TypeId, err: TypeId) -> ArtifactType {
 }
 
 fn send_error_type(message_ty: TypeId) -> ArtifactType {
+    send_error_type_with_labels(message_ty, &["Full", "Stopped", "Crashed", "MailboxClosed"])
+}
+
+fn send_error_type_with_labels(message_ty: TypeId, labels: &[&str]) -> ArtifactType {
     ArtifactType::enum_value_with_payloads(
         "SendError",
-        ["Full", "Stopped", "Crashed"]
-            .into_iter()
+        labels
+            .iter()
             .map(|label| ArtifactEnumVariant {
-                label: label.to_string(),
+                label: (*label).to_string(),
                 payload_type: Some(message_ty),
             })
             .collect(),

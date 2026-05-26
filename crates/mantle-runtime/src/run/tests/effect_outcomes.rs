@@ -241,6 +241,29 @@ fn loaded_admission_rejects_spawn_outcome_targeting_self() {
 }
 
 #[test]
+fn loaded_admission_rejects_send_outcome_type_without_mailbox_closed_variant() {
+    let artifact = send_outcome_artifact();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.types[SEND_ERROR.index()] =
+        send_error_type_with_labels(WORKER_MSG, &["Full", "Stopped", "Crashed"]);
+    program.processes[0].state_values = loaded_state_values(
+        SEND_RESULT,
+        &[
+            "Ok(Unit)",
+            "Err(Full(Ping))",
+            "Err(Stopped(Ping))",
+            "Err(Crashed(Ping))",
+        ],
+    );
+    program.processes[0].transitions[0].next_state = LoadedNextState::Current;
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "send outcome error type type id 11 has 3 variants, expected 4",
+    );
+}
+
+#[test]
 fn loaded_admission_rejects_process_ref_spawn_outcome_as_state_template() {
     let artifact = spawn_outcome_artifact();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
@@ -474,6 +497,7 @@ fn send_outcome_artifact() -> MantleArtifact {
             "Err(Full(Ping))",
             "Err(Stopped(Ping))",
             "Err(Crashed(Ping))",
+            "Err(MailboxClosed(Ping))",
         ],
     );
     artifact.processes[0].init_state = StateId::new(0);
@@ -606,12 +630,16 @@ fn result_type(ok: TypeId, err: TypeId) -> ArtifactType {
 }
 
 fn send_error_type(message_ty: TypeId) -> ArtifactType {
+    send_error_type_with_labels(message_ty, &["Full", "Stopped", "Crashed", "MailboxClosed"])
+}
+
+fn send_error_type_with_labels(message_ty: TypeId, labels: &[&str]) -> ArtifactType {
     ArtifactType::enum_value_with_payloads(
         "SendError",
-        ["Full", "Stopped", "Crashed"]
-            .into_iter()
+        labels
+            .iter()
             .map(|label| ArtifactEnumVariant {
-                label: label.to_string(),
+                label: (*label).to_string(),
                 payload_type: Some(message_ty),
             })
             .collect(),

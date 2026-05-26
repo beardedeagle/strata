@@ -513,7 +513,9 @@ variants reject payload values.
 `send_outcome_statement` binds a typed local send result. The annotation must be
 `Result<Unit,SendError<TargetMessageType>>` so pre-acceptance failure variants
 can preserve the original message value. Top-level send and spawn outcome
-bindings must precede ordinary effect statements in the same step body.
+bindings must precede ordinary non-prefix effect statements in the same step
+body. A top-level process-reference `spawn` can remain in that pre-state prefix
+so later outcome sends can target the spawned process reference.
 
 The `for` collection source is an identifier binding, not an arbitrary
 expression. Checking requires it to be a runtime-bound `List<T,N>` value. The

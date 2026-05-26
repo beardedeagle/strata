@@ -82,7 +82,7 @@ fn effect_outcomes_check_build_run_and_bind_typed_commit_results() {
     assert!(trace.contains(r#""event":"message_accepted","pid":3,"process_id":1,"process":"Worker","message_id":0,"message":"Work","queue_depth":1,"sender_pid":1"#));
     assert!(trace.contains(r#""event":"state_updated","pid":1,"process_id":0,"process":"Main""#));
     assert!(
-        trace.contains(r#""from":"MainState{sent:Err(Full(Work))}""#)
+        trace.contains(r#""from":"MainState{sent:Err(MailboxClosed(Work))}""#)
             && trace.contains(r#""to":"MainState{sent:Ok(Unit)}""#)
     );
 }

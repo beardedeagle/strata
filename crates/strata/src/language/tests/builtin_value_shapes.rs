@@ -19,7 +19,7 @@ enum MainMsg {
 
 fn failed(job: Job) -> Outcomes ! [] ~ [] @det {
     return Outcomes {
-        sent: Err(Full(job)),
+        sent: Err(MailboxClosed(job)),
         spawned: Err(Denied(job)),
         maybe: Some(Done),
     };
@@ -105,6 +105,7 @@ fn rejects_enum_variants_reserved_for_builtin_value_shapes() {
         "Full",
         "Stopped",
         "Crashed",
+        "MailboxClosed",
         "Denied",
         "Exhausted",
         "BackendUnavailable",

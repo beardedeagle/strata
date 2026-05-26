@@ -28,7 +28,7 @@ proc Main mailbox bounded(1) {
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState {
-            sent: Err(Full(Work)),
+            sent: Err(MailboxClosed(Work)),
         };
     }
 

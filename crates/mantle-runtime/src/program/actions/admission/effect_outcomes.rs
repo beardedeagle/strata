@@ -12,7 +12,7 @@ pub(super) fn validate_loaded_send_outcome_type(
         program,
         "send outcome error type",
         err_ty,
-        &["Full", "Stopped", "Crashed"],
+        &["Full", "Stopped", "Crashed", "MailboxClosed"],
         message_ty,
     )
 }

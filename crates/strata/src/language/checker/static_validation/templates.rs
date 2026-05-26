@@ -616,12 +616,24 @@ fn is_recognized_checked_builtin_equality_enum(
             first.payload_type.is_some()
                 && second.payload_type.is_some()
                 && third.payload_type.is_some()
-                && ((first.name.as_str() == "Full"
-                    && second.name.as_str() == "Stopped"
-                    && third.name.as_str() == "Crashed")
-                    || (first.name.as_str() == "Denied"
-                        && second.name.as_str() == "Exhausted"
-                        && third.name.as_str() == "BackendUnavailable"))
+                && first.payload_type == second.payload_type
+                && second.payload_type == third.payload_type
+                && first.name.as_str() == "Denied"
+                && second.name.as_str() == "Exhausted"
+                && third.name.as_str() == "BackendUnavailable"
+        }
+        [first, second, third, fourth] => {
+            first.payload_type.is_some()
+                && second.payload_type.is_some()
+                && third.payload_type.is_some()
+                && fourth.payload_type.is_some()
+                && first.payload_type == second.payload_type
+                && second.payload_type == third.payload_type
+                && third.payload_type == fourth.payload_type
+                && first.name.as_str() == "Full"
+                && second.name.as_str() == "Stopped"
+                && third.name.as_str() == "Crashed"
+                && fourth.name.as_str() == "MailboxClosed"
         }
         _ => false,
     }

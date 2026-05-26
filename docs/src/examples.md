@@ -111,8 +111,9 @@ Read them in this order:
    payloads.
 54. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-55. `effect_outcomes.str` for immutable typed local send/spawn outcomes and
-   commit-or-return state evidence.
+55. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
+   commit-or-return state evidence, and the `MailboxClosed` send-error contract
+   shape.
 56. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
 57. `effect_outcome_stopped_target.str` for a source-visible `Stopped` send
    outcome.

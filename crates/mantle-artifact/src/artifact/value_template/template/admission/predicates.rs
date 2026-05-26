@@ -118,12 +118,24 @@ fn is_recognized_builtin_equality_enum(variants: &[ArtifactEnumVariant]) -> bool
             first.payload_type.is_some()
                 && second.payload_type.is_some()
                 && third.payload_type.is_some()
-                && ((first.label == "Full"
-                    && second.label == "Stopped"
-                    && third.label == "Crashed")
-                    || (first.label == "Denied"
-                        && second.label == "Exhausted"
-                        && third.label == "BackendUnavailable"))
+                && first.payload_type == second.payload_type
+                && second.payload_type == third.payload_type
+                && first.label == "Denied"
+                && second.label == "Exhausted"
+                && third.label == "BackendUnavailable"
+        }
+        [first, second, third, fourth] => {
+            first.payload_type.is_some()
+                && second.payload_type.is_some()
+                && third.payload_type.is_some()
+                && fourth.payload_type.is_some()
+                && first.payload_type == second.payload_type
+                && second.payload_type == third.payload_type
+                && third.payload_type == fourth.payload_type
+                && first.label == "Full"
+                && second.label == "Stopped"
+                && third.label == "Crashed"
+                && fourth.label == "MailboxClosed"
         }
         _ => false,
     }
