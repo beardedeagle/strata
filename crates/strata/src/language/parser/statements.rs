@@ -1,5 +1,5 @@
 use super::*;
-use crate::language::{PROCESS_REF_TYPE, RESULT_TYPE};
+use crate::language::RESULT_TYPE;
 
 impl Parser {
     const MAX_DIRECT_STATEMENT_IF_DEPTH: usize =
@@ -82,9 +82,6 @@ impl Parser {
                 self.expect_keyword("spawn")?;
                 let target = self.expect_identifier()?;
                 self.expect_symbol(';')?;
-                if is_direct_process_ref_type(&ty) {
-                    return Ok(Statement::LetProcessRef { name, ty, target });
-                }
                 if is_direct_result_type(&ty) {
                     return Ok(Statement::LetSpawnOutcome { name, ty, target });
                 }
@@ -274,17 +271,6 @@ impl Parser {
         }
         Ok(ReturnExpr::Value(value))
     }
-}
-
-fn is_direct_process_ref_type(ty: &TypeRef) -> bool {
-    matches!(
-        ty,
-        TypeRef::Applied {
-            constructor,
-            args,
-            const_args,
-        } if constructor.as_str() == PROCESS_REF_TYPE && args.len() == 1 && const_args.is_empty()
-    )
 }
 
 fn is_direct_result_type(ty: &TypeRef) -> bool {
