@@ -596,19 +596,30 @@ fn resolve_source_function_return_if_else_value(
         context.bindings,
         depth + 1,
     )?;
-    let selected = if concrete_source_return_bool_value(context.scope, &bool_type, &condition)? {
-        then_branch
-    } else {
-        else_branch
-    };
-    resolve_source_function_block_return_value(
+    let then_value = resolve_source_function_block_return_value(
         context.scope,
         context.function,
-        selected,
+        then_branch,
         context.substitutions,
         context.local_bindings,
         context.bindings,
         depth + 1,
+    )?;
+    let else_value = resolve_source_function_block_return_value(
+        context.scope,
+        context.function,
+        else_branch,
+        context.substitutions,
+        context.local_bindings,
+        context.bindings,
+        depth + 1,
+    )?;
+    Ok(
+        if concrete_source_return_bool_value(context.scope, &bool_type, &condition)? {
+            then_value
+        } else {
+            else_value
+        },
     )
 }
 
@@ -646,9 +657,12 @@ fn concrete_source_enum_value<'a>(
         ValueExpr::Identifier(name) => Ok((name, None)),
         ValueExpr::EnumVariant { name, payload } => Ok((name, Some(payload.as_ref()))),
         ValueExpr::Call { .. }
+        | ValueExpr::ScalarLiteral(_)
         | ValueExpr::Record(_)
         | ValueExpr::IfElse { .. }
         | ValueExpr::Equality { .. }
+        | ValueExpr::ScalarArithmetic { .. }
+        | ValueExpr::ScalarOrdering { .. }
         | ValueExpr::BooleanNot { .. }
         | ValueExpr::BooleanBinary { .. }
         | ValueExpr::Grouped { .. } => Err(Error::new(format!(
@@ -668,10 +682,13 @@ fn concrete_source_record_value<'a>(
     match value {
         ValueExpr::Record(record) => Ok(record),
         ValueExpr::Identifier(_)
+        | ValueExpr::ScalarLiteral(_)
         | ValueExpr::Call { .. }
         | ValueExpr::EnumVariant { .. }
         | ValueExpr::IfElse { .. }
         | ValueExpr::Equality { .. }
+        | ValueExpr::ScalarArithmetic { .. }
+        | ValueExpr::ScalarOrdering { .. }
         | ValueExpr::BooleanNot { .. }
         | ValueExpr::BooleanBinary { .. }
         | ValueExpr::Grouped { .. } => Err(Error::new(format!(

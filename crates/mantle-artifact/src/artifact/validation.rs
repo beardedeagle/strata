@@ -184,6 +184,7 @@ impl MantleArtifact {
     fn validate_value_shape(&self, type_index: usize, shape: &ArtifactValueShape) -> Result<()> {
         match shape {
             ArtifactValueShape::Atom => Ok(()),
+            ArtifactValueShape::Scalar { .. } => Ok(()),
             ArtifactValueShape::Record { fields } => {
                 validate_count(
                     &format!("type.{type_index}.field_count"),
@@ -291,6 +292,9 @@ impl MantleArtifact {
         value.validate_without_process_ref(field)?;
         match type_entry.value_shape()? {
             ArtifactValueShape::Atom => validate_atom_value(field, ty, type_entry, value),
+            ArtifactValueShape::Scalar { scalar } => {
+                validate_scalar_value(field, ty, type_entry, *scalar, value)
+            }
             ArtifactValueShape::Enum { variants } => {
                 self.validate_enum_value(field, ty, variants, value, depth)
             }
@@ -355,6 +359,7 @@ impl MantleArtifact {
                 )
             }
             ArtifactValue::Record { .. }
+            | ArtifactValue::Scalar(_)
             | ArtifactValue::List(_)
             | ArtifactValue::Map(_)
             | ArtifactValue::ProcessRef { .. } => Err(value_not_member_error(
@@ -556,6 +561,34 @@ fn validate_atom_value(
         type_entry.label,
         ty.as_u32()
     )))
+}
+
+fn validate_scalar_value(
+    field: &str,
+    ty: TypeId,
+    type_entry: &ArtifactType,
+    expected: ArtifactScalarType,
+    value: &ArtifactValue,
+) -> Result<()> {
+    let ArtifactValue::Scalar(actual) = value else {
+        return Err(Error::new(format!(
+            "{field} value {} does not match scalar type {} (type id {})",
+            value.label(),
+            type_entry.label,
+            ty.as_u32()
+        )));
+    };
+    if actual.ty() != expected {
+        return Err(Error::new(format!(
+            "{field} scalar value {} has type {}, expected {} for type {} (type id {})",
+            actual.label(),
+            actual.ty().source_name(),
+            expected.source_name(),
+            type_entry.label,
+            ty.as_u32()
+        )));
+    }
+    Ok(())
 }
 
 fn value_not_member_error(

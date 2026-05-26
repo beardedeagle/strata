@@ -55,61 +55,63 @@ Read them in this order:
    bindings in actor step parameter patterns.
 27. `runtime_if_else.str` for Mantle-backed runtime branching over a message
    payload.
-28. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
+28. `runtime_scalar_priority.str` for typed scalar payload computation,
+   runtime-bound value conditionals, and Mantle-backed scalar branch selection.
+29. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
    a projected field from an immutable received record payload.
-29. `runtime_payload_projection_next_state.str` for Mantle-backed runtime
+30. `runtime_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable received record
    payload.
-30. `runtime_state_payload_projection_if.str` for Mantle-backed runtime
+31. `runtime_state_payload_projection_if.str` for Mantle-backed runtime
    branching over a projected field from an immutable current-state record
    payload.
-31. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
+32. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable current-state
    record payload.
-32. `runtime_nested_if_actions.str` for one bounded layer of nested
+33. `runtime_nested_if_actions.str` for one bounded layer of nested
    statement-level runtime branch actions.
-33. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
+34. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
    final-position runtime branches.
-34. `runtime_final_if_nested_if_actions.str` for one direct nested
+35. `runtime_final_if_nested_if_actions.str` for one direct nested
    statement-level runtime branch action inside final-position runtime
    branches.
-35. `runtime_final_if_nested_terminal_if.str` for one direct nested terminal
+36. `runtime_final_if_nested_terminal_if.str` for one direct nested terminal
    final-position runtime branch inside final-position runtime branches.
-36. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+37. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
    branch behavior.
-37. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+38. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-38. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-39. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+39. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+40. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-40. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
+41. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
    branch inside a bounded loop-body branch.
-41. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-42. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+42. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+43. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-43. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+44. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
    values through a guarded loop and received direct process reference.
-44. `runtime_loop_element_projection.str` for projecting immutable record
+45. `runtime_loop_element_projection.str` for projecting immutable record
    fields from guarded runtime loop elements.
-45. `actor_payload_match.str` for the same payload binding through a whole-body
+46. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-46. `actor_payload_split_match.str` for payload-sensitive same-message
+47. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-47. `actor_payload_split_signature.str` for payload-sensitive same-message
+48. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-48. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+49. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-49. `actor_payload_state_match_split.str` for payload-sensitive same-message
+50. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-50. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+51. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-51. `nested_patterns.str` for nested immutable constructor, record, list, and
+52. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-52. `actor_reply.str` for transporting typed process references through message
+53. `actor_reply.str` for transporting typed process references through message
    payloads.
-53. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+54. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-54. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+55. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 Detailed notes are grouped by topic:

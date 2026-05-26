@@ -79,7 +79,12 @@ branches must return the same step result from both branches. Statement-level
 runtime branches cannot return; state changes still occur only through the
 enclosing immutable whole-value `Continue`, `Stop`, or `Panic` return.
 
-Ordering comparisons, arithmetic, unbounded loops, imports, and a standard
+Scalar ordering comparisons, scalar equality, and checked scalar arithmetic are
+supported over matching fixed-width integer types. Runtime-bound scalar
+predicates and runtime-bound pure value conditionals lower as typed Mantle
+templates. Mantle admission and runtime evaluation also validate checked scalar
+arithmetic templates and typed value-if templates in admitted value-template
+positions. Unbounded loops, imports, floats, string equality, and a standard
 library remain outside the buildable language surface.
 
 ## Runtime Iteration

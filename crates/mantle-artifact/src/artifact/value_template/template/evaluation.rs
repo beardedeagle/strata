@@ -1,4 +1,5 @@
 use super::*;
+use crate::ArtifactScalarValue;
 
 impl ArtifactValueTemplate {
     pub fn evaluate_state_value(
@@ -224,6 +225,36 @@ impl ArtifactValueTemplate {
                 validate_value_label("map template value", &value.label())?;
                 ArtifactStateValue::from_value(*ty, value)
             }
+            Self::IfElse {
+                ty,
+                condition,
+                then_value,
+                else_value,
+            } => {
+                let condition = condition.evaluate_state_value(
+                    received_payload,
+                    current_state_payload,
+                    type_entry,
+                )?;
+                let selected = if artifact_bool_value(&condition.value)? {
+                    then_value
+                } else {
+                    else_value
+                };
+                let value = selected.evaluate_state_value(
+                    received_payload,
+                    current_state_payload,
+                    type_entry,
+                )?;
+                if value.ty != *ty {
+                    return Err(Error::new(format!(
+                        "if_else value branch has type id {}, expected {}",
+                        value.ty.as_u32(),
+                        ty.as_u32()
+                    )));
+                }
+                Ok(value)
+            }
             Self::Equality {
                 ty,
                 operand_ty,
@@ -258,6 +289,89 @@ impl ArtifactValueTemplate {
                     ArtifactValueEqualityOperator::NotEqual => !is_equal,
                 };
                 ArtifactStateValue::from_value(*ty, ArtifactValue::Atom(bool_atom(selected)))
+            }
+            Self::ScalarArithmetic {
+                ty,
+                operator,
+                left,
+                right,
+            } => {
+                let left =
+                    left.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
+                if left.ty != *ty {
+                    return Err(Error::new(format!(
+                        "scalar arithmetic left operand has type id {}, expected {}",
+                        left.ty.as_u32(),
+                        ty.as_u32()
+                    )));
+                }
+                let right = right.evaluate_state_value(
+                    received_payload,
+                    current_state_payload,
+                    type_entry,
+                )?;
+                if right.ty != *ty {
+                    return Err(Error::new(format!(
+                        "scalar arithmetic right operand has type id {}, expected {}",
+                        right.ty.as_u32(),
+                        ty.as_u32()
+                    )));
+                }
+                let (ArtifactValue::Scalar(left), ArtifactValue::Scalar(right)) =
+                    (left.value, right.value)
+                else {
+                    return Err(Error::new(
+                        "scalar arithmetic operands must produce scalar values",
+                    ));
+                };
+                ArtifactStateValue::from_value(
+                    *ty,
+                    ArtifactValue::Scalar(ArtifactScalarValue::checked_arithmetic(
+                        *operator, left, right,
+                    )?),
+                )
+            }
+            Self::ScalarOrdering {
+                ty,
+                operand_ty,
+                operator,
+                left,
+                right,
+            } => {
+                let left =
+                    left.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
+                if left.ty != *operand_ty {
+                    return Err(Error::new(format!(
+                        "scalar ordering left operand has type id {}, expected {}",
+                        left.ty.as_u32(),
+                        operand_ty.as_u32()
+                    )));
+                }
+                let right = right.evaluate_state_value(
+                    received_payload,
+                    current_state_payload,
+                    type_entry,
+                )?;
+                if right.ty != *operand_ty {
+                    return Err(Error::new(format!(
+                        "scalar ordering right operand has type id {}, expected {}",
+                        right.ty.as_u32(),
+                        operand_ty.as_u32()
+                    )));
+                }
+                let (ArtifactValue::Scalar(left), ArtifactValue::Scalar(right)) =
+                    (left.value, right.value)
+                else {
+                    return Err(Error::new(
+                        "scalar ordering operands must produce scalar values",
+                    ));
+                };
+                ArtifactStateValue::from_value(
+                    *ty,
+                    ArtifactValue::Atom(bool_atom(ArtifactScalarValue::compare(
+                        *operator, left, right,
+                    )?)),
+                )
             }
             Self::BooleanNot { ty, operand } => {
                 let value = operand.evaluate_state_value(

@@ -2,6 +2,30 @@
 
 These examples cover runtime state transitions, branching, loops, payload dispatch, process references, and failure behavior.
 
+## Runtime Scalar Priority
+
+`examples/runtime_scalar_priority.str` sends a typed `U32` payload to a worker,
+computes an immutable scalar priority in process-local pure functions, and lets
+Mantle select the runtime branch and the runtime-bound priority value from
+typed scalar templates.
+
+```sh
+just run-example runtime_scalar_priority
+```
+
+Key source ideas:
+
+- `Assign(U32)` is a typed scalar message payload, not a string payload.
+- `compute_level` uses immutable `U32` source-local bindings and checked scalar
+  arithmetic.
+- `compute_level(weight) >= 10_u32` lowers into typed Mantle scalar templates;
+  `high_priority(weight)` is the pure Bool function used by the runtime branch.
+- `classify(weight)` returns `if (urgent) { High } else { Normal }`; when
+  `urgent` depends on the message payload, lowering emits a typed Mantle
+  value-if template for the selected state field.
+- The selected branch emits `scalar priority high`, proving Mantle executed the
+  scalar branch path.
+
 ## State Payload Enum
 
 `examples/state_payload_enum.str` shows payload-bearing process state enum

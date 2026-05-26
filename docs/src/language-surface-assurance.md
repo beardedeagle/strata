@@ -9,6 +9,10 @@ checked IR and lowering coverage, Strata/Mantle boundary preservation, Mantle
 artifact admission, runtime execution, diagnostics, examples, positive and
 negative tests, source-to-runtime gates, fuzz seeds, and bounded or property
 coverage where that evidence applies.
+Typed scalar values and value operators are part of the runtime-bearing
+surface: their source syntax, checked folding, typed lowering, Mantle artifact
+admission, typed value-if templates, runtime evaluation, and fail-closed
+diagnostics are all recorded in the inventory.
 
 Run it with:
 

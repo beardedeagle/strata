@@ -14,6 +14,8 @@ mod nested_if_actions;
 mod payload_projection;
 #[path = "runtime_branches/payload_projection_next_state.rs"]
 mod payload_projection_next_state;
+#[path = "runtime_branches/scalar_priority.rs"]
+mod scalar_priority;
 #[path = "runtime_branches/state_payload_projection_if.rs"]
 mod state_payload_projection_if;
 #[path = "runtime_branches/state_payload_projection_next_state.rs"]

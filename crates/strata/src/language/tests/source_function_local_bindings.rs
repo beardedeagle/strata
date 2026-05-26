@@ -333,7 +333,7 @@ fn rejects_source_local_binding_type_mismatch_and_unknowns() {
         (
             "let current_local: Phase = status(work);",
             "let current_local: Missing = status(work);",
-            "function route source-local binding current_local must use a declared record, enum, list, or map type without process-reference authority, found Missing",
+            "function route source-local binding current_local must use a declared record, enum, scalar, list, or map type without process-reference authority, found Missing",
         ),
         (
             "let current_local: Phase = status(work);",
@@ -366,7 +366,7 @@ fn rejects_process_reference_source_local_binding() {
 
     assert!(
         err.to_string().contains(
-            "function route source-local binding worker_local must use a declared record, enum, list, or map type without process-reference authority, found ProcessRef<Main>"
+            "function route source-local binding worker_local must use a declared record, enum, scalar, list, or map type without process-reference authority, found ProcessRef<Main>"
         ),
         "{err}"
     );

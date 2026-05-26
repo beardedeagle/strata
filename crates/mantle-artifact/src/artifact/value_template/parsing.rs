@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::model::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
+use super::scalar::ArtifactScalarValue;
 use crate::validation::validate_ident_field;
 use crate::{Error, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result};
 
@@ -9,6 +10,9 @@ pub(super) fn parse_value(label: &str, depth: usize) -> Result<ArtifactValue> {
         return Err(Error::new(format!(
             "artifact value exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
         )));
+    }
+    if let Some(value) = ArtifactScalarValue::parse_label("artifact scalar value", label)? {
+        return Ok(ArtifactValue::Scalar(value));
     }
     if let Some(body) = label.strip_prefix("List[") {
         let Some(body) = body.strip_suffix(']') else {

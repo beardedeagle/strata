@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
 
 use super::super::super::super::checked::{
-    CheckedPayloadValue, CheckedProcess, CheckedProcessRefId, CheckedValueBooleanOperator,
-    CheckedValueEqualityOperator, CheckedValueTemplate,
+    CheckedPayloadValue, CheckedProcess, CheckedProcessRefId, CheckedScalarArithmeticOperator,
+    CheckedScalarOrderingOperator, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
+    CheckedValueTemplate,
 };
 use super::super::super::super::diagnostic::{Error, Result};
 use super::{StaticLoopElementBinding, StaticProcessId, resolve_static_process_ref};
@@ -311,6 +312,42 @@ pub(super) fn evaluate_checked_runtime_template(
                 ArtifactValue::Map(values),
             ))
         }
+        CheckedValueTemplate::IfElse {
+            ty,
+            condition,
+            then_value,
+            else_value,
+        } => {
+            let condition = evaluate_checked_runtime_template(
+                condition,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            let selected = if checked_runtime_bool_value(&condition)? {
+                then_value
+            } else {
+                else_value
+            };
+            let value = evaluate_checked_runtime_template(
+                selected,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            if value.ty() != ty {
+                return Err(Error::new(format!(
+                    "if expression branch has type {}, expected {}",
+                    value.ty(),
+                    ty
+                )));
+            }
+            Ok(value)
+        }
         CheckedValueTemplate::Equality {
             ty,
             operand_ty,
@@ -358,6 +395,119 @@ pub(super) fn evaluate_checked_runtime_template(
             Ok(CheckedPayloadValue::new(
                 ty.clone(),
                 ArtifactValue::Atom(bool_atom(selected)),
+            ))
+        }
+        CheckedValueTemplate::ScalarArithmetic {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_checked_runtime_template(
+                left,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            if left.ty() != ty {
+                return Err(Error::new(format!(
+                    "scalar arithmetic left operand has type {}, expected {}",
+                    left.ty(),
+                    ty
+                )));
+            }
+            let right = evaluate_checked_runtime_template(
+                right,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            if right.ty() != ty {
+                return Err(Error::new(format!(
+                    "scalar arithmetic right operand has type {}, expected {}",
+                    right.ty(),
+                    ty
+                )));
+            }
+            let (ArtifactValue::Scalar(left), ArtifactValue::Scalar(right)) = (
+                checked_payload_value(&left)?,
+                checked_payload_value(&right)?,
+            ) else {
+                return Err(Error::new(
+                    "scalar arithmetic operands must produce scalar values",
+                ));
+            };
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Scalar(
+                    mantle_artifact::ArtifactScalarValue::checked_arithmetic(
+                        scalar_arithmetic_operator(*operator),
+                        left,
+                        right,
+                    )
+                    .map_err(|err| Error::new(err.to_string()))?,
+                ),
+            ))
+        }
+        CheckedValueTemplate::ScalarOrdering {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_checked_runtime_template(
+                left,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            if left.ty() != operand_ty {
+                return Err(Error::new(format!(
+                    "scalar ordering left operand has type {}, expected {}",
+                    left.ty(),
+                    operand_ty
+                )));
+            }
+            let right = evaluate_checked_runtime_template(
+                right,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                loop_elements,
+            )?;
+            if right.ty() != operand_ty {
+                return Err(Error::new(format!(
+                    "scalar ordering right operand has type {}, expected {}",
+                    right.ty(),
+                    operand_ty
+                )));
+            }
+            let (ArtifactValue::Scalar(left), ArtifactValue::Scalar(right)) = (
+                checked_payload_value(&left)?,
+                checked_payload_value(&right)?,
+            ) else {
+                return Err(Error::new(
+                    "scalar ordering operands must produce scalar values",
+                ));
+            };
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Atom(bool_atom(
+                    mantle_artifact::ArtifactScalarValue::compare(
+                        scalar_ordering_operator(*operator),
+                        left,
+                        right,
+                    )
+                    .map_err(|err| Error::new(err.to_string()))?,
+                )),
             ))
         }
         CheckedValueTemplate::BooleanNot { ty, operand } => {
@@ -415,6 +565,47 @@ pub(super) fn evaluate_checked_runtime_template(
                 ty.clone(),
                 ArtifactValue::Atom(bool_atom(selected)),
             ))
+        }
+    }
+}
+
+fn scalar_arithmetic_operator(
+    operator: CheckedScalarArithmeticOperator,
+) -> mantle_artifact::ArtifactScalarArithmeticOperator {
+    match operator {
+        CheckedScalarArithmeticOperator::Add => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Add
+        }
+        CheckedScalarArithmeticOperator::Subtract => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Subtract
+        }
+        CheckedScalarArithmeticOperator::Multiply => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Multiply
+        }
+        CheckedScalarArithmeticOperator::Divide => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Divide
+        }
+        CheckedScalarArithmeticOperator::Modulo => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Modulo
+        }
+    }
+}
+
+fn scalar_ordering_operator(
+    operator: CheckedScalarOrderingOperator,
+) -> mantle_artifact::ArtifactScalarOrderingOperator {
+    match operator {
+        CheckedScalarOrderingOperator::Less => {
+            mantle_artifact::ArtifactScalarOrderingOperator::Less
+        }
+        CheckedScalarOrderingOperator::LessEqual => {
+            mantle_artifact::ArtifactScalarOrderingOperator::LessEqual
+        }
+        CheckedScalarOrderingOperator::Greater => {
+            mantle_artifact::ArtifactScalarOrderingOperator::Greater
+        }
+        CheckedScalarOrderingOperator::GreaterEqual => {
+            mantle_artifact::ArtifactScalarOrderingOperator::GreaterEqual
         }
     }
 }

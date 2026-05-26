@@ -46,6 +46,21 @@ pub(in crate::language::checker::static_validation) fn validate_value_template_p
             validate_value_template_payload_labels(left)?;
             validate_value_template_payload_labels(right)
         }
+        CheckedValueTemplate::ScalarArithmetic { left, right, .. }
+        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
+            validate_value_template_payload_labels(left)?;
+            validate_value_template_payload_labels(right)
+        }
+        CheckedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            validate_value_template_payload_labels(condition)?;
+            validate_value_template_payload_labels(then_value)?;
+            validate_value_template_payload_labels(else_value)
+        }
         CheckedValueTemplate::BooleanNot { operand, .. } => {
             validate_value_template_payload_labels(operand)
         }
@@ -169,6 +184,9 @@ fn checked_static_template_value(template: &CheckedValueTemplate) -> Option<Arti
         | CheckedValueTemplate::ProcessRef { .. }
         | CheckedValueTemplate::LoopElement { .. }
         | CheckedValueTemplate::Equality { .. }
+        | CheckedValueTemplate::ScalarArithmetic { .. }
+        | CheckedValueTemplate::ScalarOrdering { .. }
+        | CheckedValueTemplate::IfElse { .. }
         | CheckedValueTemplate::BooleanNot { .. }
         | CheckedValueTemplate::BooleanBinary { .. } => None,
         CheckedValueTemplate::EnumVariant {

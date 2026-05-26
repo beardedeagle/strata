@@ -23,7 +23,19 @@ impl ArtifactValueTemplate {
             Self::Map { entries, .. } => entries.iter().any(|entry| {
                 entry.key.depends_on_received_payload() || entry.value.depends_on_received_payload()
             }),
-            Self::Equality { left, right, .. } => {
+            Self::IfElse {
+                condition,
+                then_value,
+                else_value,
+                ..
+            } => {
+                condition.depends_on_received_payload()
+                    || then_value.depends_on_received_payload()
+                    || else_value.depends_on_received_payload()
+            }
+            Self::Equality { left, right, .. }
+            | Self::ScalarArithmetic { left, right, .. }
+            | Self::ScalarOrdering { left, right, .. } => {
                 left.depends_on_received_payload() || right.depends_on_received_payload()
             }
             Self::BooleanNot { operand, .. } => operand.depends_on_received_payload(),
@@ -55,7 +67,19 @@ impl ArtifactValueTemplate {
             Self::Map { entries, .. } => entries.iter().any(|entry| {
                 entry.key.depends_on_loop_element() || entry.value.depends_on_loop_element()
             }),
-            Self::Equality { left, right, .. } => {
+            Self::IfElse {
+                condition,
+                then_value,
+                else_value,
+                ..
+            } => {
+                condition.depends_on_loop_element()
+                    || then_value.depends_on_loop_element()
+                    || else_value.depends_on_loop_element()
+            }
+            Self::Equality { left, right, .. }
+            | Self::ScalarArithmetic { left, right, .. }
+            | Self::ScalarOrdering { left, right, .. } => {
                 left.depends_on_loop_element() || right.depends_on_loop_element()
             }
             Self::BooleanNot { operand, .. } => operand.depends_on_loop_element(),

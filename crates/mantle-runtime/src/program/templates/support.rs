@@ -4,7 +4,7 @@ pub(super) use super::super::values::{
 };
 pub(super) use super::super::*;
 pub(super) use mantle_artifact::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactValueBooleanOperator,
+    ArtifactMapEntry, ArtifactRecordField, ArtifactScalarValue, ArtifactValueBooleanOperator,
     ArtifactValueEqualityOperator,
 };
 pub(super) use std::collections::BTreeSet;

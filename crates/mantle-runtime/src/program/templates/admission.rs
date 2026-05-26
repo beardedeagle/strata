@@ -227,6 +227,38 @@ impl LoadedTemplateAdmission<'_> {
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_map(field, *ty, entries, depth)
             }
+            LoadedValueTemplate::IfElse {
+                ty,
+                condition,
+                then_value,
+                else_value,
+            } => {
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                let bool_ty = condition.result_type();
+                self.validate_bool_contract_type(&format!("{field}.condition.type"), bool_ty)?;
+                let condition_nested = Self {
+                    expected_type: Some(bool_ty),
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                condition_nested.validate_with_depth(
+                    &format!("{field}.condition"),
+                    condition,
+                    depth + 1,
+                )?;
+                let branch_nested = Self {
+                    expected_type: Some(*ty),
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                branch_nested.validate_with_depth(
+                    &format!("{field}.then"),
+                    then_value,
+                    depth + 1,
+                )?;
+                branch_nested.validate_with_depth(&format!("{field}.else"), else_value, depth + 1)
+            }
             LoadedValueTemplate::Equality {
                 ty,
                 operand_ty,
@@ -236,6 +268,41 @@ impl LoadedTemplateAdmission<'_> {
             } => {
                 self.validate_bool_contract_type(&format!("{field}.type"), *ty)?;
                 self.validate_equality_operand_type(field, *operand_ty)?;
+                self.validate_equality_operand_template(field, "left", *operand_ty, left)?;
+                self.validate_equality_operand_template(field, "right", *operand_ty, right)?;
+                let nested = Self {
+                    expected_type: Some(*operand_ty),
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.left"), left, depth + 1)?;
+                nested.validate_with_depth(&format!("{field}.right"), right, depth + 1)
+            }
+            LoadedValueTemplate::ScalarArithmetic {
+                ty, left, right, ..
+            } => {
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_scalar_value_type(&format!("{field}.type"), *ty)?;
+                self.validate_equality_operand_template(field, "left", *ty, left)?;
+                self.validate_equality_operand_template(field, "right", *ty, right)?;
+                let nested = Self {
+                    expected_type: Some(*ty),
+                    allow_direct_process_ref: false,
+                    ..*self
+                };
+                nested.validate_with_depth(&format!("{field}.left"), left, depth + 1)?;
+                nested.validate_with_depth(&format!("{field}.right"), right, depth + 1)
+            }
+            LoadedValueTemplate::ScalarOrdering {
+                ty,
+                operand_ty,
+                left,
+                right,
+                ..
+            } => {
+                self.validate_bool_contract_type(&format!("{field}.type"), *ty)?;
+                self.validate_scalar_value_type(&format!("{field}.operand_type_id"), *operand_ty)?;
                 self.validate_equality_operand_template(field, "left", *operand_ty, left)?;
                 self.validate_equality_operand_template(field, "right", *operand_ty, right)?;
                 let nested = Self {

@@ -37,7 +37,7 @@ fn validate_source_function_local_bindings<'a>(
             .validate_source_value_type(scope.module, ty)
         {
             return Err(Error::new(format!(
-                "function {} source-local binding {} must use a declared record, enum, list, or map type without process-reference authority, found {}: {}",
+                "function {} source-local binding {} must use a declared record, enum, scalar, list, or map type without process-reference authority, found {}: {}",
                 function.name, name, ty, err
             )));
         }

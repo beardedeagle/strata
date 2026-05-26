@@ -77,7 +77,10 @@ impl ArtifactValueTemplate {
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
             | Self::Map { ty, .. }
+            | Self::IfElse { ty, .. }
             | Self::Equality { ty, .. }
+            | Self::ScalarArithmetic { ty, .. }
+            | Self::ScalarOrdering { ty, .. }
             | Self::BooleanNot { ty, .. }
             | Self::BooleanBinary { ty, .. } => *ty,
         }

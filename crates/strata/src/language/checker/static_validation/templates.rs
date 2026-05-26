@@ -10,9 +10,10 @@ use super::process_refs::{
 };
 use crate::language::checked::{
     CheckedMessageId, CheckedNextState, CheckedPayloadValue, CheckedProcess, CheckedProcessRefId,
-    CheckedStateId, CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator,
-    CheckedValueEqualityOperator, CheckedValueShape, CheckedValueTemplate,
-    CheckedValueTemplateField, CheckedValueTemplateMapEntry,
+    CheckedScalarArithmeticOperator, CheckedScalarOrderingOperator, CheckedStateId,
+    CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
+    CheckedValueShape, CheckedValueTemplate, CheckedValueTemplateField,
+    CheckedValueTemplateMapEntry,
 };
 use crate::language::diagnostic::{Error, Result};
 
@@ -196,7 +197,9 @@ fn validate_bool_condition_template_shape(
         | CheckedValueTemplate::ListPrefixElement { .. }
         | CheckedValueTemplate::MapValue { .. }
         | CheckedValueTemplate::LoopElement { .. }
+        | CheckedValueTemplate::IfElse { .. }
         | CheckedValueTemplate::Equality { .. }
+        | CheckedValueTemplate::ScalarOrdering { .. }
         | CheckedValueTemplate::BooleanNot { .. }
         | CheckedValueTemplate::BooleanBinary { .. } => Ok(()),
         CheckedValueTemplate::ListRest { .. }
@@ -205,7 +208,8 @@ fn validate_bool_condition_template_shape(
         | CheckedValueTemplate::EnumVariant { .. }
         | CheckedValueTemplate::Record { .. }
         | CheckedValueTemplate::List { .. }
-        | CheckedValueTemplate::Map { .. } => Err(Error::new(format!(
+        | CheckedValueTemplate::Map { .. }
+        | CheckedValueTemplate::ScalarArithmetic { .. } => Err(Error::new(format!(
             "process {} if condition must evaluate to unit Bool value False or True",
             process.debug_name()
         ))),
@@ -376,6 +380,43 @@ pub(super) fn validate_value_template_binding_types(
             }
             Ok(())
         }
+        CheckedValueTemplate::IfElse {
+            ty,
+            condition,
+            then_value,
+            else_value,
+        } => {
+            validate_checked_bool_contract_type(condition.result_type())?;
+            if then_value.result_type() != ty {
+                return Err(Error::new(format!(
+                    "if expression then branch has type {}, expected {}",
+                    then_value.result_type(),
+                    ty
+                )));
+            }
+            if else_value.result_type() != ty {
+                return Err(Error::new(format!(
+                    "if expression else branch has type {}, expected {}",
+                    else_value.result_type(),
+                    ty
+                )));
+            }
+            validate_value_template_binding_types(
+                condition,
+                received_payload_type,
+                current_state_payload_type,
+            )?;
+            validate_value_template_binding_types(
+                then_value,
+                received_payload_type,
+                current_state_payload_type,
+            )?;
+            validate_value_template_binding_types(
+                else_value,
+                received_payload_type,
+                current_state_payload_type,
+            )
+        }
         CheckedValueTemplate::Equality {
             ty,
             operand_ty,
@@ -384,6 +425,45 @@ pub(super) fn validate_value_template_binding_types(
             ..
         } => {
             validate_checked_equality_template(ty, operand_ty, left, right)?;
+            validate_value_template_binding_types(
+                left,
+                received_payload_type,
+                current_state_payload_type,
+            )?;
+            validate_value_template_binding_types(
+                right,
+                received_payload_type,
+                current_state_payload_type,
+            )
+        }
+        CheckedValueTemplate::ScalarArithmetic {
+            ty, left, right, ..
+        } => {
+            validate_checked_scalar_operand_type(ty)?;
+            validate_checked_scalar_operand_template(ty, "left", left)?;
+            validate_checked_scalar_operand_template(ty, "right", right)?;
+            validate_value_template_binding_types(
+                left,
+                received_payload_type,
+                current_state_payload_type,
+            )?;
+            validate_value_template_binding_types(
+                right,
+                received_payload_type,
+                current_state_payload_type,
+            )
+        }
+        CheckedValueTemplate::ScalarOrdering {
+            ty,
+            operand_ty,
+            left,
+            right,
+            ..
+        } => {
+            validate_checked_bool_contract_type(ty)?;
+            validate_checked_scalar_operand_type(operand_ty)?;
+            validate_checked_scalar_operand_template(operand_ty, "left", left)?;
+            validate_checked_scalar_operand_template(operand_ty, "right", right)?;
             validate_value_template_binding_types(
                 left,
                 received_payload_type,
@@ -489,6 +569,9 @@ fn is_checked_bool_contract_shape(shape: &CheckedValueShape) -> bool {
 fn validate_checked_equality_operand_type(operand_ty: &CheckedTypeRef) -> Result<()> {
     match operand_ty.kind() {
         CheckedTypeKind::Value {
+            shape: CheckedValueShape::Scalar(_),
+        } => Ok(()),
+        CheckedTypeKind::Value {
             shape: CheckedValueShape::Enum { variants },
         } if variants
             .iter()
@@ -497,9 +580,35 @@ fn validate_checked_equality_operand_type(operand_ty: &CheckedTypeRef) -> Result
             Ok(())
         }
         _ => Err(Error::new(format!(
-            "equality operands must be Bool or fieldless enum values, found {operand_ty}"
+            "equality operands must be Bool, scalar values, or fieldless enum values, found {operand_ty}"
         ))),
     }
+}
+
+fn validate_checked_scalar_operand_type(ty: &CheckedTypeRef) -> Result<()> {
+    match ty.kind() {
+        CheckedTypeKind::Value {
+            shape: CheckedValueShape::Scalar(_),
+        } => Ok(()),
+        _ => Err(Error::new(format!(
+            "scalar operand type must be scalar, found {ty}"
+        ))),
+    }
+}
+
+fn validate_checked_scalar_operand_template(
+    operand_ty: &CheckedTypeRef,
+    side: &str,
+    operand: &CheckedValueTemplate,
+) -> Result<()> {
+    if operand.result_type() != operand_ty {
+        return Err(Error::new(format!(
+            "scalar {side} operand has type {}, expected {}",
+            operand.result_type(),
+            operand_ty
+        )));
+    }
+    Ok(())
 }
 
 fn validate_checked_enum_payload_projection(

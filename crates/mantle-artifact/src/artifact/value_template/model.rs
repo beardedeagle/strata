@@ -1,5 +1,9 @@
 use crate::{EnumVariantId, LoopElementId, ProcessId, ProcessRefId, TypeId};
 
+use super::scalar::{
+    ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactScalarValue,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ArtifactRecordField {
     pub name: String,
@@ -21,6 +25,7 @@ pub enum MapProjectionMode {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ArtifactValue {
     Atom(String),
+    Scalar(ArtifactScalarValue),
     EnumVariant {
         variant: String,
         payload: Box<ArtifactValue>,
@@ -114,10 +119,29 @@ pub enum ArtifactValueTemplate {
         ty: TypeId,
         entries: Vec<ArtifactValueTemplateMapEntry>,
     },
+    IfElse {
+        ty: TypeId,
+        condition: Box<ArtifactValueTemplate>,
+        then_value: Box<ArtifactValueTemplate>,
+        else_value: Box<ArtifactValueTemplate>,
+    },
     Equality {
         ty: TypeId,
         operand_ty: TypeId,
         operator: ArtifactValueEqualityOperator,
+        left: Box<ArtifactValueTemplate>,
+        right: Box<ArtifactValueTemplate>,
+    },
+    ScalarArithmetic {
+        ty: TypeId,
+        operator: ArtifactScalarArithmeticOperator,
+        left: Box<ArtifactValueTemplate>,
+        right: Box<ArtifactValueTemplate>,
+    },
+    ScalarOrdering {
+        ty: TypeId,
+        operand_ty: TypeId,
+        operator: ArtifactScalarOrderingOperator,
         left: Box<ArtifactValueTemplate>,
         right: Box<ArtifactValueTemplate>,
     },

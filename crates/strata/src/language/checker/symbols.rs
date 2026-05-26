@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use mantle_artifact::ArtifactScalarType;
+
 use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, TypeRef};
 use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
@@ -48,6 +50,7 @@ impl SymbolTable {
 
 #[derive(Debug, Clone, Copy)]
 enum TypeDecl {
+    Scalar(ArtifactScalarType),
     Record(usize),
     Enum(usize),
 }
@@ -55,6 +58,7 @@ enum TypeDecl {
 impl TypeDecl {
     fn kind(self) -> &'static str {
         match self {
+            Self::Scalar(_) => "scalar",
             Self::Record(_) => "record",
             Self::Enum(_) => "enum",
         }
@@ -108,6 +112,12 @@ impl SemanticIndex {
         let process_ref_type = symbols.intern(&Identifier::new(PROCESS_REF_TYPE)?)?;
         let list_type = symbols.intern(&Identifier::new(LIST_TYPE)?)?;
         let map_type = symbols.intern(&Identifier::new(MAP_TYPE)?)?;
+        let mut scalar_type_symbols = Vec::with_capacity(ArtifactScalarType::ALL.len());
+        for scalar in ArtifactScalarType::ALL {
+            let symbol = symbols.intern(&Identifier::new(scalar.source_name())?)?;
+            types.insert(symbol, TypeDecl::Scalar(scalar));
+            scalar_type_symbols.push(symbol);
+        }
 
         for (index, record) in module.records.iter().enumerate() {
             let symbol = symbols.intern(&record.name)?;
@@ -115,6 +125,9 @@ impl SemanticIndex {
             reject_reserved_type_name(record.name.as_str(), symbol, process_ref_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, map_type)?;
+            for scalar_symbol in &scalar_type_symbols {
+                reject_reserved_type_name(record.name.as_str(), symbol, *scalar_symbol)?;
+            }
             reject_internal_type_label_prefix(record.name.as_str())?;
             if records.insert(symbol, index).is_some() {
                 return Err(Error::new(format!(
@@ -140,6 +153,9 @@ impl SemanticIndex {
             reject_reserved_type_name(item.name.as_str(), symbol, process_ref_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, map_type)?;
+            for scalar_symbol in &scalar_type_symbols {
+                reject_reserved_type_name(item.name.as_str(), symbol, *scalar_symbol)?;
+            }
             reject_internal_type_label_prefix(item.name.as_str())?;
             if enums.insert(symbol, index).is_some() {
                 return Err(Error::new(format!(
@@ -381,14 +397,29 @@ impl SemanticIndex {
     pub(super) fn enum_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Enum> {
         match self.type_decl(ty)? {
             TypeDecl::Enum(index) => Ok(&module.enums[index]),
-            TypeDecl::Record(_) => Err(Error::new(format!("type {ty} is not declared as an enum"))),
+            TypeDecl::Record(_) | TypeDecl::Scalar(_) => {
+                Err(Error::new(format!("type {ty} is not declared as an enum")))
+            }
         }
     }
 
     pub(super) fn record_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Record> {
         match self.type_decl(ty)? {
             TypeDecl::Record(index) => Ok(&module.records[index]),
-            TypeDecl::Enum(_) => Err(Error::new(format!("type {ty} is not declared as a record"))),
+            TypeDecl::Enum(_) | TypeDecl::Scalar(_) => {
+                Err(Error::new(format!("type {ty} is not declared as a record")))
+            }
+        }
+    }
+
+    pub(super) fn scalar_type(&self, ty: &TypeRef) -> Result<Option<ArtifactScalarType>> {
+        if ty.as_named().is_none() {
+            return Ok(None);
+        }
+        match self.type_decl(ty) {
+            Ok(TypeDecl::Scalar(scalar)) => Ok(Some(scalar)),
+            Ok(TypeDecl::Record(_) | TypeDecl::Enum(_)) => Ok(None),
+            Err(err) => Err(err),
         }
     }
 
@@ -437,7 +468,7 @@ impl SemanticIndex {
     ) -> Result<usize> {
         let enum_index = match self.type_decl(ty)? {
             TypeDecl::Enum(index) => index,
-            TypeDecl::Record(_) => {
+            TypeDecl::Record(_) | TypeDecl::Scalar(_) => {
                 return Err(Error::new(format!("type {ty} is not declared as an enum")));
             }
         };
@@ -595,7 +626,7 @@ impl SemanticIndex {
             .ok_or_else(|| context.not_accepted_error(process, message))?;
         let enum_index = match self.type_decl(&process.msg_type)? {
             TypeDecl::Enum(index) => index,
-            TypeDecl::Record(_) => {
+            TypeDecl::Record(_) | TypeDecl::Scalar(_) => {
                 return Err(Error::new(format!(
                     "type {} is not declared as an enum",
                     process.msg_type

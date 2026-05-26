@@ -23,9 +23,14 @@ pub(super) fn is_static_map_key_template(template: &ArtifactValueTemplate) -> bo
         | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. }
         | ArtifactValueTemplate::LoopElement { .. }
+        | ArtifactValueTemplate::IfElse { .. }
         | ArtifactValueTemplate::Equality { .. }
         | ArtifactValueTemplate::BooleanNot { .. }
         | ArtifactValueTemplate::BooleanBinary { .. } => false,
+        ArtifactValueTemplate::ScalarArithmetic { left, right, .. }
+        | ArtifactValueTemplate::ScalarOrdering { left, right, .. } => {
+            is_static_map_key_template(left) && is_static_map_key_template(right)
+        }
         ArtifactValueTemplate::EnumVariant { payload, .. } => is_static_map_key_template(payload),
         ArtifactValueTemplate::Record { fields, .. } => fields
             .iter()

@@ -159,7 +159,7 @@ fn runtime_rejects_loaded_equality_malformed_operand_type_before_artifact_loaded
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process Main message id 0 next_state_condition.operand_type_id must be Bool or a fieldless enum value type",
+        "process Main message id 0 next_state_condition.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type",
     );
 }
 

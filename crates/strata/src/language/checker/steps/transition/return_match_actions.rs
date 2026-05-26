@@ -624,6 +624,7 @@ fn substitute_static_arm_bindings(
             .iter()
             .find_map(|binding| (binding.name == &name).then(|| binding.value.clone()))
             .unwrap_or(ValueExpr::Identifier(name)),
+        ValueExpr::ScalarLiteral(_) => value,
         ValueExpr::Call { name, arg } => ValueExpr::Call {
             name,
             arg: Box::new(substitute_static_arm_bindings(*arg, bindings)),
@@ -679,6 +680,24 @@ fn substitute_static_arm_bindings(
             left,
             right,
         } => ValueExpr::Equality {
+            operator,
+            left: Box::new(substitute_static_arm_bindings(*left, bindings)),
+            right: Box::new(substitute_static_arm_bindings(*right, bindings)),
+        },
+        ValueExpr::ScalarArithmetic {
+            operator,
+            left,
+            right,
+        } => ValueExpr::ScalarArithmetic {
+            operator,
+            left: Box::new(substitute_static_arm_bindings(*left, bindings)),
+            right: Box::new(substitute_static_arm_bindings(*right, bindings)),
+        },
+        ValueExpr::ScalarOrdering {
+            operator,
+            left,
+            right,
+        } => ValueExpr::ScalarOrdering {
             operator,
             left: Box::new(substitute_static_arm_bindings(*left, bindings)),
             right: Box::new(substitute_static_arm_bindings(*right, bindings)),

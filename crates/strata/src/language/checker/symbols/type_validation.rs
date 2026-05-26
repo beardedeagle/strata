@@ -258,6 +258,7 @@ impl SourceValueTypeValidator<'_> {
             return Ok(());
         }
         let result = match decl {
+            TypeDecl::Scalar(_) => Ok(()),
             TypeDecl::Record(index) => self.validate_record(ty, index),
             TypeDecl::Enum(index) => self.validate_enum(ty, index),
         };

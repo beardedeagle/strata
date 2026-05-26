@@ -14,11 +14,23 @@ use super::super::super::diagnostic::{Error, Result};
 use super::super::STEP_STATE_PARAMETER_NAME;
 use super::super::symbols::{CollectionType, SemanticIndex};
 
+mod scalars;
+
+use scalars::{canonical_scalar_arithmetic_value, canonical_scalar_ordering_value};
+
 pub(in crate::language::checker) struct ValueBinding<'a> {
     pub(in crate::language::checker) name: &'a Identifier,
     pub(in crate::language::checker) ty: &'a TypeRef,
     pub(in crate::language::checker) label: String,
     pub(in crate::language::checker) value: Option<ArtifactValue>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CanonicalValueScope<'a, 'binding> {
+    pub(super) module: &'a Module,
+    pub(super) semantic_index: &'a SemanticIndex,
+    pub(super) bindings: &'a [ValueBinding<'binding>],
+    pub(super) context: CanonicalValueContext,
 }
 
 #[derive(Clone, Copy)]
@@ -60,6 +72,7 @@ pub(in crate::language::checker) fn source_value_uses_binding(
 ) -> bool {
     match value {
         ValueExpr::Identifier(name) => name == binding,
+        ValueExpr::ScalarLiteral(_) => false,
         ValueExpr::Call { arg, .. } => source_value_uses_binding(arg, binding),
         ValueExpr::EnumVariant { payload, .. } => source_value_uses_binding(payload, binding),
         ValueExpr::Record(record) => record
@@ -84,6 +97,10 @@ pub(in crate::language::checker) fn source_value_uses_binding(
                 || source_value_uses_binding(else_branch, binding)
         }
         ValueExpr::Equality { left, right, .. } => {
+            source_value_uses_binding(left, binding) || source_value_uses_binding(right, binding)
+        }
+        ValueExpr::ScalarArithmetic { left, right, .. }
+        | ValueExpr::ScalarOrdering { left, right, .. } => {
             source_value_uses_binding(left, binding) || source_value_uses_binding(right, binding)
         }
         ValueExpr::BooleanNot { operand } => source_value_uses_binding(operand, binding),
@@ -133,14 +150,59 @@ pub(super) fn canonical_value(
             "function call {name} must be resolved before checking value of type {expected_type}"
         )));
     }
-    if matches!(value, ValueExpr::IfElse { .. }) {
-        return Err(Error::new(format!(
-            "if expression must be resolved before checking value of type {expected_type}"
-        )));
+    let scope = CanonicalValueScope {
+        module,
+        semantic_index,
+        bindings,
+        context,
+    };
+    if let ValueExpr::IfElse {
+        condition,
+        then_branch,
+        else_branch,
+    } = value
+    {
+        return canonical_if_else_value(
+            scope,
+            expected_type,
+            condition,
+            then_branch,
+            else_branch,
+            depth,
+        );
     }
     if matches!(value, ValueExpr::Equality { .. }) {
         return Err(Error::new(format!(
             "equality expression must be resolved before checking value of type {expected_type}"
+        )));
+    }
+    if let ValueExpr::ScalarArithmetic {
+        operator,
+        left,
+        right,
+    } = value
+    {
+        return canonical_scalar_arithmetic_value(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            depth,
+        );
+    }
+    if let ValueExpr::ScalarOrdering {
+        operator,
+        left,
+        right,
+    } = value
+    {
+        let bool_type = semantic_index.bool_type(module)?;
+        if semantic_index.same_type(expected_type, &bool_type) {
+            return canonical_scalar_ordering_value(scope, *operator, left, right, depth);
+        }
+        return Err(Error::new(format!(
+            "scalar expression must be resolved before checking value of type {expected_type}"
         )));
     }
     if matches!(
@@ -153,7 +215,7 @@ pub(super) fn canonical_value(
     }
     if matches!(value, ValueExpr::Grouped { .. }) {
         return Err(Error::new(format!(
-            "parenthesized predicate expression must be resolved before checking value of type {expected_type}"
+            "parenthesized value expression must be resolved before checking value of type {expected_type}"
         )));
     }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
@@ -178,6 +240,9 @@ pub(super) fn canonical_value(
             depth,
         );
     }
+    if let Some(scalar) = semantic_index.scalar_type(expected_type)? {
+        return canonical_scalar_value(scalar, expected_type, value);
+    }
 
     canonical_enum_value(
         module,
@@ -188,6 +253,65 @@ pub(super) fn canonical_value(
         context,
         depth,
     )
+}
+
+fn canonical_if_else_value(
+    scope: CanonicalValueScope<'_, '_>,
+    expected_type: &TypeRef,
+    condition: &ValueExpr,
+    then_branch: &ValueExpr,
+    else_branch: &ValueExpr,
+    depth: usize,
+) -> Result<ArtifactValue> {
+    let bool_type = scope.semantic_index.bool_type(scope.module)?;
+    let condition = canonical_value(
+        scope.module,
+        scope.semantic_index,
+        &bool_type,
+        condition,
+        scope.bindings,
+        scope.context,
+        depth + 1,
+    )?;
+    let branch = match condition {
+        ArtifactValue::Atom(label) if label == "True" => then_branch,
+        ArtifactValue::Atom(label) if label == "False" => else_branch,
+        _ => {
+            return Err(Error::new(
+                "if condition must evaluate to unit Bool value False or True",
+            ));
+        }
+    };
+    canonical_value(
+        scope.module,
+        scope.semantic_index,
+        expected_type,
+        branch,
+        scope.bindings,
+        scope.context,
+        depth + 1,
+    )
+}
+
+fn canonical_scalar_value(
+    scalar: mantle_artifact::ArtifactScalarType,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+) -> Result<ArtifactValue> {
+    let ValueExpr::ScalarLiteral(value) = value else {
+        return Err(Error::new(format!(
+            "expected scalar literal for type {expected_type}"
+        )));
+    };
+    if value.ty() != scalar {
+        return Err(Error::new(format!(
+            "scalar literal {} has type {}, expected {}",
+            value.label(),
+            value.ty().source_name(),
+            expected_type
+        )));
+    }
+    Ok(ArtifactValue::Scalar(*value))
 }
 
 fn canonical_enum_value(
@@ -253,11 +377,14 @@ fn canonical_enum_value(
             Ok(value)
         }
         ValueExpr::Call { .. }
+        | ValueExpr::ScalarLiteral(_)
         | ValueExpr::Record(_)
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
         | ValueExpr::IfElse { .. }
         | ValueExpr::Equality { .. }
+        | ValueExpr::ScalarArithmetic { .. }
+        | ValueExpr::ScalarOrdering { .. }
         | ValueExpr::BooleanNot { .. }
         | ValueExpr::BooleanBinary { .. }
         | ValueExpr::Grouped { .. } => Err(Error::new(format!(

@@ -301,6 +301,16 @@ fn assert_template_has_no_source_bindings(template: &ArtifactValueTemplate) {
                 assert_value_has_no_source_bindings(key);
             }
         }
+        ArtifactValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            assert_template_has_no_source_bindings(condition);
+            assert_template_has_no_source_bindings(then_value);
+            assert_template_has_no_source_bindings(else_value);
+        }
         ArtifactValueTemplate::Record { fields, .. } => {
             for field in fields {
                 assert_no_source_binding_string(&field.name);
@@ -319,6 +329,8 @@ fn assert_template_has_no_source_bindings(template: &ArtifactValueTemplate) {
             }
         }
         ArtifactValueTemplate::Equality { left, right, .. }
+        | ArtifactValueTemplate::ScalarArithmetic { left, right, .. }
+        | ArtifactValueTemplate::ScalarOrdering { left, right, .. }
         | ArtifactValueTemplate::BooleanBinary { left, right, .. } => {
             assert_template_has_no_source_bindings(left);
             assert_template_has_no_source_bindings(right);
@@ -358,6 +370,7 @@ fn assert_value_has_no_source_bindings(value: &ArtifactValue) {
                 assert_value_has_no_source_bindings(&entry.value);
             }
         }
+        ArtifactValue::Scalar(_) => {}
         ArtifactValue::ProcessRef { .. } => {}
     }
 }
@@ -370,4 +383,3 @@ fn assert_no_source_binding_string(value: &str) {
         );
     }
 }
-

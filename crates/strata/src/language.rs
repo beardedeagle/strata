@@ -15,7 +15,7 @@ pub use ast::{
     MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm,
     Module, OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordValue,
     RecordValueField, ReturnExpr, Statement, TypeRef, ValueBooleanOperator, ValueEqualityOperator,
-    ValueExpr,
+    ValueExpr, ValueScalarArithmeticOperator, ValueScalarOrderingOperator,
 };
 pub use checked::CheckedProgram;
 pub use checker::check_module;

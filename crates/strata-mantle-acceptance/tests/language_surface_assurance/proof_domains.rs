@@ -200,6 +200,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::RUNTIME_FUZZ,
     },
     ProofDomain {
+        id: "typed-scalar-value-operators",
+        title: "Typed scalar values and value operators",
+        feature_ids: &["typed-scalar-value-operators"],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "checked-ir-action-templates",
         title: "Checked IR action templates and typed lowering",
         feature_ids: &[

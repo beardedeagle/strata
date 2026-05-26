@@ -47,6 +47,7 @@ impl ArtifactValue {
         }
         match self {
             Self::Atom(value) => validate_ident_field(field, value),
+            Self::Scalar(value) => value.ty().validate_value(field, value.value()),
             Self::EnumVariant { variant, payload } => {
                 validate_ident_field(&format!("{field}.variant"), variant)?;
                 payload.validate_shape(&format!("{field}.payload"), depth + 1)
@@ -128,6 +129,7 @@ impl ArtifactValue {
     pub fn label(&self) -> String {
         match self {
             Self::Atom(value) => value.clone(),
+            Self::Scalar(value) => value.label(),
             Self::EnumVariant { variant, payload } => {
                 format!("{variant}({})", payload.label())
             }
@@ -165,6 +167,7 @@ impl ArtifactValue {
     pub fn contains_process_ref(&self) -> bool {
         match self {
             Self::Atom(_) => false,
+            Self::Scalar(_) => false,
             Self::EnumVariant { payload, .. } => payload.contains_process_ref(),
             Self::Record { fields, .. } => fields
                 .iter()

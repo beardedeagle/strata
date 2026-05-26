@@ -1,5 +1,7 @@
 use std::fmt;
 
+use mantle_artifact::ArtifactScalarType;
+
 use crate::language::ast::Identifier;
 use crate::language::diagnostic::{Error, Result};
 
@@ -14,6 +16,7 @@ pub(in crate::language) enum CheckedTypeKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) enum CheckedValueShape {
     Atom,
+    Scalar(ArtifactScalarType),
     Record {
         fields: Vec<CheckedTypeField>,
     },

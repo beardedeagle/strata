@@ -18,9 +18,11 @@ Mantle artifact internals.
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
+| Scalar values | Fixed-width integer source values `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` with explicit literal suffixes. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
+| Scalar operators | `+`, `-`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=`, and scalar equality over matching integer types only. |
 | Boolean predicates | `!`, `&&`, and `||` over checked Bool-producing predicates. |
-| Pure conditionals | Source-time expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`. |
+| Pure conditionals | Expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`; concrete forms fold before lowering, and runtime-bound value forms lower as typed Mantle value templates. |
 | Source-local bindings | `let name: Type = value_expr;` inside pure source function block bodies before the terminal return. |
 | Runtime branching | Final-position `if (condition) { ... return ...; } else { ... return ...; }` and statement-level effect branches in `step` bodies, lowered to Mantle control flow. |
 | Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in functions, message dispatch, state matches, function return-match expressions, step return-match expressions with optional uniform and selected-arm action prefixes, and `_` wildcards. |
@@ -96,8 +98,9 @@ _
 `mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`, `security`,
 `send`, `spawn`, `type`, and `var` are reserved everywhere identifiers are
 accepted.
-`ProcResult`, `ProcessRef`, `List`, and `Map` are reserved type names because
-they name built-in transition, process-reference, and collection types.
+`ProcResult`, `ProcessRef`, `List`, `Map`, `U8`, `U16`, `U32`, `U64`, `I8`,
+`I16`, `I32`, and `I64` are reserved type names because they name built-in
+transition, process-reference, collection, and scalar value types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
 artifact metadata. Checked process-reference artifact labels under that prefix
 are keyed by resolved process IDs, not source process names.
@@ -149,6 +152,39 @@ The checker resolves this form against the expected enum type. If the identifier
 names a source function instead, it is expanded as a function call; constructor
 and function names cannot collide silently.
 
+## Scalar Integer Values
+
+Scalar integer source values are fixed-width and explicitly typed. The accepted
+types are `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64`.
+Numeric value literals require suffixes:
+
+```strata
+0_u8
+10_u32
+-1_i16
+```
+
+Unsuffixed numeric value expressions are rejected. Capacity and mailbox-bound
+numbers remain separate syntax and do not use scalar literal suffixes.
+
+Scalar arithmetic supports `+`, `-`, `*`, `/`, and `%` over matching integer
+types only. Ordering supports `<`, `<=`, `>`, and `>=` over matching integer
+types and produces `Bool`. Equality supports scalar operands with the same
+integer type. There is no implicit widening, narrowing, signed/unsigned mixing,
+or string coercion.
+
+Fully concrete scalar expressions fold during checking. Overflow, underflow,
+statically known division by zero, statically known modulo by zero,
+out-of-range literals, and malformed suffixes fail before lowering.
+Runtime-bound scalar expressions lower as typed Mantle value templates with
+scalar type metadata and fail-closed runtime evaluation. They do not lower as
+source strings, binding names, or function names.
+
+Scalars are ordinary source values when they do not carry authority: they can be
+used in source function parameters and returns, source-local bindings, process
+local pure functions, record fields, message payloads, list/map values, and
+runtime `if` predicates through `Bool`.
+
 ## Collections
 
 Lists and maps are immutable source values with explicit numeric capacities.
@@ -196,7 +232,8 @@ Overlapping exact and subset map patterns are rejected instead of relying on
 source order or specificity. Subset overlap is capacity-aware: two subset
 patterns overlap when one bounded map can contain both required key sets.
 Runtime-bound map value keys must be static source values; dynamic-key
-dictionaries remain deferred. Rest binding does not expose collection
+dictionaries remain deferred. Scalar keys are allowed when they are static
+source values. Rest binding does not expose collection
 iteration, order-dependent dispatch, mutation, dynamic keys, or mutable views.
 
 Collection pattern element and map-value positions may contain nested structural
@@ -558,17 +595,19 @@ source-local bindings before the terminal pure return. Branches cannot perform
 `emit`, `send`, `spawn`, runtime `for`, branch-local process-reference binding,
 mutation, or any other runtime statement.
 
-Conditionals are selected during source checking and source function expansion. The
-selected branch is what lowering sees; Mantle does not receive a conditional
-runtime dispatch entry, a source function name, or a source-string branch key.
-If the condition is not a concrete `True` or `False` value after source function
-expansion, checking fails closed.
+Concrete conditionals are selected during source checking and source function
+expansion, so lowering sees only the selected value. Runtime-bound value
+conditionals over `Bool` lower as typed Mantle value templates containing the
+condition template and both typed branch value templates. Mantle does not
+receive a conditional runtime dispatch entry, a source function name, or a
+source-string branch key.
 
 ## Typed Equality Predicates
 
 The equality surface is `==` and `!=` over two operand families:
 
 - `Bool`, with the exact `enum Bool { False, True }` contract;
+- fixed-width scalar integer values with matching scalar types;
 - fieldless values of the same payload-free enum type.
 
 Both operands must have the same checked type. Concrete source operands fold
@@ -578,8 +617,8 @@ evaluates them from typed values. Equality does not dispatch through
 source names, function names, debug labels, or parser strings.
 
 String equality, structural record/list/map equality, payload enum equality,
-process-reference equality, ordering, arithmetic, assignment, and mutation are
-not part of the buildable equality surface.
+process-reference equality, assignment, and mutation are not part of the
+buildable equality surface.
 
 ## Boolean Predicate Composition
 
@@ -595,15 +634,15 @@ if ((flag == True) && !(status == Done)) {
 ```
 
 Every composed operand must have the exact `Bool` contract. The supported
-operands are direct `Bool` values or templates, typed equality predicates, and
-nested Boolean predicate composition. Fully concrete source predicates fold
-during checking. Runtime-dependent predicates lower into typed Mantle value
-templates; Mantle validates the typed tree, validates all operands, evaluates it
-from typed runtime values, and records the selected branch through the
-existing `branch_selected` trace event.
+operands are direct `Bool` values or templates, typed equality predicates,
+typed scalar-ordering predicates, and nested Boolean predicate composition.
+Fully concrete source predicates fold during checking. Runtime-dependent
+predicates lower into typed Mantle value templates; Mantle validates the typed
+tree, validates all operands, evaluates it from typed runtime values, and
+records the selected branch through the existing `branch_selected` trace event.
 
-Predicate composition does not add arithmetic, ordering, string equality,
-structural equality, payload enum equality, process-reference equality,
-assignment, mutation, or authority.
+Predicate composition does not add floats, string equality, structural
+equality, payload enum equality, process-reference equality, assignment,
+mutation, or authority.
 
 Runtime branching, runtime iteration, statements, effects, step patterns, state transitions, and limits are documented in [Runtime Reference](runtime-reference.md).

@@ -1,7 +1,7 @@
 use super::*;
 use predicates::{
     validate_bool_contract_type, validate_boolean_operand_template,
-    validate_equality_operand_template, validate_equality_operand_type,
+    validate_equality_operand_template, validate_equality_operand_type, validate_scalar_value_type,
 };
 use projections::{
     reject_projected_process_ref_type, validate_enum_payload_projection,
@@ -406,6 +406,39 @@ impl ArtifactValueTemplate {
                 }
                 Ok(())
             }
+            Self::IfElse {
+                ty,
+                condition,
+                then_value,
+                else_value,
+            } => {
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+                let bool_ty = condition.result_type();
+                validate_bool_contract_type(
+                    artifact,
+                    &format!("{field}.condition.type_id"),
+                    bool_ty,
+                )?;
+                condition.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.condition"),
+                    validation.nested().with_expected_type(Some(bool_ty)),
+                    depth + 1,
+                )?;
+                let nested = validation.nested().with_expected_type(Some(*ty));
+                then_value.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.then"),
+                    nested,
+                    depth + 1,
+                )?;
+                else_value.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.else"),
+                    nested,
+                    depth + 1,
+                )
+            }
             Self::Equality {
                 ty,
                 operand_ty,
@@ -415,6 +448,54 @@ impl ArtifactValueTemplate {
             } => {
                 validate_bool_contract_type(artifact, &format!("{field}.type_id"), *ty)?;
                 validate_equality_operand_type(artifact, field, *operand_ty)?;
+                validate_equality_operand_template(field, "left", *operand_ty, left)?;
+                validate_equality_operand_template(field, "right", *operand_ty, right)?;
+                let nested = validation.nested().with_expected_type(Some(*operand_ty));
+                left.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.left"),
+                    nested,
+                    depth + 1,
+                )?;
+                right.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.right"),
+                    nested,
+                    depth + 1,
+                )
+            }
+            Self::ScalarArithmetic {
+                ty, left, right, ..
+            } => {
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+                validate_scalar_value_type(artifact, &format!("{field}.type_id"), *ty)?;
+                let nested = validation.nested().with_expected_type(Some(*ty));
+                left.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.left"),
+                    nested,
+                    depth + 1,
+                )?;
+                right.validate_for_received_payload(
+                    artifact,
+                    &format!("{field}.right"),
+                    nested,
+                    depth + 1,
+                )
+            }
+            Self::ScalarOrdering {
+                ty,
+                operand_ty,
+                left,
+                right,
+                ..
+            } => {
+                validate_bool_contract_type(artifact, &format!("{field}.type_id"), *ty)?;
+                validate_scalar_value_type(
+                    artifact,
+                    &format!("{field}.operand_type_id"),
+                    *operand_ty,
+                )?;
                 validate_equality_operand_template(field, "left", *operand_ty, left)?;
                 validate_equality_operand_template(field, "right", *operand_ty, right)?;
                 let nested = validation.nested().with_expected_type(Some(*operand_ty));

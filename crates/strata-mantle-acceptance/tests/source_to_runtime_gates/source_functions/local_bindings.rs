@@ -67,7 +67,7 @@ fn source_local_binding_process_ref_check_fails_closed() {
 
     assert!(
         stderr.contains(
-            "source-local binding worker_local must use a declared record, enum, list, or map type"
+            "source-local binding worker_local must use a declared record, enum, scalar, list, or map type"
         ),
         "unexpected diagnostic\nstderr:\n{stderr}"
     );
@@ -89,7 +89,7 @@ fn source_local_binding_process_ref_carrier_enum_check_fails_closed() {
 
     assert!(
         stderr.contains(
-            "source-local binding copy must use a declared record, enum, list, or map type without process-reference authority"
+            "source-local binding copy must use a declared record, enum, scalar, list, or map type without process-reference authority"
         ),
         "unexpected diagnostic\nstderr:\n{stderr}"
     );

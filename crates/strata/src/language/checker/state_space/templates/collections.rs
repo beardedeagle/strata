@@ -194,6 +194,9 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         | CheckedValueTemplate::ProcessRef { .. }
         | CheckedValueTemplate::LoopElement { .. }
         | CheckedValueTemplate::Equality { .. }
+        | CheckedValueTemplate::ScalarArithmetic { .. }
+        | CheckedValueTemplate::ScalarOrdering { .. }
+        | CheckedValueTemplate::IfElse { .. }
         | CheckedValueTemplate::BooleanNot { .. }
         | CheckedValueTemplate::BooleanBinary { .. } => None,
         CheckedValueTemplate::EnumVariant {

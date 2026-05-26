@@ -1,4 +1,5 @@
 use super::*;
+use mantle_artifact::{ArtifactScalarType, ArtifactScalarValue};
 
 impl Parser {
     pub(super) fn parse_value_expr(&mut self) -> Result<ValueExpr> {
@@ -45,9 +46,9 @@ impl Parser {
         &mut self,
         depth: usize,
     ) -> Result<ValueExpr> {
-        let left = self.parse_value_unary_expr_with_depth(depth)?;
+        let left = self.parse_value_ordering_expr_with_depth(depth)?;
         if let Some(operator) = self.consume_value_equality_operator() {
-            let right = self.parse_value_unary_expr_with_depth(self.next_value_depth(depth)?)?;
+            let right = self.parse_value_ordering_expr_with_depth(self.next_value_depth(depth)?)?;
             if self.peek_value_equality_operator() {
                 return Err(self.error_here("chained equality expressions are not supported"));
             }
@@ -60,12 +61,74 @@ impl Parser {
         Ok(left)
     }
 
+    pub(super) fn parse_value_ordering_expr_with_depth(
+        &mut self,
+        depth: usize,
+    ) -> Result<ValueExpr> {
+        let left = self.parse_value_additive_expr_with_depth(depth)?;
+        if let Some(operator) = self.consume_value_ordering_operator() {
+            let right = self.parse_value_additive_expr_with_depth(self.next_value_depth(depth)?)?;
+            if self.peek_value_ordering_operator() {
+                return Err(
+                    self.error_here("chained scalar ordering expressions are not supported")
+                );
+            }
+            return Ok(ValueExpr::ScalarOrdering {
+                operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            });
+        }
+        Ok(left)
+    }
+
+    pub(super) fn parse_value_additive_expr_with_depth(
+        &mut self,
+        depth: usize,
+    ) -> Result<ValueExpr> {
+        let mut value = self.parse_value_multiplicative_expr_with_depth(depth)?;
+        let mut composition_depth = depth;
+        while let Some(operator) = self.consume_value_additive_operator() {
+            composition_depth = self.next_value_depth(composition_depth)?;
+            let right = self.parse_value_multiplicative_expr_with_depth(composition_depth)?;
+            value = ValueExpr::ScalarArithmetic {
+                operator,
+                left: Box::new(value),
+                right: Box::new(right),
+            };
+        }
+        Ok(value)
+    }
+
+    pub(super) fn parse_value_multiplicative_expr_with_depth(
+        &mut self,
+        depth: usize,
+    ) -> Result<ValueExpr> {
+        let mut value = self.parse_value_unary_expr_with_depth(depth)?;
+        let mut composition_depth = depth;
+        while let Some(operator) = self.consume_value_multiplicative_operator() {
+            composition_depth = self.next_value_depth(composition_depth)?;
+            let right = self.parse_value_unary_expr_with_depth(composition_depth)?;
+            value = ValueExpr::ScalarArithmetic {
+                operator,
+                left: Box::new(value),
+                right: Box::new(right),
+            };
+        }
+        Ok(value)
+    }
+
     pub(super) fn parse_value_unary_expr_with_depth(&mut self, depth: usize) -> Result<ValueExpr> {
         if self.consume_symbol('!') {
             let operand = self.parse_value_unary_expr_with_depth(self.next_value_depth(depth)?)?;
             return Ok(ValueExpr::BooleanNot {
                 operand: Box::new(operand),
             });
+        }
+        if self.peek_symbol('-') {
+            let sign_offset = self.tokens[self.index].offset;
+            self.advance();
+            return self.parse_scalar_literal(true, Some(sign_offset));
         }
         self.parse_value_primary_expr_with_depth(depth)
     }
@@ -93,6 +156,9 @@ impl Parser {
         }
         if self.peek_keyword("if") {
             return self.parse_if_else_value_expr(depth);
+        }
+        if self.peek_number() {
+            return self.parse_scalar_literal(false, None);
         }
         let name = self.expect_identifier()?;
         if name.as_str() == LIST_TYPE {
@@ -147,6 +213,39 @@ impl Parser {
         }
         let fields = self.parse_record_value_fields(&name, depth)?;
         Ok(ValueExpr::Record(RecordValue { name, fields }))
+    }
+
+    fn parse_scalar_literal(
+        &mut self,
+        negative: bool,
+        sign_offset: Option<usize>,
+    ) -> Result<ValueExpr> {
+        let number_offset = self.tokens[self.index].offset;
+        let digits = self.expect_number().map_err(|_| {
+            self.error_here("scalar negation is only supported for suffixed integer literals")
+        })?;
+        if let Some(sign_offset) = sign_offset
+            && number_offset != sign_offset + 1
+        {
+            return Err(
+                self.error_previous("negative scalar literal sign must be contiguous with digits")
+            );
+        }
+        let suffix_offset = self.tokens[self.index].offset;
+        let suffix = self.expect_ident().map_err(|_| {
+            self.error_here("numeric value literals require an explicit scalar suffix")
+        })?;
+        if suffix_offset != number_offset + digits.len() {
+            return Err(self.error_previous("scalar literal suffix must be contiguous with digits"));
+        }
+        if ArtifactScalarType::parse_suffix(&suffix).is_none() {
+            return Err(
+                self.error_previous(format!("unsupported scalar literal suffix {suffix:?}"))
+            );
+        }
+        let value = ArtifactScalarValue::parse_literal(negative, &digits, &suffix)
+            .map_err(|err| self.error_previous(err.to_string()))?;
+        Ok(ValueExpr::ScalarLiteral(value))
     }
 
     pub(super) fn parse_if_else_value_expr(&mut self, depth: usize) -> Result<ValueExpr> {

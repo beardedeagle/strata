@@ -238,6 +238,25 @@ lowering, so Mantle receives typed values, typed templates, and typed IDs rather
 than source-local variable names. Types that carry `ProcessRef<T>` authority are
 not source-local computation values.
 
+### Scalar Values
+
+The buildable source surface includes fixed-width integer value types:
+`U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64`. Numeric value
+literals require explicit suffixes, such as `10_u32` or `-1_i8`.
+
+```strata
+fn high_priority(weight: U32) -> Bool ! [] ~ [] @det {
+    let adjusted: U32 = weight + 2_u32;
+    return adjusted >= 10_u32;
+}
+```
+
+Scalar arithmetic uses matching integer types only. Overflow, underflow,
+division by zero, modulo by zero, signed/unsigned mixing, and cross-width
+mixing are rejected. Runtime-bound scalar predicates and value-level scalar
+conditionals lower as typed Mantle templates; source binding names and function
+names are not runtime dispatch keys.
+
 ### Pattern Matching
 
 Strata supports checked pattern dispatch in source functions, step signatures,

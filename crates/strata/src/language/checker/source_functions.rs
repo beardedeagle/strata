@@ -294,7 +294,7 @@ fn validate_source_function_declared_value_type(
         .validate_source_value_type(module, ty)
         .map_err(|err| {
             Error::new(format!(
-                "{owner} function {} {position} must use a declared record, enum, list, or map type without process-reference authority, found {ty}: {err}",
+                "{owner} function {} {position} must use a declared record, enum, scalar, list, or map type without process-reference authority, found {ty}: {err}",
                 function.name
             ))
         })
@@ -445,7 +445,7 @@ fn collect_source_return_expr_calls<'a>(returns: &'a ReturnExpr, calls: &mut BTr
 
 fn collect_source_value_expr_calls<'a>(value: &'a ValueExpr, calls: &mut BTreeSet<&'a str>) {
     match value {
-        ValueExpr::Identifier(_) => {}
+        ValueExpr::Identifier(_) | ValueExpr::ScalarLiteral(_) => {}
         ValueExpr::Call { name, arg } => {
             calls.insert(name.as_str());
             collect_source_value_expr_calls(arg, calls);
@@ -479,6 +479,11 @@ fn collect_source_value_expr_calls<'a>(value: &'a ValueExpr, calls: &mut BTreeSe
             collect_source_value_expr_calls(else_branch, calls);
         }
         ValueExpr::Equality { left, right, .. } => {
+            collect_source_value_expr_calls(left, calls);
+            collect_source_value_expr_calls(right, calls);
+        }
+        ValueExpr::ScalarArithmetic { left, right, .. }
+        | ValueExpr::ScalarOrdering { left, right, .. } => {
             collect_source_value_expr_calls(left, calls);
             collect_source_value_expr_calls(right, calls);
         }

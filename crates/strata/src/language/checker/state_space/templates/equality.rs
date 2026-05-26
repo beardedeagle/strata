@@ -1,6 +1,7 @@
 use crate::language::ast::{ValueBooleanOperator, ValueEqualityOperator};
 use crate::language::checked::{CheckedValueBooleanOperator, CheckedValueEqualityOperator};
 
+use super::scalars::scalar_template_expr_type;
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -169,13 +170,11 @@ pub(super) fn checked_grouped_template(
     bindings: &[ValueTemplateBinding<'_>],
     depth: usize,
 ) -> Result<CheckedValueTemplate> {
-    let bool_type = semantic_index.bool_type(module)?;
-    validate_boolean_template_result_type(semantic_index, expected_type, &bool_type)?;
     checked_value_template(
         module,
         semantic_index,
         types,
-        &bool_type,
+        expected_type,
         value,
         bindings,
         depth + 1,
@@ -276,9 +275,18 @@ fn equality_template_operand_type(
                 .equality_fieldless_enum_variant_type(module, name)
                 .map_err(|err| {
                     Error::new(format!(
-                        "equality operand {name} must be a Bool or fieldless enum value: {err}"
+                        "equality operand {name} must be a Bool, scalar value, or fieldless enum value: {err}"
                     ))
                 })
+        }
+        ValueExpr::ScalarLiteral(literal) => {
+            Ok(TypeRef::Named(Identifier::new(literal.ty().source_name())?))
+        }
+        ValueExpr::ScalarArithmetic { .. } => {
+            scalar_template_expr_type(semantic_index, value, bindings, expected_type)
+        }
+        ValueExpr::Grouped { value } => {
+            equality_template_operand_type(module, semantic_index, value, bindings, expected_type)
         }
         ValueExpr::EnumVariant { name, .. } => {
             if let Some(expected_type) = expected_type
@@ -314,10 +322,10 @@ fn equality_template_operand_type(
         | ValueExpr::Map(_)
         | ValueExpr::IfElse { .. }
         | ValueExpr::Equality { .. }
+        | ValueExpr::ScalarOrdering { .. }
         | ValueExpr::BooleanNot { .. }
-        | ValueExpr::BooleanBinary { .. }
-        | ValueExpr::Grouped { .. } => Err(Error::new(
-            "equality operands must be Bool or fieldless enum values",
+        | ValueExpr::BooleanBinary { .. } => Err(Error::new(
+            "equality operands must be Bool, scalar values, or fieldless enum values",
         )),
     }
 }
@@ -363,6 +371,9 @@ fn validate_equality_template_operand_type(
 ) -> Result<()> {
     let bool_type = semantic_index.bool_type(module)?;
     if semantic_index.same_type(operand_type, &bool_type) {
+        return Ok(());
+    }
+    if semantic_index.scalar_type(operand_type)?.is_some() {
         return Ok(());
     }
     if semantic_index

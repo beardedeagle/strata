@@ -301,6 +301,7 @@ fn concrete_artifact_enum_value<'a>(
             Ok((index, Some(payload)))
         }
         ArtifactValue::Record { .. }
+        | ArtifactValue::Scalar(_)
         | ArtifactValue::List(_)
         | ArtifactValue::Map(_)
         | ArtifactValue::ProcessRef { .. } => Err(Error::new(format!(
@@ -389,6 +390,24 @@ fn artifact_to_source_value(
             "process references must be direct message payloads",
         ));
     }
+    if let Some(expected_scalar) = semantic_index.scalar_type(expected_type)? {
+        let ArtifactValue::Scalar(value) = value else {
+            return Err(Error::new(format!(
+                "artifact value {} is not a scalar value of type {}",
+                value.label(),
+                expected_type
+            )));
+        };
+        if value.ty() != expected_scalar {
+            return Err(Error::new(format!(
+                "artifact value {} has scalar type {}, expected {}",
+                value.label(),
+                value.ty().source_name(),
+                expected_type
+            )));
+        }
+        return Ok(ValueExpr::ScalarLiteral(*value));
+    }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
         return artifact_record_to_source_value(module, semantic_index, record, value);
     }
@@ -456,6 +475,7 @@ fn artifact_enum_to_source_value(
             })
         }
         ArtifactValue::Record { .. }
+        | ArtifactValue::Scalar(_)
         | ArtifactValue::List(_)
         | ArtifactValue::Map(_)
         | ArtifactValue::ProcessRef { .. } => Err(Error::new(format!(

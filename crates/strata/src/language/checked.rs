@@ -13,7 +13,8 @@ pub(in crate::language) use process::{
     CheckedTransitionParts, checked_action_count,
 };
 pub(in crate::language) use templates::{
-    CheckedNextState, CheckedPayloadValue, CheckedStateValue, CheckedValueBooleanOperator,
+    CheckedNextState, CheckedPayloadValue, CheckedScalarArithmeticOperator,
+    CheckedScalarOrderingOperator, CheckedStateValue, CheckedValueBooleanOperator,
     CheckedValueEqualityOperator, CheckedValueTemplate, CheckedValueTemplateField,
     CheckedValueTemplateMapEntry,
 };

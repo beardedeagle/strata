@@ -3,13 +3,18 @@ use super::value_resolution::{
     resolve_pattern_source_function_call, resolve_record_pattern_source_function_call,
 };
 use super::*;
-use crate::language::ast::{ValueBooleanOperator, ValueEqualityOperator};
+use crate::language::ast::{
+    ValueBooleanOperator, ValueEqualityOperator, ValueScalarArithmeticOperator,
+    ValueScalarOrderingOperator,
+};
 
 mod body_matches;
 mod calls;
+mod dependencies;
 mod local_bindings;
 mod resolution;
 mod return_matches;
+mod scalars;
 mod type_check;
 
 use body_matches::validate_source_function_body_match_values;
@@ -17,9 +22,15 @@ use calls::{
     enum_value_error, enum_variant_for_expected_type, identifier_starts_uppercase,
     source_function_group_option, validate_source_function_call_or_constructor,
 };
+use dependencies::{source_value_requires_resolution, source_value_uses_any_binding};
 use local_bindings::validate_source_function_block_values;
 pub(in crate::language::checker) use resolution::resolve_source_value_expr;
 use return_matches::validate_source_function_return_match;
+use scalars::{
+    source_scalar_expr_type, source_scalar_operand_pair_type,
+    validate_source_scalar_arithmetic_expr, validate_source_scalar_literal_expr,
+    validate_source_scalar_operand_type, validate_source_scalar_ordering_expr,
+};
 pub(in crate::language::checker) use type_check::check_source_value_type;
 
 pub(super) fn validate_source_function_body_values(
@@ -98,11 +109,38 @@ pub(in crate::language::checker) fn validate_source_function_value_expr(
         ValueExpr::Identifier(_) | ValueExpr::EnumVariant { .. } => {
             check_source_value_type(scope, expected_type, value, bindings)
         }
+        ValueExpr::ScalarLiteral(literal) => {
+            validate_source_scalar_literal_expr(scope, expected_type, *literal)
+        }
         ValueExpr::Equality {
             operator,
             left,
             right,
         } => validate_source_equality_expr(scope, expected_type, *operator, left, right, bindings),
+        ValueExpr::ScalarArithmetic {
+            operator,
+            left,
+            right,
+        } => validate_source_scalar_arithmetic_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+        ),
+        ValueExpr::ScalarOrdering {
+            operator,
+            left,
+            right,
+        } => validate_source_scalar_ordering_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+        ),
         ValueExpr::BooleanNot { operand } => {
             validate_source_boolean_not_expr(scope, expected_type, operand, bindings)
         }
@@ -403,15 +441,9 @@ fn validate_source_grouped_value_expr(
     value: &ValueExpr,
     bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
-    let bool_type = scope.semantic_index.bool_type(scope.module)?;
-    if !scope.semantic_index.same_type(expected_type, &bool_type) {
-        return Err(Error::new(format!(
-            "parenthesized predicate grouping produces {bool_type}, expected {expected_type}"
-        )));
-    }
-    validate_source_function_value_expr(scope, &bool_type, value, bindings).map_err(|err| {
+    validate_source_function_value_expr(scope, expected_type, value, bindings).map_err(|err| {
         Error::new(format!(
-            "parenthesized predicate operand must produce {bool_type}: {err}"
+            "parenthesized value operand must produce {expected_type}: {err}"
         ))
     })
 }
@@ -479,9 +511,42 @@ fn source_equality_operand_type(
                 .equality_fieldless_enum_variant_type(scope.module, name)
                 .map_err(|err| {
                     Error::new(format!(
-                        "equality operand {name} must be a Bool or fieldless enum value: {err}"
+                        "equality operand {name} must be a Bool, scalar value, or fieldless enum value: {err}"
                     ))
                 })
+        }
+        ValueExpr::ScalarLiteral(_) | ValueExpr::ScalarArithmetic { .. } => {
+            source_scalar_expr_type(scope, value, bindings, expected_type)
+        }
+        ValueExpr::Call { name, .. } => {
+            if let Some(expected_type) = expected_type {
+                if scope.semantic_index.scalar_type(expected_type)?.is_some() {
+                    return source_scalar_expr_type(scope, value, bindings, Some(expected_type));
+                }
+            } else if let Some(function) = source_function_group_option(scope, name)?
+                .and_then(|functions| functions.first().copied())
+            {
+                return Ok(function.return_type.clone());
+            }
+            Err(Error::new(
+                "equality operands must be Bool, scalar values, or fieldless enum values",
+            ))
+        }
+        ValueExpr::IfElse { .. } => {
+            let Some(expected_type) = expected_type else {
+                return Err(Error::new(
+                    "scalar equality operand type is ambiguous; use a typed local binding or scalar literal",
+                ));
+            };
+            if scope.semantic_index.scalar_type(expected_type)?.is_some() {
+                return source_scalar_expr_type(scope, value, bindings, Some(expected_type));
+            }
+            Err(Error::new(
+                "equality operands must be Bool, scalar values, or fieldless enum values",
+            ))
+        }
+        ValueExpr::Grouped { value } => {
+            source_equality_operand_type(scope, value, bindings, expected_type)
         }
         ValueExpr::EnumVariant { name, .. } => {
             if let Some(expected_type) = expected_type
@@ -512,16 +577,14 @@ fn source_equality_operand_type(
             }
             Ok(ty)
         }
-        ValueExpr::Call { .. }
-        | ValueExpr::Record(_)
+        ValueExpr::Record(_)
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
-        | ValueExpr::IfElse { .. }
         | ValueExpr::Equality { .. }
+        | ValueExpr::ScalarOrdering { .. }
         | ValueExpr::BooleanNot { .. }
-        | ValueExpr::BooleanBinary { .. }
-        | ValueExpr::Grouped { .. } => Err(Error::new(
-            "equality operands must be Bool or fieldless enum values",
+        | ValueExpr::BooleanBinary { .. } => Err(Error::new(
+            "equality operands must be Bool, scalar values, or fieldless enum values",
         )),
     }
 }
@@ -549,6 +612,9 @@ fn validate_source_equality_operand_type(
     let bool_type = scope.semantic_index.bool_type(scope.module)?;
     if scope.semantic_index.same_type(operand_type, &bool_type) {
         return Ok(());
+    }
+    if scope.semantic_index.scalar_type(operand_type)?.is_some() {
+        return validate_source_scalar_operand_type(scope, operand_type);
     }
     if scope
         .semantic_index
@@ -680,31 +746,4 @@ fn validate_concrete_map_value_keys(
         }
     }
     Ok(())
-}
-
-fn source_value_uses_any_binding(value: &ValueExpr, bindings: &[SourceValueBinding<'_>]) -> bool {
-    bindings
-        .iter()
-        .any(|binding| source_value_uses_binding(value, binding.name))
-}
-
-fn source_value_requires_resolution(value: &ValueExpr) -> bool {
-    match value {
-        ValueExpr::Identifier(_) => false,
-        ValueExpr::Call { .. } => true,
-        ValueExpr::EnumVariant { payload, .. } => source_value_requires_resolution(payload),
-        ValueExpr::Record(record) => record
-            .fields
-            .iter()
-            .any(|field| source_value_requires_resolution(&field.value)),
-        ValueExpr::List(list) => list.items.iter().any(source_value_requires_resolution),
-        ValueExpr::Map(map) => map.entries.iter().any(|entry| {
-            source_value_requires_resolution(&entry.key)
-                || source_value_requires_resolution(&entry.value)
-        }),
-        ValueExpr::IfElse { .. } => true,
-        ValueExpr::Equality { .. } => true,
-        ValueExpr::BooleanNot { .. } | ValueExpr::BooleanBinary { .. } => true,
-        ValueExpr::Grouped { .. } => true,
-    }
 }
