@@ -44,6 +44,7 @@ fn runtime_rejects_loaded_send_missing_payload_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[1].message_variants[0].payload_type = Some(JOB);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[0].transitions[0].effect_authority =
         crate::program::LoadedEffectAuthority::from_artifact(&[
             ArtifactEffect::Spawn,
@@ -72,6 +73,7 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[0].transitions[0].effect_authority =
         crate::program::LoadedEffectAuthority::from_artifact(&[
             ArtifactEffect::Spawn,
@@ -105,6 +107,7 @@ fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded()
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.types[BOX.index()] = box_record_type("reply_to", MAIN_STATE);
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[0].transitions[0].effect_authority =
         crate::program::LoadedEffectAuthority::from_artifact(&[
             ArtifactEffect::Spawn,
@@ -163,6 +166,7 @@ fn runtime_rejects_loaded_process_ref_payload_guard_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[1].transitions[0].payload_guard = Some(
         RuntimePayload::from_artifact(
             &ArtifactPayload::process_ref(PROCESS_REF_WORKER, ProcessId::new(1), 2)
@@ -182,6 +186,7 @@ fn runtime_rejects_loaded_process_ref_type_payload_guard_before_artifact_loaded(
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[1].transitions[0].payload_guard = Some(
         RuntimePayload::from_artifact(
             &ArtifactPayload::value(PROCESS_REF_WORKER, artifact_value("Plain"))
@@ -199,8 +204,11 @@ fn runtime_rejects_loaded_process_ref_type_payload_guard_before_artifact_loaded(
 #[test]
 fn runtime_rejects_unspawned_process_ref_payload() {
     let mut artifact = artifact_with_unbound_worker_process_ref();
-    artifact.processes[1].message_variants =
-        vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)],
+    );
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
     let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
@@ -238,8 +246,11 @@ fn runtime_rejects_unspawned_process_ref_payload() {
 #[test]
 fn runtime_rejects_process_ref_payload_target_type_mismatch() {
     let mut artifact = artifact_with_unbound_worker_process_ref();
-    artifact.processes[1].message_variants =
-        vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)],
+    );
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
     let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
@@ -310,6 +321,7 @@ fn runtime_rejects_oversized_record_payload_template_value() {
         Some(&received),
         &step,
         &LocalProcessRefs::empty(),
+        &[],
         &[],
     )
     .expect_err("oversized record payload labels should fail closed");

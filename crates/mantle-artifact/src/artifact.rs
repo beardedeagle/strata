@@ -25,12 +25,13 @@ pub use value_template::{
 };
 
 use crate::{
-    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, EnumVariantId, Error, LoopElementId,
-    MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE,
-    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
-    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId,
-    ProcessId, ProcessRefId, Result, StateId, TypeId,
+    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, EffectOutcomeId, EnumVariantId,
+    Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION,
+    MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
+    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId,
+    ProcessRefId, Result, StateId, TypeId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -450,7 +451,19 @@ pub enum ArtifactAction {
         target: ProcessId,
         process_ref: ProcessRefId,
     },
+    SpawnOutcome {
+        outcome: EffectOutcomeId,
+        outcome_ty: TypeId,
+        target: ProcessId,
+    },
     Send {
+        target: ArtifactSendTarget,
+        message: MessageId,
+        payload: Option<ArtifactValueTemplate>,
+    },
+    SendOutcome {
+        outcome: EffectOutcomeId,
+        outcome_ty: TypeId,
         target: ArtifactSendTarget,
         message: MessageId,
         payload: Option<ArtifactValueTemplate>,
@@ -474,10 +487,10 @@ impl ArtifactAction {
             Self::Emit { .. } => {
                 effects.insert(ArtifactEffect::Emit);
             }
-            Self::Spawn { .. } => {
+            Self::Spawn { .. } | Self::SpawnOutcome { .. } => {
                 effects.insert(ArtifactEffect::Spawn);
             }
-            Self::Send { .. } => {
+            Self::Send { .. } | Self::SendOutcome { .. } => {
                 effects.insert(ArtifactEffect::Send);
             }
             Self::IfElse {
@@ -507,7 +520,11 @@ impl ArtifactAction {
             )));
         }
         match self {
-            Self::Emit { .. } | Self::Spawn { .. } | Self::Send { .. } => Ok(1),
+            Self::Emit { .. }
+            | Self::Spawn { .. }
+            | Self::SpawnOutcome { .. }
+            | Self::Send { .. }
+            | Self::SendOutcome { .. } => Ok(1),
             Self::IfElse {
                 then_actions,
                 else_actions,

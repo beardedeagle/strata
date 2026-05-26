@@ -5,7 +5,6 @@ fn rejects_duplicate_static_map_template_keys_with_runtime_value() {
     let source = r#"
 module duplicate_static_map_template_keys_with_runtime_value;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -47,7 +46,6 @@ fn rejects_runtime_dependent_map_key_state_template() {
     let source = r#"
 module runtime_dependent_map_key_state_template;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -89,7 +87,6 @@ fn rejects_source_function_runtime_dependent_map_key_state_template() {
     let source = r#"
 module source_function_runtime_dependent_map_key_state_template;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -135,7 +132,6 @@ fn rejects_runtime_dependent_map_key_send_payload_template() {
     let source = r#"
 module runtime_dependent_map_key_send_payload_template;
 
-record Unit;
 enum Phase {
     Ready,
     Done,

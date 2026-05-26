@@ -26,6 +26,9 @@ pub(in crate::language::checker::static_validation) fn validate_value_template_p
         CheckedValueTemplate::LoopElement { ty, .. } => {
             reject_projected_process_ref_payload_type(ty)
         }
+        CheckedValueTemplate::EffectOutcome { ty, .. } => {
+            reject_projected_process_ref_payload_type(ty)
+        }
         CheckedValueTemplate::EnumPayload { ty, value, .. } => {
             reject_projected_process_ref_payload_type(ty)?;
             validate_value_template_process_refs(processes, process, value, spawned_refs, false)
@@ -283,6 +286,7 @@ pub(in crate::language::checker::static_validation) fn reject_process_ref_templa
         CheckedValueTemplate::LoopElement { .. } => Err(Error::new(
             "loop element templates are not valid next-state values",
         )),
+        CheckedValueTemplate::EffectOutcome { .. } => Ok(()),
         CheckedValueTemplate::EnumVariant { payload, .. } => {
             reject_process_ref_template_in_next_state(payload)
         }

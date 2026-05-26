@@ -1,13 +1,14 @@
 use super::*;
 use predicates::{
     validate_bool_contract_type, validate_boolean_operand_template,
-    validate_equality_operand_template, validate_equality_operand_type, validate_scalar_value_type,
+    validate_equality_operand_template, validate_equality_operands, validate_scalar_value_type,
 };
 use projections::{
-    reject_projected_process_ref_type, validate_enum_payload_projection,
-    validate_enum_variant_payload, validate_list_element_projection_type,
-    validate_list_rest_projection_type, validate_map_rest_projection_type,
-    validate_map_value_projection_type, validate_record_field_projection_type,
+    reject_projected_process_ref_type, reject_type_containing_process_ref,
+    validate_enum_payload_projection, validate_enum_variant_payload,
+    validate_list_element_projection_type, validate_list_rest_projection_type,
+    validate_map_rest_projection_type, validate_map_value_projection_type,
+    validate_record_field_projection_type,
 };
 use static_keys::{is_static_map_key_template, static_map_key_template_value};
 use template_types::{
@@ -276,6 +277,13 @@ impl ArtifactValueTemplate {
             Self::LoopElement { ty, .. } => {
                 artifact.validate_value_type(&format!("{field}.type_id"), *ty)
             }
+            Self::EffectOutcome { ty, .. } => {
+                artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
+                if !validation.allow_process_ref_effect_outcome {
+                    reject_type_containing_process_ref(artifact, field, *ty)?;
+                }
+                Ok(())
+            }
             Self::EnumVariant {
                 ty,
                 variant,
@@ -305,10 +313,12 @@ impl ArtifactValueTemplate {
                     1,
                     MAX_VALUE_TEMPLATE_FIELDS,
                 )?;
-                let mut seen = BTreeSet::new();
-                for record_field in fields {
+                for (index, record_field) in fields.iter().enumerate() {
                     validate_ident_field(&format!("{field}.field"), &record_field.name)?;
-                    if !seen.insert(record_field.name.as_str()) {
+                    if fields[..index]
+                        .iter()
+                        .any(|previous| previous.name == record_field.name)
+                    {
                         return Err(Error::new(format!(
                             "{field} duplicates field {}",
                             record_field.name
@@ -376,7 +386,7 @@ impl ArtifactValueTemplate {
                         capacity
                     )));
                 }
-                let mut keys = BTreeSet::new();
+                let mut keys = Vec::with_capacity(entries.len());
                 for (index, entry) in entries.iter().enumerate() {
                     if !is_static_map_key_template(&entry.key) {
                         return Err(Error::new(format!(
@@ -390,13 +400,13 @@ impl ArtifactValueTemplate {
                         depth + 1,
                     )?;
                     let key = static_map_key_template_value(artifact, &entry.key)?;
-                    if keys.contains(&key) {
+                    if keys.iter().any(|previous| previous == &key) {
                         return Err(Error::new(format!(
                             "{field} duplicates key {}",
                             key.label()
                         )));
                     }
-                    keys.insert(key);
+                    keys.push(key);
                     entry.value.validate_for_received_payload(
                         artifact,
                         &format!("{field}.entry.{index}.value"),
@@ -447,10 +457,16 @@ impl ArtifactValueTemplate {
                 ..
             } => {
                 validate_bool_contract_type(artifact, &format!("{field}.type_id"), *ty)?;
-                validate_equality_operand_type(artifact, field, *operand_ty)?;
+                let equality_admission =
+                    validate_equality_operands(artifact, field, *operand_ty, left, right)?;
                 validate_equality_operand_template(field, "left", *operand_ty, left)?;
                 validate_equality_operand_template(field, "right", *operand_ty, right)?;
-                let nested = validation.nested().with_expected_type(Some(*operand_ty));
+                let nested = validation
+                    .nested()
+                    .with_expected_type(Some(*operand_ty))
+                    .with_process_ref_effect_outcome(
+                        equality_admission.allow_process_ref_effect_outcome,
+                    );
                 left.validate_for_received_payload(
                     artifact,
                     &format!("{field}.left"),

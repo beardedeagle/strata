@@ -1,14 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use mantle_artifact::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
 
 use super::super::super::super::checked::{
-    CheckedPayloadValue, CheckedProcess, CheckedProcessRefId, CheckedScalarArithmeticOperator,
-    CheckedScalarOrderingOperator, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
-    CheckedValueTemplate,
+    CheckedEffectOutcomeId, CheckedPayloadValue, CheckedProcess, CheckedProcessRefId,
+    CheckedScalarArithmeticOperator, CheckedScalarOrderingOperator, CheckedTypeRef,
+    CheckedValueBooleanOperator, CheckedValueEqualityOperator, CheckedValueTemplate,
 };
 use super::super::super::super::diagnostic::{Error, Result};
-use super::{StaticLoopElementBinding, StaticProcessId, resolve_static_process_ref};
+use super::{
+    StaticEffectOutcomeBinding, StaticLoopElementBinding, StaticProcessId,
+    resolve_static_process_ref,
+};
 
 pub(super) fn evaluate_checked_runtime_template(
     template: &CheckedValueTemplate,
@@ -17,6 +20,7 @@ pub(super) fn evaluate_checked_runtime_template(
     process: &CheckedProcess,
     process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
     loop_elements: &[StaticLoopElementBinding],
+    effect_outcomes: &[StaticEffectOutcomeBinding],
 ) -> Result<CheckedPayloadValue> {
     match template {
         CheckedValueTemplate::Literal(value) => Ok(value.clone()),
@@ -46,6 +50,9 @@ pub(super) fn evaluate_checked_runtime_template(
             }
             Ok(payload.clone())
         }
+        CheckedValueTemplate::EffectOutcome { ty, outcome } => {
+            resolve_static_effect_outcome(process, *outcome, ty, effect_outcomes)
+        }
         CheckedValueTemplate::EnumPayload { ty, value, variant } => {
             let value = evaluate_checked_runtime_template(
                 value,
@@ -54,6 +61,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let variant = value.ty().enum_variant_label(*variant)?;
             let payload = checked_payload_value(&value)?
@@ -69,6 +77,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let value = checked_payload_value(&record)?
                 .project_record_field(field.as_str())
@@ -88,6 +97,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let value = checked_payload_value(&list)?
                 .project_list_element(*index, *len)
@@ -107,6 +117,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let value = checked_payload_value(&list)?
                 .project_list_prefix_element(*index, *prefix_len)
@@ -125,6 +136,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let value = checked_payload_value(&list)?
                 .project_list_rest(*prefix_len)
@@ -145,6 +157,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let value = checked_payload_value(&map)?
                 .project_map_value(key, keys, *projection)
@@ -163,6 +176,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let value = checked_payload_value(&map)?
                 .project_map_rest(excluded_keys)
@@ -216,6 +230,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             Ok(CheckedPayloadValue::new(
                 ty.clone(),
@@ -227,8 +242,7 @@ pub(super) fn evaluate_checked_runtime_template(
         }
         CheckedValueTemplate::Record { ty, fields } => {
             let mut values = Vec::with_capacity(fields.len());
-            let mut seen = BTreeSet::new();
-            for field in fields {
+            for (index, field) in fields.iter().enumerate() {
                 let value = evaluate_checked_runtime_template(
                     field.value(),
                     received_payload,
@@ -236,8 +250,12 @@ pub(super) fn evaluate_checked_runtime_template(
                     process,
                     process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
-                if !seen.insert(field.name()) {
+                if fields[..index]
+                    .iter()
+                    .any(|previous| previous.name() == field.name())
+                {
                     return Err(Error::new(format!(
                         "record template duplicates field {}",
                         field.name()
@@ -266,6 +284,7 @@ pub(super) fn evaluate_checked_runtime_template(
                     process,
                     process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
                 values.push(checked_payload_value(&value)?);
             }
@@ -275,8 +294,7 @@ pub(super) fn evaluate_checked_runtime_template(
             ))
         }
         CheckedValueTemplate::Map { ty, entries } => {
-            let mut values = Vec::with_capacity(entries.len());
-            let mut seen = BTreeSet::new();
+            let mut values: Vec<ArtifactMapEntry> = Vec::with_capacity(entries.len());
             for entry in entries {
                 let key = evaluate_checked_runtime_template(
                     entry.key(),
@@ -285,6 +303,7 @@ pub(super) fn evaluate_checked_runtime_template(
                     process,
                     process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
                 let value = evaluate_checked_runtime_template(
                     entry.value(),
@@ -293,10 +312,11 @@ pub(super) fn evaluate_checked_runtime_template(
                     process,
                     process_refs,
                     loop_elements,
+                    effect_outcomes,
                 )?;
                 let key_value = checked_payload_value(&key)?;
                 let item_value = checked_payload_value(&value)?;
-                if !seen.insert(key_value.clone()) {
+                if values.iter().any(|previous| previous.key == key_value) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
                         key_value.label()
@@ -325,6 +345,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let selected = if checked_runtime_bool_value(&condition)? {
                 then_value
@@ -338,6 +359,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if value.ty() != ty {
                 return Err(Error::new(format!(
@@ -362,6 +384,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if left.ty() != operand_ty {
                 return Err(Error::new(format!(
@@ -378,6 +401,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if right.ty() != operand_ty {
                 return Err(Error::new(format!(
@@ -410,6 +434,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if left.ty() != ty {
                 return Err(Error::new(format!(
@@ -425,6 +450,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if right.ty() != ty {
                 return Err(Error::new(format!(
@@ -467,6 +493,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if left.ty() != operand_ty {
                 return Err(Error::new(format!(
@@ -482,6 +509,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             if right.ty() != operand_ty {
                 return Err(Error::new(format!(
@@ -518,6 +546,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             Ok(CheckedPayloadValue::new(
                 ty.clone(),
@@ -537,6 +566,7 @@ pub(super) fn evaluate_checked_runtime_template(
                 process,
                 process_refs,
                 loop_elements,
+                effect_outcomes,
             )?;
             let left = checked_runtime_bool_value(&left)?;
             let selected = match operator {
@@ -548,6 +578,7 @@ pub(super) fn evaluate_checked_runtime_template(
                         process,
                         process_refs,
                         loop_elements,
+                        effect_outcomes,
                     )?)?
                 }
                 CheckedValueBooleanOperator::Or => {
@@ -558,6 +589,7 @@ pub(super) fn evaluate_checked_runtime_template(
                         process,
                         process_refs,
                         loop_elements,
+                        effect_outcomes,
                     )?)?
                 }
             };
@@ -567,6 +599,34 @@ pub(super) fn evaluate_checked_runtime_template(
             ))
         }
     }
+}
+
+fn resolve_static_effect_outcome(
+    process: &CheckedProcess,
+    outcome: CheckedEffectOutcomeId,
+    ty: &CheckedTypeRef,
+    effect_outcomes: &[StaticEffectOutcomeBinding],
+) -> Result<CheckedPayloadValue> {
+    let value = effect_outcomes
+        .iter()
+        .find(|binding| binding.id == outcome)
+        .map(|binding| &binding.value)
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} references unbound effect outcome id {}",
+                process.debug_name(),
+                outcome.as_u32()
+            ))
+        })?;
+    if value.ty() != ty {
+        return Err(Error::new(format!(
+            "effect outcome id {} has type {}, expected {}",
+            outcome.as_u32(),
+            value.ty(),
+            ty
+        )));
+    }
+    Ok(value.clone())
 }
 
 fn scalar_arithmetic_operator(

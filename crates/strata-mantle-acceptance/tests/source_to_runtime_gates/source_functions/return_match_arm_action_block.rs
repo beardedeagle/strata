@@ -324,8 +324,10 @@ fn deepen_first_nested_if(actions: &mut [ArtifactAction]) -> bool {
                 }
             }
             ArtifactAction::Spawn { .. }
+            | ArtifactAction::SpawnOutcome { .. }
             | ArtifactAction::Emit { .. }
-            | ArtifactAction::Send { .. } => {}
+            | ArtifactAction::Send { .. }
+            | ArtifactAction::SendOutcome { .. } => {}
         }
     }
     false

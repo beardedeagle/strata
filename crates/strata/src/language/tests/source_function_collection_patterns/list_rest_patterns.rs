@@ -447,7 +447,6 @@ fn rejects_source_function_list_rest_non_concrete_argument() {
     let source = r#"
 module list_rest_non_concrete_argument;
 
-record Unit;
 enum Phase {
     Ready,
     Done,

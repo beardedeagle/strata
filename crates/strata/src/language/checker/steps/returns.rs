@@ -58,6 +58,21 @@ pub(super) fn step_source_bindings<'a>(
     bindings
 }
 
+fn step_source_bindings_with_effect_outcomes<'a>(
+    input: &StepReturnInput<'a>,
+) -> Vec<SourceValueBinding<'a>> {
+    let mut bindings = step_source_bindings(input.payload_bindings, input.state_payload_bindings);
+    for statement in &input.body.statements {
+        let (name, ty) = match statement {
+            Statement::LetSendOutcome { name, ty, .. }
+            | Statement::LetSpawnOutcome { name, ty, .. } => (name, ty),
+            _ => continue,
+        };
+        bindings.push(SourceValueBinding { name, ty });
+    }
+    bindings
+}
+
 pub(super) fn resolve_step_return(
     module: &Module,
     process: &Process,
@@ -110,8 +125,7 @@ pub(super) fn preadmit_step_return_state_value(
         return preadmit_step_return_state_value(context, &else_input);
     }
 
-    let source_bindings =
-        step_source_bindings(input.payload_bindings, input.state_payload_bindings);
+    let source_bindings = step_source_bindings_with_effect_outcomes(input);
     let module = context.module;
     let process = context.process;
     let semantic_index = context.semantic_index;
@@ -130,6 +144,9 @@ pub(super) fn preadmit_step_return_state_value(
         &source_bindings,
         input,
     )?;
+    if step_state_arg_uses_effect_outcome(input, &resolved.state_arg) {
+        return Ok(());
+    }
     let state_arg = resolve_source_value_expr(
         &function_scope,
         &process.state_type,
@@ -213,6 +230,10 @@ fn preadmit_step_state_arg(
         .state_payload_bindings
         .iter()
         .any(|binding| source_value_uses_binding(state_arg, &binding.name));
+    let uses_effect_outcome = step_state_arg_uses_effect_outcome(input, state_arg);
+    if uses_effect_outcome {
+        return Ok(());
+    }
     if !uses_payload && !uses_state {
         context.state_space.resolve_state_value(
             context.semantic_index,
@@ -233,6 +254,19 @@ fn preadmit_step_state_arg(
     }
 
     preadmit_step_state_arg_with_payload_bindings(context, input, state_arg)
+}
+
+fn step_state_arg_uses_effect_outcome(input: &StepReturnInput<'_>, state_arg: &ValueExpr) -> bool {
+    input
+        .body
+        .statements
+        .iter()
+        .any(|statement| match statement {
+            Statement::LetSendOutcome { name, .. } | Statement::LetSpawnOutcome { name, .. } => {
+                source_value_uses_binding(state_arg, name)
+            }
+            _ => false,
+        })
 }
 
 fn preadmit_step_state_arg_with_payload_bindings(

@@ -53,20 +53,25 @@ pub(super) fn resolve_binding_source_function_call(
 pub(super) fn resolve_pattern_source_function_call(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
-    functions: &[&Function],
+    functions: SourceFunctionGroup<'_, '_>,
     arg: &ValueExpr,
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
-    let enum_type =
-        infer_pattern_function_enum_type(scope.module, scope.semantic_index, "source", functions)?;
+    let first = functions
+        .first()
+        .ok_or_else(|| Error::new("pattern function group is empty"))?;
+    let enum_type = infer_pattern_function_enum_type(
+        scope.module,
+        scope.semantic_index,
+        "source",
+        functions.iter(),
+        Some(&first.name),
+    )?;
     let resolved_arg = resolve_source_value_expr(scope, &enum_type, arg, bindings, depth + 1)?;
     check_source_value_type(scope, &enum_type, &resolved_arg, bindings)?;
-    let (variant_name, selected_payload) = concrete_source_enum_value(
-        functions[0].name.as_str(),
-        "pattern dispatch",
-        &resolved_arg,
-    )?;
+    let (variant_name, selected_payload) =
+        concrete_source_enum_value(first.name.as_str(), "pattern dispatch", &resolved_arg)?;
     let enum_decl = scope.semantic_index.enum_decl(scope.module, &enum_type)?;
     let selected_variant =
         scope
@@ -74,7 +79,7 @@ pub(super) fn resolve_pattern_source_function_call(
             .enum_variant_index(scope.module, &enum_type, variant_name)?;
 
     let mut wildcard = None;
-    for function in functions {
+    for function in functions.iter() {
         let FunctionParam::Pattern(pattern) = &function.params[0] else {
             return Err(Error::new(format!(
                 "function {} cannot mix binding and pattern clauses",
@@ -159,7 +164,7 @@ pub(super) fn resolve_pattern_source_function_call(
 
     Err(Error::new(format!(
         "function {} has no pattern for variant {} of enum {}",
-        functions[0].name, variant_name, enum_decl.name
+        first.name, variant_name, enum_decl.name
     )))
 }
 
@@ -369,7 +374,7 @@ pub(super) fn resolve_record_pattern_source_function_call(
 pub(super) fn resolve_collection_pattern_source_function_call(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
-    functions: &[&Function],
+    functions: SourceFunctionGroup<'_, '_>,
     arg: &ValueExpr,
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
@@ -382,7 +387,7 @@ pub(super) fn resolve_collection_pattern_source_function_call(
         resolve_source_value_expr(scope, &collection_type, arg, bindings, depth + 1)?;
     check_source_value_type(scope, &collection_type, &resolved_arg, bindings)?;
 
-    for function in functions {
+    for function in functions.iter() {
         let FunctionParam::Pattern(pattern) = &function.params[0] else {
             return Err(Error::new(format!(
                 "function {} cannot mix binding and collection pattern clauses",

@@ -3,18 +3,26 @@ use std::collections::{BTreeMap, VecDeque};
 use mantle_artifact::ArtifactValue;
 
 use super::super::super::checked::{
-    CheckedAction, CheckedLoopElementId, CheckedMessageId, CheckedPayloadValue, CheckedProcess,
-    CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedValueTemplate,
+    CheckedAction, CheckedLoopElementId, CheckedMessageId, CheckedNextState, CheckedPayloadValue,
+    CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId,
+    CheckedStepResult, CheckedValueTemplate,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
 use super::process_refs::{process_by_id, process_label, process_ref_target};
-use super::templates::resolve_checked_next_state;
 
+mod conditions;
+mod effect_outcomes;
 mod templates;
+mod transitions;
 
+use conditions::evaluate_checked_bool_condition;
+use effect_outcomes::{
+    StaticEffectOutcomeBinding, bind_static_effect_outcome, ok_process_ref_outcome,
+    ok_unit_outcome, send_error_outcome, spawn_error_outcome, static_original_message,
+};
 use templates::{checked_payload_value, evaluate_checked_runtime_template};
+use transitions::transition_for_message;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StaticLoopElementBinding {
@@ -50,6 +58,7 @@ struct StaticActionState<'a> {
     instances: &'a mut Vec<StaticProcessInstance>,
     next_pid: &'a mut StaticProcessId,
     local_process_refs: &'a mut BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    effect_outcomes: &'a mut Vec<StaticEffectOutcomeBinding>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,13 +257,22 @@ pub(super) fn validate_static_runtime_order(
             current_state,
             envelope.payload.as_ref(),
         )?;
-        let final_state = resolve_checked_next_state(
-            process,
-            current_state,
-            transition.next_state_ref(),
-            envelope.payload.as_ref(),
-        )?;
         let mut local_process_refs = BTreeMap::new();
+        let mut effect_outcomes = Vec::new();
+        let next_state_depends_on_outcome =
+            checked_next_state_depends_on_effect_outcome(transition.next_state_ref());
+        let pre_action_state = if next_state_depends_on_outcome {
+            None
+        } else {
+            Some(resolve_checked_runtime_next_state(
+                process,
+                current_state,
+                transition.next_state_ref(),
+                envelope.payload.as_ref(),
+                &local_process_refs,
+                &effect_outcomes,
+            )?)
+        };
 
         {
             let action_context = StaticActionContext {
@@ -268,12 +286,24 @@ pub(super) fn validate_static_runtime_order(
                 instances: &mut instances,
                 next_pid: &mut next_pid,
                 local_process_refs: &mut local_process_refs,
+                effect_outcomes: &mut effect_outcomes,
             };
             for action in transition.actions() {
                 execute_static_action(action_context, &mut action_state, action)?;
             }
         }
 
+        let final_state = match pre_action_state {
+            Some(state) => state,
+            None => resolve_checked_runtime_next_state(
+                process,
+                current_state,
+                transition.next_state_ref(),
+                envelope.payload.as_ref(),
+                &local_process_refs,
+                &effect_outcomes,
+            )?,
+        };
         instances[process_index].state = final_state;
         match transition.step_result() {
             CheckedStepResult::Continue => {}
@@ -299,6 +329,24 @@ pub(super) fn validate_static_runtime_order(
     }
 
     Ok(())
+}
+
+fn checked_next_state_depends_on_effect_outcome(next_state: &CheckedNextState) -> bool {
+    match next_state {
+        CheckedNextState::Current | CheckedNextState::Value(_) => false,
+        CheckedNextState::Template(template) => {
+            super::templates::checked_template_depends_on_effect_outcome(template)
+        }
+        CheckedNextState::IfElse {
+            condition,
+            then_state,
+            else_state,
+        } => {
+            super::templates::checked_template_depends_on_effect_outcome(condition)
+                || checked_next_state_depends_on_effect_outcome(then_state)
+                || checked_next_state_depends_on_effect_outcome(else_state)
+        }
+    }
 }
 
 fn execute_static_action(
@@ -332,7 +380,52 @@ fn execute_static_action(
             });
             Ok(())
         }
+        CheckedAction::SpawnOutcome {
+            outcome,
+            outcome_ty,
+            target,
+        } => {
+            let target_process = process_by_id(context.processes, *target)?;
+            if state.instances.len() >= STATIC_RUNTIME_PROCESS_LIMIT {
+                return bind_static_effect_outcome(
+                    context.process,
+                    state,
+                    *outcome,
+                    outcome_ty,
+                    spawn_error_outcome(outcome_ty, "Exhausted")?,
+                );
+            }
+            let spawned_pid = *state.next_pid;
+            *state.next_pid = state.next_pid.checked_next()?;
+            state.instances.push(StaticProcessInstance {
+                pid: spawned_pid,
+                process_id: *target,
+                state: target_process.init_state(),
+                status: StaticProcessStatus::Running,
+                mailbox: VecDeque::new(),
+            });
+            bind_static_effect_outcome(
+                context.process,
+                state,
+                *outcome,
+                outcome_ty,
+                ok_process_ref_outcome(outcome_ty, u64::from(spawned_pid.as_u32()))?,
+            )
+        }
         CheckedAction::Send {
+            target,
+            message,
+            payload,
+        } => execute_static_send(
+            context,
+            state,
+            target,
+            *message,
+            payload.as_ref().map(Box::as_ref),
+        ),
+        CheckedAction::SendOutcome {
+            outcome,
+            outcome_ty,
             target,
             message,
             payload,
@@ -362,22 +455,7 @@ fn execute_static_action(
                 )));
             }
 
-            if state.instances[target_index].status != StaticProcessStatus::Running {
-                return Err(Error::new(format!(
-                    "process {} sends to {}, which is not running",
-                    context.process.debug_name(),
-                    target_process.debug_name()
-                )));
-            }
-            if state.instances[target_index].mailbox.len() >= target_process.mailbox_bound() {
-                return Err(Error::new(format!(
-                    "process {} sends to {}, but its mailbox would exceed bound {}",
-                    context.process.debug_name(),
-                    target_process.debug_name(),
-                    target_process.mailbox_bound()
-                )));
-            }
-            let payload = match payload {
+            let prepared_payload = match payload {
                 Some(payload) => Some(evaluate_checked_runtime_template(
                     payload,
                     context.envelope.payload.as_ref(),
@@ -385,13 +463,40 @@ fn execute_static_action(
                     context.process,
                     state.local_process_refs,
                     context.loop_elements,
+                    state.effect_outcomes,
                 )?),
                 None => None,
             };
+            let failure_variant = match state.instances[target_index].status {
+                StaticProcessStatus::Running => None,
+                StaticProcessStatus::Stopped => Some("Stopped"),
+                StaticProcessStatus::Failed => Some("Crashed"),
+            }
+            .or_else(|| {
+                (state.instances[target_index].mailbox.len() >= target_process.mailbox_bound())
+                    .then_some("Full")
+            });
+            if let Some(error_variant) = failure_variant {
+                let original_message =
+                    static_original_message(target_process, *message, prepared_payload.as_ref())?;
+                return bind_static_effect_outcome(
+                    context.process,
+                    state,
+                    *outcome,
+                    outcome_ty,
+                    send_error_outcome(outcome_ty, error_variant, original_message)?,
+                );
+            }
             state.instances[target_index]
                 .mailbox
-                .push_back(StaticMessageEnvelope::new(*message, payload));
-            Ok(())
+                .push_back(StaticMessageEnvelope::new(*message, prepared_payload));
+            bind_static_effect_outcome(
+                context.process,
+                state,
+                *outcome,
+                outcome_ty,
+                ok_unit_outcome(outcome_ty)?,
+            )
         }
         CheckedAction::IfElse {
             condition,
@@ -405,6 +510,7 @@ fn execute_static_action(
                 context.process,
                 state.local_process_refs,
                 context.loop_elements,
+                state.effect_outcomes,
             )? {
                 then_actions
             } else {
@@ -428,6 +534,7 @@ fn execute_static_action(
                 context.process,
                 state.local_process_refs,
                 context.loop_elements,
+                state.effect_outcomes,
             )?;
             let collection_label = collection.label();
             let collection_value = checked_payload_value(&collection)?;
@@ -464,6 +571,71 @@ fn execute_static_action(
     }
 }
 
+fn execute_static_send(
+    context: StaticActionContext<'_>,
+    state: &mut StaticActionState<'_>,
+    target: &CheckedSendTarget,
+    message: CheckedMessageId,
+    payload: Option<&CheckedValueTemplate>,
+) -> Result<()> {
+    let target_pid = resolve_static_send_target(
+        context.process,
+        state.local_process_refs,
+        target,
+        context.envelope.payload.as_ref(),
+    )
+    .map_err(|err| Error::new(format!("process {} {err}", context.process.debug_name())))?;
+    let target_index =
+        static_process_index_for_pid(state.instances, target_pid).map_err(|err| {
+            Error::new(format!(
+                "process {} sends through process reference to {err}",
+                context.process.debug_name()
+            ))
+        })?;
+    let target_process =
+        process_by_id(context.processes, state.instances[target_index].process_id)?;
+    if message.index() >= target_process.message_cases().len() {
+        return Err(Error::new(format!(
+            "process {} sends message id {} not accepted by {}",
+            context.process.debug_name(),
+            message.as_u32(),
+            target_process.debug_name()
+        )));
+    }
+
+    if state.instances[target_index].status != StaticProcessStatus::Running {
+        return Err(Error::new(format!(
+            "process {} sends to {}, which is not running",
+            context.process.debug_name(),
+            target_process.debug_name()
+        )));
+    }
+    if state.instances[target_index].mailbox.len() >= target_process.mailbox_bound() {
+        return Err(Error::new(format!(
+            "process {} sends to {}, but its mailbox would exceed bound {}",
+            context.process.debug_name(),
+            target_process.debug_name(),
+            target_process.mailbox_bound()
+        )));
+    }
+    let payload = match payload {
+        Some(payload) => Some(evaluate_checked_runtime_template(
+            payload,
+            context.envelope.payload.as_ref(),
+            context.current_state_payload,
+            context.process,
+            state.local_process_refs,
+            context.loop_elements,
+            state.effect_outcomes,
+        )?),
+        None => None,
+    };
+    state.instances[target_index]
+        .mailbox
+        .push_back(StaticMessageEnvelope::new(message, payload));
+    Ok(())
+}
+
 fn execute_static_action_list(
     context: StaticActionContext<'_>,
     state: &mut StaticActionState<'_>,
@@ -475,120 +647,91 @@ fn execute_static_action_list(
     Ok(())
 }
 
-fn evaluate_checked_bool_condition(
-    condition: &CheckedValueTemplate,
+fn resolve_checked_runtime_next_state(
+    process: &CheckedProcess,
+    current_state: CheckedStateId,
+    next_state: &CheckedNextState,
+    received_payload: Option<&CheckedPayloadValue>,
+    process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    effect_outcomes: &[StaticEffectOutcomeBinding],
+) -> Result<CheckedStateId> {
+    let current_state_payload = process
+        .state_values()
+        .get(current_state.index())
+        .and_then(|state| state.payload());
+    match next_state {
+        CheckedNextState::Current => Ok(current_state),
+        CheckedNextState::Value(state) => Ok(*state),
+        CheckedNextState::Template(template) => resolve_checked_runtime_template_state(
+            process,
+            template,
+            received_payload,
+            current_state_payload,
+            process_refs,
+            effect_outcomes,
+        ),
+        CheckedNextState::IfElse {
+            condition,
+            then_state,
+            else_state,
+        } => {
+            let selected_state = match evaluate_checked_bool_condition(
+                condition,
+                received_payload,
+                current_state_payload,
+                process,
+                process_refs,
+                &[],
+                effect_outcomes,
+            )? {
+                true => then_state,
+                false => else_state,
+            };
+            resolve_checked_runtime_next_state(
+                process,
+                current_state,
+                selected_state,
+                received_payload,
+                process_refs,
+                effect_outcomes,
+            )
+        }
+    }
+}
+
+fn resolve_checked_runtime_template_state(
+    process: &CheckedProcess,
+    template: &CheckedValueTemplate,
     received_payload: Option<&CheckedPayloadValue>,
     current_state_payload: Option<&CheckedPayloadValue>,
-    process: &CheckedProcess,
     process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
-    loop_elements: &[StaticLoopElementBinding],
-) -> Result<bool> {
+    effect_outcomes: &[StaticEffectOutcomeBinding],
+) -> Result<CheckedStateId> {
     let value = evaluate_checked_runtime_template(
-        condition,
+        template,
         received_payload,
         current_state_payload,
         process,
         process_refs,
-        loop_elements,
+        &[],
+        effect_outcomes,
     )?;
-    let value = value.value().ok_or_else(|| {
-        Error::new(format!(
-            "process {} if condition produced a process reference payload",
-            process.debug_name()
-        ))
-    })?;
-    let ArtifactValue::Atom(label) = value else {
-        return Err(Error::new(format!(
-            "process {} if condition produced non-Bool value {}",
-            process.debug_name(),
-            value.label()
-        )));
-    };
-    match label.as_str() {
-        "True" => Ok(true),
-        "False" => Ok(false),
-        _ => Err(Error::new(format!(
-            "process {} if condition produced invalid Bool value {}",
-            process.debug_name(),
-            label
-        ))),
-    }
+    let state_index = process
+        .state_values()
+        .iter()
+        .position(|state| state.has_same_identity_as_payload(&value))
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process {} next_state template produced value {} not admitted by state table",
+                process.debug_name(),
+                value.label()
+            ))
+        })?;
+    CheckedStateId::from_index(state_index)
 }
 
 fn next_static_runnable(instances: &[StaticProcessInstance]) -> Option<usize> {
     instances.iter().position(|instance| {
         instance.status == StaticProcessStatus::Running && !instance.mailbox.is_empty()
     })
-}
-
-fn transition_for_message<'a>(
-    process: &'a CheckedProcess,
-    message: CheckedMessageId,
-    current_state: CheckedStateId,
-    payload: Option<&CheckedPayloadValue>,
-) -> Result<&'a CheckedTransition> {
-    let message_is_state_specific = process
-        .transitions()
-        .iter()
-        .any(|transition| transition.message() == message && transition.current_state().is_some());
-    let expected_state = message_is_state_specific.then_some(current_state);
-    let base_has_payload_guard = process.transitions().iter().any(|transition| {
-        transition.message() == message
-            && transition.current_state() == expected_state
-            && transition.payload_guard().is_some()
-    });
-
-    if base_has_payload_guard {
-        let payload = payload.ok_or_else(|| {
-            Error::new(format!(
-                "process {} has payload-specific transition(s) for message id {}, but the queued message has no payload",
-                process.debug_name(),
-                message.as_u32()
-            ))
-        })?;
-        return process
-            .transitions()
-            .iter()
-            .find(|transition| {
-                transition.message() == message
-                    && transition.current_state() == expected_state
-                    && transition
-                        .payload_guard()
-                        .is_some_and(|guard| payload_guard_matches(guard, payload))
-            })
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "process {} has no transition for message id {} current_state id {} payload {}",
-                    process.debug_name(),
-                    message.as_u32(),
-                    current_state.as_u32(),
-                    payload.label()
-                ))
-            });
-    }
-
-    process
-        .transitions()
-        .iter()
-        .find(|transition| {
-            transition.message() == message
-                && transition.current_state() == expected_state
-                && transition.payload_guard().is_none()
-        })
-        .ok_or_else(|| {
-            Error::new(format!(
-                "process {} has no transition for message id {} current_state id {}",
-                process.debug_name(),
-                message.as_u32(),
-                current_state.as_u32()
-            ))
-        })
-}
-
-fn payload_guard_matches(guard: &CheckedPayloadValue, payload: &CheckedPayloadValue) -> bool {
-    guard.ty() == payload.ty()
-        && guard
-            .value()
-            .zip(payload.value())
-            .is_some_and(|(guard_value, payload_value)| guard_value == payload_value)
 }

@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+pub(in crate::program) use actions::ActionAdmissionContext;
 pub(crate) use actions::{LoadedAction, LoadedLoopElement, LoadedSendTarget};
 use admission::{
     validate_loaded_artifact_identity, validate_loaded_ident_field, validate_loaded_output_text,
@@ -25,14 +26,14 @@ mod values;
 use mantle_artifact::{
     ArtifactAction, ArtifactEnumVariant, ArtifactMessageVariant, ArtifactProcess,
     ArtifactProcessRef, ArtifactScalarType, ArtifactSendTarget, ArtifactTransition, ArtifactType,
-    ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape, EnumVariantId, Error, LoopElementId,
-    MAX_ACTIONS_PER_PROCESS, MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_ENUM_VARIANTS_PER_TYPE,
-    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH,
-    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId, validate_message_label,
-    validate_state_value_identity_label,
+    ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape, EffectOutcomeId, EnumVariantId, Error,
+    LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_EFFECT_OUTCOMES_PER_TRANSITION,
+    MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
+    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
+    NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
+    validate_message_label, validate_state_value_identity_label,
 };
 
 #[derive(Debug, Clone)]
@@ -366,6 +367,7 @@ pub(crate) struct LoadedProcess {
     pub(crate) debug_name: String,
     pub(crate) state_type: TypeId,
     pub(crate) state_values: Vec<LoadedStateValue>,
+    pub(crate) message_type: TypeId,
     pub(crate) message_variants: Vec<LoadedMessageVariant>,
     pub(crate) process_refs: Vec<LoadedProcessRef>,
     pub(crate) mailbox_bound: usize,

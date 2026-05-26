@@ -1,8 +1,12 @@
 use super::value_template::ValueTemplatePayloadValidation;
 use super::*;
-use crate::{MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_NEXT_STATE_IF_ELSE_DEPTH};
+use crate::{
+    MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_EFFECT_OUTCOMES_PER_TRANSITION,
+    MAX_NEXT_STATE_IF_ELSE_DEPTH,
+};
 
 mod actions;
+mod effect_outcomes;
 mod templates;
 
 use templates::{
@@ -231,6 +235,53 @@ impl ArtifactProcess {
         }
         validate_count("action_count", action_count, 0, MAX_ACTIONS_PER_PROCESS)?;
         self.validate_transition_coverage(&transition_keys)?;
+        self.validate_message_type_shape(artifact)?;
+        Ok(())
+    }
+
+    fn validate_message_type_shape(&self, artifact: &MantleArtifact) -> Result<()> {
+        let message_type = artifact.type_entry(self.message_type)?;
+        let ArtifactValueShape::Enum { variants } = message_type.value_shape()? else {
+            return Err(Error::new(format!(
+                "process {} message_type id {} must be an enum aligned with message variants",
+                self.debug_name,
+                self.message_type.as_u32()
+            )));
+        };
+        if variants.len() != self.message_variants.len() {
+            return Err(Error::new(format!(
+                "process {} message_type id {} declares {} variant(s), expected {} message variant(s)",
+                self.debug_name,
+                self.message_type.as_u32(),
+                variants.len(),
+                self.message_variants.len()
+            )));
+        }
+        for (index, (message, variant)) in self
+            .message_variants
+            .iter()
+            .zip(variants.iter())
+            .enumerate()
+        {
+            if variant.label != message.label {
+                return Err(Error::new(format!(
+                    "process {} message_type id {} variant {index} label {} does not match message label {}",
+                    self.debug_name,
+                    self.message_type.as_u32(),
+                    variant.label,
+                    message.label
+                )));
+            }
+            if variant.payload_type != message.payload_type {
+                return Err(Error::new(format!(
+                    "process {} message_type id {} variant {index} payload type {:?}, expected {:?}",
+                    self.debug_name,
+                    self.message_type.as_u32(),
+                    variant.payload_type.map(TypeId::as_u32),
+                    message.payload_type.map(TypeId::as_u32)
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -356,7 +407,7 @@ impl ArtifactProcess {
         transition: &ArtifactTransition,
         template: &ArtifactValueTemplate,
     ) -> Result<()> {
-        if template.depends_on_received_payload() {
+        if template.depends_on_received_payload() || template.depends_on_effect_outcome() {
             return Ok(());
         }
         let current_state_payload = transition
@@ -551,12 +602,14 @@ impl ArtifactProcess {
             for action in &transition.actions {
                 self.validate_action_reference(
                     artifact,
+                    process_id,
                     transition,
                     &mut spawned_refs,
                     action,
                     ActionReferenceScope::root(),
                 )?;
             }
+            self.validate_effect_outcome_templates(transition)?;
             for declared_effect in &declared_effects {
                 if !used_effects.contains(declared_effect) {
                     return Err(Error::new(format!(

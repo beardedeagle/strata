@@ -135,8 +135,8 @@ pub(super) fn source_scalar_expr_type(
                 validate_source_scalar_operand_type(scope, expected_type)?;
                 return Ok(expected_type.clone());
             }
-            let Some(function) = source_function_group_option(scope, name)?
-                .and_then(|functions| functions.first().copied())
+            let Some(function) =
+                source_function_group_option(scope, name)?.and_then(|functions| functions.first())
             else {
                 return Err(Error::new(format!("function {name} is not declared")));
             };

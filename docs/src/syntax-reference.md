@@ -419,7 +419,9 @@ source_function_statement =
 runtime_statement =
     emit_statement
   | process_ref_statement
+  | spawn_outcome_statement
   | send_statement
+  | send_outcome_statement
   | if_statement
   | for_statement
 
@@ -435,8 +437,16 @@ process_ref_statement =
 process_ref_type =
     "ProcessRef" "<" ident ">"
 
+spawn_outcome_statement =
+    "let" ident ":" "Result" "<" process_ref_type "," "SpawnError" "<" "Unit" ">" ">"
+    "=" "spawn" ident ";"
+
 send_statement =
     "send" ident ident payload_arg? ";"
+
+send_outcome_statement =
+    "let" ident ":" "Result" "<" "Unit" "," "SendError" "<" type_ref ">" ">"
+    "=" "send" ident ident payload_arg? ";"
 
 payload_arg =
     "(" value_expr ")"
@@ -489,10 +499,23 @@ The identifier in `process_ref_statement` names an immutable process reference
 value. The identifier after `spawn` is the process definition name. The
 `ProcessRef<T>` annotation must name the same process definition.
 
+`spawn_outcome_statement` binds
+`Result<ProcessRef<TargetProcess>,SpawnError<Unit>>` as an immutable step-local
+value. The `Ok` branch carries the committed process reference; it is authority
+data and is not valid source state. A top-level outcome binding is visible only
+to later statements and return values.
+
 The first identifier in `send` is a local process reference or a received
 payload binding whose type is `ProcessRef<T>`. The second identifier is the
 message variant to send. Payload variants require one payload value. Unit
 variants reject payload values.
+
+`send_outcome_statement` binds a typed local send result. The annotation must be
+`Result<Unit,SendError<TargetMessageType>>` so pre-acceptance failure variants
+can preserve the original message value. Top-level send and spawn outcome
+bindings must precede ordinary non-prefix effect statements in the same step
+body. A top-level process-reference `spawn` can remain in that pre-state prefix
+so later outcome sends can target the spawned process reference.
 
 The `for` collection source is an identifier binding, not an arbitrary
 expression. Checking requires it to be a runtime-bound `List<T,N>` value. The
@@ -520,7 +543,9 @@ The built-in generic types accepted by checking are
 `ProcessRef<ProcessName>` in spawn bindings, message payload declarations, and
 payload-binding step patterns. `List<T,N>` and `Map<K,V,N>` are accepted source
 value types when their element, key, and value arguments are source value types
-and `N` is a numeric capacity.
+and `N` is a numeric capacity. `Unit`, `Option<T>`, `Result<T,E>`,
+`SendError<M>`, and `SpawnError<A>` are built-in value shapes for explicit
+domain failure and typed effect outcomes.
 
 ## Values
 
@@ -701,5 +726,7 @@ ident =
 `mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`, `security`,
 `send`, `spawn`, `type`, and `var` are reserved everywhere identifiers are
 accepted. The single `_` token is reserved for wildcard patterns.
-`ProcResult`, `ProcessRef`, `List`, and `Map` are reserved type names because
-they name built-in transition, process-reference, and collection types.
+`ProcResult`, `ProcessRef`, `List`, `Map`, `Unit`, `Option`, `Result`,
+`SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and
+`I64` are reserved type names because they name built-in transition,
+process-reference, collection, effect outcome, and scalar value types.

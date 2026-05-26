@@ -20,6 +20,7 @@ fn validate_rejects_payload_bearing_entry_message() {
     let mut artifact = valid_artifact();
     artifact.processes[0].message_variants[0] =
         ArtifactMessageVariant::payload("Start", MAIN_PAYLOAD);
+    align_process_message_type(&mut artifact, 0);
 
     let err = artifact
         .validate()
@@ -107,6 +108,7 @@ fn validate_rejects_if_else_next_state_condition_that_is_not_bool() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants[0] =
         ArtifactMessageVariant::payload("Ping", WORKER_STATE);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[1].transitions[0].next_state = NextState::IfElse {
         condition: ArtifactValueTemplate::ReceivedPayload { ty: WORKER_STATE },
         then_state: Box::new(NextState::Value(StateId::new(1))),
@@ -202,6 +204,7 @@ fn validate_rejects_payload_dependent_map_template_key() {
     artifact.processes[1].state_type = job_map;
     artifact.processes[1].state_values = vec![state_value(job_map, "Map[Job=>Job]")];
     artifact.processes[1].message_variants[0] = ArtifactMessageVariant::payload("Ping", JOB);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[1].transitions[0].next_state =
         NextState::Template(ArtifactValueTemplate::Map {
             ty: job_map,

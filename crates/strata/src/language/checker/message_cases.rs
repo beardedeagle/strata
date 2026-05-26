@@ -71,22 +71,21 @@ impl MessageCaseTable {
                 collect_message_case_process_refs(process, process_id, semantic_index)
             })
             .collect::<Result<Vec<_>>>()?;
-        let discovery_clauses_by_process = module
-            .processes
-            .iter()
-            .enumerate()
-            .map(|(process_index, process)| {
-                let process_id = CheckedProcessId::from_index(process_index)?;
-                process
-                    .steps
-                    .iter()
-                    .map(|step| {
-                        step_discovery_clauses(module, process, process_id, semantic_index, step)
-                    })
-                    .collect::<Result<Vec<_>>>()
-                    .map(|clauses| clauses.into_iter().flatten().collect::<Vec<_>>())
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut discovery_clauses_by_process = Vec::with_capacity(module.processes.len());
+        for (process_index, process) in module.processes.iter().enumerate() {
+            let process_id = CheckedProcessId::from_index(process_index)?;
+            let mut process_clauses = Vec::new();
+            for step in &process.steps {
+                process_clauses.extend(step_discovery_clauses(
+                    module,
+                    process,
+                    process_id,
+                    semantic_index,
+                    step,
+                )?);
+            }
+            discovery_clauses_by_process.push(process_clauses);
+        }
         let concrete_state_payload_domains = module
             .processes
             .iter()
@@ -260,8 +259,7 @@ struct MessageCaseBuilder<'a> {
     semantic_index: &'a SemanticIndex,
     process: &'a Process,
     process_id: CheckedProcessId,
-    payload_cases:
-        BTreeMap<CheckedMessageVariantId, BTreeMap<PayloadDomainKey, CheckedPayloadValue>>,
+    payload_cases: BTreeMap<CheckedMessageVariantId, Vec<(PayloadDomainKey, CheckedPayloadValue)>>,
 }
 
 impl<'a> MessageCaseBuilder<'a> {
@@ -276,7 +274,7 @@ impl<'a> MessageCaseBuilder<'a> {
         for (variant_index, variant) in msg_enum.variants.iter().enumerate() {
             let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
             if variant.payload_type.is_some() {
-                payload_cases.insert(variant_id, BTreeMap::new());
+                payload_cases.insert(variant_id, Vec::new());
             }
         }
         Ok(Self {
@@ -363,13 +361,15 @@ impl<'a> MessageCaseBuilder<'a> {
         variant_id: CheckedMessageVariantId,
         payload: CheckedPayloadValue,
     ) -> Result<bool> {
-        let payloads = self.payload_cases.entry(variant_id).or_default();
         let key = PayloadDomainKey::from_payload(&payload)?;
-        if payloads.contains_key(&key) {
-            return Ok(false);
+        let payloads = self.payload_cases.entry(variant_id).or_default();
+        match payloads.binary_search_by(|(existing, _)| existing.cmp(&key)) {
+            Ok(_) => Ok(false),
+            Err(index) => {
+                payloads.insert(index, (key, payload));
+                Ok(true)
+            }
         }
-        payloads.insert(key, payload);
-        Ok(true)
     }
 
     fn current_cases(&self) -> Result<Vec<DiscoveredMessageCase>> {
@@ -381,7 +381,7 @@ impl<'a> MessageCaseBuilder<'a> {
             let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
             if variant.payload_type.is_some() {
                 if let Some(payloads) = self.payload_cases.get(&variant_id) {
-                    for payload in payloads.values() {
+                    for (_, payload) in payloads {
                         cases.push(DiscoveredMessageCase::new(
                             variant_id,
                             Some(payload.clone()),
@@ -434,7 +434,10 @@ impl<'a> MessageCaseBuilder<'a> {
             }
             let variant_id = CheckedMessageVariantId::from_index(variant_index)?;
             if let Some(payloads) = self.payload_cases.get(&variant_id) {
-                payloads_by_variant[variant_index] = payloads.values().cloned().collect();
+                payloads_by_variant[variant_index] = payloads
+                    .iter()
+                    .map(|(_, payload)| payload.clone())
+                    .collect();
             }
         }
         Ok(payloads_by_variant)
@@ -620,14 +623,18 @@ fn state_payload_discovery_values(
     types: &mut CheckedTypeInterner<'_>,
 ) -> Result<Vec<CheckedPayloadValue>> {
     let checked_ty = types.intern(&binding.payload_ty)?;
-    let mut payloads: BTreeMap<PayloadDomainKey, CheckedPayloadValue> = BTreeMap::new();
+    let mut payloads = Vec::new();
     if let Some(domain) = concrete_state_payloads
         .iter()
         .find(|domain| semantic_index.same_type(&domain.ty, &binding.payload_ty))
     {
         for value in &domain.values {
             let payload = CheckedPayloadValue::new(checked_ty.clone(), value.clone());
-            payloads.insert(PayloadDomainKey::from_payload(&payload)?, payload);
+            insert_payload_domain_value(
+                &mut payloads,
+                PayloadDomainKey::from_payload(&payload)?,
+                payload,
+            );
         }
     }
     for case in sender_cases {
@@ -635,10 +642,27 @@ fn state_payload_discovery_values(
             continue;
         };
         if payload.ty() == &checked_ty && payload.process_ref_payload().is_none() {
-            payloads.insert(PayloadDomainKey::from_payload(payload)?, payload.clone());
+            insert_payload_domain_value(
+                &mut payloads,
+                PayloadDomainKey::from_payload(payload)?,
+                payload.clone(),
+            );
         }
     }
-    Ok(payloads.into_values().collect())
+    payloads.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(payloads.into_iter().map(|(_, payload)| payload).collect())
+}
+
+fn insert_payload_domain_value(
+    payloads: &mut Vec<(PayloadDomainKey, CheckedPayloadValue)>,
+    key: PayloadDomainKey,
+    payload: CheckedPayloadValue,
+) {
+    if let Some((_, existing)) = payloads.iter_mut().find(|(existing, _)| existing == &key) {
+        *existing = payload;
+        return;
+    }
+    payloads.push((key, payload));
 }
 
 fn value_bindings_from_discovery(bindings: &[DiscoveryValueBinding]) -> Vec<ValueBinding<'_>> {

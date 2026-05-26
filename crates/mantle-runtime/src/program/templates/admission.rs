@@ -10,7 +10,9 @@ pub(in crate::program) struct LoadedTemplateAdmission<'a> {
     pub(in crate::program) received_payload_type: Option<TypeId>,
     pub(in crate::program) current_state_payload_type: Option<TypeId>,
     pub(in crate::program) allow_direct_process_ref: bool,
+    pub(in crate::program) allow_process_ref_effect_outcome: bool,
     pub(in crate::program) loop_elements: &'a [LoadedLoopElement],
+    pub(in crate::program) effect_outcomes: &'a [(EffectOutcomeId, TypeId)],
     pub(in crate::program) program: &'a LoadedProgram,
     pub(in crate::program) process: &'a LoadedProcess,
     pub(in crate::program) spawned_refs: &'a [bool],
@@ -23,6 +25,29 @@ impl LoadedTemplateAdmission<'_> {
         template: &LoadedValueTemplate,
     ) -> Result<()> {
         self.validate_with_depth(field, template, 0)
+    }
+
+    fn nested(&self) -> Self {
+        Self {
+            expected_type: None,
+            allow_direct_process_ref: false,
+            allow_process_ref_effect_outcome: false,
+            ..*self
+        }
+    }
+
+    fn with_expected_type(self, expected_type: Option<TypeId>) -> Self {
+        Self {
+            expected_type,
+            ..self
+        }
+    }
+
+    fn with_process_ref_effect_outcome(self, allowed: bool) -> Self {
+        Self {
+            allow_process_ref_effect_outcome: allowed,
+            ..self
+        }
     }
 
     fn validate_with_depth(
@@ -62,11 +87,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_enum_payload_projection(field, value.result_type(), *variant, *ty)?;
-                let nested = Self {
-                    expected_type: None,
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested();
                 nested.validate_with_depth(&format!("{field}.value"), value, depth + 1)
             }
             LoadedValueTemplate::RecordField {
@@ -84,11 +105,7 @@ impl LoadedTemplateAdmission<'_> {
                     field_name,
                     *ty,
                 )?;
-                let nested = Self {
-                    expected_type: None,
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested();
                 nested.validate_with_depth(&format!("{field}.record"), record, depth + 1)
             }
             LoadedValueTemplate::ListElement {
@@ -111,11 +128,7 @@ impl LoadedTemplateAdmission<'_> {
                         "{field}.index {index} is outside list length {len}"
                     )));
                 }
-                let nested = Self {
-                    expected_type: None,
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested();
                 nested.validate_with_depth(&format!("{field}.list"), list, depth + 1)
             }
             LoadedValueTemplate::ListPrefixElement {
@@ -129,11 +142,7 @@ impl LoadedTemplateAdmission<'_> {
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_list_element_projection(field, list.result_type(), *ty)?;
                 validate_list_prefix_projection(field, *index, *prefix_len)?;
-                let nested = Self {
-                    expected_type: None,
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested();
                 nested.validate_with_depth(&format!("{field}.list"), list, depth + 1)
             }
             LoadedValueTemplate::ListRest {
@@ -146,11 +155,7 @@ impl LoadedTemplateAdmission<'_> {
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_list_rest_projection(field, list.result_type(), *ty)?;
                 validate_list_rest_prefix_len(field, *prefix_len)?;
-                let nested = Self {
-                    expected_type: None,
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested();
                 nested.validate_with_depth(&format!("{field}.list"), list, depth + 1)
             }
             LoadedValueTemplate::MapValue {
@@ -165,11 +170,7 @@ impl LoadedTemplateAdmission<'_> {
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_map_value_projection(field, map.result_type(), key, keys, *ty)?;
                 validate_map_projection_keys(field, key, keys)?;
-                let nested = Self {
-                    expected_type: None,
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested();
                 nested.validate_with_depth(&format!("{field}.map"), map, depth + 1)
             }
             LoadedValueTemplate::MapRest {
@@ -182,11 +183,7 @@ impl LoadedTemplateAdmission<'_> {
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_map_rest_projection(field, map.result_type(), excluded_keys, *ty)?;
                 validate_map_rest_keys(field, excluded_keys)?;
-                let nested = Self {
-                    expected_type: None,
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested();
                 nested.validate_with_depth(&format!("{field}.map"), map, depth + 1)
             }
             LoadedValueTemplate::ProcessRef {
@@ -197,6 +194,14 @@ impl LoadedTemplateAdmission<'_> {
             LoadedValueTemplate::LoopElement { ty, element } => {
                 self.validate_loop_element(field, *ty, *element)
             }
+            LoadedValueTemplate::EffectOutcome { ty, outcome } => {
+                self.program
+                    .validate_value_type(&format!("{field}.type"), *ty)?;
+                if !self.allow_process_ref_effect_outcome {
+                    self.reject_type_containing_process_ref(field, *ty)?;
+                }
+                self.validate_effect_outcome(field, *ty, *outcome)
+            }
             LoadedValueTemplate::EnumVariant {
                 ty,
                 variant,
@@ -205,11 +210,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.program
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_enum_variant_payload(field, *ty, *variant, payload.result_type())?;
-                let nested = Self {
-                    expected_type: None,
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested();
                 nested.validate_with_depth(&format!("{field}.payload"), payload, depth + 1)
             }
             LoadedValueTemplate::Record { ty, fields } => {
@@ -237,21 +238,13 @@ impl LoadedTemplateAdmission<'_> {
                     .validate_value_type(&format!("{field}.type"), *ty)?;
                 let bool_ty = condition.result_type();
                 self.validate_bool_contract_type(&format!("{field}.condition.type"), bool_ty)?;
-                let condition_nested = Self {
-                    expected_type: Some(bool_ty),
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let condition_nested = self.nested().with_expected_type(Some(bool_ty));
                 condition_nested.validate_with_depth(
                     &format!("{field}.condition"),
                     condition,
                     depth + 1,
                 )?;
-                let branch_nested = Self {
-                    expected_type: Some(*ty),
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let branch_nested = self.nested().with_expected_type(Some(*ty));
                 branch_nested.validate_with_depth(
                     &format!("{field}.then"),
                     then_value,
@@ -267,14 +260,16 @@ impl LoadedTemplateAdmission<'_> {
                 ..
             } => {
                 self.validate_bool_contract_type(&format!("{field}.type"), *ty)?;
-                self.validate_equality_operand_type(field, *operand_ty)?;
+                let equality_admission =
+                    self.validate_equality_operands(field, *operand_ty, left, right)?;
                 self.validate_equality_operand_template(field, "left", *operand_ty, left)?;
                 self.validate_equality_operand_template(field, "right", *operand_ty, right)?;
-                let nested = Self {
-                    expected_type: Some(*operand_ty),
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self
+                    .nested()
+                    .with_expected_type(Some(*operand_ty))
+                    .with_process_ref_effect_outcome(
+                        equality_admission.allow_process_ref_effect_outcome,
+                    );
                 nested.validate_with_depth(&format!("{field}.left"), left, depth + 1)?;
                 nested.validate_with_depth(&format!("{field}.right"), right, depth + 1)
             }
@@ -286,11 +281,7 @@ impl LoadedTemplateAdmission<'_> {
                 self.validate_scalar_value_type(&format!("{field}.type"), *ty)?;
                 self.validate_equality_operand_template(field, "left", *ty, left)?;
                 self.validate_equality_operand_template(field, "right", *ty, right)?;
-                let nested = Self {
-                    expected_type: Some(*ty),
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested().with_expected_type(Some(*ty));
                 nested.validate_with_depth(&format!("{field}.left"), left, depth + 1)?;
                 nested.validate_with_depth(&format!("{field}.right"), right, depth + 1)
             }
@@ -305,22 +296,14 @@ impl LoadedTemplateAdmission<'_> {
                 self.validate_scalar_value_type(&format!("{field}.operand_type_id"), *operand_ty)?;
                 self.validate_equality_operand_template(field, "left", *operand_ty, left)?;
                 self.validate_equality_operand_template(field, "right", *operand_ty, right)?;
-                let nested = Self {
-                    expected_type: Some(*operand_ty),
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested().with_expected_type(Some(*operand_ty));
                 nested.validate_with_depth(&format!("{field}.left"), left, depth + 1)?;
                 nested.validate_with_depth(&format!("{field}.right"), right, depth + 1)
             }
             LoadedValueTemplate::BooleanNot { ty, operand } => {
                 self.validate_bool_contract_type(&format!("{field}.type"), *ty)?;
                 self.validate_boolean_operand_template(field, "operand", *ty, operand)?;
-                let nested = Self {
-                    expected_type: Some(*ty),
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested().with_expected_type(Some(*ty));
                 nested.validate_with_depth(&format!("{field}.operand"), operand, depth + 1)
             }
             LoadedValueTemplate::BooleanBinary {
@@ -329,15 +312,35 @@ impl LoadedTemplateAdmission<'_> {
                 self.validate_bool_contract_type(&format!("{field}.type"), *ty)?;
                 self.validate_boolean_operand_template(field, "left", *ty, left)?;
                 self.validate_boolean_operand_template(field, "right", *ty, right)?;
-                let nested = Self {
-                    expected_type: Some(*ty),
-                    allow_direct_process_ref: false,
-                    ..*self
-                };
+                let nested = self.nested().with_expected_type(Some(*ty));
                 nested.validate_with_depth(&format!("{field}.left"), left, depth + 1)?;
                 nested.validate_with_depth(&format!("{field}.right"), right, depth + 1)
             }
         }
+    }
+
+    fn validate_effect_outcome(
+        &self,
+        field: &str,
+        ty: TypeId,
+        outcome: EffectOutcomeId,
+    ) -> Result<()> {
+        let Some((_, expected_ty)) = self.effect_outcomes.iter().find(|(id, _)| *id == outcome)
+        else {
+            return Err(Error::new(format!(
+                "{field} references unbound effect outcome id {}",
+                outcome.as_u32()
+            )));
+        };
+        if *expected_ty != ty {
+            return Err(Error::new(format!(
+                "{field} effect outcome id {} has type id {}, expected {}",
+                outcome.as_u32(),
+                ty.as_u32(),
+                expected_ty.as_u32()
+            )));
+        }
+        Ok(())
     }
 
     fn validate_received_payload(&self, field: &str, ty: TypeId) -> Result<()> {
@@ -492,10 +495,12 @@ impl LoadedTemplateAdmission<'_> {
                 "{field}.field_count must be between 1 and {MAX_VALUE_TEMPLATE_FIELDS}"
             )));
         }
-        let mut names = BTreeSet::new();
-        for record_field in fields {
+        for (index, record_field) in fields.iter().enumerate() {
             validate_loaded_ident_field(&format!("{field}.field"), &record_field.name)?;
-            if !names.insert(record_field.name.as_str()) {
+            if fields[..index]
+                .iter()
+                .any(|previous| previous.name == record_field.name)
+            {
                 return Err(Error::new(format!(
                     "{field} duplicates field {}",
                     record_field.name
@@ -511,11 +516,7 @@ impl LoadedTemplateAdmission<'_> {
                         ty.as_u32()
                     ))
                 })?;
-            let nested = Self {
-                expected_type: Some(expected.ty),
-                allow_direct_process_ref: false,
-                ..*self
-            };
+            let nested = self.nested().with_expected_type(Some(expected.ty));
             nested.validate_with_depth(
                 &format!("{field}.field.{}", record_field.name),
                 &record_field.value,
@@ -551,11 +552,7 @@ impl LoadedTemplateAdmission<'_> {
                 capacity
             )));
         }
-        let nested = Self {
-            expected_type: Some(*element),
-            allow_direct_process_ref: false,
-            ..*self
-        };
+        let nested = self.nested().with_expected_type(Some(*element));
         for (index, item) in items.iter().enumerate() {
             nested.validate_with_depth(&format!("{field}.item.{index}"), item, depth + 1)?;
         }
@@ -593,41 +590,35 @@ impl LoadedTemplateAdmission<'_> {
                 capacity
             )));
         }
-        let mut keys = BTreeSet::new();
+        let mut keys = Vec::with_capacity(entries.len());
         for (index, entry) in entries.iter().enumerate() {
             if !loaded_template_is_static_map_key(&entry.key) {
                 return Err(Error::new(format!(
                     "{field}.entry.{index}.key must be a static value template"
                 )));
             }
-            Self {
-                expected_type: Some(*key_type),
-                allow_direct_process_ref: false,
-                ..*self
-            }
-            .validate_with_depth(
-                &format!("{field}.entry.{index}.key"),
-                &entry.key,
-                depth + 1,
-            )?;
+            self.nested()
+                .with_expected_type(Some(*key_type))
+                .validate_with_depth(
+                    &format!("{field}.entry.{index}.key"),
+                    &entry.key,
+                    depth + 1,
+                )?;
             let key = loaded_static_map_key_value(self.program, &entry.key)?;
-            if keys.contains(&key) {
+            if keys.iter().any(|previous| previous == &key) {
                 return Err(Error::new(format!(
                     "{field} duplicates key {}",
                     key.label()
                 )));
             }
-            keys.insert(key);
-            Self {
-                expected_type: Some(*value_type),
-                allow_direct_process_ref: false,
-                ..*self
-            }
-            .validate_with_depth(
-                &format!("{field}.entry.{index}.value"),
-                &entry.value,
-                depth + 1,
-            )?;
+            keys.push(key);
+            self.nested()
+                .with_expected_type(Some(*value_type))
+                .validate_with_depth(
+                    &format!("{field}.entry.{index}.value"),
+                    &entry.value,
+                    depth + 1,
+                )?;
         }
         Ok(())
     }

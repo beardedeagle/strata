@@ -2,8 +2,11 @@ use super::super::*;
 use crate::MAX_NEXT_STATE_IF_ELSE_DEPTH;
 use crate::fields::ArtifactFields;
 
+mod action_decode;
 mod scalar_decode;
 mod value_template_decode;
+
+use action_decode::decode_action;
 
 impl MantleArtifact {
     pub fn decode(contents: &str) -> Result<Self> {
@@ -488,6 +491,10 @@ fn decode_value_template(
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
             element: fields.take_loop_element_id(&format!("{prefix}.loop_element"))?,
         }),
+        "effect_outcome" => Ok(ArtifactValueTemplate::EffectOutcome {
+            ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
+            outcome: fields.take_effect_outcome_id(&format!("{prefix}.outcome"))?,
+        }),
         "enum_variant" => Ok(ArtifactValueTemplate::EnumVariant {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
             variant: fields.take_enum_variant_id(&format!("{prefix}.variant_id"))?,
@@ -614,135 +621,5 @@ fn decode_value_template(
             })
         }
         value => Err(Error::new(format!("invalid {kind_key} value {value:?}"))),
-    }
-}
-
-fn decode_send_target(
-    fields: &mut ArtifactFields,
-    action_prefix: &str,
-) -> Result<ArtifactSendTarget> {
-    let key = format!("{action_prefix}.target");
-    match fields.take_required(&key)?.as_str() {
-        "process_ref" => Ok(ArtifactSendTarget::ProcessRef(
-            fields.take_process_ref_id(&format!("{action_prefix}.target_process_ref"))?,
-        )),
-        "received_payload" => Ok(ArtifactSendTarget::ReceivedPayload {
-            ty: fields.take_type_id(&format!("{action_prefix}.target_payload_type_id"))?,
-            target_process: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
-        }),
-        value => Err(Error::new(format!("invalid {key} value {value:?}"))),
-    }
-}
-
-fn decode_action(
-    fields: &mut ArtifactFields,
-    action_prefix: &str,
-    depth: usize,
-) -> Result<ArtifactAction> {
-    if depth > MAX_VALUE_TEMPLATE_DEPTH {
-        return Err(Error::new(format!(
-            "{action_prefix} exceeds maximum action nesting depth of {MAX_VALUE_TEMPLATE_DEPTH}"
-        )));
-    }
-    let kind = fields.take_required(&format!("{action_prefix}.kind"))?;
-    match kind.as_str() {
-        "emit" => Ok(ArtifactAction::Emit {
-            output: fields.take_output_id(&format!("{action_prefix}.output"))?,
-        }),
-        "spawn" => Ok(ArtifactAction::Spawn {
-            target: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
-            process_ref: fields.take_process_ref_id(&format!("{action_prefix}.process_ref"))?,
-        }),
-        "send" => {
-            let target = decode_send_target(fields, action_prefix)?;
-            let message = fields.take_message_id(&format!("{action_prefix}.message"))?;
-            let payload_key = format!("{action_prefix}.payload");
-            let payload = match fields.take_required(&payload_key)?.as_str() {
-                "none" => None,
-                "template" => Some(decode_value_template(
-                    fields,
-                    &format!("{action_prefix}.payload_template"),
-                    0,
-                )?),
-                value => {
-                    return Err(Error::new(format!(
-                        "invalid {payload_key} value {value:?}; expected \"none\" or \"template\""
-                    )));
-                }
-            };
-            Ok(ArtifactAction::Send {
-                target,
-                message,
-                payload,
-            })
-        }
-        "if_else" => {
-            let condition =
-                decode_value_template(fields, &format!("{action_prefix}.condition"), 0)?;
-            let then_action_count = fields.take_bounded_usize(
-                &format!("{action_prefix}.then_action_count"),
-                0,
-                MAX_ACTIONS_PER_PROCESS,
-            )?;
-            let mut then_actions = Vec::with_capacity(then_action_count);
-            for action_index in 0..then_action_count {
-                then_actions.push(decode_action(
-                    fields,
-                    &format!("{action_prefix}.then_action.{action_index}"),
-                    depth + 1,
-                )?);
-            }
-            let else_action_count = fields.take_bounded_usize(
-                &format!("{action_prefix}.else_action_count"),
-                0,
-                MAX_ACTIONS_PER_PROCESS,
-            )?;
-            let mut else_actions = Vec::with_capacity(else_action_count);
-            for action_index in 0..else_action_count {
-                else_actions.push(decode_action(
-                    fields,
-                    &format!("{action_prefix}.else_action.{action_index}"),
-                    depth + 1,
-                )?);
-            }
-            Ok(ArtifactAction::IfElse {
-                condition,
-                then_actions,
-                else_actions,
-            })
-        }
-        "for_each" => {
-            let body_action_count = fields.take_bounded_usize(
-                &format!("{action_prefix}.body_action_count"),
-                0,
-                MAX_ACTIONS_PER_PROCESS,
-            )?;
-            let mut body = Vec::with_capacity(body_action_count);
-            for action_index in 0..body_action_count {
-                body.push(decode_action(
-                    fields,
-                    &format!("{action_prefix}.body_action.{action_index}"),
-                    depth + 1,
-                )?);
-            }
-            Ok(ArtifactAction::ForEach {
-                element: ArtifactLoopElement {
-                    id: fields.take_loop_element_id(&format!("{action_prefix}.loop_element"))?,
-                    ty: fields.take_type_id(&format!("{action_prefix}.element_type_id"))?,
-                },
-                collection: decode_value_template(
-                    fields,
-                    &format!("{action_prefix}.collection"),
-                    0,
-                )?,
-                max_items: fields.take_bounded_usize(
-                    &format!("{action_prefix}.max_items"),
-                    0,
-                    MAX_VALUE_TEMPLATE_FIELDS,
-                )?,
-                body,
-            })
-        }
-        _ => Err(Error::new(format!("invalid artifact action kind {kind:?}"))),
     }
 }

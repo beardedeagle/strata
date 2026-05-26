@@ -11,8 +11,10 @@ fn checked_action_kinds(actions: &[CheckedAction]) -> Vec<ActionKind> {
         .iter()
         .map(|action| match action {
             CheckedAction::Spawn { .. } => ActionKind::Spawn,
+            CheckedAction::SpawnOutcome { .. } => ActionKind::SpawnOutcome,
             CheckedAction::Emit { .. } => ActionKind::Emit,
             CheckedAction::Send { .. } => ActionKind::Send,
+            CheckedAction::SendOutcome { .. } => ActionKind::SendOutcome,
             CheckedAction::IfElse { .. } => ActionKind::IfElse,
             CheckedAction::ForEach { .. } => ActionKind::ForEach,
         })
@@ -24,8 +26,10 @@ fn artifact_action_kinds(actions: &[ArtifactAction]) -> Vec<ActionKind> {
         .iter()
         .map(|action| match action {
             ArtifactAction::Spawn { .. } => ActionKind::Spawn,
+            ArtifactAction::SpawnOutcome { .. } => ActionKind::SpawnOutcome,
             ArtifactAction::Emit { .. } => ActionKind::Emit,
             ArtifactAction::Send { .. } => ActionKind::Send,
+            ArtifactAction::SendOutcome { .. } => ActionKind::SendOutcome,
             ArtifactAction::IfElse { .. } => ActionKind::IfElse,
             ArtifactAction::ForEach { .. } => ActionKind::ForEach,
         })
@@ -71,7 +75,9 @@ fn assert_nested_artifact_send_actions_use_ids(actions: &[ArtifactAction]) {
                 assert_nested_artifact_send_actions_use_ids(body);
             }
             ArtifactAction::Spawn { .. }
+            | ArtifactAction::SpawnOutcome { .. }
             | ArtifactAction::Emit { .. }
+            | ArtifactAction::SendOutcome { .. }
             | ArtifactAction::Send { .. } => {}
         }
     }
@@ -131,4 +137,3 @@ fn artifact_effect_for(effect: Effect) -> ArtifactEffect {
         Effect::Send => ArtifactEffect::Send,
     }
 }
-

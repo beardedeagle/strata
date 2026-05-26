@@ -15,6 +15,7 @@ impl ArtifactValueTemplate {
             Self::MapRest { map, .. } => map.depends_on_received_payload(),
             Self::ProcessRef { .. } => false,
             Self::LoopElement { .. } => false,
+            Self::EffectOutcome { .. } => false,
             Self::EnumVariant { payload, .. } => payload.depends_on_received_payload(),
             Self::Record { fields, .. } => fields
                 .iter()
@@ -59,6 +60,7 @@ impl ArtifactValueTemplate {
             Self::MapRest { map, .. } => map.depends_on_loop_element(),
             Self::ProcessRef { .. } => false,
             Self::LoopElement { .. } => true,
+            Self::EffectOutcome { .. } => false,
             Self::EnumVariant { payload, .. } => payload.depends_on_loop_element(),
             Self::Record { fields, .. } => fields
                 .iter()
@@ -85,6 +87,51 @@ impl ArtifactValueTemplate {
             Self::BooleanNot { operand, .. } => operand.depends_on_loop_element(),
             Self::BooleanBinary { left, right, .. } => {
                 left.depends_on_loop_element() || right.depends_on_loop_element()
+            }
+        }
+    }
+
+    pub(in crate::artifact) fn depends_on_effect_outcome(&self) -> bool {
+        match self {
+            Self::EffectOutcome { .. } => true,
+            Self::Literal { .. }
+            | Self::ReceivedPayload { .. }
+            | Self::CurrentStatePayload { .. }
+            | Self::ProcessRef { .. }
+            | Self::LoopElement { .. } => false,
+            Self::EnumPayload { value, .. } => value.depends_on_effect_outcome(),
+            Self::RecordField { record, .. } => record.depends_on_effect_outcome(),
+            Self::ListElement { list, .. }
+            | Self::ListPrefixElement { list, .. }
+            | Self::ListRest { list, .. } => list.depends_on_effect_outcome(),
+            Self::MapValue { map, .. } => map.depends_on_effect_outcome(),
+            Self::MapRest { map, .. } => map.depends_on_effect_outcome(),
+            Self::EnumVariant { payload, .. } => payload.depends_on_effect_outcome(),
+            Self::Record { fields, .. } => fields
+                .iter()
+                .any(|field| field.value.depends_on_effect_outcome()),
+            Self::List { items, .. } => items.iter().any(Self::depends_on_effect_outcome),
+            Self::Map { entries, .. } => entries.iter().any(|entry| {
+                entry.key.depends_on_effect_outcome() || entry.value.depends_on_effect_outcome()
+            }),
+            Self::IfElse {
+                condition,
+                then_value,
+                else_value,
+                ..
+            } => {
+                condition.depends_on_effect_outcome()
+                    || then_value.depends_on_effect_outcome()
+                    || else_value.depends_on_effect_outcome()
+            }
+            Self::Equality { left, right, .. }
+            | Self::ScalarArithmetic { left, right, .. }
+            | Self::ScalarOrdering { left, right, .. } => {
+                left.depends_on_effect_outcome() || right.depends_on_effect_outcome()
+            }
+            Self::BooleanNot { operand, .. } => operand.depends_on_effect_outcome(),
+            Self::BooleanBinary { left, right, .. } => {
+                left.depends_on_effect_outcome() || right.depends_on_effect_outcome()
             }
         }
     }

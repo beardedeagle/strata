@@ -3,38 +3,39 @@ use crate::ArtifactValueTemplate;
 
 pub(super) fn add_value_template_bytes(
     total: &mut usize,
-    prefix: &str,
+    prefix: KeyLen,
     template: &ArtifactValueTemplate,
 ) -> Result<()> {
     match template {
         ArtifactValueTemplate::Literal { ty, value } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "literal")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.value"), &value.label())?;
+            add_field_bytes(total, prefix.child("kind"), "literal")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_value_label_len(total, prefix.child("value"), value)?;
         }
         ArtifactValueTemplate::ReceivedPayload { ty } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "received_payload")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, prefix.child("kind"), "received_payload")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
         }
         ArtifactValueTemplate::CurrentStatePayload { ty } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "current_state_payload")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, prefix.child("kind"), "current_state_payload")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+        }
+        ArtifactValueTemplate::EffectOutcome { ty, outcome } => {
+            add_field_bytes(total, prefix.child("kind"), "effect_outcome")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_u32(total, prefix.child("outcome"), outcome.as_u32())?;
         }
         ArtifactValueTemplate::EnumPayload { ty, value, variant } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "enum_payload")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.variant_id"),
-                &variant.as_u32().to_string(),
-            )?;
-            add_value_template_bytes(total, &format!("{prefix}.value"), value)?;
+            add_field_bytes(total, prefix.child("kind"), "enum_payload")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_u32(total, prefix.child("variant_id"), variant.as_u32())?;
+            add_value_template_bytes(total, prefix.child("value"), value)?;
         }
         ArtifactValueTemplate::RecordField { ty, record, field } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "record_field")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.field_name"), field)?;
-            add_value_template_bytes(total, &format!("{prefix}.record"), record)?;
+            add_field_bytes(total, prefix.child("kind"), "record_field")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_bytes(total, prefix.child("field_name"), field)?;
+            add_value_template_bytes(total, prefix.child("record"), record)?;
         }
         ArtifactValueTemplate::ListElement {
             ty,
@@ -42,11 +43,11 @@ pub(super) fn add_value_template_bytes(
             index,
             len,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "list_element")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.index"), &index.to_string())?;
-            add_field_bytes(total, &format!("{prefix}.len"), &len.to_string())?;
-            add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
+            add_field_bytes(total, prefix.child("kind"), "list_element")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_usize(total, prefix.child("index"), *index)?;
+            add_field_usize(total, prefix.child("len"), *len)?;
+            add_value_template_bytes(total, prefix.child("list"), list)?;
         }
         ArtifactValueTemplate::ListPrefixElement {
             ty,
@@ -54,29 +55,21 @@ pub(super) fn add_value_template_bytes(
             index,
             prefix_len,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "list_prefix_element")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.index"), &index.to_string())?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.prefix_len"),
-                &prefix_len.to_string(),
-            )?;
-            add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
+            add_field_bytes(total, prefix.child("kind"), "list_prefix_element")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_usize(total, prefix.child("index"), *index)?;
+            add_field_usize(total, prefix.child("prefix_len"), *prefix_len)?;
+            add_value_template_bytes(total, prefix.child("list"), list)?;
         }
         ArtifactValueTemplate::ListRest {
             ty,
             list,
             prefix_len,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "list_rest")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.prefix_len"),
-                &prefix_len.to_string(),
-            )?;
-            add_value_template_bytes(total, &format!("{prefix}.list"), list)?;
+            add_field_bytes(total, prefix.child("kind"), "list_rest")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_usize(total, prefix.child("prefix_len"), *prefix_len)?;
+            add_value_template_bytes(total, prefix.child("list"), list)?;
         }
         ArtifactValueTemplate::MapValue {
             ty,
@@ -85,124 +78,92 @@ pub(super) fn add_value_template_bytes(
             keys,
             projection,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "map_value")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.key"), &key.label())?;
-            add_field_bytes(total, &format!("{prefix}.projection"), projection.as_str())?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.key_count"),
-                &keys.len().to_string(),
-            )?;
+            add_field_bytes(total, prefix.child("kind"), "map_value")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_value_label_len(total, prefix.child("key"), key)?;
+            add_field_bytes(total, prefix.child("projection"), projection.as_str())?;
+            add_field_usize(total, prefix.child("key_count"), keys.len())?;
             for (key_index, expected_key) in keys.iter().enumerate() {
-                add_field_bytes(
+                add_field_value_label_len(
                     total,
-                    &format!("{prefix}.expected_key.{key_index}"),
-                    &expected_key.label(),
+                    prefix.indexed_child("expected_key", key_index),
+                    expected_key,
                 )?;
             }
-            add_value_template_bytes(total, &format!("{prefix}.map"), map)?;
+            add_value_template_bytes(total, prefix.child("map"), map)?;
         }
         ArtifactValueTemplate::MapRest {
             ty,
             map,
             excluded_keys,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "map_rest")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.key_count"),
-                &excluded_keys.len().to_string(),
-            )?;
+            add_field_bytes(total, prefix.child("kind"), "map_rest")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_usize(total, prefix.child("key_count"), excluded_keys.len())?;
             for (key_index, excluded_key) in excluded_keys.iter().enumerate() {
-                add_field_bytes(
+                add_field_value_label_len(
                     total,
-                    &format!("{prefix}.excluded_key.{key_index}"),
-                    &excluded_key.label(),
+                    prefix.indexed_child("excluded_key", key_index),
+                    excluded_key,
                 )?;
             }
-            add_value_template_bytes(total, &format!("{prefix}.map"), map)?;
+            add_value_template_bytes(total, prefix.child("map"), map)?;
         }
         ArtifactValueTemplate::ProcessRef {
             ty,
             target_process,
             process_ref,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "process_ref")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
+            add_field_bytes(total, prefix.child("kind"), "process_ref")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_u32(
                 total,
-                &format!("{prefix}.target_process"),
-                &target_process.as_u32().to_string(),
+                prefix.child("target_process"),
+                target_process.as_u32(),
             )?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.process_ref"),
-                &process_ref.as_u32().to_string(),
-            )?;
+            add_field_u32(total, prefix.child("process_ref"), process_ref.as_u32())?;
         }
         ArtifactValueTemplate::LoopElement { ty, element } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "loop_element")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.loop_element"),
-                &element.as_u32().to_string(),
-            )?;
+            add_field_bytes(total, prefix.child("kind"), "loop_element")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_u32(total, prefix.child("loop_element"), element.as_u32())?;
         }
         ArtifactValueTemplate::EnumVariant {
             ty,
             variant,
             payload,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "enum_variant")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.variant_id"),
-                &variant.as_u32().to_string(),
-            )?;
-            add_value_template_bytes(total, &format!("{prefix}.payload"), payload)?;
+            add_field_bytes(total, prefix.child("kind"), "enum_variant")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_u32(total, prefix.child("variant_id"), variant.as_u32())?;
+            add_value_template_bytes(total, prefix.child("payload"), payload)?;
         }
         ArtifactValueTemplate::Record { ty, fields } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "record")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.field_count"),
-                &fields.len().to_string(),
-            )?;
+            add_field_bytes(total, prefix.child("kind"), "record")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_usize(total, prefix.child("field_count"), fields.len())?;
             for (field_index, field) in fields.iter().enumerate() {
-                let field_prefix = format!("{prefix}.field.{field_index}");
-                add_field_bytes(total, &format!("{field_prefix}.name"), &field.name)?;
-                add_value_template_bytes(total, &format!("{field_prefix}.value"), &field.value)?;
+                let field_prefix = prefix.indexed_child("field", field_index);
+                add_field_bytes(total, field_prefix.child("name"), &field.name)?;
+                add_value_template_bytes(total, field_prefix.child("value"), &field.value)?;
             }
         }
         ArtifactValueTemplate::List { ty, items } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "list")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.item_count"),
-                &items.len().to_string(),
-            )?;
+            add_field_bytes(total, prefix.child("kind"), "list")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_usize(total, prefix.child("item_count"), items.len())?;
             for (item_index, item) in items.iter().enumerate() {
-                add_value_template_bytes(total, &format!("{prefix}.item.{item_index}"), item)?;
+                add_value_template_bytes(total, prefix.indexed_child("item", item_index), item)?;
             }
         }
         ArtifactValueTemplate::Map { ty, entries } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "map")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.entry_count"),
-                &entries.len().to_string(),
-            )?;
+            add_field_bytes(total, prefix.child("kind"), "map")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_usize(total, prefix.child("entry_count"), entries.len())?;
             for (entry_index, entry) in entries.iter().enumerate() {
-                let entry_prefix = format!("{prefix}.entry.{entry_index}");
-                add_value_template_bytes(total, &format!("{entry_prefix}.key"), &entry.key)?;
-                add_value_template_bytes(total, &format!("{entry_prefix}.value"), &entry.value)?;
+                let entry_prefix = prefix.indexed_child("entry", entry_index);
+                add_value_template_bytes(total, entry_prefix.child("key"), &entry.key)?;
+                add_value_template_bytes(total, entry_prefix.child("value"), &entry.value)?;
             }
         }
         ArtifactValueTemplate::IfElse {
@@ -211,11 +172,11 @@ pub(super) fn add_value_template_bytes(
             then_value,
             else_value,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "if_else")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_value_template_bytes(total, &format!("{prefix}.condition"), condition)?;
-            add_value_template_bytes(total, &format!("{prefix}.then"), then_value)?;
-            add_value_template_bytes(total, &format!("{prefix}.else"), else_value)?;
+            add_field_bytes(total, prefix.child("kind"), "if_else")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_value_template_bytes(total, prefix.child("condition"), condition)?;
+            add_value_template_bytes(total, prefix.child("then"), then_value)?;
+            add_value_template_bytes(total, prefix.child("else"), else_value)?;
         }
         ArtifactValueTemplate::Equality {
             ty,
@@ -224,16 +185,12 @@ pub(super) fn add_value_template_bytes(
             left,
             right,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "equality")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.operand_type_id"),
-                &type_id_string(*operand_ty),
-            )?;
-            add_field_bytes(total, &format!("{prefix}.operator"), operator.as_str())?;
-            add_value_template_bytes(total, &format!("{prefix}.left"), left)?;
-            add_value_template_bytes(total, &format!("{prefix}.right"), right)?;
+            add_field_bytes(total, prefix.child("kind"), "equality")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_u32(total, prefix.child("operand_type_id"), operand_ty.as_u32())?;
+            add_field_bytes(total, prefix.child("operator"), operator.as_str())?;
+            add_value_template_bytes(total, prefix.child("left"), left)?;
+            add_value_template_bytes(total, prefix.child("right"), right)?;
         }
         ArtifactValueTemplate::ScalarArithmetic {
             ty,
@@ -241,11 +198,11 @@ pub(super) fn add_value_template_bytes(
             left,
             right,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "scalar_arithmetic")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.operator"), operator.as_str())?;
-            add_value_template_bytes(total, &format!("{prefix}.left"), left)?;
-            add_value_template_bytes(total, &format!("{prefix}.right"), right)?;
+            add_field_bytes(total, prefix.child("kind"), "scalar_arithmetic")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_bytes(total, prefix.child("operator"), operator.as_str())?;
+            add_value_template_bytes(total, prefix.child("left"), left)?;
+            add_value_template_bytes(total, prefix.child("right"), right)?;
         }
         ArtifactValueTemplate::ScalarOrdering {
             ty,
@@ -254,21 +211,17 @@ pub(super) fn add_value_template_bytes(
             left,
             right,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "scalar_ordering")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(
-                total,
-                &format!("{prefix}.operand_type_id"),
-                &type_id_string(*operand_ty),
-            )?;
-            add_field_bytes(total, &format!("{prefix}.operator"), operator.as_str())?;
-            add_value_template_bytes(total, &format!("{prefix}.left"), left)?;
-            add_value_template_bytes(total, &format!("{prefix}.right"), right)?;
+            add_field_bytes(total, prefix.child("kind"), "scalar_ordering")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_u32(total, prefix.child("operand_type_id"), operand_ty.as_u32())?;
+            add_field_bytes(total, prefix.child("operator"), operator.as_str())?;
+            add_value_template_bytes(total, prefix.child("left"), left)?;
+            add_value_template_bytes(total, prefix.child("right"), right)?;
         }
         ArtifactValueTemplate::BooleanNot { ty, operand } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "boolean_not")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_value_template_bytes(total, &format!("{prefix}.operand"), operand)?;
+            add_field_bytes(total, prefix.child("kind"), "boolean_not")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_value_template_bytes(total, prefix.child("operand"), operand)?;
         }
         ArtifactValueTemplate::BooleanBinary {
             ty,
@@ -276,11 +229,11 @@ pub(super) fn add_value_template_bytes(
             left,
             right,
         } => {
-            add_field_bytes(total, &format!("{prefix}.kind"), "boolean_binary")?;
-            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
-            add_field_bytes(total, &format!("{prefix}.operator"), operator.as_str())?;
-            add_value_template_bytes(total, &format!("{prefix}.left"), left)?;
-            add_value_template_bytes(total, &format!("{prefix}.right"), right)?;
+            add_field_bytes(total, prefix.child("kind"), "boolean_binary")?;
+            add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
+            add_field_bytes(total, prefix.child("operator"), operator.as_str())?;
+            add_value_template_bytes(total, prefix.child("left"), left)?;
+            add_value_template_bytes(total, prefix.child("right"), right)?;
         }
     }
     Ok(())

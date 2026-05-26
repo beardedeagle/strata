@@ -1,12 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use mantle_artifact::MAX_VALUE_TEMPLATE_FIELDS;
 
+use super::super::super::MAX_TYPE_NESTING;
 use super::super::super::ast::{Enum, EnumVariant, Identifier, Module, Record, TypeRef};
 use super::super::super::checked::CheckedProcessId;
 use super::super::super::diagnostic::{Error, Result};
 use super::super::CHECKED_TYPE_LABEL_PREFIX;
-use super::{Symbol, SymbolTable, TypeDecl};
+use super::type_decls::{TypeDecl, TypeDeclMap};
+use super::{Symbol, SymbolTable};
 
 pub(super) fn reject_reserved_type_name(
     name: &str,
@@ -29,17 +31,13 @@ pub(super) fn reject_internal_type_label_prefix(name: &str) -> Result<()> {
 }
 
 pub(super) fn validate_record_fields(
-    module: &Module,
-    symbols: &SymbolTable,
-    types: &BTreeMap<Symbol, TypeDecl>,
-    process_ref_type: Symbol,
-    list_type: Symbol,
-    map_type: Symbol,
+    context: SourceValueTypeContext<'_>,
     record: &Record,
 ) -> Result<()> {
     let mut field_names = BTreeMap::new();
     for field in &record.fields {
-        let field_symbol = symbols
+        let field_symbol = context
+            .symbols
             .resolve(field.name.as_str())
             .ok_or_else(|| Error::new(format!("field {} is not interned", field.name)))?;
         if field_names.insert(field_symbol, ()).is_some() {
@@ -48,19 +46,16 @@ pub(super) fn validate_record_fields(
                 record.name, field.name
             )));
         }
-        if let Err(err) = validate_source_value_type(
-            module,
-            symbols,
-            types,
-            process_ref_type,
-            list_type,
-            map_type,
-            &field.ty,
-        ) {
-            if collection_type_signature_error(symbols, list_type, map_type, &field.ty) {
+        if let Err(err) = validate_source_value_type(context, &field.ty) {
+            if collection_type_signature_error(
+                context.symbols,
+                context.list_type,
+                context.map_type,
+                &field.ty,
+            ) {
                 return Err(err);
             }
-            if type_contains_process_ref(symbols, process_ref_type, &field.ty) {
+            if type_contains_process_ref(context.symbols, context.process_ref_type, &field.ty) {
                 return Err(Error::new(format!(
                     "record {} field {} type {} contains a process reference; process references must be direct message payloads",
                     record.name, field.name, field.ty
@@ -79,11 +74,45 @@ pub(super) fn validate_record_fields(
 pub(super) struct MessagePayloadTypeContext<'a> {
     pub(super) module: &'a Module,
     pub(super) symbols: &'a SymbolTable,
-    pub(super) types: &'a BTreeMap<Symbol, TypeDecl>,
+    pub(super) types: &'a TypeDeclMap,
     pub(super) processes: &'a BTreeMap<Symbol, CheckedProcessId>,
     pub(super) process_ref_type: Symbol,
     pub(super) list_type: Symbol,
     pub(super) map_type: Symbol,
+    pub(super) builtin_types: BuiltinTypeSymbols,
+}
+
+impl<'a> MessagePayloadTypeContext<'a> {
+    const fn source_value(self) -> SourceValueTypeContext<'a> {
+        SourceValueTypeContext {
+            module: self.module,
+            symbols: self.symbols,
+            types: self.types,
+            process_ref_type: self.process_ref_type,
+            list_type: self.list_type,
+            map_type: self.map_type,
+            builtin_types: self.builtin_types,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct BuiltinTypeSymbols {
+    pub(super) option: Symbol,
+    pub(super) result: Symbol,
+    pub(super) send_error: Symbol,
+    pub(super) spawn_error: Symbol,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SourceValueTypeContext<'a> {
+    pub(super) module: &'a Module,
+    pub(super) symbols: &'a SymbolTable,
+    pub(super) types: &'a TypeDeclMap,
+    pub(super) process_ref_type: Symbol,
+    pub(super) list_type: Symbol,
+    pub(super) map_type: Symbol,
+    pub(super) builtin_types: BuiltinTypeSymbols,
 }
 
 pub(super) fn validate_message_payload_type(
@@ -100,16 +129,7 @@ pub(super) fn validate_message_payload_type(
                     enum_decl.name, variant.name, payload_type
                 )));
             }
-            validate_source_value_type(
-                context.module,
-                context.symbols,
-                context.types,
-                context.process_ref_type,
-                context.list_type,
-                context.map_type,
-                payload_type,
-            )
-            .map_err(|err| {
+            validate_source_value_type(context.source_value(), payload_type).map_err(|err| {
                 Error::new(format!(
                     "enum {} variant {} payload type {} is invalid: {err}",
                     enum_decl.name, variant.name, payload_type
@@ -157,15 +177,7 @@ pub(super) fn validate_message_payload_type(
                     enum_decl.name, variant.name, payload_type
                 )));
             }
-            if let Err(err) = validate_source_value_type(
-                context.module,
-                context.symbols,
-                context.types,
-                context.process_ref_type,
-                context.list_type,
-                context.map_type,
-                payload_type,
-            ) {
+            if let Err(err) = validate_source_value_type(context.source_value(), payload_type) {
                 if collection_type_signature_error(
                     context.symbols,
                     context.list_type,
@@ -197,34 +209,70 @@ pub(super) fn validate_message_payload_type(
 }
 
 pub(super) fn validate_source_value_type(
-    module: &Module,
-    symbols: &SymbolTable,
-    types: &BTreeMap<Symbol, TypeDecl>,
-    process_ref_type: Symbol,
-    list_type: Symbol,
-    map_type: Symbol,
+    context: SourceValueTypeContext<'_>,
     ty: &TypeRef,
 ) -> Result<()> {
     let mut validator = SourceValueTypeValidator {
-        module,
-        symbols,
-        types,
-        process_ref_type,
-        list_type,
-        map_type,
-        visiting: BTreeSet::new(),
+        module: context.module,
+        symbols: context.symbols,
+        types: context.types,
+        process_ref_type: context.process_ref_type,
+        list_type: context.list_type,
+        map_type: context.map_type,
+        builtin_types: context.builtin_types,
+        visiting: TypeVisitStack::default(),
     };
     validator.validate(ty)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TypeVisitStack {
+    items: [Option<Symbol>; MAX_TYPE_NESTING + 1],
+    len: usize,
+}
+
+impl Default for TypeVisitStack {
+    fn default() -> Self {
+        Self {
+            items: [None; MAX_TYPE_NESTING + 1],
+            len: 0,
+        }
+    }
+}
+
+impl TypeVisitStack {
+    fn push_if_absent(&mut self, symbol: Symbol) -> Result<bool> {
+        if self.items[..self.len].contains(&Some(symbol)) {
+            return Ok(false);
+        }
+        let Some(slot) = self.items.get_mut(self.len) else {
+            return Err(Error::new(format!(
+                "type nesting exceeds maximum depth of {MAX_TYPE_NESTING}"
+            )));
+        };
+        *slot = Some(symbol);
+        self.len += 1;
+        Ok(true)
+    }
+
+    fn pop(&mut self) {
+        if self.len == 0 {
+            return;
+        }
+        self.len -= 1;
+        self.items[self.len] = None;
+    }
 }
 
 struct SourceValueTypeValidator<'a> {
     module: &'a Module,
     symbols: &'a SymbolTable,
-    types: &'a BTreeMap<Symbol, TypeDecl>,
+    types: &'a TypeDeclMap,
     process_ref_type: Symbol,
     list_type: Symbol,
     map_type: Symbol,
-    visiting: BTreeSet<Symbol>,
+    builtin_types: BuiltinTypeSymbols,
+    visiting: TypeVisitStack,
 }
 
 impl SourceValueTypeValidator<'_> {
@@ -251,18 +299,18 @@ impl SourceValueTypeValidator<'_> {
             .ok_or_else(|| Error::new(format!("type {name} is not declared")))?;
         let decl = self
             .types
-            .get(&symbol)
-            .copied()
+            .get(symbol)
             .ok_or_else(|| Error::new(format!("type {name} is not declared")))?;
-        if !self.visiting.insert(symbol) {
+        if !self.visiting.push_if_absent(symbol)? {
             return Ok(());
         }
         let result = match decl {
             TypeDecl::Scalar(_) => Ok(()),
+            TypeDecl::Unit => Ok(()),
             TypeDecl::Record(index) => self.validate_record(ty, index),
             TypeDecl::Enum(index) => self.validate_enum(ty, index),
         };
-        self.visiting.remove(&symbol);
+        self.visiting.pop();
         result
     }
 
@@ -299,6 +347,51 @@ impl SourceValueTypeValidator<'_> {
         if constructor_symbol == self.map_type {
             return Err(Error::new(format!(
                 "map type {ty} must declare exactly two type arguments and one numeric capacity"
+            )));
+        }
+        if constructor_symbol == self.builtin_types.option
+            && args.len() == 1
+            && const_args.is_empty()
+        {
+            return self.validate(&args[0]);
+        }
+        if constructor_symbol == self.builtin_types.option {
+            return Err(Error::new(format!(
+                "option type {ty} must declare exactly one type argument"
+            )));
+        }
+        if constructor_symbol == self.builtin_types.result
+            && args.len() == 2
+            && const_args.is_empty()
+        {
+            self.validate(&args[0])?;
+            return self.validate(&args[1]);
+        }
+        if constructor_symbol == self.builtin_types.result {
+            return Err(Error::new(format!(
+                "result type {ty} must declare exactly two type arguments"
+            )));
+        }
+        if constructor_symbol == self.builtin_types.send_error
+            && args.len() == 1
+            && const_args.is_empty()
+        {
+            return self.validate(&args[0]);
+        }
+        if constructor_symbol == self.builtin_types.send_error {
+            return Err(Error::new(format!(
+                "send error type {ty} must declare exactly one message type"
+            )));
+        }
+        if constructor_symbol == self.builtin_types.spawn_error
+            && args.len() == 1
+            && const_args.is_empty()
+        {
+            return self.validate(&args[0]);
+        }
+        if constructor_symbol == self.builtin_types.spawn_error {
+            return Err(Error::new(format!(
+                "spawn error type {ty} must declare exactly one init-argument type"
             )));
         }
         Err(Error::new(format!("type {ty} is not declared")))

@@ -40,7 +40,11 @@ fn loaded_program_selects_payload_guarded_transitions_by_exact_payload_identity(
         }),
     };
     artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Ready", "Done"]);
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Assign", JOB)],
+    );
     artifact.processes[1].transitions = vec![
         ArtifactTransition {
             current_state: None,
@@ -118,7 +122,11 @@ fn loaded_program_selects_state_specific_payload_guarded_transitions_by_exact_pa
         }),
     };
     artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Working"]);
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Assign", JOB)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Assign", JOB)],
+    );
     artifact.processes[1].transitions = vec![
         ArtifactTransition {
             current_state: Some(StateId::new(0)),

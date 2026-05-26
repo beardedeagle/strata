@@ -111,7 +111,16 @@ Read them in this order:
    payloads.
 54. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-55. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+55. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
+   commit-or-return state evidence, and the `MailboxClosed` send-error contract
+   shape.
+56. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
+57. `effect_outcome_stopped_target.str` for a source-visible `Stopped` send
+   outcome.
+58. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
+   source-created `Panic(...)` prevents a later observer from recovering the
+   crash as a source-visible send outcome.
+59. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 Detailed notes are grouped by topic:

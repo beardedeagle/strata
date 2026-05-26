@@ -5,6 +5,7 @@ fn artifact_round_trips_for_each_control_flow() {
     let mut artifact = valid_artifact();
     let job_list = append_list_type(&mut artifact, "JobList", JOB, 2);
     artifact.processes[1].message_variants[0].payload_type = Some(JOB);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions = vec![
         ArtifactAction::Spawn {
             target: ProcessId::new(1),
@@ -49,6 +50,7 @@ fn admission_rejects_direct_process_ref_payload_inside_for_each_loop_body() {
     let mut artifact = valid_artifact();
     let job_list = append_list_type(&mut artifact, "JobList", JOB, 1);
     artifact.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions = vec![
         ArtifactAction::Spawn {
             target: ProcessId::new(1),
@@ -102,6 +104,7 @@ fn admission_accepts_if_else_inside_for_each_loop_body() {
     let bool_type = append_bool_type(&mut artifact);
     let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 2);
     artifact.processes[1].message_variants[0].payload_type = Some(bool_type);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].effects = vec![
         ArtifactEffect::Spawn,
         ArtifactEffect::Emit,
@@ -370,6 +373,7 @@ fn decode_rejects_missing_for_each_body_action() {
     let mut artifact = valid_artifact();
     let job_list = append_list_type(&mut artifact, "JobList", JOB, 1);
     artifact.processes[1].message_variants[0].payload_type = Some(JOB);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
             id: LoopElementId::new(0),
@@ -407,6 +411,7 @@ fn admission_rejects_inactive_for_each_loop_element_payload() {
     let mut artifact = valid_artifact();
     let job_list = append_list_type(&mut artifact, "JobList", JOB, 1);
     artifact.processes[1].message_variants[0].payload_type = Some(JOB);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions = vec![
         ArtifactAction::Spawn {
             target: ProcessId::new(1),
@@ -476,6 +481,7 @@ fn admission_rejects_static_for_each_non_list_collection() {
 fn admission_rejects_dynamic_for_each_non_list_collection() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants[0].payload_type = Some(JOB);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
@@ -511,6 +517,7 @@ fn admission_rejects_dynamic_for_each_collection_element_type_mismatch() {
     let mut artifact = valid_artifact();
     let other_job_list = append_list_type(&mut artifact, "OtherJobList", OTHER_JOB, 1);
     artifact.processes[1].message_variants[0].payload_type = Some(other_job_list);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),

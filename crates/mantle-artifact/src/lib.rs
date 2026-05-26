@@ -21,7 +21,8 @@ pub use artifact::{
 pub use constants::*;
 pub use error::{Error, Result};
 pub use ids::{
-    EnumVariantId, LoopElementId, MessageId, OutputId, ProcessId, ProcessRefId, StateId, TypeId,
+    EffectOutcomeId, EnumVariantId, LoopElementId, MessageId, OutputId, ProcessId, ProcessRefId,
+    StateId, TypeId,
 };
 pub use io::{read_artifact, source_hash_fnv1a64, write_artifact};
 pub use validation::{

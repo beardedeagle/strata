@@ -6,7 +6,8 @@ pub(in crate::program) fn loaded_template_depends_on_received_payload(
     match template {
         LoadedValueTemplate::Literal { .. }
         | LoadedValueTemplate::ProcessRef { .. }
-        | LoadedValueTemplate::LoopElement { .. } => false,
+        | LoadedValueTemplate::LoopElement { .. }
+        | LoadedValueTemplate::EffectOutcome { .. } => false,
         LoadedValueTemplate::ReceivedPayload { .. } => true,
         LoadedValueTemplate::CurrentStatePayload { .. } => false,
         LoadedValueTemplate::EnumPayload { value, .. } => {
@@ -73,7 +74,8 @@ pub(in crate::program) fn loaded_template_depends_on_loop_element(
         LoadedValueTemplate::Literal { .. }
         | LoadedValueTemplate::ReceivedPayload { .. }
         | LoadedValueTemplate::CurrentStatePayload { .. }
-        | LoadedValueTemplate::ProcessRef { .. } => false,
+        | LoadedValueTemplate::ProcessRef { .. }
+        | LoadedValueTemplate::EffectOutcome { .. } => false,
         LoadedValueTemplate::EnumPayload { value, .. } => {
             loaded_template_depends_on_loop_element(value)
         }
@@ -122,6 +124,65 @@ pub(in crate::program) fn loaded_template_depends_on_loop_element(
         LoadedValueTemplate::BooleanBinary { left, right, .. } => {
             loaded_template_depends_on_loop_element(left)
                 || loaded_template_depends_on_loop_element(right)
+        }
+    }
+}
+
+pub(in crate::program) fn loaded_template_depends_on_effect_outcome(
+    template: &LoadedValueTemplate,
+) -> bool {
+    match template {
+        LoadedValueTemplate::EffectOutcome { .. } => true,
+        LoadedValueTemplate::Literal { .. }
+        | LoadedValueTemplate::ReceivedPayload { .. }
+        | LoadedValueTemplate::CurrentStatePayload { .. }
+        | LoadedValueTemplate::ProcessRef { .. }
+        | LoadedValueTemplate::LoopElement { .. } => false,
+        LoadedValueTemplate::EnumPayload { value, .. } => {
+            loaded_template_depends_on_effect_outcome(value)
+        }
+        LoadedValueTemplate::RecordField { record, .. } => {
+            loaded_template_depends_on_effect_outcome(record)
+        }
+        LoadedValueTemplate::ListElement { list, .. }
+        | LoadedValueTemplate::ListPrefixElement { list, .. }
+        | LoadedValueTemplate::ListRest { list, .. } => {
+            loaded_template_depends_on_effect_outcome(list)
+        }
+        LoadedValueTemplate::MapValue { map, .. } => loaded_template_depends_on_effect_outcome(map),
+        LoadedValueTemplate::MapRest { map, .. } => loaded_template_depends_on_effect_outcome(map),
+        LoadedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            loaded_template_depends_on_effect_outcome(condition)
+                || loaded_template_depends_on_effect_outcome(then_value)
+                || loaded_template_depends_on_effect_outcome(else_value)
+        }
+        LoadedValueTemplate::EnumVariant { payload, .. } => {
+            loaded_template_depends_on_effect_outcome(payload)
+        }
+        LoadedValueTemplate::Record { fields, .. } => fields
+            .iter()
+            .any(|field| loaded_template_depends_on_effect_outcome(&field.value)),
+        LoadedValueTemplate::List { items, .. } => {
+            items.iter().any(loaded_template_depends_on_effect_outcome)
+        }
+        LoadedValueTemplate::Map { entries, .. } => entries.iter().any(|entry| {
+            loaded_template_depends_on_effect_outcome(&entry.key)
+                || loaded_template_depends_on_effect_outcome(&entry.value)
+        }),
+        LoadedValueTemplate::Equality { left, right, .. }
+        | LoadedValueTemplate::ScalarArithmetic { left, right, .. }
+        | LoadedValueTemplate::ScalarOrdering { left, right, .. }
+        | LoadedValueTemplate::BooleanBinary { left, right, .. } => {
+            loaded_template_depends_on_effect_outcome(left)
+                || loaded_template_depends_on_effect_outcome(right)
+        }
+        LoadedValueTemplate::BooleanNot { operand, .. } => {
+            loaded_template_depends_on_effect_outcome(operand)
         }
     }
 }

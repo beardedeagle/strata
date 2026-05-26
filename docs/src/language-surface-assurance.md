@@ -13,6 +13,13 @@ Typed scalar values and value operators are part of the runtime-bearing
 surface: their source syntax, checked folding, typed lowering, Mantle artifact
 admission, typed value-if templates, runtime evaluation, and fail-closed
 diagnostics are all recorded in the inventory.
+Typed effect outcomes are also runtime-bearing: source-visible send/spawn
+`Result` bindings, checked outcome templates, Mantle artifact admission, runtime
+commit-or-return behavior, spawn success process-reference evidence,
+source-to-runtime success plus `Full`/`Stopped` pre-acceptance failure examples,
+direct runtime `Crashed` failure evidence, typed `MailboxClosed` admission,
+parse/check/lower, artifact-decode, and runtime-from-source fuzz seeds, bounded
+state-admission evidence, and diagnostics are recorded together.
 
 Run it with:
 

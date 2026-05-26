@@ -341,7 +341,7 @@ struct DiscoveryValueBinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ConcreteStatePayloadDomain {
     ty: TypeRef,
-    values: BTreeSet<ArtifactValue>,
+    values: Vec<ArtifactValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -473,9 +473,6 @@ enum SourceFunctionParamKind {
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
-    if module.records.is_empty() {
-        return Err(Error::new("expected at least one record declaration"));
-    }
     if module.enums.is_empty() {
         return Err(Error::new("expected at least one enum declaration"));
     }

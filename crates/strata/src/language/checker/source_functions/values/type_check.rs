@@ -140,6 +140,12 @@ fn check_source_value_type_inner(
             "function call {name} must be resolved before checking value of type {expected_type}"
         )));
     }
+    if scope.semantic_index.is_unit_type(expected_type)? {
+        return match value {
+            ValueExpr::Identifier(name) if name.as_str() == "Unit" => Ok(()),
+            _ => Err(Error::new("provided value is not the Unit value")),
+        };
+    }
     if scope.semantic_index.scalar_type(expected_type)?.is_some() {
         return Err(Error::new(format!(
             "expected scalar literal or scalar expression for type {expected_type}"
@@ -197,20 +203,21 @@ fn check_record_source_value_type(
             record.name, record_decl.name
         )));
     }
-    let declared_fields = record_decl
-        .fields
-        .iter()
-        .map(|field| field.name.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut provided = BTreeMap::new();
-    for field in &record.fields {
-        if provided.insert(field.name.as_str(), &field.value).is_some() {
+    for (index, field) in record.fields.iter().enumerate() {
+        if record.fields[..index]
+            .iter()
+            .any(|provided| provided.name == field.name)
+        {
             return Err(Error::new(format!(
                 "record value {} duplicates field {}",
                 record.name, field.name
             )));
         }
-        if !declared_fields.contains(field.name.as_str()) {
+        if !record_decl
+            .fields
+            .iter()
+            .any(|declared| declared.name == field.name)
+        {
             return Err(Error::new(format!(
                 "record value {} declares unknown field {}",
                 record.name, field.name
@@ -218,7 +225,12 @@ fn check_record_source_value_type(
         }
     }
     for field in &record_decl.fields {
-        let Some(value) = provided.get(field.name.as_str()) else {
+        let Some(value) = record
+            .fields
+            .iter()
+            .find(|provided| provided.name == field.name)
+            .map(|provided| &provided.value)
+        else {
             return Err(Error::new(format!(
                 "record value {} is missing field {}",
                 record_decl.name, field.name
@@ -288,41 +300,25 @@ fn check_enum_source_value_type(
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<()> {
-    let enum_decl = scope
-        .semantic_index
-        .enum_decl(scope.module, expected_type)?;
     match value {
         ValueExpr::Identifier(name) => {
-            let Some(variant) = enum_decl
-                .variants
-                .iter()
-                .find(|variant| variant.name == *name)
-            else {
-                return Err(Error::new(format!(
-                    "value {name} is not a variant of enum {}",
-                    enum_decl.name
-                )));
-            };
+            let variant =
+                scope
+                    .semantic_index
+                    .value_enum_variant(scope.module, expected_type, name)?;
             if variant.payload_type.is_some() {
                 return Err(Error::new(format!(
-                    "enum variant {} requires a payload and cannot be used as a fieldless value",
-                    variant.name
+                    "enum variant {name} requires a payload and cannot be used as a fieldless value"
                 )));
             }
             Ok(())
         }
         ValueExpr::EnumVariant { name, payload } => {
-            let variant = enum_decl
-                .variants
-                .iter()
-                .find(|variant| variant.name == *name)
-                .ok_or_else(|| {
-                    Error::new(format!(
-                        "value {name} is not a variant of enum {}",
-                        enum_decl.name
-                    ))
-                })?;
-            let Some(payload_type) = &variant.payload_type else {
+            let variant =
+                scope
+                    .semantic_index
+                    .value_enum_variant(scope.module, expected_type, name)?;
+            let Some(payload_type) = variant.payload_type.as_ref() else {
                 return Err(Error::new(format!(
                     "enum variant {name} does not accept a payload"
                 )));
@@ -342,7 +338,9 @@ fn check_enum_source_value_type(
         | ValueExpr::Grouped { .. }
         | ValueExpr::IfElse { .. } => Err(Error::new(format!(
             "expected enum variant value for enum {}",
-            enum_decl.name
+            scope
+                .semantic_index
+                .value_enum_name(scope.module, expected_type)?
         ))),
     }
 }

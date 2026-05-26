@@ -1,5 +1,8 @@
 use super::send::{resolve_checked_send_target, resolve_send_message_case};
 use super::*;
+use crate::language::{
+    PROCESS_REF_TYPE, RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, UNIT_TYPE,
+};
 
 #[derive(Clone, Copy)]
 pub(super) struct ActionCheckInput<'a, 'scope, 'source, 'template> {
@@ -7,6 +10,7 @@ pub(super) struct ActionCheckInput<'a, 'scope, 'source, 'template> {
     pub(super) source_bindings: &'a [SourceValueBinding<'source>],
     pub(super) template_bindings: &'a [ValueTemplateBinding<'template>],
     pub(super) payload_bindings: &'a [StepPayloadBinding],
+    pub(super) outcome_bindings: &'a [EffectOutcomeBinding<'source>],
     pub(super) scope: ActionCheckScope,
 }
 
@@ -72,6 +76,36 @@ pub(super) fn checked_actions_for_statements(
                     process_ref: binding.id,
                 });
             }
+            Statement::LetSpawnOutcome { name, target, .. } => {
+                if input.scope.in_step_return_match_arm {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot bind effect outcome {}",
+                        context.process.name, name
+                    )));
+                }
+                if !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside) {
+                    return Err(Error::new(format!(
+                        "process {} {} cannot bind effect outcome {}",
+                        context.process.name,
+                        input.scope.runtime_if_branch_label(),
+                        name
+                    )));
+                }
+                if input.scope.in_loop_body {
+                    return Err(Error::new(format!(
+                        "process {} for loop body cannot bind effect outcome {}",
+                        context.process.name, name
+                    )));
+                }
+                let target_process = context.semantic_index.process_id(target)?;
+                let binding = effect_outcome_binding(input.outcome_bindings, name)?;
+                validate_spawn_outcome_annotation(context, target, binding.ty)?;
+                actions.push(CheckedAction::SpawnOutcome {
+                    outcome: binding.id,
+                    outcome_ty: binding.checked_ty.clone(),
+                    target: target_process,
+                });
+            }
             Statement::LetValue { name, .. } => {
                 return Err(Error::new(format!(
                     "process {} step source-local value binding {} is only supported in pure source functions",
@@ -95,6 +129,54 @@ pub(super) fn checked_actions_for_statements(
                     input.template_bindings,
                 )?;
                 actions.push(CheckedAction::Send {
+                    target: send_target.target,
+                    message: message_id.message,
+                    payload: message_id.payload.map(Box::new),
+                });
+            }
+            Statement::LetSendOutcome {
+                name,
+                ty: _,
+                target,
+                message,
+                payload,
+            } => {
+                if input.scope.in_step_return_match_arm {
+                    return Err(Error::new(format!(
+                        "process {} step return match arm cannot bind effect outcome {}",
+                        context.process.name, name
+                    )));
+                }
+                if !matches!(input.scope.runtime_if_branch, RuntimeIfBranchScope::Outside) {
+                    return Err(Error::new(format!(
+                        "process {} {} cannot bind effect outcome {}",
+                        context.process.name,
+                        input.scope.runtime_if_branch_label(),
+                        name
+                    )));
+                }
+                if input.scope.in_loop_body {
+                    return Err(Error::new(format!(
+                        "process {} for loop body cannot bind effect outcome {}",
+                        context.process.name, name
+                    )));
+                }
+                let send_target =
+                    resolve_checked_send_target(context, input.payload_bindings, target)?;
+                let message_id = resolve_send_message_case(
+                    context,
+                    types,
+                    send_target.target_process,
+                    message,
+                    payload.as_ref(),
+                    input.source_bindings,
+                    input.template_bindings,
+                )?;
+                let binding = effect_outcome_binding(input.outcome_bindings, name)?;
+                validate_send_outcome_annotation(context, send_target.target_process, binding.ty)?;
+                actions.push(CheckedAction::SendOutcome {
+                    outcome: binding.id,
+                    outcome_ty: binding.checked_ty.clone(),
                     target: send_target.target,
                     message: message_id.message,
                     payload: message_id.payload.map(Box::new),
@@ -148,6 +230,85 @@ pub(super) fn checked_actions_for_statements(
         }
     }
     Ok(actions)
+}
+
+fn validate_send_outcome_annotation(
+    context: &StepCheckContext<'_>,
+    target_process: CheckedProcessId,
+    actual: &TypeRef,
+) -> Result<()> {
+    let process = context
+        .module
+        .processes
+        .get(target_process.index())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process id {} is not declared",
+                target_process.as_u32()
+            ))
+        })?;
+    let expected = result_type(unit_type()?, send_error_type(process.msg_type.clone())?)?;
+    if context.semantic_index.same_type(actual, &expected) {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "process {} send outcome binding must have type {}, got {}",
+        context.process.name, expected, actual
+    )))
+}
+
+fn validate_spawn_outcome_annotation(
+    context: &StepCheckContext<'_>,
+    target: &Identifier,
+    actual: &TypeRef,
+) -> Result<()> {
+    let unit = unit_type()?;
+    let expected = result_type(process_ref_type(target.clone())?, spawn_error_type(unit)?)?;
+    if context.semantic_index.same_type(actual, &expected) {
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "process {} spawn outcome binding must have type {}, got {}",
+        context.process.name, expected, actual
+    )))
+}
+
+fn unit_type() -> Result<TypeRef> {
+    Ok(TypeRef::Named(Identifier::new(UNIT_TYPE)?))
+}
+
+fn send_error_type(message_ty: TypeRef) -> Result<TypeRef> {
+    applied_type(SEND_ERROR_TYPE, vec![message_ty])
+}
+
+fn spawn_error_type(init_ty: TypeRef) -> Result<TypeRef> {
+    applied_type(SPAWN_ERROR_TYPE, vec![init_ty])
+}
+
+fn result_type(ok_ty: TypeRef, err_ty: TypeRef) -> Result<TypeRef> {
+    applied_type(RESULT_TYPE, vec![ok_ty, err_ty])
+}
+
+fn process_ref_type(target: Identifier) -> Result<TypeRef> {
+    applied_type(PROCESS_REF_TYPE, vec![TypeRef::Named(target)])
+}
+
+fn applied_type(constructor: &str, args: Vec<TypeRef>) -> Result<TypeRef> {
+    Ok(TypeRef::Applied {
+        constructor: Identifier::new(constructor)?,
+        args,
+        const_args: Vec::new(),
+    })
+}
+
+fn effect_outcome_binding<'a>(
+    bindings: &'a [EffectOutcomeBinding<'a>],
+    name: &Identifier,
+) -> Result<&'a EffectOutcomeBinding<'a>> {
+    bindings
+        .iter()
+        .find(|binding| binding.name == name)
+        .ok_or_else(|| Error::new(format!("effect outcome binding {name} was not resolved")))
 }
 
 fn checked_if_else_statement_action(
@@ -325,6 +486,7 @@ fn checked_for_each_action(
             source_bindings: &body_source_bindings,
             template_bindings: &body_template_bindings,
             payload_bindings: input.payload_bindings,
+            outcome_bindings: input.outcome_bindings,
             scope: body_scope,
         },
         for_each.body,

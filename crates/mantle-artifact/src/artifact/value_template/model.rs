@@ -1,4 +1,4 @@
-use crate::{EnumVariantId, LoopElementId, ProcessId, ProcessRefId, TypeId};
+use crate::{EffectOutcomeId, EnumVariantId, LoopElementId, ProcessId, ProcessRefId, TypeId};
 
 use super::scalar::{
     ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactScalarValue,
@@ -101,6 +101,10 @@ pub enum ArtifactValueTemplate {
     LoopElement {
         ty: TypeId,
         element: LoopElementId,
+    },
+    EffectOutcome {
+        ty: TypeId,
+        outcome: EffectOutcomeId,
     },
     EnumVariant {
         ty: TypeId,

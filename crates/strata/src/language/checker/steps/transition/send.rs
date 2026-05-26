@@ -147,6 +147,12 @@ pub(super) fn checked_send_payload_template(
                             element,
                         }
                     }
+                    ValueTemplateSource::EffectOutcome(outcome) => {
+                        CheckedValueTemplate::EffectOutcome {
+                            ty: binding.checked_ty.clone(),
+                            outcome,
+                        }
+                    }
                 });
             }
             return Err(Error::new(format!(

@@ -183,6 +183,28 @@ send worker Ping;
 Process references can also travel as typed immutable message payloads when the
 message declares a direct `ProcessRef<T>` payload.
 
+### Typed Effect Outcomes
+
+Local send and spawn effects can bind immutable `Result` values in `step`
+bodies:
+
+```strata
+let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;
+let send_result: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+```
+
+Send outcomes commit accepted messages as `Ok(Unit)` and return typed
+pre-acceptance failures such as `Full(message)`, `Stopped(message)`,
+`Crashed(message)`, or `MailboxClosed(message)` while preserving the original
+message value. The current local runtime can produce `Full`, `Stopped`, and
+already-failed `Crashed`; `MailboxClosed` remains part of the typed contract for
+closed mailbox boundaries. Local spawn outcomes return
+`Result<ProcessRef<Target>,SpawnError<Unit>>`: accepted spawns commit the new
+process and return its typed process reference, while pre-acceptance failures
+return typed `SpawnError<Unit>` values. Outcome values are immutable and
+step-local; process references remain authority values and are not storable
+source state.
+
 ### Records, Enums, And Payloads
 
 Records and enum payloads are immutable values:

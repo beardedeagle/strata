@@ -126,6 +126,43 @@ Key source ideas:
   value.
 - `WorkerState { job: job }` constructs the next state as a whole value.
 
+## Typed Effect Outcomes
+
+`examples/effect_outcomes.str` binds local spawn and send results as immutable
+`Result` values, branches on typed outcome variant patterns, and stores the
+finite send result in the next state as whole-value data.
+
+```sh
+just run-example effect_outcomes
+```
+
+Key source ideas:
+
+- `let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;`
+  returns the committed process reference on accepted local spawn.
+- `if (spawn_result != Err(Exhausted(Unit)))` branches on the spawn outcome
+  variant without comparing process-reference identities.
+- `let send_result: Result<Unit,SendError<WorkerMsg>> = send worker Work;`
+  returns `Ok(Unit)` after Mantle accepts the message, or a typed
+  `SendError<WorkerMsg>` before acceptance.
+- `SendError<WorkerMsg>` admits `Full`, `Stopped`, `Crashed`, and
+  `MailboxClosed`; the current local runtime does not yet expose a distinct
+  source-created closed-mailbox lifecycle.
+- `if (send_result == Ok(Unit))` branches over the immutable outcome to choose a
+  follow-up effect.
+- The next state stores `send_result`. `spawn_result` stays step-local because
+  its success branch carries a process reference authority, not ordinary
+  storable source state.
+- The generated artifact uses typed outcome IDs and typed value templates, not
+  the source binding names, for runtime meaning.
+- `examples/effect_outcome_mailbox_full.str` and
+  `examples/effect_outcome_stopped_target.str` cover source-to-runtime
+  pre-acceptance failure outcomes. `examples/effect_outcome_crashed_target.str`
+  checks and builds, then proves the current source-created panic boundary fails
+  closed before a later sender can observe `Err(Crashed(...))`; the direct
+  Mantle runtime outcome test covers already-failed targets, and admission tests
+  cover the required `MailboxClosed` shape.
+
 ## Runtime If Else
 
 `examples/runtime_if_else.str` branches inside `Worker.step` over a received

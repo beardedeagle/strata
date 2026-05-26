@@ -7,4 +7,3 @@ pub(super) use mantle_artifact::{
     ArtifactMapEntry, ArtifactRecordField, ArtifactScalarValue, ArtifactValueBooleanOperator,
     ArtifactValueEqualityOperator,
 };
-pub(super) use std::collections::BTreeSet;

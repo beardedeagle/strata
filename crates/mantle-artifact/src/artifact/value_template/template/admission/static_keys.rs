@@ -23,6 +23,7 @@ pub(super) fn is_static_map_key_template(template: &ArtifactValueTemplate) -> bo
         | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. }
         | ArtifactValueTemplate::LoopElement { .. }
+        | ArtifactValueTemplate::EffectOutcome { .. }
         | ArtifactValueTemplate::IfElse { .. }
         | ArtifactValueTemplate::Equality { .. }
         | ArtifactValueTemplate::BooleanNot { .. }

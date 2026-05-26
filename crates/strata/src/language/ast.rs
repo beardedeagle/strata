@@ -318,7 +318,19 @@ pub enum Statement {
         ty: TypeRef,
         target: Identifier,
     },
+    LetSpawnOutcome {
+        name: Identifier,
+        ty: TypeRef,
+        target: Identifier,
+    },
     Send {
+        target: Identifier,
+        message: Identifier,
+        payload: Option<ValueExpr>,
+    },
+    LetSendOutcome {
+        name: Identifier,
+        ty: TypeRef,
         target: Identifier,
         message: Identifier,
         payload: Option<ValueExpr>,

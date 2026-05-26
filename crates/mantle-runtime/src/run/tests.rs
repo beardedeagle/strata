@@ -1,5 +1,6 @@
 mod delivery;
 mod effect_admission;
+mod effect_outcomes;
 mod identity_admission;
 mod process_lookup;
 mod process_ref_admission;

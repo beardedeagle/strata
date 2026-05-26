@@ -13,6 +13,55 @@ impl LoadedTemplateAdmission<'_> {
         Ok(())
     }
 
+    pub(super) fn reject_type_containing_process_ref(&self, field: &str, ty: TypeId) -> Result<()> {
+        if self.type_contains_process_ref_at_depth(ty, 0)? {
+            return Err(Error::new(format!(
+                "{field} process reference outcome must remain step-local"
+            )));
+        }
+        Ok(())
+    }
+
+    fn type_contains_process_ref_at_depth(&self, ty: TypeId, depth: usize) -> Result<bool> {
+        if depth > MAX_VALUE_TEMPLATE_DEPTH {
+            return Err(Error::new(format!(
+                "type id {} nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}",
+                ty.as_u32()
+            )));
+        }
+        let type_entry = self.program.type_entry(ty)?;
+        match type_entry.kind {
+            ArtifactTypeKind::ProcessRef { .. } => Ok(true),
+            ArtifactTypeKind::Value => match type_entry.value_shape()? {
+                ArtifactValueShape::Atom | ArtifactValueShape::Scalar { .. } => Ok(false),
+                ArtifactValueShape::Record { fields } => {
+                    for field in fields {
+                        if self.type_contains_process_ref_at_depth(field.ty, depth + 1)? {
+                            return Ok(true);
+                        }
+                    }
+                    Ok(false)
+                }
+                ArtifactValueShape::Enum { variants } => {
+                    for variant in variants {
+                        if let Some(payload_type) = variant.payload_type
+                            && self.type_contains_process_ref_at_depth(payload_type, depth + 1)?
+                        {
+                            return Ok(true);
+                        }
+                    }
+                    Ok(false)
+                }
+                ArtifactValueShape::List { element, .. } => {
+                    self.type_contains_process_ref_at_depth(*element, depth + 1)
+                }
+                ArtifactValueShape::Map { key, value, .. } => Ok(self
+                    .type_contains_process_ref_at_depth(*key, depth + 1)?
+                    || self.type_contains_process_ref_at_depth(*value, depth + 1)?),
+            },
+        }
+    }
+
     pub(super) fn validate_enum_payload_projection(
         &self,
         field: &str,

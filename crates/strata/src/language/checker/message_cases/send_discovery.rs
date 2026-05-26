@@ -45,6 +45,12 @@ fn discover_send_statement(
             target,
             message,
             payload,
+        }
+        | Statement::LetSendOutcome {
+            target,
+            message,
+            payload,
+            ..
         } => {
             let target_process_id = resolve_send_target_process_for_discovery(
                 process,
@@ -74,6 +80,7 @@ fn discover_send_statement(
                 context,
             )
         }
+        Statement::LetSpawnOutcome { .. } => Ok(false),
         Statement::IfElse {
             then_body,
             else_body,

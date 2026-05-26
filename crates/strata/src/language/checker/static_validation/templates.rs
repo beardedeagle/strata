@@ -17,14 +17,19 @@ use crate::language::checked::{
 };
 use crate::language::diagnostic::{Error, Result};
 
+mod dependencies;
+mod equality;
 mod evaluation;
 mod payload_labels;
 mod process_refs;
 
-pub(super) use evaluation::{
-    checked_template_depends_on_loop_element, checked_template_depends_on_received_payload,
-    evaluate_checked_template, resolve_checked_next_state, resolve_checked_template_state,
+use equality::validate_checked_equality_template;
+
+pub(super) use dependencies::{
+    checked_template_depends_on_effect_outcome, checked_template_depends_on_loop_element,
+    checked_template_depends_on_received_payload,
 };
+pub(super) use evaluation::{evaluate_checked_template, resolve_checked_template_state};
 pub(super) use payload_labels::validate_value_template_payload_labels;
 pub(super) use process_refs::{
     reject_process_ref_template_in_next_state, validate_value_template_process_refs,
@@ -74,7 +79,9 @@ fn validate_next_state_at_depth(
             )?;
             validate_value_template_payload_labels(template)?;
             reject_process_ref_template_in_next_state(template)?;
-            if !checked_template_depends_on_received_payload(template) {
+            if !checked_template_depends_on_received_payload(template)
+                && !checked_template_depends_on_effect_outcome(template)
+            {
                 resolve_checked_template_state(
                     process,
                     template,
@@ -163,6 +170,7 @@ pub(super) fn validate_static_bool_condition_value(
 ) -> Result<()> {
     if checked_template_depends_on_received_payload(condition)
         || checked_template_depends_on_loop_element(condition)
+        || checked_template_depends_on_effect_outcome(condition)
     {
         return Ok(());
     }
@@ -197,6 +205,7 @@ fn validate_bool_condition_template_shape(
         | CheckedValueTemplate::ListPrefixElement { .. }
         | CheckedValueTemplate::MapValue { .. }
         | CheckedValueTemplate::LoopElement { .. }
+        | CheckedValueTemplate::EffectOutcome { .. }
         | CheckedValueTemplate::IfElse { .. }
         | CheckedValueTemplate::Equality { .. }
         | CheckedValueTemplate::ScalarOrdering { .. }
@@ -292,6 +301,7 @@ pub(super) fn validate_value_template_binding_types(
             Ok(())
         }
         CheckedValueTemplate::LoopElement { .. } => Ok(()),
+        CheckedValueTemplate::EffectOutcome { .. } => Ok(()),
         CheckedValueTemplate::EnumPayload { ty, value, variant } => {
             validate_checked_enum_payload_projection(ty, value.result_type(), *variant)?;
             validate_value_template_binding_types(
@@ -502,31 +512,6 @@ pub(super) fn validate_value_template_binding_types(
     }
 }
 
-fn validate_checked_equality_template(
-    result_ty: &CheckedTypeRef,
-    operand_ty: &CheckedTypeRef,
-    left: &CheckedValueTemplate,
-    right: &CheckedValueTemplate,
-) -> Result<()> {
-    validate_checked_bool_contract_type(result_ty)?;
-    validate_checked_equality_operand_type(operand_ty)?;
-    if left.result_type() != operand_ty {
-        return Err(Error::new(format!(
-            "equality left operand has type {}, expected {}",
-            left.result_type(),
-            operand_ty
-        )));
-    }
-    if right.result_type() != operand_ty {
-        return Err(Error::new(format!(
-            "equality right operand has type {}, expected {}",
-            right.result_type(),
-            operand_ty
-        )));
-    }
-    Ok(())
-}
-
 fn validate_checked_bool_composition_operand(
     result_ty: &CheckedTypeRef,
     operand: &CheckedValueTemplate,
@@ -542,7 +527,7 @@ fn validate_checked_bool_composition_operand(
     Ok(())
 }
 
-fn validate_checked_bool_contract_type(ty: &CheckedTypeRef) -> Result<()> {
+pub(super) fn validate_checked_bool_contract_type(ty: &CheckedTypeRef) -> Result<()> {
     if matches!(
         ty.kind(),
         CheckedTypeKind::Value { shape } if is_checked_bool_contract_shape(shape)
@@ -564,25 +549,6 @@ fn is_checked_bool_contract_shape(shape: &CheckedValueShape) -> bool {
                 && variants[1].name.as_str() == "True"
                 && variants[1].payload_type.is_none()
     )
-}
-
-fn validate_checked_equality_operand_type(operand_ty: &CheckedTypeRef) -> Result<()> {
-    match operand_ty.kind() {
-        CheckedTypeKind::Value {
-            shape: CheckedValueShape::Scalar(_),
-        } => Ok(()),
-        CheckedTypeKind::Value {
-            shape: CheckedValueShape::Enum { variants },
-        } if variants
-            .iter()
-            .all(|variant| variant.payload_type.is_none()) =>
-        {
-            Ok(())
-        }
-        _ => Err(Error::new(format!(
-            "equality operands must be Bool, scalar values, or fieldless enum values, found {operand_ty}"
-        ))),
-    }
 }
 
 fn validate_checked_scalar_operand_type(ty: &CheckedTypeRef) -> Result<()> {

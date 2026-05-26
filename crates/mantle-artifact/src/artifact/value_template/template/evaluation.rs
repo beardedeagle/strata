@@ -46,6 +46,9 @@ impl ArtifactValueTemplate {
                 }
                 ArtifactStateValue::from_value(payload.ty, payload.value.clone())
             }
+            Self::EffectOutcome { .. } => Err(Error::new(
+                "effect outcome templates require runtime effect outcome bindings",
+            )),
             Self::EnumPayload { ty, value, variant } => {
                 let value = value.evaluate_state_value(
                     received_payload,
@@ -157,14 +160,16 @@ impl ArtifactValueTemplate {
             Self::Record { ty, fields } => {
                 let ty_label = type_entry(*ty)?.label;
                 let mut values = Vec::with_capacity(fields.len());
-                let mut seen = BTreeSet::new();
-                for field in fields {
+                for (index, field) in fields.iter().enumerate() {
                     let value = field.value.evaluate_state_value(
                         received_payload,
                         current_state_payload,
                         type_entry,
                     )?;
-                    if !seen.insert(field.name.as_str()) {
+                    if fields[..index]
+                        .iter()
+                        .any(|previous| previous.name == field.name)
+                    {
                         return Err(Error::new(format!(
                             "record template duplicates field {}",
                             field.name
@@ -197,8 +202,7 @@ impl ArtifactValueTemplate {
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::Map { ty, entries } => {
-                let mut values = Vec::with_capacity(entries.len());
-                let mut seen = BTreeSet::new();
+                let mut values: Vec<ArtifactMapEntry> = Vec::with_capacity(entries.len());
                 for entry in entries {
                     let key = entry.key.evaluate_state_value(
                         received_payload,
@@ -210,7 +214,7 @@ impl ArtifactValueTemplate {
                         current_state_payload,
                         type_entry,
                     )?;
-                    if !seen.insert(key.value.clone()) {
+                    if values.iter().any(|previous| previous.key == key.value) {
                         return Err(Error::new(format!(
                             "map template duplicates key {}",
                             key.value.label()

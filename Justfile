@@ -313,6 +313,17 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_emit_spawn_send.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_emit_spawn_send.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_emit_spawn_send.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcomes.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcomes.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/effect_outcomes.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcome_mailbox_full.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcome_mailbox_full.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_mailbox_full.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcome_stopped_target.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcome_stopped_target.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_stopped_target.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcome_crashed_target.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcome_crashed_target.str
 
 source-to-runtime-failure-gates: build
     #!/usr/bin/env bash

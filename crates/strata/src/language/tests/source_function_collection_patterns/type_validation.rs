@@ -89,7 +89,6 @@ fn rejects_mismatched_list_value_type_argument() {
     let source = r#"
 module mismatched_list_value_type_argument;
 
-record Unit;
 enum Phase {
     Ready,
 }
@@ -128,7 +127,6 @@ fn rejects_mismatched_map_value_type_argument() {
     let source = r#"
 module mismatched_map_value_type_argument;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -168,7 +166,6 @@ fn rejects_unbounded_list_type() {
     let source = r#"
 module unbounded_list_type;
 
-record Unit;
 enum Phase {
     Ready,
 }
@@ -244,7 +241,6 @@ fn rejects_unbounded_map_type() {
     let source = r#"
 module unbounded_map_type;
 
-record Unit;
 enum Phase {
     Ready,
 }
@@ -281,7 +277,6 @@ fn rejects_unbounded_map_payload_with_collection_diagnostic() {
     let source = r#"
 module unbounded_map_payload;
 
-record Unit;
 enum Phase {
     Ready,
 }
@@ -319,7 +314,6 @@ fn rejects_capacity_overflow_with_parser_byte_offset() {
     let source = r#"
 module collection_capacity_overflow;
 
-record Unit;
 enum Phase {
     Ready,
 }
@@ -355,7 +349,6 @@ fn rejects_list_value_above_declared_capacity() {
     let source = r#"
 module list_value_above_declared_capacity;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -392,7 +385,6 @@ fn rejects_map_value_above_declared_capacity() {
     let source = r#"
 module map_value_above_declared_capacity;
 
-record Unit;
 enum Phase {
     Ready,
     Done,

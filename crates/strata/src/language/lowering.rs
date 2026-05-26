@@ -5,19 +5,19 @@ use mantle_artifact::{
     ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind,
     ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
     ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
-    EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
+    EffectOutcomeId, EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId,
+    ProcessId, ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
 use super::checked::{
-    CheckedAction, CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageCase,
-    CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess,
-    CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedScalarArithmeticOperator,
-    CheckedScalarOrderingOperator, CheckedSendTarget, CheckedStateId, CheckedStateValue,
-    CheckedStepResult, CheckedTransition, CheckedTypeId, CheckedTypeKind, CheckedTypeRef,
-    CheckedValueBooleanOperator, CheckedValueEqualityOperator, CheckedValueShape,
-    CheckedValueTemplate,
+    CheckedAction, CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId,
+    CheckedMessageCase, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedPayloadValue,
+    CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram,
+    CheckedScalarArithmeticOperator, CheckedScalarOrderingOperator, CheckedSendTarget,
+    CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId,
+    CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
+    CheckedValueShape, CheckedValueTemplate,
 };
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
@@ -242,11 +242,36 @@ fn lower_action(
             target: lower_process_id(*target),
             process_ref: lower_process_ref_id(*process_ref),
         }),
+        CheckedAction::SpawnOutcome {
+            outcome,
+            outcome_ty,
+            target,
+        } => Ok(ArtifactAction::SpawnOutcome {
+            outcome: lower_effect_outcome_id(*outcome),
+            outcome_ty: types.artifact_id(outcome_ty)?,
+            target: lower_process_id(*target),
+        }),
         CheckedAction::Send {
             target,
             message,
             payload,
         } => Ok(ArtifactAction::Send {
+            target: lower_send_target(target, types)?,
+            message: lower_message_id(*message),
+            payload: payload
+                .as_ref()
+                .map(|payload| lower_value_template(payload, types))
+                .transpose()?,
+        }),
+        CheckedAction::SendOutcome {
+            outcome,
+            outcome_ty,
+            target,
+            message,
+            payload,
+        } => Ok(ArtifactAction::SendOutcome {
+            outcome: lower_effect_outcome_id(*outcome),
+            outcome_ty: types.artifact_id(outcome_ty)?,
             target: lower_send_target(target, types)?,
             message: lower_message_id(*message),
             payload: payload
@@ -364,6 +389,12 @@ fn lower_value_template(
         CheckedValueTemplate::CurrentStatePayload { ty } => {
             Ok(ArtifactValueTemplate::CurrentStatePayload {
                 ty: types.artifact_id(ty)?,
+            })
+        }
+        CheckedValueTemplate::EffectOutcome { ty, outcome } => {
+            Ok(ArtifactValueTemplate::EffectOutcome {
+                ty: types.artifact_id(ty)?,
+                outcome: lower_effect_outcome_id(*outcome),
             })
         }
         CheckedValueTemplate::EnumPayload { ty, value, variant } => {
@@ -650,4 +681,8 @@ fn lower_enum_variant_id(id: CheckedEnumVariantId) -> EnumVariantId {
 
 fn lower_loop_element_id(id: CheckedLoopElementId) -> LoopElementId {
     LoopElementId::new(id.as_u32())
+}
+
+fn lower_effect_outcome_id(id: CheckedEffectOutcomeId) -> EffectOutcomeId {
+    EffectOutcomeId::new(id.as_u32())
 }

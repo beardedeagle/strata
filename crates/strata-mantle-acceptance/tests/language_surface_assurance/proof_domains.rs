@@ -206,6 +206,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
     },
     ProofDomain {
+        id: "typed-effect-outcomes",
+        title: "Typed effect outcomes and commit-or-return behavior",
+        feature_ids: &["typed-effect-outcomes"],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "checked-ir-action-templates",
         title: "Checked IR action templates and typed lowering",
         feature_ids: &[
@@ -213,6 +219,7 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "return-match-action-blocks",
             "runtime-if-control-flow",
             "runtime-for-checked-lists",
+            "typed-effect-outcomes",
         ],
         obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
     },

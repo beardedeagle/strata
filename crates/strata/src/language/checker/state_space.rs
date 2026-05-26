@@ -38,6 +38,18 @@ impl<'module> StateSpace<'module> {
         types: &mut CheckedTypeInterner<'_>,
     ) -> Result<Self> {
         let checked_state_type = types.intern(&process.state_type)?;
+        if semantic_index.is_unit_type(&process.state_type)? {
+            return Ok(Self {
+                module,
+                process_name: &process.name,
+                state_type: &process.state_type,
+                checked_state_type: checked_state_type.clone(),
+                values: vec![CheckedStateValue::new(
+                    checked_state_type,
+                    ArtifactValue::Atom("Unit".to_string()),
+                )],
+            });
+        }
         if let Ok(record) = semantic_index.record_decl(module, &process.state_type) {
             let values = if record.fields.is_empty() {
                 vec![CheckedStateValue::new(

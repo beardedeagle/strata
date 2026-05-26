@@ -8,11 +8,13 @@ use super::super::checked::{
 use super::super::diagnostic::{Error, Result};
 use mantle_artifact::{MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_VALUE_TEMPLATE_FIELDS};
 
+mod loop_elements;
 mod process_refs;
 mod runtime_order;
 mod templates;
 mod transition_coverage;
 
+use loop_elements::validate_value_template_loop_elements;
 use process_refs::{
     message_payload_type, process_by_id, process_label, process_ref_target, validate_send_target,
 };
@@ -134,8 +136,7 @@ fn validate_checked_state_table(process: &CheckedProcess) -> Result<()> {
         )));
     }
 
-    let mut states = BTreeSet::new();
-    for state in process.state_values() {
+    for (index, state) in process.state_values().iter().enumerate() {
         if state.ty() != process.state_type() {
             return Err(Error::new(format!(
                 "process {} state value {} has type {}, expected {}",
@@ -182,7 +183,9 @@ fn validate_checked_state_table(process: &CheckedProcess) -> Result<()> {
                 )));
             }
         }
-        if !states.insert((state.ty().id(), state.value().clone())) {
+        if process.state_values()[..index].iter().any(|previous| {
+            previous.ty().id() == state.ty().id() && previous.value() == state.value()
+        }) {
             return Err(Error::new(format!(
                 "process {} declares duplicate state value {}",
                 process.debug_name(),
@@ -301,10 +304,50 @@ fn validate_action_reference(
                 )));
             }
         }
+        CheckedAction::SpawnOutcome { target, .. } => {
+            if scope.is_inside_runtime_if_branch() {
+                return Err(Error::new(format!(
+                    "process {} runtime if branch cannot bind spawn outcomes",
+                    process.debug_name()
+                )));
+            }
+            if scope.inside_loop {
+                return Err(Error::new(format!(
+                    "process {} for loop body cannot bind spawn outcomes",
+                    process.debug_name()
+                )));
+            }
+            if target.index() >= context.processes.len() {
+                return Err(Error::new(format!(
+                    "process {} spawns undefined process id {}",
+                    process.debug_name(),
+                    target.as_u32()
+                )));
+            }
+            if *target == context.entry_process {
+                return Err(Error::new(format!(
+                    "process {} spawns entry process {}, which is already started",
+                    process.debug_name(),
+                    process_label(context.processes, *target)?
+                )));
+            }
+            if *target == context.process_id {
+                return Err(Error::new(format!(
+                    "process {} spawns itself, which is not supported",
+                    process.debug_name()
+                )));
+            }
+        }
         CheckedAction::Send {
             target,
             message,
             payload,
+        }
+        | CheckedAction::SendOutcome {
+            target,
+            message,
+            payload,
+            ..
         } => {
             let target_process_id = validate_send_target(
                 context.processes,
@@ -607,100 +650,6 @@ fn validate_send_payload_shape(
                     payload.result_type(),
                     expected_type
                 )));
-            }
-            Ok(())
-        }
-    }
-}
-
-fn validate_value_template_loop_elements(
-    template: &CheckedValueTemplate,
-    active_loop_elements: &[ActiveCheckedLoopElement],
-) -> Result<()> {
-    match template {
-        CheckedValueTemplate::Literal(_)
-        | CheckedValueTemplate::ReceivedPayload { .. }
-        | CheckedValueTemplate::CurrentStatePayload { .. }
-        | CheckedValueTemplate::ProcessRef { .. } => Ok(()),
-        CheckedValueTemplate::LoopElement { ty, element } => {
-            let Some(active) = active_loop_elements
-                .iter()
-                .find(|active| active.id == *element)
-            else {
-                return Err(Error::new(format!(
-                    "references inactive loop element id {}",
-                    element.as_u32()
-                )));
-            };
-            if active.ty != *ty {
-                return Err(Error::new(format!(
-                    "loop element id {} has type {}, expected {}",
-                    element.as_u32(),
-                    active.ty,
-                    ty
-                )));
-            }
-            Ok(())
-        }
-        CheckedValueTemplate::EnumPayload { value, .. } => {
-            validate_value_template_loop_elements(value, active_loop_elements)
-        }
-        CheckedValueTemplate::RecordField { record, .. } => {
-            validate_value_template_loop_elements(record, active_loop_elements)
-        }
-        CheckedValueTemplate::ListElement { list, .. }
-        | CheckedValueTemplate::ListPrefixElement { list, .. }
-        | CheckedValueTemplate::ListRest { list, .. } => {
-            validate_value_template_loop_elements(list, active_loop_elements)
-        }
-        CheckedValueTemplate::MapValue { map, .. } => {
-            validate_value_template_loop_elements(map, active_loop_elements)
-        }
-        CheckedValueTemplate::MapRest { map, .. } => {
-            validate_value_template_loop_elements(map, active_loop_elements)
-        }
-        CheckedValueTemplate::Equality { left, right, .. }
-        | CheckedValueTemplate::ScalarArithmetic { left, right, .. }
-        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
-            validate_value_template_loop_elements(left, active_loop_elements)?;
-            validate_value_template_loop_elements(right, active_loop_elements)
-        }
-        CheckedValueTemplate::IfElse {
-            condition,
-            then_value,
-            else_value,
-            ..
-        } => {
-            validate_value_template_loop_elements(condition, active_loop_elements)?;
-            validate_value_template_loop_elements(then_value, active_loop_elements)?;
-            validate_value_template_loop_elements(else_value, active_loop_elements)
-        }
-        CheckedValueTemplate::BooleanNot { operand, .. } => {
-            validate_value_template_loop_elements(operand, active_loop_elements)
-        }
-        CheckedValueTemplate::BooleanBinary { left, right, .. } => {
-            validate_value_template_loop_elements(left, active_loop_elements)?;
-            validate_value_template_loop_elements(right, active_loop_elements)
-        }
-        CheckedValueTemplate::EnumVariant { payload, .. } => {
-            validate_value_template_loop_elements(payload, active_loop_elements)
-        }
-        CheckedValueTemplate::Record { fields, .. } => {
-            for field in fields {
-                validate_value_template_loop_elements(field.value(), active_loop_elements)?;
-            }
-            Ok(())
-        }
-        CheckedValueTemplate::List { items, .. } => {
-            for item in items {
-                validate_value_template_loop_elements(item, active_loop_elements)?;
-            }
-            Ok(())
-        }
-        CheckedValueTemplate::Map { entries, .. } => {
-            for entry in entries {
-                validate_value_template_loop_elements(entry.key(), active_loop_elements)?;
-                validate_value_template_loop_elements(entry.value(), active_loop_elements)?;
             }
             Ok(())
         }

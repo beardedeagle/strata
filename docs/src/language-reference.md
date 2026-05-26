@@ -18,6 +18,7 @@ Mantle artifact internals.
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
+| Effect outcomes | Immutable step-local `Result` bindings for local `send` and the current local `spawn` success shape. |
 | Scalar values | Fixed-width integer source values `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` with explicit literal suffixes. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
 | Scalar operators | `+`, `-`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=`, and scalar equality over matching integer types only. |
@@ -98,9 +99,10 @@ _
 `mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`, `security`,
 `send`, `spawn`, `type`, and `var` are reserved everywhere identifiers are
 accepted.
-`ProcResult`, `ProcessRef`, `List`, `Map`, `U8`, `U16`, `U32`, `U64`, `I8`,
-`I16`, `I32`, and `I64` are reserved type names because they name built-in
-transition, process-reference, collection, and scalar value types.
+`ProcResult`, `ProcessRef`, `List`, `Map`, `Unit`, `Option`, `Result`,
+`SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and
+`I64` are reserved type names because they name built-in transition,
+process-reference, collection, effect outcome, and scalar value types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
 artifact metadata. Checked process-reference artifact labels under that prefix
 are keyed by resolved process IDs, not source process names.
@@ -184,6 +186,64 @@ Scalars are ordinary source values when they do not carry authority: they can be
 used in source function parameters and returns, source-local bindings, process
 local pure functions, record fields, message payloads, list/map values, and
 runtime `if` predicates through `Bool`.
+
+## Built-In Result Values
+
+The buildable value surface includes these built-in value shapes:
+
+```strata
+Unit
+Option<T>
+Result<T,E>
+SendError<M>
+SpawnError<A>
+```
+
+`Unit` has the single value `Unit`. `Option<T>` has `None` and `Some(T)`.
+`Result<T,E>` has `Ok(T)` and `Err(E)`. Local send outcomes use
+`Result<Unit,SendError<MessageType>>`; local spawn outcomes use
+`Result<ProcessRef<TargetProcess>,SpawnError<Unit>>`.
+
+```strata
+let send_result: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;
+```
+
+Outcome bindings are immutable and scoped to the `step` body. They may feed
+whole-value state transitions when the checker can admit the finite runtime
+outcome values into the process state table. Spawn outcome successes carry
+process references, so they remain step-local authority values rather than
+storable source state. Outcomes may also drive follow-up effects through
+ordinary immutable `if` conditions such as `send_result == Ok(Unit)` or
+`spawn_result != Err(Exhausted(Unit))`. Those branch tests compare the typed
+built-in variant shape, not the preserved message payload or the successful
+process-reference payload. Top-level pre-state effect bindings are declaration
+ordered: an outcome is usable only after its `let` statement, and outcome
+bindings must appear before ordinary non-prefix effect statements that would
+otherwise be reordered around the commit-or-return boundary. A top-level
+process-reference `spawn` may remain in the same pre-state prefix so later
+outcome sends can target it.
+`SendError<M>`
+preserves the original message value for pre-acceptance failures, including the
+runtime metadata for a direct `ProcessRef<T>` message payload. That authority
+remains a send/message boundary value and is not admitted into ordinary process
+state. The admitted variants are
+`Full(M)`, `Stopped(M)`, `Crashed(M)`, and `MailboxClosed(M)`. The current
+runtime distinguishes full, stopped, and targets already failed before
+acceptance in direct runtime execution. It does not yet expose a distinct
+source-created closed-mailbox lifecycle, but the typed shape is admitted at
+source, artifact, and runtime-loaded boundaries. A source transition that
+creates the crash with `Panic(...)` still fails the run after recording no-replay
+evidence before a later source sender can observe the target as crashed.
+`SpawnError<A>`
+admits `Denied(A)`, `Exhausted(A)`, and
+`BackendUnavailable(A)`; the current local runtime reports exhausted process
+capacity.
+
+Bare statement `send` and `spawn` remain fail-closed runtime effects: Mantle
+rejects pre-acceptance delivery and process-limit failures instead of silently
+dropping them. Outcome-form `send` returns the typed failure result before message
+acceptance and commits the message only on `Ok(Unit)`.
 
 ## Collections
 
@@ -604,11 +664,14 @@ source-string branch key.
 
 ## Typed Equality Predicates
 
-The equality surface is `==` and `!=` over two operand families:
+The equality surface is `==` and `!=` over these operand families:
 
 - `Bool`, with the exact `enum Bool { False, True }` contract;
 - fixed-width scalar integer values with matching scalar types;
-- fieldless values of the same payload-free enum type.
+- fieldless values of the same payload-free enum type;
+- built-in `Option`, `Result`, `SendError`, and `SpawnError` values only when one
+  side is a safe built-in variant pattern such as `None`, `Ok(Unit)`, or
+  `Err(Exhausted(Unit))`.
 
 Both operands must have the same checked type. Concrete source operands fold
 during checking, so lowering sees only the selected `True` or `False` value.
@@ -617,8 +680,9 @@ evaluates them from typed values. Equality does not dispatch through
 source names, function names, debug labels, or parser strings.
 
 String equality, structural record/list/map equality, payload enum equality,
-process-reference equality, assignment, and mutation are not part of the
-buildable equality surface.
+process-reference equality, direct equality between two spawn outcomes, and
+matching a preserved message payload by equality are not part of the buildable
+equality surface.
 
 ## Boolean Predicate Composition
 

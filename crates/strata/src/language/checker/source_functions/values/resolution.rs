@@ -595,16 +595,16 @@ fn resolve_source_call_or_constructor(
     }
     let Some(functions) = functions else {
         if identifier_starts_uppercase(name)
-            && let Ok(enum_decl) = scope.semantic_index.enum_decl(scope.module, expected_type)
+            && let Ok(value_enum) = scope.semantic_index.value_enum(scope.module, expected_type)
         {
             return Err(Error::new(format!(
                 "value {name} is not a variant of enum {}",
-                enum_decl.name
+                value_enum.name
             )));
         }
         return Err(Error::new(format!("function {name} is not declared")));
     };
-    resolve_source_function_call(scope, expected_type, name, arg, bindings, depth, &functions)
+    resolve_source_function_call(scope, expected_type, name, arg, bindings, depth, functions)
 }
 
 fn resolve_source_enum_payload_value(
@@ -617,7 +617,7 @@ fn resolve_source_enum_payload_value(
 ) -> Result<ValueExpr> {
     let variant = enum_variant_for_expected_type(scope, expected_type, name)?
         .ok_or_else(|| enum_value_error(scope, expected_type, name))?;
-    let Some(payload_type) = &variant.payload_type else {
+    let Some(payload_type) = variant.payload_type.as_ref() else {
         return Err(Error::new(format!(
             "enum variant {name} does not accept a payload"
         )));
@@ -643,7 +643,7 @@ fn resolve_source_function_call(
     arg: &ValueExpr,
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
-    functions: &[&Function],
+    functions: SourceFunctionGroup<'_, '_>,
 ) -> Result<ValueExpr> {
     let first = functions
         .first()

@@ -1,4 +1,5 @@
 use super::*;
+use crate::language::RESULT_TYPE;
 
 impl Parser {
     const MAX_DIRECT_STATEMENT_IF_DEPTH: usize =
@@ -81,7 +82,30 @@ impl Parser {
                 self.expect_keyword("spawn")?;
                 let target = self.expect_identifier()?;
                 self.expect_symbol(';')?;
+                if is_direct_result_type(&ty) {
+                    return Ok(Statement::LetSpawnOutcome { name, ty, target });
+                }
                 return Ok(Statement::LetProcessRef { name, ty, target });
+            }
+            if self.peek_keyword("send") {
+                self.expect_keyword("send")?;
+                let target = self.expect_identifier()?;
+                let message = self.expect_identifier()?;
+                let payload = if self.consume_symbol('(') {
+                    let value = self.parse_value_expr()?;
+                    self.expect_symbol(')')?;
+                    Some(value)
+                } else {
+                    None
+                };
+                self.expect_symbol(';')?;
+                return Ok(Statement::LetSendOutcome {
+                    name,
+                    ty,
+                    target,
+                    message,
+                    payload,
+                });
             }
             let value = self.parse_value_expr()?;
             self.expect_symbol(';')?;
@@ -247,4 +271,15 @@ impl Parser {
         }
         Ok(ReturnExpr::Value(value))
     }
+}
+
+fn is_direct_result_type(ty: &TypeRef) -> bool {
+    matches!(
+        ty,
+        TypeRef::Applied {
+            constructor,
+            const_args,
+            ..
+        } if constructor.as_str() == RESULT_TYPE && const_args.is_empty()
+    )
 }

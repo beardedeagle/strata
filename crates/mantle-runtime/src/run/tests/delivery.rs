@@ -244,6 +244,7 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
                 &action,
                 RuntimeBranchPath::root(),
                 &[],
+                &[],
             )
             .expect_err("stopped target should reject before payload template evaluation");
 
@@ -282,6 +283,7 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
                 &step,
                 &action,
                 RuntimeBranchPath::root(),
+                &[],
                 &[],
             )
             .expect_err("failed target should reject before payload template evaluation");
@@ -327,6 +329,7 @@ fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation()
                 &step,
                 &action,
                 RuntimeBranchPath::root(),
+                &[],
                 &[],
             )
             .expect_err("full mailbox should reject before payload template evaluation");
@@ -490,8 +493,11 @@ fn runtime_rejects_message_payload_outside_declared_enum_before_acceptance() {
 
 fn artifact_with_worker_process_ref_payload() -> MantleArtifact {
     let mut artifact = artifact_with_unbound_worker_process_ref();
-    artifact.processes[1].message_variants =
-        vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Ping", PROCESS_REF_WORKER)],
+    );
     artifact
 }
 
@@ -504,8 +510,11 @@ fn artifact_with_nested_worker_bool_branch() -> MantleArtifact {
         vec!["False".to_string(), "True".to_string()],
     ));
     artifact.processes[1].state_values = state_values(WORKER_STATE, &["Idle", "Handled", "Done"]);
-    artifact.processes[1].message_variants =
-        vec![ArtifactMessageVariant::payload("Ping", bool_type)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Ping", bool_type)],
+    );
     let condition = ArtifactValueTemplate::ReceivedPayload { ty: bool_type };
     artifact.processes[1].transitions[0].next_state = NextState::IfElse {
         condition: condition.clone(),
@@ -521,7 +530,11 @@ fn artifact_with_nested_worker_bool_branch() -> MantleArtifact {
 
 fn artifact_with_worker_job_payload() -> MantleArtifact {
     let mut artifact = artifact_with_unbound_worker_process_ref();
-    artifact.processes[1].message_variants = vec![ArtifactMessageVariant::payload("Ping", JOB)];
+    replace_process_message_variants(
+        &mut artifact,
+        1,
+        vec![ArtifactMessageVariant::payload("Ping", JOB)],
+    );
     artifact
 }
 

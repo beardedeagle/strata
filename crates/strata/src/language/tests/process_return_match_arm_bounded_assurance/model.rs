@@ -49,7 +49,9 @@ enum ModelStatement {
 enum ActionShape {
     Emit,
     Spawn,
+    SpawnOutcome,
     Send,
+    SendOutcome,
     IfElse {
         then_actions: Vec<ActionShape>,
         else_actions: Vec<ActionShape>,
@@ -210,4 +212,3 @@ const INVALID_SOURCE_CASES: [InvalidSourceCase; 7] = [
         expected: "if branches are pure value expressions and must not perform statements",
     },
 ];
-

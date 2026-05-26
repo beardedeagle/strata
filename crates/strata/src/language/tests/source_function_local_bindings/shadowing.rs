@@ -39,6 +39,11 @@ fn rejects_source_local_binding_declared_name_conflicts() {
         ),
         (
             "let current_local: Phase = status(work);",
+            "let Ok: Phase = Active;",
+            "source-local binding Ok conflicts with a declared type or value constructor",
+        ),
+        (
+            "let current_local: Phase = status(work);",
             "let Main: Phase = Active;",
             "source-local binding Main conflicts with a process declaration",
         ),
@@ -64,6 +69,11 @@ fn rejects_source_function_binding_parameter_declared_name_conflicts() {
             "fn route(work: Work) -> Route ! [] ~ [] @det {",
             "fn route(Active: Work) -> Route ! [] ~ [] @det {",
             "source function parameter Active conflicts with a declared type or value constructor",
+        ),
+        (
+            "fn route(work: Work) -> Route ! [] ~ [] @det {",
+            "fn route(Err: Work) -> Route ! [] ~ [] @det {",
+            "source function parameter Err conflicts with a declared type or value constructor",
         ),
         (
             "fn route(work: Work) -> Route ! [] ~ [] @det {",
@@ -187,6 +197,23 @@ proc Worker mailbox bounded(1) {
     assert!(
         err.to_string().contains(
             "process Main function route source-local binding worker conflicts with a process reference binding"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn rejects_source_pattern_binding_named_like_builtin_value_constructor() {
+    let source = SOURCE_FUNCTION_LOCAL_BINDINGS.replace(
+        "Route { selected: echo_source_local }",
+        "Route { selected: Some }",
+    );
+
+    let err = check_source(&source).expect_err("builtin pattern binding shadowing should fail");
+
+    assert!(
+        err.to_string().contains(
+            "function echo_route return match record pattern binding Some conflicts with a declared type or value constructor"
         ),
         "{err}"
     );

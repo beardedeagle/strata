@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use mantle_artifact::{MAX_IDENTIFIER_BYTES, MAX_TYPE_COUNT};
 
 use super::super::ast::{Module, TypeRef};
@@ -7,7 +9,7 @@ use super::super::checked::{
 };
 use super::super::diagnostic::{Error, Result};
 use super::CHECKED_TYPE_LABEL_PREFIX;
-use super::symbols::{CollectionType, SemanticIndex};
+use super::symbols::{BuiltinValueShape, CollectionType, SemanticIndex};
 
 const CHECKED_PROCESS_REF_TYPE_LABEL_PREFIX: &str = "__strata_checked_process_ref_";
 
@@ -51,7 +53,7 @@ impl<'a> CheckedTypeInterner<'a> {
         };
         self.entries.push((
             ty.clone(),
-            CheckedTypeRef::new(id, label.clone(), placeholder_kind),
+            CheckedTypeRef::new(id, String::new(), placeholder_kind),
         ));
 
         let kind = match process_ref_target {
@@ -91,43 +93,57 @@ impl<'a> CheckedTypeInterner<'a> {
             };
         }
 
+        if let Some(shape) = self.semantic_index.builtin_value_shape(ty)? {
+            return match shape {
+                BuiltinValueShape::Unit => Ok(CheckedValueShape::Atom),
+                BuiltinValueShape::Enum(value_enum) => {
+                    let variants = value_enum
+                        .variants
+                        .into_iter()
+                        .map(|variant| {
+                            let payload_type = variant
+                                .payload_type
+                                .as_ref()
+                                .map(|payload_type| self.intern(payload_type).map(|ty| ty.id()))
+                                .transpose()?;
+                            Ok(CheckedEnumVariant {
+                                name: variant.name,
+                                payload_type,
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    Ok(CheckedValueShape::Enum { variants })
+                }
+            };
+        }
+
         if let Ok(record_decl) = self.semantic_index.record_decl(self.module, ty) {
             if record_decl.fields.is_empty() {
                 return Ok(CheckedValueShape::Atom);
             }
-            let fields = record_decl
-                .fields
-                .iter()
-                .map(|field| (field.name.clone(), field.ty.clone()))
-                .collect::<Vec<_>>();
-            let fields = fields
-                .into_iter()
-                .map(|(name, field_ty)| {
-                    Ok(CheckedTypeField {
-                        name,
-                        ty: self.intern(&field_ty)?.id(),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
+            let mut fields = Vec::with_capacity(record_decl.fields.len());
+            for field in &record_decl.fields {
+                fields.push(CheckedTypeField {
+                    name: field.name.clone(),
+                    ty: self.intern(&field.ty)?.id(),
+                });
+            }
             return Ok(CheckedValueShape::Record { fields });
         }
 
         if let Ok(enum_decl) = self.semantic_index.enum_decl(self.module, ty) {
-            let variants = enum_decl
-                .variants
-                .iter()
-                .map(|variant| (variant.name.clone(), variant.payload_type.clone()))
-                .collect::<Vec<_>>();
-            let variants = variants
-                .into_iter()
-                .map(|(name, payload_type)| {
-                    let payload_type = payload_type
-                        .as_ref()
-                        .map(|payload_type| self.intern(payload_type).map(|ty| ty.id()))
-                        .transpose()?;
-                    Ok(CheckedEnumVariant { name, payload_type })
-                })
-                .collect::<Result<Vec<_>>>()?;
+            let mut variants = Vec::with_capacity(enum_decl.variants.len());
+            for variant in &enum_decl.variants {
+                let payload_type = variant
+                    .payload_type
+                    .as_ref()
+                    .map(|payload_type| self.intern(payload_type).map(|ty| ty.id()))
+                    .transpose()?;
+                variants.push(CheckedEnumVariant {
+                    name: variant.name.clone(),
+                    payload_type,
+                });
+            }
             return Ok(CheckedValueShape::Enum { variants });
         }
 
@@ -171,21 +187,23 @@ fn checked_type_label(
             args,
             const_args,
         } => {
-            let mut label = format!(
-                "{CHECKED_TYPE_LABEL_PREFIX}{}",
-                checked_type_label_component(&TypeRef::Named(constructor.clone()))?
-            );
+            let mut label = String::with_capacity(checked_type_label_capacity_hint(ty));
+            label.push_str(CHECKED_TYPE_LABEL_PREFIX);
+            push_checked_type_label_named_component(&mut label, constructor.as_str())?;
             label.push('_');
-            label.push_str(&args.len().to_string());
+            write!(&mut label, "{}", args.len())
+                .map_err(|_| Error::new("failed to build checked type label"))?;
             label.push('_');
-            label.push_str(&const_args.len().to_string());
+            write!(&mut label, "{}", const_args.len())
+                .map_err(|_| Error::new("failed to build checked type label"))?;
             for arg in args {
                 label.push('_');
-                label.push_str(&checked_type_label_component(arg)?);
+                push_checked_type_label_component(&mut label, arg)?;
             }
             for value in const_args {
                 label.push('_');
-                label.push_str(&value.to_string());
+                write!(&mut label, "{value}")
+                    .map_err(|_| Error::new("failed to build checked type label"))?;
             }
             if label.len() > MAX_IDENTIFIER_BYTES {
                 return Err(Error::new(format!(
@@ -197,32 +215,95 @@ fn checked_type_label(
     }
 }
 
-fn checked_type_label_component(ty: &TypeRef) -> Result<String> {
+fn checked_type_label_capacity_hint(ty: &TypeRef) -> usize {
     match ty {
-        TypeRef::Named(name) => Ok(format!("{}_{}", name.as_str().len(), name)),
+        TypeRef::Named(name) => name.as_str().len(),
         TypeRef::Applied {
             constructor,
             args,
             const_args,
         } => {
-            let mut label = format!(
-                "{}_{}_{}_{}",
-                constructor.as_str().len(),
-                constructor,
-                args.len(),
-                const_args.len()
-            );
+            CHECKED_TYPE_LABEL_PREFIX.len()
+                + checked_type_label_named_component_capacity(constructor.as_str())
+                + 1
+                + decimal_len(args.len())
+                + 1
+                + decimal_len(const_args.len())
+                + args
+                    .iter()
+                    .map(|arg| 1 + checked_type_label_component_capacity_hint(arg))
+                    .sum::<usize>()
+                + const_args
+                    .iter()
+                    .map(|value| 1 + decimal_len(*value))
+                    .sum::<usize>()
+        }
+    }
+}
+
+fn checked_type_label_component_capacity_hint(ty: &TypeRef) -> usize {
+    match ty {
+        TypeRef::Named(name) => checked_type_label_named_component_capacity(name.as_str()),
+        TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } => {
+            checked_type_label_named_component_capacity(constructor.as_str())
+                + 1
+                + decimal_len(args.len())
+                + 1
+                + decimal_len(const_args.len())
+                + args
+                    .iter()
+                    .map(|arg| 1 + checked_type_label_component_capacity_hint(arg))
+                    .sum::<usize>()
+                + const_args
+                    .iter()
+                    .map(|value| 1 + decimal_len(*value))
+                    .sum::<usize>()
+        }
+    }
+}
+
+fn checked_type_label_named_component_capacity(name: &str) -> usize {
+    decimal_len(name.len()) + 1 + name.len()
+}
+
+fn decimal_len(value: usize) -> usize {
+    value
+        .checked_ilog10()
+        .map_or(1, |digits| digits as usize + 1)
+}
+
+fn push_checked_type_label_component(label: &mut String, ty: &TypeRef) -> Result<()> {
+    match ty {
+        TypeRef::Named(name) => push_checked_type_label_named_component(label, name.as_str()),
+        TypeRef::Applied {
+            constructor,
+            args,
+            const_args,
+        } => {
+            push_checked_type_label_named_component(label, constructor.as_str())?;
+            write!(label, "_{}_{}", args.len(), const_args.len())
+                .map_err(|_| Error::new("failed to build checked type label"))?;
             for arg in args {
                 label.push('_');
-                label.push_str(&checked_type_label_component(arg)?);
+                push_checked_type_label_component(label, arg)?;
             }
             for value in const_args {
                 label.push('_');
-                label.push_str(&value.to_string());
+                write!(label, "{value}")
+                    .map_err(|_| Error::new("failed to build checked type label"))?;
             }
-            Ok(label)
+            Ok(())
         }
     }
+}
+
+fn push_checked_type_label_named_component(label: &mut String, name: &str) -> Result<()> {
+    write!(label, "{}_{name}", name.len())
+        .map_err(|_| Error::new("failed to build checked type label"))
 }
 
 fn checked_process_ref_type_label(target: CheckedProcessId) -> Result<String> {

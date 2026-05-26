@@ -15,6 +15,7 @@ impl LoadedProcess {
                 .iter()
                 .map(LoadedStateValue::from_artifact)
                 .collect::<Result<Vec<_>>>()?,
+            message_type: process.message_type,
             message_variants: process
                 .message_variants
                 .iter()
@@ -144,13 +145,14 @@ impl LoadedProcess {
         validate_loaded_transition_coverage(self)?;
         for transition in &self.transitions {
             let message = transition.message;
-            transition.validate_admission(program, self, message)?;
+            transition.validate_admission(program, self, process_id, message)?;
             transition.effect_authority.validate_actions(
                 &self.debug_name,
                 message,
                 &transition.actions,
             )?;
         }
+        self.validate_message_type_shape(program)?;
         Ok(())
     }
 
@@ -227,6 +229,7 @@ impl LoadedProcess {
     }
 
     fn validate_message_table(&self, program: &LoadedProgram) -> Result<()> {
+        program.validate_value_type("message_type", self.message_type)?;
         if self.message_variants.is_empty()
             || self.message_variants.len() > MAX_MESSAGE_VARIANTS_PER_PROCESS
         {
@@ -253,6 +256,52 @@ impl LoadedProcess {
                 return Err(Error::new(format!(
                     "process {} loads duplicate message label {}",
                     self.debug_name, message.label
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_message_type_shape(&self, program: &LoadedProgram) -> Result<()> {
+        let message_type = program.type_entry(self.message_type)?;
+        let ArtifactValueShape::Enum { variants } = message_type.value_shape()? else {
+            return Err(Error::new(format!(
+                "process {} loaded message_type id {} must be an enum aligned with message variants",
+                self.debug_name,
+                self.message_type.as_u32()
+            )));
+        };
+        if variants.len() != self.message_variants.len() {
+            return Err(Error::new(format!(
+                "process {} loaded message_type id {} declares {} variant(s), expected {} message variant(s)",
+                self.debug_name,
+                self.message_type.as_u32(),
+                variants.len(),
+                self.message_variants.len()
+            )));
+        }
+        for (index, (message, variant)) in self
+            .message_variants
+            .iter()
+            .zip(variants.iter())
+            .enumerate()
+        {
+            if variant.label != message.label {
+                return Err(Error::new(format!(
+                    "process {} loaded message_type id {} variant {index} label {} does not match message label {}",
+                    self.debug_name,
+                    self.message_type.as_u32(),
+                    variant.label,
+                    message.label
+                )));
+            }
+            if variant.payload_type != message.payload_type {
+                return Err(Error::new(format!(
+                    "process {} loaded message_type id {} variant {index} payload type {:?}, expected {:?}",
+                    self.debug_name,
+                    self.message_type.as_u32(),
+                    variant.payload_type.map(TypeId::as_u32),
+                    message.payload_type.map(TypeId::as_u32)
                 )));
             }
         }

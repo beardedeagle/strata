@@ -17,6 +17,7 @@ fn runtime_rejects_loaded_payload_bearing_entry_message_before_artifact_loaded()
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[0].message_variants[0].payload_type = Some(START_PAYLOAD);
+    align_loaded_process_message_type(&mut program, 0);
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
@@ -29,10 +30,11 @@ fn runtime_rejects_loaded_invalid_message_payload_type_before_artifact_loaded() 
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[1].message_variants[0].payload_type = Some(TypeId::new(99));
+    align_loaded_process_message_type(&mut program, 1);
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process Worker message payload_type: loaded type id 99 is not loaded",
+        "loaded type id 99 is not loaded",
     );
 }
 

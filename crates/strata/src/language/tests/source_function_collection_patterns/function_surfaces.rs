@@ -172,7 +172,6 @@ fn lowers_payload_dependent_list_state_templates() {
     let source = r#"
 module payload_dependent_list_state;
 
-record Unit;
 enum Phase {
     Ready,
     Done,
@@ -222,7 +221,6 @@ fn lowers_payload_dependent_map_state_templates() {
     let source = r#"
 module payload_dependent_map_state;
 
-record Unit;
 enum Phase {
     Ready,
     Done,

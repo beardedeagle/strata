@@ -53,7 +53,7 @@ fn artifact_round_trips_enum_variant_metadata_above_template_field_limit() {
     let variants = (0..=MAX_VALUE_TEMPLATE_FIELDS)
         .map(|index| format!("V{index}"))
         .collect::<Vec<_>>();
-    artifact.types[MAIN_MSG.index()] = ArtifactType::enum_value("MainMsg", variants);
+    artifact.types[BOX.index()] = ArtifactType::enum_value("LargeEnum", variants);
 
     let encoded = artifact.encode();
     let decoded = MantleArtifact::decode(&encoded)
@@ -62,7 +62,7 @@ fn artifact_round_trips_enum_variant_metadata_above_template_field_limit() {
     assert_eq!(decoded, artifact);
     assert!(encoded.contains(&format!(
         "type.{}.enum_variant_count={}",
-        MAIN_MSG.index(),
+        BOX.index(),
         MAX_VALUE_TEMPLATE_FIELDS + 1
     )));
 }
@@ -240,6 +240,7 @@ fn artifact_round_trips_boolean_predicate_condition_template() {
         }),
     };
     artifact.processes[1].message_variants[0].payload_type = Some(bool_type);
+    align_process_message_type(&mut artifact, 1);
     match &mut artifact.processes[0].transitions[0].actions[1] {
         ArtifactAction::Send { payload, .. } => {
             *payload = Some(ArtifactValueTemplate::Literal {

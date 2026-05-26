@@ -68,11 +68,11 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
         entry_message: MessageId::new(0),
         types: vec![
             ArtifactType::value("MainState"),
-            ArtifactType::value("MainMsg"),
+            ArtifactType::enum_value("MainMsg", vec!["Start".to_string()]),
             worker_state_type(&[
                 "Idle", "Handled", "Working", "Done", "Routed", "Ready", "Other", "Spoofed",
             ]),
-            ArtifactType::value("WorkerMsg"),
+            ArtifactType::enum_value("WorkerMsg", vec!["Ping".to_string()]),
             job_record_type(),
             ArtifactType::value("Box"),
             ArtifactType::value("Leaf"),
@@ -146,6 +146,43 @@ pub(super) fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValu
 
 pub(super) fn artifact_value(value: &str) -> ArtifactValue {
     ArtifactValue::parse(value).expect("test artifact value should be valid")
+}
+
+pub(super) fn replace_process_message_variants(
+    artifact: &mut MantleArtifact,
+    process_index: usize,
+    variants: Vec<ArtifactMessageVariant>,
+) {
+    artifact.processes[process_index].message_variants = variants;
+    align_process_message_type(artifact, process_index);
+}
+
+pub(super) fn align_process_message_type(artifact: &mut MantleArtifact, process_index: usize) {
+    let message_type = artifact.processes[process_index].message_type;
+    let label = artifact.types[message_type.index()].label.clone();
+    let variants = artifact.processes[process_index]
+        .message_variants
+        .iter()
+        .map(|variant| ArtifactEnumVariant {
+            label: variant.label.clone(),
+            payload_type: variant.payload_type,
+        })
+        .collect();
+    artifact.types[message_type.index()] = ArtifactType::enum_value_with_payloads(label, variants);
+}
+
+pub(super) fn align_loaded_process_message_type(program: &mut LoadedProgram, process_index: usize) {
+    let message_type = program.processes[process_index].message_type;
+    let label = program.types[message_type.index()].label.clone();
+    let variants = program.processes[process_index]
+        .message_variants
+        .iter()
+        .map(|variant| ArtifactEnumVariant {
+            label: variant.label.clone(),
+            payload_type: variant.payload_type,
+        })
+        .collect();
+    program.types[message_type.index()] = ArtifactType::enum_value_with_payloads(label, variants);
 }
 
 pub(super) fn state_value(ty: TypeId, value: &str) -> ArtifactStateValue {

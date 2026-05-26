@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use crate::language::ast::{ListValue, MapValue};
 use crate::language::checked::CheckedValueTemplateMapEntry;
 use crate::language::checker::symbols::CollectionType;
@@ -57,44 +55,42 @@ pub(super) fn checked_collection_template(
                 )));
             };
             validate_map_value_type(semantic_index, expected_type, map, key, item, capacity)?;
-            let mut seen_keys = BTreeSet::new();
+            let mut key_values = Vec::with_capacity(map.entries.len());
+            let mut entries = Vec::with_capacity(map.entries.len());
+            for entry in &map.entries {
+                let key_template = checked_value_template(
+                    module,
+                    semantic_index,
+                    types,
+                    key,
+                    &entry.key,
+                    bindings,
+                    depth + 1,
+                )?;
+                let key_value = validate_static_map_key_template(expected_type, &key_template)?;
+                if key_values.iter().any(|previous| previous == &key_value) {
+                    return Err(Error::new(format!(
+                        "map value type {expected_type} duplicates key {}",
+                        key_value.label()
+                    )));
+                }
+                key_values.push(key_value);
+                entries.push(CheckedValueTemplateMapEntry::new(
+                    key_template,
+                    checked_value_template(
+                        module,
+                        semantic_index,
+                        types,
+                        item,
+                        &entry.value,
+                        bindings,
+                        depth + 1,
+                    )?,
+                ));
+            }
             Ok(CheckedValueTemplate::Map {
                 ty: types.intern(expected_type)?,
-                entries: map
-                    .entries
-                    .iter()
-                    .map(|entry| {
-                        let key_template = checked_value_template(
-                            module,
-                            semantic_index,
-                            types,
-                            key,
-                            &entry.key,
-                            bindings,
-                            depth + 1,
-                        )?;
-                        let key_label =
-                            validate_static_map_key_template(expected_type, &key_template)?;
-                        if !seen_keys.insert(key_label.clone()) {
-                            return Err(Error::new(format!(
-                                "map value type {expected_type} duplicates key {}",
-                                key_label.label()
-                            )));
-                        }
-                        Ok(CheckedValueTemplateMapEntry::new(
-                            key_template,
-                            checked_value_template(
-                                module,
-                                semantic_index,
-                                types,
-                                item,
-                                &entry.value,
-                                bindings,
-                                depth + 1,
-                            )?,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>>>()?,
+                entries,
             })
         }
     }
@@ -193,6 +189,7 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         | CheckedValueTemplate::MapRest { .. }
         | CheckedValueTemplate::ProcessRef { .. }
         | CheckedValueTemplate::LoopElement { .. }
+        | CheckedValueTemplate::EffectOutcome { .. }
         | CheckedValueTemplate::Equality { .. }
         | CheckedValueTemplate::ScalarArithmetic { .. }
         | CheckedValueTemplate::ScalarOrdering { .. }
@@ -209,9 +206,11 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
         }),
         CheckedValueTemplate::Record { ty, fields } => {
             let mut values = Vec::with_capacity(fields.len());
-            let mut seen = BTreeSet::new();
-            for field in fields {
-                if !seen.insert(field.name()) {
+            for (index, field) in fields.iter().enumerate() {
+                if fields[..index]
+                    .iter()
+                    .any(|previous| previous.name() == field.name())
+                {
                     return None;
                 }
                 values.push(ArtifactRecordField {
@@ -232,12 +231,11 @@ fn checked_static_source_value(template: &CheckedValueTemplate) -> Option<Artifa
             Some(ArtifactValue::List(values))
         }
         CheckedValueTemplate::Map { entries, .. } => {
-            let mut values = Vec::with_capacity(entries.len());
-            let mut seen = BTreeSet::new();
+            let mut values: Vec<ArtifactMapEntry> = Vec::with_capacity(entries.len());
             for entry in entries {
                 let key = checked_static_source_value(entry.key())?;
                 let value = checked_static_source_value(entry.value())?;
-                if !seen.insert(key.clone()) {
+                if values.iter().any(|previous| previous.key == key) {
                     return None;
                 }
                 values.push(ArtifactMapEntry { key, value });

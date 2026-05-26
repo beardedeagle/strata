@@ -11,6 +11,8 @@ mod payload_dispatch;
 mod process_refs_and_authority;
 #[path = "source_to_runtime_gates/runtime_branches.rs"]
 mod runtime_branches;
+#[path = "source_to_runtime_gates/runtime_effect_outcomes.rs"]
+mod runtime_effect_outcomes;
 #[path = "source_to_runtime_gates/runtime_loop_admission.rs"]
 mod runtime_loop_admission;
 #[path = "source_to_runtime_gates/runtime_loop_execution.rs"]

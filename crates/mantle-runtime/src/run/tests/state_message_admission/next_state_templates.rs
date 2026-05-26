@@ -122,6 +122,7 @@ fn runtime_rejects_loaded_process_ref_payload_enum_next_state_before_artifact_lo
         ("Routed", Some(PROCESS_REF_WORKER)),
     ]);
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
+    align_loaded_process_message_type(&mut program, 1);
     program.processes[1].transitions[0].current_state = Some(StateId::new(0));
     program.processes[1].transitions[0].next_state =
         loaded_next_state(NextState::Template(ArtifactValueTemplate::EnumVariant {

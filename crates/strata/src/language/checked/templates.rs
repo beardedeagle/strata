@@ -3,8 +3,8 @@ use mantle_artifact::{ArtifactValue, MapProjectionMode};
 use crate::language::ast::Identifier;
 
 use super::{
-    CheckedEnumVariantId, CheckedLoopElementId, CheckedProcessId, CheckedProcessRefId,
-    CheckedStateId, CheckedTypeRef,
+    CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId, CheckedProcessId,
+    CheckedProcessRefId, CheckedStateId, CheckedTypeRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,6 +202,10 @@ pub(in crate::language) enum CheckedValueTemplate {
         ty: CheckedTypeRef,
         element: CheckedLoopElementId,
     },
+    EffectOutcome {
+        ty: CheckedTypeRef,
+        outcome: CheckedEffectOutcomeId,
+    },
     EnumVariant {
         ty: CheckedTypeRef,
         variant: CheckedEnumVariantId,
@@ -301,6 +305,7 @@ impl CheckedValueTemplate {
             | Self::MapRest { ty, .. }
             | Self::ProcessRef { ty, .. }
             | Self::LoopElement { ty, .. }
+            | Self::EffectOutcome { ty, .. }
             | Self::EnumVariant { ty, .. }
             | Self::Record { ty, .. }
             | Self::List { ty, .. }

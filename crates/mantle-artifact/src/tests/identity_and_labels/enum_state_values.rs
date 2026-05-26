@@ -41,6 +41,7 @@ fn validate_rejects_literal_payload_outside_declared_enum_variants() {
     let mut artifact = valid_artifact();
     artifact.processes[1].message_variants[0] =
         ArtifactMessageVariant::payload("Ping", WORKER_STATE);
+    align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
         message: MessageId::new(0),
