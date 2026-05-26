@@ -9,6 +9,8 @@ pub(super) enum TokenKind {
     Symbol(char),
     EqualEqual,
     BangEqual,
+    LessEqual,
+    GreaterEqual,
     AmpAmp,
     PipePipe,
     DotDot,
@@ -76,6 +78,18 @@ impl<'a> Lexer<'a> {
                 push_source_token(&mut tokens, TokenKind::BangEqual, offset)?;
                 continue;
             }
+            if ch == '<' && self.peek_next_char() == Some('=') {
+                self.bump_char();
+                self.bump_char();
+                push_source_token(&mut tokens, TokenKind::LessEqual, offset)?;
+                continue;
+            }
+            if ch == '>' && self.peek_next_char() == Some('=') {
+                self.bump_char();
+                self.bump_char();
+                push_source_token(&mut tokens, TokenKind::GreaterEqual, offset)?;
+                continue;
+            }
             if ch == '&' && self.peek_next_char() == Some('&') {
                 self.bump_char();
                 self.bump_char();
@@ -123,7 +137,7 @@ impl<'a> Lexer<'a> {
                 push_source_token(&mut tokens, TokenKind::Number(number), offset)?;
                 continue;
             }
-            if "{}()[];:,=<>!~".contains(ch) {
+            if "{}()[];:,=<>!~+-*/%".contains(ch) {
                 self.bump_char();
                 push_source_token(&mut tokens, TokenKind::Symbol(ch), offset)?;
                 continue;

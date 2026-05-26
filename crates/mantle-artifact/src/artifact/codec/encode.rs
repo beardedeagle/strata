@@ -160,6 +160,12 @@ fn encode_type_shape(encoded: &mut String, prefix: &str, shape: &ArtifactValueSh
         ArtifactValueShape::Atom => {
             encoded.push_str(&format!("{prefix}.shape=atom\n"));
         }
+        ArtifactValueShape::Scalar { scalar } => {
+            encoded.push_str(&format!(
+                "{prefix}.shape=scalar\n{prefix}.scalar_type={}\n",
+                scalar.artifact_name()
+            ));
+        }
         ArtifactValueShape::Record { fields } => {
             encoded.push_str(&format!(
                 "{prefix}.shape=record\n{prefix}.field_count={}\n",
@@ -387,6 +393,20 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
                 encode_value_template(encoded, &format!("{entry_prefix}.value"), &entry.value);
             }
         }
+        ArtifactValueTemplate::IfElse {
+            ty,
+            condition,
+            then_value,
+            else_value,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=if_else\n{prefix}.type_id={}\n",
+                ty.as_u32()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.condition"), condition);
+            encode_value_template(encoded, &format!("{prefix}.then"), then_value);
+            encode_value_template(encoded, &format!("{prefix}.else"), else_value);
+        }
         ArtifactValueTemplate::Equality {
             ty,
             operand_ty,
@@ -396,6 +416,36 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
         } => {
             encoded.push_str(&format!(
                 "{prefix}.kind=equality\n{prefix}.type_id={}\n{prefix}.operand_type_id={}\n{prefix}.operator={}\n",
+                ty.as_u32(),
+                operand_ty.as_u32(),
+                operator.as_str()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.left"), left);
+            encode_value_template(encoded, &format!("{prefix}.right"), right);
+        }
+        ArtifactValueTemplate::ScalarArithmetic {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=scalar_arithmetic\n{prefix}.type_id={}\n{prefix}.operator={}\n",
+                ty.as_u32(),
+                operator.as_str()
+            ));
+            encode_value_template(encoded, &format!("{prefix}.left"), left);
+            encode_value_template(encoded, &format!("{prefix}.right"), right);
+        }
+        ArtifactValueTemplate::ScalarOrdering {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            encoded.push_str(&format!(
+                "{prefix}.kind=scalar_ordering\n{prefix}.type_id={}\n{prefix}.operand_type_id={}\n{prefix}.operator={}\n",
                 ty.as_u32(),
                 operand_ty.as_u32(),
                 operator.as_str()

@@ -22,9 +22,14 @@ pub(super) fn loaded_template_is_static_map_key(template: &LoadedValueTemplate) 
         | LoadedValueTemplate::MapRest { .. }
         | LoadedValueTemplate::ProcessRef { .. }
         | LoadedValueTemplate::LoopElement { .. }
+        | LoadedValueTemplate::IfElse { .. }
         | LoadedValueTemplate::Equality { .. }
         | LoadedValueTemplate::BooleanNot { .. }
         | LoadedValueTemplate::BooleanBinary { .. } => false,
+        LoadedValueTemplate::ScalarArithmetic { left, right, .. }
+        | LoadedValueTemplate::ScalarOrdering { left, right, .. } => {
+            loaded_template_is_static_map_key(left) && loaded_template_is_static_map_key(right)
+        }
         LoadedValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_is_static_map_key(payload)
         }

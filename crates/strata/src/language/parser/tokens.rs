@@ -111,6 +111,76 @@ impl Parser {
         )
     }
 
+    pub(super) fn consume_value_ordering_operator(
+        &mut self,
+    ) -> Option<ValueScalarOrderingOperator> {
+        match self.peek_kind() {
+            TokenKind::Symbol('<') => {
+                self.advance();
+                Some(ValueScalarOrderingOperator::Less)
+            }
+            TokenKind::LessEqual => {
+                self.advance();
+                Some(ValueScalarOrderingOperator::LessEqual)
+            }
+            TokenKind::Symbol('>') => {
+                self.advance();
+                Some(ValueScalarOrderingOperator::Greater)
+            }
+            TokenKind::GreaterEqual => {
+                self.advance();
+                Some(ValueScalarOrderingOperator::GreaterEqual)
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn peek_value_ordering_operator(&self) -> bool {
+        matches!(
+            self.peek_kind(),
+            TokenKind::Symbol('<')
+                | TokenKind::LessEqual
+                | TokenKind::Symbol('>')
+                | TokenKind::GreaterEqual
+        )
+    }
+
+    pub(super) fn consume_value_additive_operator(
+        &mut self,
+    ) -> Option<ValueScalarArithmeticOperator> {
+        match self.peek_kind() {
+            TokenKind::Symbol('+') => {
+                self.advance();
+                Some(ValueScalarArithmeticOperator::Add)
+            }
+            TokenKind::Symbol('-') => {
+                self.advance();
+                Some(ValueScalarArithmeticOperator::Subtract)
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn consume_value_multiplicative_operator(
+        &mut self,
+    ) -> Option<ValueScalarArithmeticOperator> {
+        match self.peek_kind() {
+            TokenKind::Symbol('*') => {
+                self.advance();
+                Some(ValueScalarArithmeticOperator::Multiply)
+            }
+            TokenKind::Symbol('/') => {
+                self.advance();
+                Some(ValueScalarArithmeticOperator::Divide)
+            }
+            TokenKind::Symbol('%') => {
+                self.advance();
+                Some(ValueScalarArithmeticOperator::Modulo)
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn expect_symbol(&mut self, symbol: char) -> Result<()> {
         if self.consume_symbol(symbol) {
             Ok(())

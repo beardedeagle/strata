@@ -226,6 +226,7 @@ impl<'module> StateSpace<'module> {
                 ))
             }
             ValueExpr::Call { .. }
+            | ValueExpr::ScalarLiteral(_)
             | ValueExpr::Record(_)
             | ValueExpr::List(_)
             | ValueExpr::Map(_) => Ok(CheckedStateValue::new(
@@ -235,11 +236,14 @@ impl<'module> StateSpace<'module> {
             ValueExpr::Equality { .. } => Err(Error::new(
                 "equality expression must be resolved before checking state value",
             )),
+            ValueExpr::ScalarArithmetic { .. } | ValueExpr::ScalarOrdering { .. } => Err(
+                Error::new("scalar expression must be resolved before checking state value"),
+            ),
             ValueExpr::BooleanNot { .. } | ValueExpr::BooleanBinary { .. } => Err(Error::new(
                 "boolean predicate expression must be resolved before checking state value",
             )),
             ValueExpr::Grouped { .. } => Err(Error::new(
-                "parenthesized predicate expression must be resolved before checking state value",
+                "parenthesized value expression must be resolved before checking state value",
             )),
             ValueExpr::IfElse { .. } => Err(Error::new(
                 "if expression must be resolved before checking state value",

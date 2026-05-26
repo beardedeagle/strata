@@ -1,0 +1,71 @@
+module runtime_scalar_priority;
+
+record MainState;
+record WorkerState {
+    selected: Priority,
+    level: U32,
+}
+enum Bool {
+    False,
+    True,
+}
+enum Priority {
+    Normal,
+    High,
+}
+enum MainMsg {
+    Start,
+}
+enum WorkerMsg {
+    Assign(U32),
+}
+
+fn compute_level(weight: U32) -> U32 ! [] ~ [] @det {
+    let base: U32 = weight;
+    let adjusted: U32 = base + 2_u32;
+    return adjusted;
+}
+
+fn high_priority(weight: U32) -> Bool ! [] ~ [] @det {
+    return compute_level(weight) >= 10_u32;
+}
+
+fn classify(weight: U32) -> Priority ! [] ~ [] @det {
+    let adjusted: U32 = compute_level(weight);
+    let urgent: Bool = adjusted >= 10_u32;
+    return if (urgent) { High } else { Normal };
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Assign(9_u32);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState { selected: Normal, level: 0_u32 };
+    }
+
+    fn step(state: WorkerState, Assign(weight: U32)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        if (high_priority(weight)) {
+            emit "scalar priority high";
+            return Continue(WorkerState { selected: classify(weight), level: compute_level(weight) });
+        } else {
+            emit "scalar priority normal";
+            return Continue(WorkerState { selected: classify(weight), level: 0_u32 });
+        }
+    }
+}

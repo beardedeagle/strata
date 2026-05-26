@@ -399,7 +399,19 @@ impl ArtifactProcess {
             ArtifactValueTemplate::MapRest { map, .. } => {
                 self.validate_template_process_refs(artifact, map, spawned_refs)
             }
-            ArtifactValueTemplate::Equality { left, right, .. } => {
+            ArtifactValueTemplate::IfElse {
+                condition,
+                then_value,
+                else_value,
+                ..
+            } => {
+                self.validate_template_process_refs(artifact, condition, spawned_refs)?;
+                self.validate_template_process_refs(artifact, then_value, spawned_refs)?;
+                self.validate_template_process_refs(artifact, else_value, spawned_refs)
+            }
+            ArtifactValueTemplate::Equality { left, right, .. }
+            | ArtifactValueTemplate::ScalarArithmetic { left, right, .. }
+            | ArtifactValueTemplate::ScalarOrdering { left, right, .. } => {
                 self.validate_template_process_refs(artifact, left, spawned_refs)?;
                 self.validate_template_process_refs(artifact, right, spawned_refs)
             }

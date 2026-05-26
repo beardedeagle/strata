@@ -659,9 +659,21 @@ fn validate_value_template_loop_elements(
         CheckedValueTemplate::MapRest { map, .. } => {
             validate_value_template_loop_elements(map, active_loop_elements)
         }
-        CheckedValueTemplate::Equality { left, right, .. } => {
+        CheckedValueTemplate::Equality { left, right, .. }
+        | CheckedValueTemplate::ScalarArithmetic { left, right, .. }
+        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
             validate_value_template_loop_elements(left, active_loop_elements)?;
             validate_value_template_loop_elements(right, active_loop_elements)
+        }
+        CheckedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            validate_value_template_loop_elements(condition, active_loop_elements)?;
+            validate_value_template_loop_elements(then_value, active_loop_elements)?;
+            validate_value_template_loop_elements(else_value, active_loop_elements)
         }
         CheckedValueTemplate::BooleanNot { operand, .. } => {
             validate_value_template_loop_elements(operand, active_loop_elements)

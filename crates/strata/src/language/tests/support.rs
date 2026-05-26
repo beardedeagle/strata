@@ -128,10 +128,10 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
                 effects: Vec::new(),
                 may: Vec::new(),
                 determinism: Determinism::Det,
-                body: Some(FunctionBody::Block(FunctionBlock {
+                body: Some(FunctionBody::Block(Box::new(FunctionBlock {
                     statements: Vec::new(),
                     returns: ReturnExpr::Value(ValueExpr::Identifier(ident(state_name.as_str()))),
-                })),
+                }))),
             },
             functions: Vec::new(),
             steps: vec![Function {
@@ -151,13 +151,13 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
                 effects: Vec::new(),
                 may: Vec::new(),
                 determinism: Determinism::Det,
-                body: Some(FunctionBody::Block(FunctionBlock {
+                body: Some(FunctionBody::Block(Box::new(FunctionBlock {
                     statements: Vec::new(),
                     returns: ReturnExpr::Call {
                         name: ident("Stop"),
                         arg: ValueExpr::Identifier(ident("state")),
                     },
-                })),
+                }))),
             }],
         });
     }

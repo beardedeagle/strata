@@ -12,6 +12,8 @@ mod return_match_arm_for;
 mod return_match_arm_for_if;
 #[path = "source_functions/return_match_arm_if_for.rs"]
 mod return_match_arm_if_for;
+#[path = "source_functions/scalar_failures.rs"]
+mod scalar_failures;
 
 #[test]
 fn function_match_checks_builds_and_runs_on_mantle() {

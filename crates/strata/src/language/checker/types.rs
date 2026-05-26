@@ -66,6 +66,9 @@ impl<'a> CheckedTypeInterner<'a> {
     }
 
     fn value_shape(&mut self, ty: &TypeRef) -> Result<CheckedValueShape> {
+        if let Some(scalar) = self.semantic_index.scalar_type(ty)? {
+            return Ok(CheckedValueShape::Scalar(scalar));
+        }
         if let Some(collection) = self.semantic_index.collection_type(ty)? {
             return match collection {
                 CollectionType::List { element, capacity } => {

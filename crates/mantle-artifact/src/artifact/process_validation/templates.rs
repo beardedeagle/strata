@@ -49,7 +49,34 @@ pub(in crate::artifact) fn validate_template_loop_elements(
         ArtifactValueTemplate::MapRest { map, .. } => {
             validate_template_loop_elements(artifact, map, active_loop_elements, field)
         }
-        ArtifactValueTemplate::Equality { left, right, .. } => {
+        ArtifactValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            validate_template_loop_elements(
+                artifact,
+                condition,
+                active_loop_elements,
+                &format!("{field}.condition"),
+            )?;
+            validate_template_loop_elements(
+                artifact,
+                then_value,
+                active_loop_elements,
+                &format!("{field}.then"),
+            )?;
+            validate_template_loop_elements(
+                artifact,
+                else_value,
+                active_loop_elements,
+                &format!("{field}.else"),
+            )
+        }
+        ArtifactValueTemplate::Equality { left, right, .. }
+        | ArtifactValueTemplate::ScalarArithmetic { left, right, .. }
+        | ArtifactValueTemplate::ScalarOrdering { left, right, .. } => {
             validate_template_loop_elements(
                 artifact,
                 left,
@@ -205,12 +232,15 @@ fn validate_bool_condition_template_shape(
         | ArtifactValueTemplate::MapValue { .. }
         | ArtifactValueTemplate::LoopElement { .. }
         | ArtifactValueTemplate::Equality { .. }
+        | ArtifactValueTemplate::ScalarOrdering { .. }
+        | ArtifactValueTemplate::IfElse { .. }
         | ArtifactValueTemplate::BooleanNot { .. }
         | ArtifactValueTemplate::BooleanBinary { .. } => Ok(()),
         ArtifactValueTemplate::ListRest { .. }
         | ArtifactValueTemplate::MapRest { .. }
         | ArtifactValueTemplate::ProcessRef { .. }
         | ArtifactValueTemplate::EnumVariant { .. }
+        | ArtifactValueTemplate::ScalarArithmetic { .. }
         | ArtifactValueTemplate::Record { .. }
         | ArtifactValueTemplate::List { .. }
         | ArtifactValueTemplate::Map { .. } => Err(Error::new(format!(

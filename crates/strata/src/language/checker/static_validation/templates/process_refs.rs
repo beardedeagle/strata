@@ -129,6 +129,39 @@ pub(in crate::language::checker::static_validation) fn validate_value_template_p
             validate_value_template_process_refs(processes, process, left, spawned_refs, false)?;
             validate_value_template_process_refs(processes, process, right, spawned_refs, false)
         }
+        CheckedValueTemplate::ScalarArithmetic { left, right, .. }
+        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
+            validate_value_template_process_refs(processes, process, left, spawned_refs, false)?;
+            validate_value_template_process_refs(processes, process, right, spawned_refs, false)
+        }
+        CheckedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            validate_value_template_process_refs(
+                processes,
+                process,
+                condition,
+                spawned_refs,
+                false,
+            )?;
+            validate_value_template_process_refs(
+                processes,
+                process,
+                then_value,
+                spawned_refs,
+                false,
+            )?;
+            validate_value_template_process_refs(
+                processes,
+                process,
+                else_value,
+                spawned_refs,
+                false,
+            )
+        }
         CheckedValueTemplate::BooleanNot { operand, .. } => {
             validate_value_template_process_refs(processes, process, operand, spawned_refs, false)
         }
@@ -221,6 +254,21 @@ pub(in crate::language::checker::static_validation) fn reject_process_ref_templa
             reject_projected_process_ref_payload_type(operand_ty)?;
             reject_process_ref_template_in_next_state(left)?;
             reject_process_ref_template_in_next_state(right)
+        }
+        CheckedValueTemplate::ScalarArithmetic { left, right, .. }
+        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
+            reject_process_ref_template_in_next_state(left)?;
+            reject_process_ref_template_in_next_state(right)
+        }
+        CheckedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            reject_process_ref_template_in_next_state(condition)?;
+            reject_process_ref_template_in_next_state(then_value)?;
+            reject_process_ref_template_in_next_state(else_value)
         }
         CheckedValueTemplate::BooleanNot { operand, .. } => {
             reject_process_ref_template_in_next_state(operand)

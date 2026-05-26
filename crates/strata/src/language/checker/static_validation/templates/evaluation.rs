@@ -39,7 +39,19 @@ pub(in crate::language::checker::static_validation) fn checked_template_depends_
             checked_template_depends_on_received_payload(entry.key())
                 || checked_template_depends_on_received_payload(entry.value())
         }),
-        CheckedValueTemplate::Equality { left, right, .. } => {
+        CheckedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            checked_template_depends_on_received_payload(condition)
+                || checked_template_depends_on_received_payload(then_value)
+                || checked_template_depends_on_received_payload(else_value)
+        }
+        CheckedValueTemplate::Equality { left, right, .. }
+        | CheckedValueTemplate::ScalarArithmetic { left, right, .. }
+        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
             checked_template_depends_on_received_payload(left)
                 || checked_template_depends_on_received_payload(right)
         }
@@ -88,7 +100,19 @@ pub(in crate::language::checker::static_validation) fn checked_template_depends_
             checked_template_depends_on_loop_element(entry.key())
                 || checked_template_depends_on_loop_element(entry.value())
         }),
-        CheckedValueTemplate::Equality { left, right, .. } => {
+        CheckedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            checked_template_depends_on_loop_element(condition)
+                || checked_template_depends_on_loop_element(then_value)
+                || checked_template_depends_on_loop_element(else_value)
+        }
+        CheckedValueTemplate::Equality { left, right, .. }
+        | CheckedValueTemplate::ScalarArithmetic { left, right, .. }
+        | CheckedValueTemplate::ScalarOrdering { left, right, .. } => {
             checked_template_depends_on_loop_element(left)
                 || checked_template_depends_on_loop_element(right)
         }
@@ -308,6 +332,30 @@ pub(in crate::language::checker::static_validation) fn evaluate_checked_template
                 ArtifactValue::Map(values),
             ))
         }
+        CheckedValueTemplate::IfElse {
+            ty,
+            condition,
+            then_value,
+            else_value,
+        } => {
+            let condition =
+                evaluate_checked_template(condition, received_payload, current_state_payload)?;
+            let selected = if checked_bool_value(&condition)? {
+                then_value
+            } else {
+                else_value
+            };
+            let value =
+                evaluate_checked_template(selected, received_payload, current_state_payload)?;
+            if value.ty() != ty {
+                return Err(Error::new(format!(
+                    "if expression branch has type {}, expected {}",
+                    value.ty(),
+                    ty
+                )));
+            }
+            Ok(value)
+        }
         CheckedValueTemplate::Equality {
             ty,
             operand_ty,
@@ -341,6 +389,91 @@ pub(in crate::language::checker::static_validation) fn evaluate_checked_template
             Ok(CheckedPayloadValue::new(
                 ty.clone(),
                 ArtifactValue::Atom(bool_atom(selected)),
+            ))
+        }
+        CheckedValueTemplate::ScalarArithmetic {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_checked_template(left, received_payload, current_state_payload)?;
+            if left.ty() != ty {
+                return Err(Error::new(format!(
+                    "scalar arithmetic left operand has type {}, expected {}",
+                    left.ty(),
+                    ty
+                )));
+            }
+            let right = evaluate_checked_template(right, received_payload, current_state_payload)?;
+            if right.ty() != ty {
+                return Err(Error::new(format!(
+                    "scalar arithmetic right operand has type {}, expected {}",
+                    right.ty(),
+                    ty
+                )));
+            }
+            let (ArtifactValue::Scalar(left), ArtifactValue::Scalar(right)) = (
+                checked_payload_value(&left)?,
+                checked_payload_value(&right)?,
+            ) else {
+                return Err(Error::new(
+                    "scalar arithmetic operands must produce scalar values",
+                ));
+            };
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Scalar(
+                    mantle_artifact::ArtifactScalarValue::checked_arithmetic(
+                        scalar_arithmetic_operator(*operator),
+                        left,
+                        right,
+                    )
+                    .map_err(|err| Error::new(err.to_string()))?,
+                ),
+            ))
+        }
+        CheckedValueTemplate::ScalarOrdering {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_checked_template(left, received_payload, current_state_payload)?;
+            if left.ty() != operand_ty {
+                return Err(Error::new(format!(
+                    "scalar ordering left operand has type {}, expected {}",
+                    left.ty(),
+                    operand_ty
+                )));
+            }
+            let right = evaluate_checked_template(right, received_payload, current_state_payload)?;
+            if right.ty() != operand_ty {
+                return Err(Error::new(format!(
+                    "scalar ordering right operand has type {}, expected {}",
+                    right.ty(),
+                    operand_ty
+                )));
+            }
+            let (ArtifactValue::Scalar(left), ArtifactValue::Scalar(right)) = (
+                checked_payload_value(&left)?,
+                checked_payload_value(&right)?,
+            ) else {
+                return Err(Error::new(
+                    "scalar ordering operands must produce scalar values",
+                ));
+            };
+            Ok(CheckedPayloadValue::new(
+                ty.clone(),
+                ArtifactValue::Atom(bool_atom(
+                    mantle_artifact::ArtifactScalarValue::compare(
+                        scalar_ordering_operator(*operator),
+                        left,
+                        right,
+                    )
+                    .map_err(|err| Error::new(err.to_string()))?,
+                )),
             ))
         }
         CheckedValueTemplate::BooleanNot { ty, operand } => {
@@ -379,6 +512,47 @@ pub(in crate::language::checker::static_validation) fn evaluate_checked_template
                 ty.clone(),
                 ArtifactValue::Atom(bool_atom(selected)),
             ))
+        }
+    }
+}
+
+fn scalar_arithmetic_operator(
+    operator: CheckedScalarArithmeticOperator,
+) -> mantle_artifact::ArtifactScalarArithmeticOperator {
+    match operator {
+        CheckedScalarArithmeticOperator::Add => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Add
+        }
+        CheckedScalarArithmeticOperator::Subtract => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Subtract
+        }
+        CheckedScalarArithmeticOperator::Multiply => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Multiply
+        }
+        CheckedScalarArithmeticOperator::Divide => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Divide
+        }
+        CheckedScalarArithmeticOperator::Modulo => {
+            mantle_artifact::ArtifactScalarArithmeticOperator::Modulo
+        }
+    }
+}
+
+fn scalar_ordering_operator(
+    operator: CheckedScalarOrderingOperator,
+) -> mantle_artifact::ArtifactScalarOrderingOperator {
+    match operator {
+        CheckedScalarOrderingOperator::Less => {
+            mantle_artifact::ArtifactScalarOrderingOperator::Less
+        }
+        CheckedScalarOrderingOperator::LessEqual => {
+            mantle_artifact::ArtifactScalarOrderingOperator::LessEqual
+        }
+        CheckedScalarOrderingOperator::Greater => {
+            mantle_artifact::ArtifactScalarOrderingOperator::Greater
+        }
+        CheckedScalarOrderingOperator::GreaterEqual => {
+            mantle_artifact::ArtifactScalarOrderingOperator::GreaterEqual
         }
     }
 }
@@ -502,6 +676,25 @@ fn checked_bool_condition_value(
             "process {} if condition produced invalid Bool value {}",
             process.debug_name(),
             label
+        ))),
+    }
+}
+
+fn checked_bool_value(value: &CheckedPayloadValue) -> Result<bool> {
+    let value = value.value().ok_or_else(|| {
+        Error::new("if expression condition produced a process reference payload")
+    })?;
+    let ArtifactValue::Atom(label) = value else {
+        return Err(Error::new(format!(
+            "if expression condition produced non-Bool value {}",
+            value.label()
+        )));
+    };
+    match label.as_str() {
+        "True" => Ok(true),
+        "False" => Ok(false),
+        _ => Err(Error::new(format!(
+            "if expression condition produced invalid Bool value {label}"
         ))),
     }
 }

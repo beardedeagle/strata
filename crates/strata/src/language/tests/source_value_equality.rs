@@ -208,9 +208,9 @@ fn rejects_boolean_predicate_non_bool_operands() {
 }
 
 #[test]
-fn rejects_parenthesized_non_bool_value_grouping() {
+fn accepts_parenthesized_non_bool_value_grouping() {
     let source = r#"
-module source_grouping_rejects_non_bool;
+module source_grouping_accepts_value;
 
 enum Bool { False, True }
 enum Mode { Cold, Warm }
@@ -231,11 +231,10 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let err = check_source(source).expect_err("parenthesized non-Bool value should fail");
-    assert!(
-        err.to_string()
-            .contains("parenthesized predicate grouping produces Bool, expected Mode"),
-        "{err}"
+    let checked = check_source(source).expect("parenthesized non-Bool value should check");
+    assert_eq!(
+        checked_state_labels(&checked.processes()[0]),
+        ["MainState{mode:Cold}"]
     );
 }
 
@@ -347,19 +346,19 @@ fn rejects_source_equality_invalid_operand_types() {
         ("Cold == True", "equality operands must have the same type"),
         (
             "Job { phase: Ready } == Job { phase: Ready }",
-            "equality operands must be Bool or fieldless enum values",
+            "equality operands must be Bool, scalar values, or fieldless enum values",
         ),
         (
             "List<Bool,2>[True, False] == List<Bool,2>[True, False]",
-            "equality operands must be Bool or fieldless enum values",
+            "equality operands must be Bool, scalar values, or fieldless enum values",
         ),
         (
             "Map<Mode,Mode,1>[Cold => Warm] == Map<Mode,Mode,1>[Cold => Warm]",
-            "equality operands must be Bool or fieldless enum values",
+            "equality operands must be Bool, scalar values, or fieldless enum values",
         ),
         (
             "Wrapped(Ready) == Wrapped(Ready)",
-            "equality operands must be Bool or fieldless enum values",
+            "equality operands must be Bool, scalar values, or fieldless enum values",
         ),
     ] {
         let source = source_with_equality_expr(expr);
@@ -512,34 +511,48 @@ proc Worker mailbox bounded(1) {
 
     let err = check_source(source).expect_err("process-reference equality should fail");
     assert!(
-        err.to_string()
-            .contains("equality operand worker must be a Bool or fieldless enum value"),
+        err.to_string().contains(
+            "equality operand worker must be a Bool, scalar value, or fieldless enum value"
+        ),
         "{err}"
     );
 }
 
 #[test]
 fn rejects_non_equality_operators_and_arithmetic_conditions() {
-    for (source, expected) in [
-        (source_with_equality_expr("True < True"), "expected symbol"),
-        (source_with_equality_expr("True <= True"), "expected symbol"),
-        (source_with_equality_expr("True > True"), "expected symbol"),
-        (source_with_equality_expr("True >= True"), "expected symbol"),
+    for (expr, expected) in [
         (
-            source_with_equality_expr("\"a\" == \"a\""),
-            "expected identifier",
+            "True < True",
+            "scalar operand True must be a scalar value binding",
         ),
         (
-            source_with_equality_expr("True + True"),
-            "unsupported character '+'",
+            "True <= True",
+            "scalar operand True must be a scalar value binding",
         ),
+        (
+            "True > True",
+            "scalar operand True must be a scalar value binding",
+        ),
+        (
+            "True >= True",
+            "scalar operand True must be a scalar value binding",
+        ),
+        ("True + True", "type Bool is not a scalar integer type"),
     ] {
-        let err = parse_source(&source).expect_err("unsupported operator should fail");
+        let source = source_with_equality_expr(expr);
+        let err = check_source(&source).expect_err("unsupported Bool operator should fail");
         assert!(
             err.to_string().contains(expected),
             "expected {expected:?}, got {err}"
         );
     }
+
+    let source = source_with_equality_expr("\"a\" == \"a\"");
+    let err = parse_source(&source).expect_err("unsupported string equality syntax should fail");
+    assert!(
+        err.to_string().contains("expected identifier"),
+        "expected string equality syntax rejection, got {err}"
+    );
 }
 
 fn source_with_equality_expr(expr: &str) -> String {

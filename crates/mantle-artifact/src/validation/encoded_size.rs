@@ -247,6 +247,14 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
 fn add_type_shape_bytes(total: &mut usize, prefix: &str, shape: &ArtifactValueShape) -> Result<()> {
     match shape {
         ArtifactValueShape::Atom => add_field_bytes(total, &format!("{prefix}.shape"), "atom"),
+        ArtifactValueShape::Scalar { scalar } => {
+            add_field_bytes(total, &format!("{prefix}.shape"), "scalar")?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.scalar_type"),
+                scalar.artifact_name(),
+            )
+        }
         ArtifactValueShape::Record { fields } => {
             add_field_bytes(total, &format!("{prefix}.shape"), "record")?;
             add_field_bytes(

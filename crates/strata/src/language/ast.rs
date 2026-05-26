@@ -1,8 +1,12 @@
 use std::fmt;
 
-use mantle_artifact::{MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES};
+use mantle_artifact::{ArtifactScalarValue, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES};
 
 use super::diagnostic::{Error, Result};
+
+mod scalar;
+
+pub use scalar::{ValueScalarArithmeticOperator, ValueScalarOrderingOperator};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Identifier(String);
@@ -279,7 +283,7 @@ pub enum CollectionPatternBinding {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FunctionBody {
-    Block(FunctionBlock),
+    Block(Box<FunctionBlock>),
     Match(Match),
 }
 
@@ -452,6 +456,7 @@ pub enum ReturnExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueExpr {
     Identifier(Identifier),
+    ScalarLiteral(ArtifactScalarValue),
     Call {
         name: Identifier,
         arg: Box<ValueExpr>,
@@ -470,6 +475,16 @@ pub enum ValueExpr {
     },
     Equality {
         operator: ValueEqualityOperator,
+        left: Box<ValueExpr>,
+        right: Box<ValueExpr>,
+    },
+    ScalarArithmetic {
+        operator: ValueScalarArithmeticOperator,
+        left: Box<ValueExpr>,
+        right: Box<ValueExpr>,
+    },
+    ScalarOrdering {
+        operator: ValueScalarOrderingOperator,
         left: Box<ValueExpr>,
         right: Box<ValueExpr>,
     },
@@ -568,6 +583,7 @@ impl ValueExpr {
         }
         match self {
             Self::Identifier(name) => write!(f, "{name}"),
+            Self::ScalarLiteral(value) => write!(f, "{}", value.label()),
             Self::Call { name, arg } => write!(f, "{name}({arg})"),
             Self::EnumVariant { name, payload } => write!(f, "{name}({payload})"),
             Self::Record(value) => write!(f, "{value}"),
@@ -579,6 +595,24 @@ impl ValueExpr {
                 else_branch,
             } => write!(f, "if({condition}){{{then_branch}}}else{{{else_branch}}}"),
             Self::Equality {
+                operator,
+                left,
+                right,
+            } => {
+                left.fmt_with_min_precedence(f, precedence)?;
+                write!(f, " {} ", operator.as_str())?;
+                right.fmt_with_min_precedence(f, precedence + 1)
+            }
+            Self::ScalarArithmetic {
+                operator,
+                left,
+                right,
+            } => {
+                left.fmt_with_min_precedence(f, precedence)?;
+                write!(f, " {} ", operator.as_str())?;
+                right.fmt_with_min_precedence(f, precedence + 1)
+            }
+            Self::ScalarOrdering {
                 operator,
                 left,
                 right,
@@ -623,15 +657,29 @@ impl ValueExpr {
                 ..
             } => 2,
             Self::Equality { .. } => 3,
-            Self::BooleanNot { .. } => 4,
+            Self::ScalarOrdering { .. } => 4,
+            Self::ScalarArithmetic {
+                operator:
+                    ValueScalarArithmeticOperator::Add | ValueScalarArithmeticOperator::Subtract,
+                ..
+            } => 5,
+            Self::ScalarArithmetic {
+                operator:
+                    ValueScalarArithmeticOperator::Multiply
+                    | ValueScalarArithmeticOperator::Divide
+                    | ValueScalarArithmeticOperator::Modulo,
+                ..
+            } => 6,
+            Self::BooleanNot { .. } => 7,
             Self::Identifier(_)
+            | Self::ScalarLiteral(_)
             | Self::Call { .. }
             | Self::EnumVariant { .. }
             | Self::Record(_)
             | Self::List(_)
             | Self::Map(_)
             | Self::IfElse { .. }
-            | Self::Grouped { .. } => 5,
+            | Self::Grouped { .. } => 8,
         }
     }
 }

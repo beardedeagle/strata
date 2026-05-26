@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use mantle_artifact::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactValueBooleanOperator,
+    ArtifactMapEntry, ArtifactRecordField, ArtifactScalarValue, ArtifactValueBooleanOperator,
     ArtifactValueEqualityOperator, Error, Result,
 };
 
@@ -306,6 +306,42 @@ pub(super) fn evaluate_runtime_template(
             }
             program.runtime_payload_value("map template value", *ty, RuntimeValue::Map(values))
         }
+        LoadedValueTemplate::IfElse {
+            ty,
+            condition,
+            then_value,
+            else_value,
+        } => {
+            let condition = evaluate_runtime_template(
+                program,
+                condition,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            let selected = if runtime_bool_value(&condition.value)? {
+                then_value
+            } else {
+                else_value
+            };
+            let value = evaluate_runtime_template(
+                program,
+                selected,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            if value.ty != *ty {
+                return Err(Error::new(format!(
+                    "if_else value branch has type id {}, expected {}",
+                    value.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            Ok(value)
+        }
         LoadedValueTemplate::Equality {
             ty,
             operand_ty,
@@ -352,6 +388,109 @@ pub(super) fn evaluate_runtime_template(
                 "equality template value",
                 *ty,
                 RuntimeValue::Atom(bool_atom(selected)),
+            )
+        }
+        LoadedValueTemplate::ScalarArithmetic {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_runtime_template(
+                program,
+                left,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            if left.ty != *ty {
+                return Err(Error::new(format!(
+                    "scalar arithmetic left operand has type id {}, expected {}",
+                    left.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            let right = evaluate_runtime_template(
+                program,
+                right,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            if right.ty != *ty {
+                return Err(Error::new(format!(
+                    "scalar arithmetic right operand has type id {}, expected {}",
+                    right.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            let (RuntimeValue::Scalar(left), RuntimeValue::Scalar(right)) =
+                (left.value, right.value)
+            else {
+                return Err(Error::new(
+                    "scalar arithmetic operands must produce scalar values",
+                ));
+            };
+            program.runtime_payload_value(
+                "scalar arithmetic template value",
+                *ty,
+                RuntimeValue::Scalar(ArtifactScalarValue::checked_arithmetic(
+                    *operator, left, right,
+                )?),
+            )
+        }
+        LoadedValueTemplate::ScalarOrdering {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_runtime_template(
+                program,
+                left,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            if left.ty != *operand_ty {
+                return Err(Error::new(format!(
+                    "scalar ordering left operand has type id {}, expected {}",
+                    left.ty.as_u32(),
+                    operand_ty.as_u32()
+                )));
+            }
+            let right = evaluate_runtime_template(
+                program,
+                right,
+                received_payload,
+                step,
+                process_refs,
+                loop_elements,
+            )?;
+            if right.ty != *operand_ty {
+                return Err(Error::new(format!(
+                    "scalar ordering right operand has type id {}, expected {}",
+                    right.ty.as_u32(),
+                    operand_ty.as_u32()
+                )));
+            }
+            let (RuntimeValue::Scalar(left), RuntimeValue::Scalar(right)) =
+                (left.value, right.value)
+            else {
+                return Err(Error::new(
+                    "scalar ordering operands must produce scalar values",
+                ));
+            };
+            program.runtime_payload_value(
+                "scalar ordering template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(ArtifactScalarValue::compare(
+                    *operator, left, right,
+                )?)),
             )
         }
         LoadedValueTemplate::BooleanNot { ty, operand } => {

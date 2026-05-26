@@ -192,7 +192,7 @@ fn rejects_if_else_branch_type_mismatch() {
 }
 
 #[test]
-fn rejects_if_else_runtime_bound_condition() {
+fn lowers_if_else_runtime_bound_condition_as_typed_next_state() {
     let source = r#"
 module source_function_if_else_runtime_condition;
 
@@ -218,13 +218,24 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    let err = check_source(source).expect_err("runtime-bound condition should fail closed");
-    let message = err.to_string();
+    let checked = check_source(source).expect("runtime-bound value if should check");
+    let artifact =
+        lower_to_artifact(&checked, source).expect("runtime-bound value if should lower");
+    let transition = artifact.processes[0]
+        .transitions
+        .iter()
+        .find(|transition| transition.message.as_u32() == 1)
+        .expect("Start transition should lower");
 
-    assert!(
-        message.contains("if condition requires a concrete Bool value"),
-        "{message}"
-    );
+    assert!(matches!(
+        &transition.next_state,
+        NextState::IfElse {
+            condition: ArtifactValueTemplate::ReceivedPayload { .. },
+            then_state,
+            else_state,
+        } if matches!(then_state.as_ref(), NextState::Value(_))
+            && matches!(else_state.as_ref(), NextState::Value(_))
+    ));
 }
 
 #[test]

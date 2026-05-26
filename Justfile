@@ -232,6 +232,9 @@ source-to-runtime-success-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_if_else.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_if_else.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_if_else.mta
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_scalar_priority.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_scalar_priority.str
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_scalar_priority.mta
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_payload_projection_if.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_payload_projection_if.str
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_payload_projection_if.mta
@@ -327,8 +330,13 @@ source-to-runtime-failure-gates: build
     arm_nested_for_stderr="$(mktemp)"
     arm_excessive_if_stderr="$(mktemp)"
     arm_final_if_excessive_if_stderr="$(mktemp)"
+    scalar_overflow_stderr="$(mktemp)"
+    scalar_type_mismatch_stderr="$(mktemp)"
+    scalar_divide_by_zero_stderr="$(mktemp)"
+    scalar_runtime_stderr="$(mktemp)"
+    scalar_unsuffixed_stderr="$(mktemp)"
     run_stderr="$(mktemp)"
-    trap 'rm -f "$effect_authority_stderr" "$function_return_if_stderr" "$source_local_ref_stderr" "$source_local_ref_carrier_stderr" "$source_local_ref_shadow_stderr" "$source_param_ref_shadow_stderr" "$arm_nested_for_stderr" "$arm_excessive_if_stderr" "$arm_final_if_excessive_if_stderr" "$run_stderr"' EXIT
+    trap 'rm -f "$effect_authority_stderr" "$function_return_if_stderr" "$source_local_ref_stderr" "$source_local_ref_carrier_stderr" "$source_local_ref_shadow_stderr" "$source_param_ref_shadow_stderr" "$arm_nested_for_stderr" "$arm_excessive_if_stderr" "$arm_final_if_excessive_if_stderr" "$scalar_overflow_stderr" "$scalar_type_mismatch_stderr" "$scalar_divide_by_zero_stderr" "$scalar_runtime_stderr" "$scalar_unsuffixed_stderr" "$run_stderr"' EXIT
 
     if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/effect_authority_missing.str 2>"$effect_authority_stderr"; then
         echo "Error: effect_authority_missing was expected to fail source effect authority checks." >&2
@@ -352,7 +360,7 @@ source-to-runtime-failure-gates: build
         echo "Error: source_local_binding_process_ref was expected to fail source-local binding checks." >&2
         exit 1
     fi
-    if ! grep -q 'source-local binding worker_local must use a declared record, enum, list, or map type' "$source_local_ref_stderr"; then
+    if ! grep -q 'source-local binding worker_local must use a declared record, enum, scalar, list, or map type' "$source_local_ref_stderr"; then
         echo "Error: source_local_binding_process_ref failed for an unexpected reason." >&2
         cat "$source_local_ref_stderr" >&2
         exit 1
@@ -361,7 +369,7 @@ source-to-runtime-failure-gates: build
         echo "Error: source_local_binding_process_ref_carrier_enum was expected to fail source-local binding checks." >&2
         exit 1
     fi
-    if ! grep -q 'source-local binding copy must use a declared record, enum, list, or map type without process-reference authority' "$source_local_ref_carrier_stderr"; then
+    if ! grep -q 'source-local binding copy must use a declared record, enum, scalar, list, or map type without process-reference authority' "$source_local_ref_carrier_stderr"; then
         echo "Error: source_local_binding_process_ref_carrier_enum failed for an unexpected reason." >&2
         cat "$source_local_ref_carrier_stderr" >&2
         exit 1
@@ -411,6 +419,49 @@ source-to-runtime-failure-gates: build
         cat "$arm_final_if_excessive_if_stderr" >&2
         exit 1
     fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_overflow.str 2>"$scalar_overflow_stderr"; then
+        echo "Error: scalar_overflow was expected to fail scalar overflow checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'scalar arithmetic result 256 is outside U8 range' "$scalar_overflow_stderr"; then
+        echo "Error: scalar_overflow failed for an unexpected reason." >&2
+        cat "$scalar_overflow_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_type_mismatch.str 2>"$scalar_type_mismatch_stderr"; then
+        echo "Error: scalar_type_mismatch was expected to fail scalar type checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'scalar literal 2_u64 has type U64, expected U32' "$scalar_type_mismatch_stderr"; then
+        echo "Error: scalar_type_mismatch failed for an unexpected reason." >&2
+        cat "$scalar_type_mismatch_stderr" >&2
+        exit 1
+    fi
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_divide_by_zero.str 2>"$scalar_divide_by_zero_stderr"; then
+        echo "Error: scalar_divide_by_zero was expected to fail scalar divide-by-zero checks." >&2
+        exit 1
+    fi
+    if ! grep -q 'scalar division by zero' "$scalar_divide_by_zero_stderr"; then
+        echo "Error: scalar_divide_by_zero failed for an unexpected reason." >&2
+        cat "$scalar_divide_by_zero_stderr" >&2
+        exit 1
+    fi
+    rm -f target/strata/scalar_runtime_divide_by_zero.mta target/strata/scalar_runtime_modulo_by_zero.mta
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_runtime_divide_by_zero.str 2>"$scalar_runtime_stderr"; then echo "Error: scalar_runtime_divide_by_zero was expected to fail scalar divide-by-zero checks." >&2; exit 1; fi
+    if ! grep -q 'scalar division by zero' "$scalar_runtime_stderr"; then echo "Error: scalar_runtime_divide_by_zero failed for an unexpected reason." >&2; cat "$scalar_runtime_stderr" >&2; exit 1; fi
+    test ! -f target/strata/scalar_runtime_divide_by_zero.mta
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_runtime_modulo_by_zero.str 2>"$scalar_runtime_stderr"; then echo "Error: scalar_runtime_modulo_by_zero was expected to fail scalar modulo-by-zero checks." >&2; exit 1; fi
+    if ! grep -q 'scalar modulo by zero' "$scalar_runtime_stderr"; then echo "Error: scalar_runtime_modulo_by_zero failed for an unexpected reason." >&2; cat "$scalar_runtime_stderr" >&2; exit 1; fi
+    test ! -f target/strata/scalar_runtime_modulo_by_zero.mta
+    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_unsuffixed_literal.str 2>"$scalar_unsuffixed_stderr"; then
+        echo "Error: scalar_unsuffixed_literal was expected to fail scalar literal parsing." >&2
+        exit 1
+    fi
+    if ! grep -q 'numeric value literals require an explicit scalar suffix' "$scalar_unsuffixed_stderr"; then
+        echo "Error: scalar_unsuffixed_literal failed for an unexpected reason." >&2
+        cat "$scalar_unsuffixed_stderr" >&2
+        exit 1
+    fi
 
     rm -f "$trace"
     if cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta 2>"$run_stderr"; then
@@ -449,6 +500,8 @@ bounded-assurance-smoke:
     cargo +{{stable_toolchain}} test -p strata process_return_match_arm_prefix_properties --lib
     cargo +{{stable_toolchain}} test -p strata source_function_if_else --lib
     cargo +{{stable_toolchain}} test -p strata source_function_local_bindings --lib
+    cargo +{{stable_toolchain}} test -p strata source_scalar_bounded --lib
+    cargo +{{stable_toolchain}} test -p strata bounded_scalar_folding_matches_independent_model_and_binding_expansion --lib
     cargo +{{stable_toolchain}} test -p strata-mantle-acceptance process_return_match_arm_bounded_runtime --test source_to_runtime_gates
     cargo +{{stable_toolchain}} test -p strata-mantle-acceptance process_return_match_arm_action_block --test source_to_runtime_gates
 

@@ -11,9 +11,10 @@ mod validation;
 pub use artifact::{
     ArtifactAction, ArtifactBranch, ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement,
     ArtifactMapEntry, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
-    ArtifactProcessRefPayload, ArtifactRecordField, ArtifactSendTarget, ArtifactStateValue,
-    ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind, ArtifactValue,
-    ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
+    ArtifactProcessRefPayload, ArtifactRecordField, ArtifactScalarArithmeticOperator,
+    ArtifactScalarOrderingOperator, ArtifactScalarType, ArtifactScalarValue, ArtifactSendTarget,
+    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind,
+    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
     ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
     MantleArtifact, MapProjectionMode, NextState, StepResult, validate_value_enum_membership,
 };

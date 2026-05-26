@@ -4,7 +4,8 @@ use super::ast::{
     ListValue, MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match,
     MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record, RecordField,
     RecordPatternField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
-    ValueBooleanOperator, ValueEqualityOperator, ValueExpr,
+    ValueBooleanOperator, ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator,
+    ValueScalarOrderingOperator,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};

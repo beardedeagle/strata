@@ -48,8 +48,10 @@ just language-surface-assurance
 
 `just bounded-assurance-smoke` runs the focused bounded assurance surface for
 the current bounded language surfaces. It covers immutable source-local binding
-chains and pure source-function `if` selection. It also covers selected
-`step return match` action blocks. The gate compares checked IR shapes with
+chains, bounded scalar expression trees, binding-expanded scalar equivalents,
+scalar values in records, lists, and maps, and pure source value/return `if`
+selection. It also covers selected `step return match`
+action blocks. The gate compares checked IR shapes with
 lowered Mantle artifact shapes, validates the artifact boundary, verifies typed
 send IDs, checks terminal `Continue` / `Stop` / `Panic` lowering, runs an
 explicit smaller bounded runtime execution generator through Mantle, and runs

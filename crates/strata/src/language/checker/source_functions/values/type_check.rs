@@ -60,6 +60,39 @@ fn check_source_value_type_inner(
             bindings,
         );
     }
+    if let ValueExpr::ScalarLiteral(literal) = value {
+        return validate_source_scalar_literal_expr(scope, expected_type, *literal);
+    }
+    if let ValueExpr::ScalarArithmetic {
+        operator,
+        left,
+        right,
+    } = value
+    {
+        return validate_source_scalar_arithmetic_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+        );
+    }
+    if let ValueExpr::ScalarOrdering {
+        operator,
+        left,
+        right,
+    } = value
+    {
+        return validate_source_scalar_ordering_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+        );
+    }
     if let ValueExpr::BooleanNot { operand } = value {
         return validate_source_boolean_not_expr(scope, expected_type, operand, bindings);
     }
@@ -105,6 +138,11 @@ fn check_source_value_type_inner(
     if let ValueExpr::Call { name, .. } = value {
         return Err(Error::new(format!(
             "function call {name} must be resolved before checking value of type {expected_type}"
+        )));
+    }
+    if scope.semantic_index.scalar_type(expected_type)?.is_some() {
+        return Err(Error::new(format!(
+            "expected scalar literal or scalar expression for type {expected_type}"
         )));
     }
     if let Ok(record) = scope
@@ -292,10 +330,13 @@ fn check_enum_source_value_type(
             check_source_value_type_inner(scope, payload_type, payload, bindings, depth + 1)
         }
         ValueExpr::Call { .. }
+        | ValueExpr::ScalarLiteral(_)
         | ValueExpr::Record(_)
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
         | ValueExpr::Equality { .. }
+        | ValueExpr::ScalarArithmetic { .. }
+        | ValueExpr::ScalarOrdering { .. }
         | ValueExpr::BooleanNot { .. }
         | ValueExpr::BooleanBinary { .. }
         | ValueExpr::Grouped { .. }

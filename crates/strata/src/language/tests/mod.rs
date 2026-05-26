@@ -32,6 +32,8 @@ mod source_function_local_bindings;
 mod source_function_local_bindings_authority;
 mod source_function_patterns;
 mod source_function_record_patterns;
+mod source_scalar_bounded;
+mod source_scalar_values;
 mod source_value_equality;
 mod state_match_payload_split;
 mod state_match_success;

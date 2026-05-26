@@ -16,12 +16,17 @@ use super::canonical::{CanonicalValueContext, canonical_value, source_value_uses
 
 mod collections;
 mod equality;
+mod scalars;
 
 use collections::checked_collection_template;
 use equality::{
     CheckedBinaryTemplate, CheckedEqualityTemplate, CheckedTemplateInput,
     checked_boolean_binary_template, checked_boolean_not_template, checked_equality_template,
     checked_grouped_template,
+};
+use scalars::{
+    CheckedScalarArithmeticTemplate, CheckedScalarOrderingTemplate,
+    checked_scalar_arithmetic_template, checked_scalar_ordering_template,
 };
 
 #[derive(Clone, Copy)]
@@ -91,10 +96,43 @@ fn checked_value_template(
             "function call {name} must be resolved before checking value template of type {expected_type}"
         )));
     }
-    if matches!(value, ValueExpr::IfElse { .. }) {
-        return Err(Error::new(format!(
-            "if expression must be resolved before checking value template of type {expected_type}"
-        )));
+    if let ValueExpr::IfElse {
+        condition,
+        then_branch,
+        else_branch,
+    } = value
+    {
+        let bool_type = semantic_index.bool_type(module)?;
+        return Ok(CheckedValueTemplate::IfElse {
+            ty: types.intern(expected_type)?,
+            condition: Box::new(checked_value_template(
+                module,
+                semantic_index,
+                types,
+                &bool_type,
+                condition,
+                bindings,
+                depth + 1,
+            )?),
+            then_value: Box::new(checked_value_template(
+                module,
+                semantic_index,
+                types,
+                expected_type,
+                then_branch,
+                bindings,
+                depth + 1,
+            )?),
+            else_value: Box::new(checked_value_template(
+                module,
+                semantic_index,
+                types,
+                expected_type,
+                else_branch,
+                bindings,
+                depth + 1,
+            )?),
+        });
     }
     if let ValueExpr::Equality {
         operator,
@@ -112,6 +150,50 @@ fn checked_value_template(
                 depth: depth + 1,
             },
             CheckedEqualityTemplate {
+                operator: *operator,
+                left,
+                right,
+            },
+        );
+    }
+    if let ValueExpr::ScalarArithmetic {
+        operator,
+        left,
+        right,
+    } = value
+    {
+        return checked_scalar_arithmetic_template(
+            types,
+            CheckedTemplateInput {
+                module,
+                semantic_index,
+                expected_type,
+                bindings,
+                depth: depth + 1,
+            },
+            CheckedScalarArithmeticTemplate {
+                operator: *operator,
+                left,
+                right,
+            },
+        );
+    }
+    if let ValueExpr::ScalarOrdering {
+        operator,
+        left,
+        right,
+    } = value
+    {
+        return checked_scalar_ordering_template(
+            types,
+            CheckedTemplateInput {
+                module,
+                semantic_index,
+                expected_type,
+                bindings,
+                depth: depth + 1,
+            },
+            CheckedScalarOrderingTemplate {
                 operator: *operator,
                 left,
                 right,

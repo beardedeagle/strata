@@ -2,6 +2,9 @@ use super::super::*;
 use crate::MAX_NEXT_STATE_IF_ELSE_DEPTH;
 use crate::fields::ArtifactFields;
 
+mod scalar_decode;
+mod value_template_decode;
+
 impl MantleArtifact {
     pub fn decode(contents: &str) -> Result<Self> {
         let mut fields = ArtifactFields::parse(contents)?;
@@ -228,6 +231,7 @@ fn decode_type(fields: &mut ArtifactFields, type_index: usize) -> Result<Artifac
 fn decode_type_shape(fields: &mut ArtifactFields, prefix: &str) -> Result<ArtifactValueShape> {
     match fields.take_required(&format!("{prefix}.shape"))?.as_str() {
         "atom" => Ok(ArtifactValueShape::Atom),
+        "scalar" => scalar_decode::decode_scalar_shape(fields, prefix),
         "record" => {
             let field_count = fields.take_bounded_usize(
                 &format!("{prefix}.field_count"),
@@ -555,6 +559,7 @@ fn decode_value_template(
             }
             Ok(ArtifactValueTemplate::Map { ty, entries })
         }
+        "if_else" => value_template_decode::decode_if_else_template(fields, prefix, depth),
         "equality" => {
             let operator_field = format!("{prefix}.operator");
             Ok(ArtifactValueTemplate::Equality {
@@ -576,6 +581,10 @@ fn decode_value_template(
                 )?),
             })
         }
+        "scalar_arithmetic" => {
+            scalar_decode::decode_scalar_arithmetic_template(fields, prefix, depth)
+        }
+        "scalar_ordering" => scalar_decode::decode_scalar_ordering_template(fields, prefix, depth),
         "boolean_not" => Ok(ArtifactValueTemplate::BooleanNot {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
             operand: Box::new(decode_value_template(

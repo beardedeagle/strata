@@ -72,6 +72,14 @@ resolved before lowering while Mantle executes only typed artifact data:
 just run-example function_local_bindings
 ```
 
+A scalar computation gate proves typed scalar payloads, immutable process-local
+scalar functions, runtime scalar predicates, runtime-bound value conditionals,
+and Mantle execution of typed scalar templates:
+
+```sh
+just run-example runtime_scalar_priority
+```
+
 A selected return-match arm-prefix gate proves source-selected dispatch before
 Mantle executes typed runtime arm actions:
 
@@ -87,6 +95,7 @@ Mantle execution:
 
 ```sh
 just run-example runtime_guard_noop
+just run-example runtime_scalar_priority
 just run-example runtime_nested_if_actions
 just run-example runtime_final_if_guarded_loop
 just run-example runtime_final_if_nested_if_actions
@@ -107,6 +116,12 @@ artifact:
 ```sh
 just strata-check examples/failures/effect_authority_missing.str
 just strata-check examples/failures/source_local_binding_process_ref_carrier_enum.str
+just strata-check examples/failures/scalar_overflow.str
+just strata-check examples/failures/scalar_type_mismatch.str
+just strata-check examples/failures/scalar_divide_by_zero.str
+just strata-check examples/failures/scalar_runtime_divide_by_zero.str
+just strata-check examples/failures/scalar_runtime_modulo_by_zero.str
+just strata-check examples/failures/scalar_unsuffixed_literal.str
 ```
 
 A runtime fail-closed gate checks and builds successfully, then returns non-zero

@@ -1,0 +1,30 @@
+module scalar_runtime_modulo_by_zero;
+
+record MainState {
+    value: U32,
+}
+enum MainMsg {
+    Start,
+    Set(U32),
+}
+
+fn broken(weight: U32) -> U32 ! [] ~ [] @det {
+    return weight % 0_u32;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { value: 1_u32 };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+
+    fn step(state: MainState, Set(weight: U32)) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Continue(MainState { value: broken(weight) });
+    }
+}

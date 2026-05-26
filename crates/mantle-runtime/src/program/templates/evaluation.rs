@@ -89,6 +89,8 @@ fn validate_loaded_bool_condition_shape(
         | LoadedValueTemplate::MapValue { .. }
         | LoadedValueTemplate::LoopElement { .. }
         | LoadedValueTemplate::Equality { .. }
+        | LoadedValueTemplate::ScalarOrdering { .. }
+        | LoadedValueTemplate::IfElse { .. }
         | LoadedValueTemplate::BooleanNot { .. }
         | LoadedValueTemplate::BooleanBinary { .. } => Ok(()),
         LoadedValueTemplate::ListRest { .. }
@@ -97,7 +99,8 @@ fn validate_loaded_bool_condition_shape(
         | LoadedValueTemplate::EnumVariant { .. }
         | LoadedValueTemplate::Record { .. }
         | LoadedValueTemplate::List { .. }
-        | LoadedValueTemplate::Map { .. } => Err(Error::new(format!(
+        | LoadedValueTemplate::Map { .. }
+        | LoadedValueTemplate::ScalarArithmetic { .. } => Err(Error::new(format!(
             "{field} must evaluate to unit Bool value False or True"
         ))),
     }
@@ -369,6 +372,38 @@ fn evaluate_loaded_payload_value(
             }
             program.runtime_payload_value("map template value", *ty, RuntimeValue::Map(values))
         }
+        LoadedValueTemplate::IfElse {
+            ty,
+            condition,
+            then_value,
+            else_value,
+        } => {
+            let condition = evaluate_loaded_payload_value(
+                program,
+                condition,
+                received_payload,
+                current_state_payload,
+            )?;
+            let selected = if runtime_bool_value(&condition.value)? {
+                then_value
+            } else {
+                else_value
+            };
+            let value = evaluate_loaded_payload_value(
+                program,
+                selected,
+                received_payload,
+                current_state_payload,
+            )?;
+            if value.ty != *ty {
+                return Err(Error::new(format!(
+                    "if expression branch produced type id {}, expected {}",
+                    value.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            Ok(value)
+        }
         LoadedValueTemplate::Equality {
             ty,
             operand_ty,
@@ -411,6 +446,101 @@ fn evaluate_loaded_payload_value(
                 "equality template value",
                 *ty,
                 RuntimeValue::Atom(bool_atom(selected)),
+            )
+        }
+        LoadedValueTemplate::ScalarArithmetic {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_loaded_payload_value(
+                program,
+                left,
+                received_payload,
+                current_state_payload,
+            )?;
+            if left.ty != *ty {
+                return Err(Error::new(format!(
+                    "scalar arithmetic left operand has type id {}, expected {}",
+                    left.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            let right = evaluate_loaded_payload_value(
+                program,
+                right,
+                received_payload,
+                current_state_payload,
+            )?;
+            if right.ty != *ty {
+                return Err(Error::new(format!(
+                    "scalar arithmetic right operand has type id {}, expected {}",
+                    right.ty.as_u32(),
+                    ty.as_u32()
+                )));
+            }
+            let (RuntimeValue::Scalar(left), RuntimeValue::Scalar(right)) =
+                (left.value, right.value)
+            else {
+                return Err(Error::new(
+                    "scalar arithmetic operands must produce scalar values",
+                ));
+            };
+            program.runtime_payload_value(
+                "scalar arithmetic template value",
+                *ty,
+                RuntimeValue::Scalar(ArtifactScalarValue::checked_arithmetic(
+                    *operator, left, right,
+                )?),
+            )
+        }
+        LoadedValueTemplate::ScalarOrdering {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            let left = evaluate_loaded_payload_value(
+                program,
+                left,
+                received_payload,
+                current_state_payload,
+            )?;
+            if left.ty != *operand_ty {
+                return Err(Error::new(format!(
+                    "scalar ordering left operand has type id {}, expected {}",
+                    left.ty.as_u32(),
+                    operand_ty.as_u32()
+                )));
+            }
+            let right = evaluate_loaded_payload_value(
+                program,
+                right,
+                received_payload,
+                current_state_payload,
+            )?;
+            if right.ty != *operand_ty {
+                return Err(Error::new(format!(
+                    "scalar ordering right operand has type id {}, expected {}",
+                    right.ty.as_u32(),
+                    operand_ty.as_u32()
+                )));
+            }
+            let (RuntimeValue::Scalar(left), RuntimeValue::Scalar(right)) =
+                (left.value, right.value)
+            else {
+                return Err(Error::new(
+                    "scalar ordering operands must produce scalar values",
+                ));
+            };
+            program.runtime_payload_value(
+                "scalar ordering template value",
+                *ty,
+                RuntimeValue::Atom(bool_atom(ArtifactScalarValue::compare(
+                    *operator, left, right,
+                )?)),
             )
         }
         LoadedValueTemplate::BooleanNot { ty, operand } => {

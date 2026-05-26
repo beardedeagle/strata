@@ -269,7 +269,7 @@ impl Parser {
                 }
                 FunctionBody::Match(match_body)
             } else {
-                FunctionBody::Block(self.parse_function_block()?)
+                FunctionBody::Block(Box::new(self.parse_function_block()?))
             };
             self.expect_symbol('}')?;
             Some(body)

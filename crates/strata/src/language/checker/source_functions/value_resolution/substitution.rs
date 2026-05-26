@@ -5,6 +5,7 @@ pub(super) fn substitute_source_value_bindings(
     bindings: &[SourceSubstitution],
 ) -> ValueExpr {
     match value {
+        ValueExpr::ScalarLiteral(_) => value,
         ValueExpr::Identifier(name) => bindings
             .iter()
             .find_map(|binding| (name == binding.name).then(|| binding.value.clone()))
@@ -64,6 +65,24 @@ pub(super) fn substitute_source_value_bindings(
             left,
             right,
         } => ValueExpr::Equality {
+            operator,
+            left: Box::new(substitute_source_value_bindings(*left, bindings)),
+            right: Box::new(substitute_source_value_bindings(*right, bindings)),
+        },
+        ValueExpr::ScalarArithmetic {
+            operator,
+            left,
+            right,
+        } => ValueExpr::ScalarArithmetic {
+            operator,
+            left: Box::new(substitute_source_value_bindings(*left, bindings)),
+            right: Box::new(substitute_source_value_bindings(*right, bindings)),
+        },
+        ValueExpr::ScalarOrdering {
+            operator,
+            left,
+            right,
+        } => ValueExpr::ScalarOrdering {
             operator,
             left: Box::new(substitute_source_value_bindings(*left, bindings)),
             right: Box::new(substitute_source_value_bindings(*right, bindings)),

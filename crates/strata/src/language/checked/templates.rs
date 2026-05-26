@@ -219,10 +219,29 @@ pub(in crate::language) enum CheckedValueTemplate {
         ty: CheckedTypeRef,
         entries: Vec<CheckedValueTemplateMapEntry>,
     },
+    IfElse {
+        ty: CheckedTypeRef,
+        condition: Box<CheckedValueTemplate>,
+        then_value: Box<CheckedValueTemplate>,
+        else_value: Box<CheckedValueTemplate>,
+    },
     Equality {
         ty: CheckedTypeRef,
         operand_ty: CheckedTypeRef,
         operator: CheckedValueEqualityOperator,
+        left: Box<CheckedValueTemplate>,
+        right: Box<CheckedValueTemplate>,
+    },
+    ScalarArithmetic {
+        ty: CheckedTypeRef,
+        operator: CheckedScalarArithmeticOperator,
+        left: Box<CheckedValueTemplate>,
+        right: Box<CheckedValueTemplate>,
+    },
+    ScalarOrdering {
+        ty: CheckedTypeRef,
+        operand_ty: CheckedTypeRef,
+        operator: CheckedScalarOrderingOperator,
         left: Box<CheckedValueTemplate>,
         right: Box<CheckedValueTemplate>,
     },
@@ -242,6 +261,23 @@ pub(in crate::language) enum CheckedValueTemplate {
 pub(in crate::language) enum CheckedValueEqualityOperator {
     Equal,
     NotEqual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) enum CheckedScalarArithmeticOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) enum CheckedScalarOrderingOperator {
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,7 +305,10 @@ impl CheckedValueTemplate {
             | Self::Record { ty, .. }
             | Self::List { ty, .. }
             | Self::Map { ty, .. }
+            | Self::IfElse { ty, .. }
             | Self::Equality { ty, .. }
+            | Self::ScalarArithmetic { ty, .. }
+            | Self::ScalarOrdering { ty, .. }
             | Self::BooleanNot { ty, .. }
             | Self::BooleanBinary { ty, .. } => ty,
         }

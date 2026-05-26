@@ -30,6 +30,7 @@ impl LoadedProgram {
     fn validate_value_shape(&self, type_index: usize, shape: &ArtifactValueShape) -> Result<()> {
         match shape {
             ArtifactValueShape::Atom => Ok(()),
+            ArtifactValueShape::Scalar { .. } => Ok(()),
             ArtifactValueShape::Record { fields } => {
                 if fields.is_empty() || fields.len() > MAX_VALUE_TEMPLATE_FIELDS {
                     return Err(Error::new(format!(
@@ -123,6 +124,9 @@ impl LoadedProgram {
         values::validate_non_process_ref_value(field, value)?;
         match type_entry.value_shape()? {
             ArtifactValueShape::Atom => self.validate_atom_value(field, ty, type_entry, value),
+            ArtifactValueShape::Scalar { scalar } => {
+                self.validate_scalar_value(field, ty, type_entry, *scalar, value)
+            }
             ArtifactValueShape::Enum { variants } => {
                 self.validate_enum_value(field, ty, type_entry, variants, value, depth)
             }
@@ -156,6 +160,33 @@ impl LoadedProgram {
             type_entry.label,
             ty.as_u32()
         )))
+    }
+
+    fn validate_scalar_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        type_entry: &ArtifactType,
+        expected: ArtifactScalarType,
+        value: &RuntimeValue,
+    ) -> Result<()> {
+        let RuntimeValue::Scalar(value) = value else {
+            return Err(Error::new(format!(
+                "{field} value {} does not match scalar type {} (type id {})",
+                value.label(),
+                type_entry.label,
+                ty.as_u32()
+            )));
+        };
+        if value.ty() != expected {
+            return Err(Error::new(format!(
+                "{field} scalar value {} does not match scalar type {} (type id {})",
+                value.label(),
+                type_entry.label,
+                ty.as_u32()
+            )));
+        }
+        expected.validate_value(field, value.value())
     }
 
     fn validate_enum_value(
@@ -198,6 +229,7 @@ impl LoadedProgram {
             RuntimeValue::Record { .. }
             | RuntimeValue::List(_)
             | RuntimeValue::Map(_)
+            | RuntimeValue::Scalar(_)
             | RuntimeValue::ProcessRef { .. } => {
                 Err(runtime_value_not_member_error(field, ty, type_entry, value))
             }

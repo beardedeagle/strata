@@ -18,9 +18,10 @@ pub(in crate::artifact) use validation::{
 
 pub use value_template::{
     ArtifactMapEntry, ArtifactPayload, ArtifactProcessRefPayload, ArtifactRecordField,
-    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
-    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
-    MapProjectionMode,
+    ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactScalarType,
+    ArtifactScalarValue, ArtifactValue, ArtifactValueBooleanOperator,
+    ArtifactValueEqualityOperator, ArtifactValueTemplate, ArtifactValueTemplateField,
+    ArtifactValueTemplateMapEntry, MapProjectionMode,
 };
 
 use crate::{
@@ -152,6 +153,9 @@ pub struct ArtifactType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactValueShape {
     Atom,
+    Scalar {
+        scalar: ArtifactScalarType,
+    },
     Record {
         fields: Vec<ArtifactTypeField>,
     },
@@ -187,6 +191,14 @@ impl ArtifactType {
             label: label.into(),
             kind: ArtifactTypeKind::Value,
             shape: Some(ArtifactValueShape::Atom),
+        }
+    }
+
+    pub fn scalar(label: impl Into<String>, scalar: ArtifactScalarType) -> Self {
+        Self {
+            label: label.into(),
+            kind: ArtifactTypeKind::Value,
+            shape: Some(ArtifactValueShape::Scalar { scalar }),
         }
     }
 

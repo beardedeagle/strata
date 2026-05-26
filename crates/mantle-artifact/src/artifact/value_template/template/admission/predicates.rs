@@ -22,9 +22,10 @@ pub(super) fn validate_equality_operand_type(
     let type_entry = artifact.type_entry(operand_ty)?;
     match &type_entry.kind {
         ArtifactTypeKind::ProcessRef { .. } => Err(Error::new(format!(
-            "{field}.operand_type_id must be Bool or a fieldless enum value type"
+            "{field}.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
         ))),
         ArtifactTypeKind::Value => match type_entry.value_shape()? {
+            ArtifactValueShape::Scalar { .. } => Ok(()),
             ArtifactValueShape::Enum { variants }
                 if variants
                     .iter()
@@ -33,9 +34,24 @@ pub(super) fn validate_equality_operand_type(
                 Ok(())
             }
             _ => Err(Error::new(format!(
-                "{field}.operand_type_id must be Bool or a fieldless enum value type"
+                "{field}.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
             ))),
         },
+    }
+}
+
+pub(super) fn validate_scalar_value_type(
+    artifact: &MantleArtifact,
+    field: &str,
+    ty: TypeId,
+) -> Result<()> {
+    let type_entry = artifact.type_entry(ty)?;
+    match &type_entry.kind {
+        ArtifactTypeKind::Value => match type_entry.value_shape()? {
+            ArtifactValueShape::Scalar { .. } => Ok(()),
+            _ => Err(Error::new(format!("{field} must be a scalar value type"))),
+        },
+        _ => Err(Error::new(format!("{field} must be a scalar value type"))),
     }
 }
 

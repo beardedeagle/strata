@@ -86,12 +86,15 @@ Key source ideas:
 - `let current_local: Phase = status(work);` binds an immutable source value,
   not a runtime action.
 - Later source-local bindings can use earlier bindings in source function calls,
-  pure conditionals, record/list/map constructors, and equality predicates.
+  pure conditionals, scalar arithmetic and ordering, record/list/map
+  constructors, and equality predicates.
 - Braced pure return-if branches can introduce branch-local immutable values
   before their terminal return.
 - Function return-match arms can use source-local bindings before their terminal
   pure return.
 - Process-local pure functions use the same source-local binding rules.
+- Runtime-bound pure value `if` expressions over `Bool` lower as typed Mantle
+  value templates, not source strings or source function dispatch names.
 - Message enums that carry direct `ProcessRef<T>` payloads remain authority
   surfaces and are rejected as source-local binding types.
 - Mantle receives typed values and templates, not source-local binding names or

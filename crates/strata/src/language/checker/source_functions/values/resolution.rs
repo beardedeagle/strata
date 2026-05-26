@@ -22,6 +22,7 @@ pub(in crate::language::checker) fn resolve_source_value_expr(
 
     match value {
         ValueExpr::Identifier(_) => Ok(value.clone()),
+        ValueExpr::ScalarLiteral(_) => Ok(value.clone()),
         ValueExpr::Call { name, arg } => {
             resolve_source_call_or_constructor(scope, expected_type, name, arg, bindings, depth + 1)
         }
@@ -68,6 +69,32 @@ pub(in crate::language::checker) fn resolve_source_value_expr(
             bindings,
             depth + 1,
         ),
+        ValueExpr::ScalarArithmetic {
+            operator,
+            left,
+            right,
+        } => resolve_source_scalar_arithmetic_value_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+            depth + 1,
+        ),
+        ValueExpr::ScalarOrdering {
+            operator,
+            left,
+            right,
+        } => resolve_source_scalar_ordering_value_expr(
+            scope,
+            expected_type,
+            *operator,
+            left,
+            right,
+            bindings,
+            depth + 1,
+        ),
         ValueExpr::BooleanNot { operand } => resolve_source_boolean_not_value_expr(
             scope,
             expected_type,
@@ -96,6 +123,163 @@ pub(in crate::language::checker) fn resolve_source_value_expr(
     }
 }
 
+fn resolve_source_scalar_arithmetic_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    operator: ValueScalarArithmeticOperator,
+    left: &ValueExpr,
+    right: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    validate_source_scalar_arithmetic_expr(scope, expected_type, operator, left, right, bindings)?;
+    let left = resolve_source_value_expr(scope, expected_type, left, bindings, depth + 1)?;
+    let right = resolve_source_value_expr(scope, expected_type, right, bindings, depth + 1)?;
+    reject_static_zero_scalar_divisor(scope, expected_type, operator, &right, bindings)?;
+    if !source_value_uses_any_binding(&left, bindings)
+        && !source_value_uses_any_binding(&right, bindings)
+        && !source_value_requires_resolution(&left)
+        && !source_value_requires_resolution(&right)
+    {
+        let left = canonical_source_value_with_bindings(
+            scope.module,
+            scope.semantic_index,
+            expected_type,
+            &left,
+            &[],
+        )?;
+        let right = canonical_source_value_with_bindings(
+            scope.module,
+            scope.semantic_index,
+            expected_type,
+            &right,
+            &[],
+        )?;
+        let (
+            mantle_artifact::ArtifactValue::Scalar(left),
+            mantle_artifact::ArtifactValue::Scalar(right),
+        ) = (left, right)
+        else {
+            return Err(Error::new(
+                "scalar arithmetic operands must be scalar values",
+            ));
+        };
+        return Ok(ValueExpr::ScalarLiteral(
+            mantle_artifact::ArtifactScalarValue::checked_arithmetic(
+                operator.artifact_operator(),
+                left,
+                right,
+            )
+            .map_err(|err| Error::new(err.to_string()))?,
+        ));
+    }
+    Ok(ValueExpr::ScalarArithmetic {
+        operator,
+        left: Box::new(left),
+        right: Box::new(right),
+    })
+}
+
+fn reject_static_zero_scalar_divisor(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    operator: ValueScalarArithmeticOperator,
+    right: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<()> {
+    let message = match operator {
+        ValueScalarArithmeticOperator::Divide => "scalar division by zero",
+        ValueScalarArithmeticOperator::Modulo => "scalar modulo by zero",
+        ValueScalarArithmeticOperator::Add
+        | ValueScalarArithmeticOperator::Subtract
+        | ValueScalarArithmeticOperator::Multiply => return Ok(()),
+    };
+    if concrete_scalar_value_option(scope, expected_type, right, bindings)?
+        .is_some_and(|value| value.value() == 0)
+    {
+        return Err(Error::new(message));
+    }
+    Ok(())
+}
+
+fn concrete_scalar_value_option(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+) -> Result<Option<mantle_artifact::ArtifactScalarValue>> {
+    if source_value_uses_any_binding(value, bindings) || source_value_requires_resolution(value) {
+        return Ok(None);
+    }
+    match canonical_source_value_with_bindings(
+        scope.module,
+        scope.semantic_index,
+        expected_type,
+        value,
+        &[],
+    )? {
+        mantle_artifact::ArtifactValue::Scalar(value) => Ok(Some(value)),
+        _ => Err(Error::new(
+            "scalar arithmetic operands must be scalar values",
+        )),
+    }
+}
+
+fn resolve_source_scalar_ordering_value_expr(
+    scope: &SourceFunctionScope<'_>,
+    expected_type: &TypeRef,
+    operator: ValueScalarOrderingOperator,
+    left: &ValueExpr,
+    right: &ValueExpr,
+    bindings: &[SourceValueBinding<'_>],
+    depth: usize,
+) -> Result<ValueExpr> {
+    validate_source_scalar_ordering_expr(scope, expected_type, operator, left, right, bindings)?;
+    let operand_type = source_scalar_operand_pair_type(scope, left, right, bindings)?;
+    let left = resolve_source_value_expr(scope, &operand_type, left, bindings, depth + 1)?;
+    let right = resolve_source_value_expr(scope, &operand_type, right, bindings, depth + 1)?;
+    if !source_value_uses_any_binding(&left, bindings)
+        && !source_value_uses_any_binding(&right, bindings)
+        && !source_value_requires_resolution(&left)
+        && !source_value_requires_resolution(&right)
+    {
+        let left = canonical_source_value_with_bindings(
+            scope.module,
+            scope.semantic_index,
+            &operand_type,
+            &left,
+            &[],
+        )?;
+        let right = canonical_source_value_with_bindings(
+            scope.module,
+            scope.semantic_index,
+            &operand_type,
+            &right,
+            &[],
+        )?;
+        let (
+            mantle_artifact::ArtifactValue::Scalar(left),
+            mantle_artifact::ArtifactValue::Scalar(right),
+        ) = (left, right)
+        else {
+            return Err(Error::new("scalar ordering operands must be scalar values"));
+        };
+        return Ok(ValueExpr::Identifier(bool_identifier(
+            mantle_artifact::ArtifactScalarValue::compare(
+                operator.artifact_operator(),
+                left,
+                right,
+            )
+            .map_err(|err| Error::new(err.to_string()))?,
+        )?));
+    }
+    Ok(ValueExpr::ScalarOrdering {
+        operator,
+        left: Box::new(left),
+        right: Box::new(right),
+    })
+}
+
 fn resolve_if_else_source_value_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
@@ -116,12 +300,24 @@ fn resolve_if_else_source_value_expr(
         bindings,
     )?;
     let condition = resolve_source_value_expr(scope, &bool_type, condition, bindings, depth + 1)?;
-    let selected = if concrete_source_bool_value(scope, &bool_type, &condition)? {
-        then_branch
-    } else {
-        else_branch
-    };
-    resolve_source_value_expr(scope, expected_type, selected, bindings, depth + 1)
+    let then_branch =
+        resolve_source_value_expr(scope, expected_type, then_branch, bindings, depth + 1)?;
+    let else_branch =
+        resolve_source_value_expr(scope, expected_type, else_branch, bindings, depth + 1)?;
+    if let Some(condition_value) =
+        concrete_bool_value_option(scope, &bool_type, &condition, bindings)?
+    {
+        return Ok(if condition_value {
+            then_branch
+        } else {
+            else_branch
+        });
+    }
+    Ok(ValueExpr::IfElse {
+        condition: Box::new(condition),
+        then_branch: Box::new(then_branch),
+        else_branch: Box::new(else_branch),
+    })
 }
 
 fn concrete_source_bool_value(
@@ -266,9 +462,8 @@ fn resolve_source_grouped_value_expr(
     bindings: &[SourceValueBinding<'_>],
     depth: usize,
 ) -> Result<ValueExpr> {
-    let bool_type = scope.semantic_index.bool_type(scope.module)?;
     validate_source_grouped_value_expr(scope, expected_type, value, bindings)?;
-    resolve_source_value_expr(scope, &bool_type, value, bindings, depth + 1)
+    resolve_source_value_expr(scope, expected_type, value, bindings, depth + 1)
 }
 
 fn equality_result(

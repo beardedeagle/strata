@@ -1,20 +1,22 @@
 use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactEnumVariant,
     ArtifactLoopElement, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField,
-    ArtifactTypeKind, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
-    ArtifactValueShape, ArtifactValueTemplate, ArtifactValueTemplateField,
-    ArtifactValueTemplateMapEntry, EnumVariantId, LoopElementId, MantleArtifact, MessageId,
-    NextState, OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
+    ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactSendTarget,
+    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind,
+    ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
+    EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
 use super::checked::{
     CheckedAction, CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageCase,
     CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess,
-    CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedSendTarget, CheckedStateId,
-    CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId, CheckedTypeKind,
-    CheckedTypeRef, CheckedValueBooleanOperator, CheckedValueEqualityOperator, CheckedValueShape,
+    CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedScalarArithmeticOperator,
+    CheckedScalarOrderingOperator, CheckedSendTarget, CheckedStateId, CheckedStateValue,
+    CheckedStepResult, CheckedTransition, CheckedTypeId, CheckedTypeKind, CheckedTypeRef,
+    CheckedValueBooleanOperator, CheckedValueEqualityOperator, CheckedValueShape,
     CheckedValueTemplate,
 };
 
@@ -81,6 +83,7 @@ impl ArtifactTypeMap {
 fn lower_value_shape(shape: &CheckedValueShape) -> ArtifactValueShape {
     match shape {
         CheckedValueShape::Atom => ArtifactValueShape::Atom,
+        CheckedValueShape::Scalar(scalar) => ArtifactValueShape::Scalar { scalar: *scalar },
         CheckedValueShape::Record { fields } => ArtifactValueShape::Record {
             fields: fields
                 .iter()
@@ -485,6 +488,17 @@ fn lower_value_template(
                 })
                 .collect::<mantle_artifact::Result<Vec<_>>>()?,
         }),
+        CheckedValueTemplate::IfElse {
+            ty,
+            condition,
+            then_value,
+            else_value,
+        } => Ok(ArtifactValueTemplate::IfElse {
+            ty: types.artifact_id(ty)?,
+            condition: Box::new(lower_value_template(condition, types)?),
+            then_value: Box::new(lower_value_template(then_value, types)?),
+            else_value: Box::new(lower_value_template(else_value, types)?),
+        }),
         CheckedValueTemplate::Equality {
             ty,
             operand_ty,
@@ -495,6 +509,30 @@ fn lower_value_template(
             ty: types.artifact_id(ty)?,
             operand_ty: types.artifact_id(operand_ty)?,
             operator: lower_value_equality_operator(*operator),
+            left: Box::new(lower_value_template(left, types)?),
+            right: Box::new(lower_value_template(right, types)?),
+        }),
+        CheckedValueTemplate::ScalarArithmetic {
+            ty,
+            operator,
+            left,
+            right,
+        } => Ok(ArtifactValueTemplate::ScalarArithmetic {
+            ty: types.artifact_id(ty)?,
+            operator: lower_scalar_arithmetic_operator(*operator),
+            left: Box::new(lower_value_template(left, types)?),
+            right: Box::new(lower_value_template(right, types)?),
+        }),
+        CheckedValueTemplate::ScalarOrdering {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => Ok(ArtifactValueTemplate::ScalarOrdering {
+            ty: types.artifact_id(ty)?,
+            operand_ty: types.artifact_id(operand_ty)?,
+            operator: lower_scalar_ordering_operator(*operator),
             left: Box::new(lower_value_template(left, types)?),
             right: Box::new(lower_value_template(right, types)?),
         }),
@@ -531,6 +569,29 @@ fn lower_value_boolean_operator(
     match operator {
         CheckedValueBooleanOperator::And => ArtifactValueBooleanOperator::And,
         CheckedValueBooleanOperator::Or => ArtifactValueBooleanOperator::Or,
+    }
+}
+
+fn lower_scalar_arithmetic_operator(
+    operator: CheckedScalarArithmeticOperator,
+) -> ArtifactScalarArithmeticOperator {
+    match operator {
+        CheckedScalarArithmeticOperator::Add => ArtifactScalarArithmeticOperator::Add,
+        CheckedScalarArithmeticOperator::Subtract => ArtifactScalarArithmeticOperator::Subtract,
+        CheckedScalarArithmeticOperator::Multiply => ArtifactScalarArithmeticOperator::Multiply,
+        CheckedScalarArithmeticOperator::Divide => ArtifactScalarArithmeticOperator::Divide,
+        CheckedScalarArithmeticOperator::Modulo => ArtifactScalarArithmeticOperator::Modulo,
+    }
+}
+
+fn lower_scalar_ordering_operator(
+    operator: CheckedScalarOrderingOperator,
+) -> ArtifactScalarOrderingOperator {
+    match operator {
+        CheckedScalarOrderingOperator::Less => ArtifactScalarOrderingOperator::Less,
+        CheckedScalarOrderingOperator::LessEqual => ArtifactScalarOrderingOperator::LessEqual,
+        CheckedScalarOrderingOperator::Greater => ArtifactScalarOrderingOperator::Greater,
+        CheckedScalarOrderingOperator::GreaterEqual => ArtifactScalarOrderingOperator::GreaterEqual,
     }
 }
 

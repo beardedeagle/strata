@@ -186,7 +186,7 @@ immutable binding name.
 Buildable source accepts bodies for `init`, `step`, module functions, and
 process-local functions. It requires deterministic functions and empty
 may-behavior lists. Normal source functions are pure: they use `! []`, allow only
-source-time value expressions, immutable source-local bindings, and pure braced
+source value expressions, immutable source-local bindings, and pure braced
 return branches, perform no runtime statements, and are expanded before
 lowering.
 
@@ -393,9 +393,9 @@ fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
 }
 ```
 
-The braced form is source-time control flow for pure returned values. Each branch
-may contain immutable source-local bindings before its terminal `return`, and the
-checker resolves one concrete branch during source function expansion. Function
+The braced form is pure control flow for returned values. Each branch may
+contain immutable source-local bindings before its terminal `return`. Concrete
+conditions select one branch during source function expansion. Function
 return-match arms are exhaustive, duplicate-free, immutable, and still expand
 before lowering.
 Function calls and payload-bearing enum values share the same surface syntax:
@@ -541,19 +541,48 @@ value_and_expr =
   | value_and_expr "&&" value_equality_expr
 
 value_equality_expr =
-    value_unary_expr
-  | value_unary_expr equality_op value_unary_expr
+    value_ordering_expr
+  | value_ordering_expr equality_op value_ordering_expr
 
 equality_op =
     "=="
   | "!="
 
+value_ordering_expr =
+    value_additive_expr
+  | value_additive_expr ordering_op value_additive_expr
+
+ordering_op =
+    "<"
+  | "<="
+  | ">"
+  | ">="
+
+value_additive_expr =
+    value_multiplicative_expr
+  | value_additive_expr additive_op value_multiplicative_expr
+
+additive_op =
+    "+"
+  | "-"
+
+value_multiplicative_expr =
+    value_unary_expr
+  | value_multiplicative_expr multiplicative_op value_unary_expr
+
+multiplicative_op =
+    "*"
+  | "/"
+  | "%"
+
 value_unary_expr =
     value_primary_expr
   | "!" value_unary_expr
+  | "-" suffixed_integer_literal
 
 value_primary_expr =
     ident
+  | suffixed_integer_literal
   | ident "(" value_expr ")"
   | ident "{" record_value_field ("," record_value_field)* ","? "}"
   | "List" list_type_args? "[" value_expr_list? "]"
@@ -570,9 +599,17 @@ value_expr_list =
 map_value_entries =
     value_expr "=>" value_expr
     ("," value_expr "=>" value_expr)* ","?
+
+suffixed_integer_literal =
+    number scalar_suffix
+
+scalar_suffix =
+    "_u8" | "_u16" | "_u32" | "_u64"
+  | "_i8" | "_i16" | "_i32" | "_i64"
 ```
 
-Parenthesized value expressions are accepted only as Bool predicate grouping.
+Parenthesized value expressions group any value expression without changing its
+type.
 `ident(value)` is a function call when `ident` names a visible source function and a
 payload-bearing enum value when `ident` names a constructor of the expected enum
 type.
@@ -583,14 +620,21 @@ expected bounded source value type.
 
 Typed equality predicates are deliberately narrow. `left == right`
 and `left != right` are supported only when both operands have the same checked
-type and that type is `Bool` or a payload-free enum. Fully concrete source
-equality folds during checking. Runtime-bound equality lowers as a typed Mantle
-value template; operands are not runtime dispatch strings. Ordering, arithmetic,
-string equality, record/list/map structural equality, process-reference
-equality, and payload enum equality remain unsupported.
+type and that type is `Bool`, a scalar integer type, or a payload-free enum.
+Fully concrete source equality folds during checking. Runtime-bound equality
+lowers as a typed Mantle value template; operands are not runtime dispatch
+strings. String equality, record/list/map structural equality,
+process-reference equality, and payload enum equality remain unsupported.
+
+Scalar literals require explicit suffixes in value positions. Arithmetic uses
+`+`, `-`, `*`, `/`, and `%`; ordering uses `<`, `<=`, `>`, and `>=`. Scalar
+operators require matching integer types and perform checked arithmetic. Fully
+concrete overflow, underflow, division by zero, and modulo by zero fail during
+checking. Runtime-bound scalar operators lower as typed Mantle value templates
+and fail closed during runtime evaluation.
 
 Boolean predicate composition is also narrow. `!`, `&&`, and `||` are supported
-only over `Bool` values, typed equality predicates, or nested composed
+only over `Bool` values, typed equality or scalar-ordering predicates, or nested composed
 predicates. `!` binds tighter than `&&`, and `&&` binds tighter than `||`; use
 parentheses for explicit grouping. Fully concrete predicates fold during
 checking. Runtime-bound predicates lower as typed Mantle value templates over
@@ -598,8 +642,9 @@ typed Bool-producing operands, not as source strings or function names.
 
 Pure conditionals require the exact fieldless source contract
 `enum Bool { False, True }`. Both branches are value expressions checked against
-the same expected type, and the checker selects a concrete branch before
-lowering. Branch bodies cannot contain statements or effects.
+the same expected type. Concrete conditions select one branch before lowering;
+runtime-bound expression-form conditionals lower as typed Mantle value
+templates. Expression branch bodies cannot contain statements or effects.
 
 Final-position `return_if_else` is runtime control flow in `step` bodies. The
 condition must have the same `Bool` contract, but it may depend on received

@@ -16,6 +16,7 @@ pub(super) fn substitute_step_return_bindings(
             .find(|binding| binding.name == &name)
             .map(|binding| binding.value.clone())
             .unwrap_or(ValueExpr::Identifier(name)),
+        ValueExpr::ScalarLiteral(_) => value,
         ValueExpr::Call { name, arg } => ValueExpr::Call {
             name,
             arg: Box::new(substitute_step_return_bindings(*arg, bindings)),
@@ -62,6 +63,24 @@ pub(super) fn substitute_step_return_bindings(
             left,
             right,
         } => ValueExpr::Equality {
+            operator,
+            left: Box::new(substitute_step_return_bindings(*left, bindings)),
+            right: Box::new(substitute_step_return_bindings(*right, bindings)),
+        },
+        ValueExpr::ScalarArithmetic {
+            operator,
+            left,
+            right,
+        } => ValueExpr::ScalarArithmetic {
+            operator,
+            left: Box::new(substitute_step_return_bindings(*left, bindings)),
+            right: Box::new(substitute_step_return_bindings(*right, bindings)),
+        },
+        ValueExpr::ScalarOrdering {
+            operator,
+            left,
+            right,
+        } => ValueExpr::ScalarOrdering {
             operator,
             left: Box::new(substitute_step_return_bindings(*left, bindings)),
             right: Box::new(substitute_step_return_bindings(*right, bindings)),

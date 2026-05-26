@@ -205,6 +205,18 @@ pub(super) fn add_value_template_bytes(
                 add_value_template_bytes(total, &format!("{entry_prefix}.value"), &entry.value)?;
             }
         }
+        ArtifactValueTemplate::IfElse {
+            ty,
+            condition,
+            then_value,
+            else_value,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "if_else")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_value_template_bytes(total, &format!("{prefix}.condition"), condition)?;
+            add_value_template_bytes(total, &format!("{prefix}.then"), then_value)?;
+            add_value_template_bytes(total, &format!("{prefix}.else"), else_value)?;
+        }
         ArtifactValueTemplate::Equality {
             ty,
             operand_ty,
@@ -213,6 +225,36 @@ pub(super) fn add_value_template_bytes(
             right,
         } => {
             add_field_bytes(total, &format!("{prefix}.kind"), "equality")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(
+                total,
+                &format!("{prefix}.operand_type_id"),
+                &type_id_string(*operand_ty),
+            )?;
+            add_field_bytes(total, &format!("{prefix}.operator"), operator.as_str())?;
+            add_value_template_bytes(total, &format!("{prefix}.left"), left)?;
+            add_value_template_bytes(total, &format!("{prefix}.right"), right)?;
+        }
+        ArtifactValueTemplate::ScalarArithmetic {
+            ty,
+            operator,
+            left,
+            right,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "scalar_arithmetic")?;
+            add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
+            add_field_bytes(total, &format!("{prefix}.operator"), operator.as_str())?;
+            add_value_template_bytes(total, &format!("{prefix}.left"), left)?;
+            add_value_template_bytes(total, &format!("{prefix}.right"), right)?;
+        }
+        ArtifactValueTemplate::ScalarOrdering {
+            ty,
+            operand_ty,
+            operator,
+            left,
+            right,
+        } => {
+            add_field_bytes(total, &format!("{prefix}.kind"), "scalar_ordering")?;
             add_field_bytes(total, &format!("{prefix}.type_id"), &type_id_string(*ty))?;
             add_field_bytes(
                 total,

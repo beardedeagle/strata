@@ -26,6 +26,16 @@ pub(in crate::program) fn loaded_template_depends_on_received_payload(
         LoadedValueTemplate::MapRest { map, .. } => {
             loaded_template_depends_on_received_payload(map)
         }
+        LoadedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            loaded_template_depends_on_received_payload(condition)
+                || loaded_template_depends_on_received_payload(then_value)
+                || loaded_template_depends_on_received_payload(else_value)
+        }
         LoadedValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_depends_on_received_payload(payload)
         }
@@ -39,7 +49,9 @@ pub(in crate::program) fn loaded_template_depends_on_received_payload(
             loaded_template_depends_on_received_payload(&entry.key)
                 || loaded_template_depends_on_received_payload(&entry.value)
         }),
-        LoadedValueTemplate::Equality { left, right, .. } => {
+        LoadedValueTemplate::Equality { left, right, .. }
+        | LoadedValueTemplate::ScalarArithmetic { left, right, .. }
+        | LoadedValueTemplate::ScalarOrdering { left, right, .. } => {
             loaded_template_depends_on_received_payload(left)
                 || loaded_template_depends_on_received_payload(right)
         }
@@ -75,6 +87,16 @@ pub(in crate::program) fn loaded_template_depends_on_loop_element(
         }
         LoadedValueTemplate::MapValue { map, .. } => loaded_template_depends_on_loop_element(map),
         LoadedValueTemplate::MapRest { map, .. } => loaded_template_depends_on_loop_element(map),
+        LoadedValueTemplate::IfElse {
+            condition,
+            then_value,
+            else_value,
+            ..
+        } => {
+            loaded_template_depends_on_loop_element(condition)
+                || loaded_template_depends_on_loop_element(then_value)
+                || loaded_template_depends_on_loop_element(else_value)
+        }
         LoadedValueTemplate::EnumVariant { payload, .. } => {
             loaded_template_depends_on_loop_element(payload)
         }
@@ -88,7 +110,9 @@ pub(in crate::program) fn loaded_template_depends_on_loop_element(
             loaded_template_depends_on_loop_element(&entry.key)
                 || loaded_template_depends_on_loop_element(&entry.value)
         }),
-        LoadedValueTemplate::Equality { left, right, .. } => {
+        LoadedValueTemplate::Equality { left, right, .. }
+        | LoadedValueTemplate::ScalarArithmetic { left, right, .. }
+        | LoadedValueTemplate::ScalarOrdering { left, right, .. } => {
             loaded_template_depends_on_loop_element(left)
                 || loaded_template_depends_on_loop_element(right)
         }

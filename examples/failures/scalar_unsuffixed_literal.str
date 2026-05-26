@@ -1,0 +1,21 @@
+module scalar_unsuffixed_literal;
+
+record MainState {
+    value: U32,
+}
+enum MainMsg {
+    Start,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { value: 1 + 2 };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
