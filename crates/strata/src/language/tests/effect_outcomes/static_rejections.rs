@@ -51,7 +51,61 @@ proc Worker mailbox bounded(1) {
 
     assert!(
         err.to_string()
-            .contains("process-reference equality is not supported"),
+            .contains("requires one operand to be a safe built-in variant pattern"),
+        "{err}"
+    );
+}
+
+#[test]
+fn rejects_direct_send_outcome_equality_between_runtime_values() {
+    let source = r#"
+module send_outcome_direct_equality;
+
+enum MainState { Ready }
+enum MainMsg { Start }
+enum Bool { False, True }
+enum WorkerState { Idle }
+enum WorkerMsg { Work }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return Ready;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sent: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+        if (sent == sent) {
+            emit "same";
+        } else {
+            emit "different";
+        }
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("direct send outcome equality should fail");
+
+    assert!(
+        err.to_string()
+            .contains("requires one operand to be a safe built-in variant pattern"),
         "{err}"
     );
 }

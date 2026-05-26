@@ -1,6 +1,12 @@
 use super::*;
 use crate::ArtifactEnumVariant;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EqualityOperandKind {
+    Structural,
+    BuiltinVariantPatternOnly,
+}
+
 pub(super) fn validate_bool_contract_type(
     artifact: &MantleArtifact,
     field: &str,
@@ -15,11 +21,11 @@ pub(super) fn validate_bool_contract_type(
     )))
 }
 
-pub(super) fn validate_equality_operand_type(
+fn validate_equality_operand_type(
     artifact: &MantleArtifact,
     field: &str,
     operand_ty: TypeId,
-) -> Result<()> {
+) -> Result<EqualityOperandKind> {
     validate_equality_operand_type_at_depth(artifact, field, operand_ty, 0)
 }
 
@@ -28,7 +34,7 @@ fn validate_equality_operand_type_at_depth(
     field: &str,
     operand_ty: TypeId,
     depth: usize,
-) -> Result<()> {
+) -> Result<EqualityOperandKind> {
     if depth > MAX_VALUE_TEMPLATE_DEPTH {
         return Err(Error::new(format!(
             "{field}.operand_type_id nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
@@ -40,29 +46,21 @@ fn validate_equality_operand_type_at_depth(
             "{field}.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
         ))),
         ArtifactTypeKind::Value => match type_entry.value_shape()? {
-            ArtifactValueShape::Atom if type_entry.label == "Unit" => Ok(()),
-            ArtifactValueShape::Scalar { .. } => Ok(()),
+            ArtifactValueShape::Atom if type_entry.label == "Unit" => {
+                Ok(EqualityOperandKind::Structural)
+            }
+            ArtifactValueShape::Scalar { .. } => Ok(EqualityOperandKind::Structural),
             ArtifactValueShape::Enum { variants }
                 if variants
                     .iter()
                     .all(|variant| variant.payload_type.is_none()) =>
             {
-                Ok(())
+                Ok(EqualityOperandKind::Structural)
             }
             ArtifactValueShape::Enum { variants }
                 if is_recognized_builtin_equality_enum(variants) =>
             {
-                for variant in variants {
-                    if let Some(payload_ty) = variant.payload_type {
-                        validate_equality_operand_type_at_depth(
-                            artifact,
-                            field,
-                            payload_ty,
-                            depth + 1,
-                        )?;
-                    }
-                }
-                Ok(())
+                Ok(EqualityOperandKind::BuiltinVariantPatternOnly)
             }
             _ => Err(Error::new(format!(
                 "{field}.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
@@ -83,22 +81,21 @@ pub(super) fn validate_equality_operands(
     left: &ArtifactValueTemplate,
     right: &ArtifactValueTemplate,
 ) -> Result<EqualityOperandAdmission> {
-    let full_error = match validate_equality_operand_type(artifact, field, operand_ty) {
-        Ok(()) => {
-            return Ok(EqualityOperandAdmission {
-                allow_process_ref_effect_outcome: false,
-            });
+    match validate_equality_operand_type(artifact, field, operand_ty)? {
+        EqualityOperandKind::Structural => Ok(EqualityOperandAdmission {
+            allow_process_ref_effect_outcome: false,
+        }),
+        EqualityOperandKind::BuiltinVariantPatternOnly
+            if (template_is_builtin_variant_pattern(artifact, operand_ty, left)?
+                || template_is_builtin_variant_pattern(artifact, operand_ty, right)?) =>
+        {
+            Ok(EqualityOperandAdmission {
+                allow_process_ref_effect_outcome: true,
+            })
         }
-        Err(err) => err,
-    };
-    if template_is_builtin_variant_pattern(artifact, operand_ty, left)?
-        || template_is_builtin_variant_pattern(artifact, operand_ty, right)?
-    {
-        Ok(EqualityOperandAdmission {
-            allow_process_ref_effect_outcome: true,
-        })
-    } else {
-        Err(full_error)
+        EqualityOperandKind::BuiltinVariantPatternOnly => Err(Error::new(format!(
+            "{field}.operand_type_id built-in payload enum requires one operand to be a safe built-in variant pattern"
+        ))),
     }
 }
 
@@ -146,9 +143,18 @@ fn template_is_builtin_variant_pattern(
     operand_ty: TypeId,
     template: &ArtifactValueTemplate,
 ) -> Result<bool> {
+    template_is_builtin_variant_pattern_at_depth(artifact, operand_ty, template, 0)
+}
+
+fn template_is_builtin_variant_pattern_at_depth(
+    artifact: &MantleArtifact,
+    operand_ty: TypeId,
+    template: &ArtifactValueTemplate,
+    depth: usize,
+) -> Result<bool> {
     match template {
         ArtifactValueTemplate::Literal { ty, value } if *ty == operand_ty => {
-            value_is_builtin_variant_pattern(artifact, operand_ty, value)
+            value_is_builtin_variant_pattern_at_depth(artifact, operand_ty, value, depth)
         }
         ArtifactValueTemplate::EnumVariant {
             ty,
@@ -168,16 +174,17 @@ fn template_is_builtin_variant_pattern(
             let Some(payload_ty) = variant_entry.payload_type else {
                 return Ok(false);
             };
-            payload_template_pattern_is_safe(artifact, payload_ty, payload)
+            payload_template_pattern_is_safe(artifact, payload_ty, payload, depth + 1)
         }
         _ => Ok(false),
     }
 }
 
-fn value_is_builtin_variant_pattern(
+fn value_is_builtin_variant_pattern_at_depth(
     artifact: &MantleArtifact,
     operand_ty: TypeId,
     value: &ArtifactValue,
+    depth: usize,
 ) -> Result<bool> {
     let type_entry = artifact.type_entry(operand_ty)?;
     let ArtifactValueShape::Enum { variants } = type_entry.value_shape()? else {
@@ -197,7 +204,7 @@ fn value_is_builtin_variant_pattern(
             let Some(payload_ty) = variant_entry.payload_type else {
                 return Ok(false);
             };
-            payload_value_pattern_is_safe(artifact, payload_ty, payload)
+            payload_value_pattern_is_safe(artifact, payload_ty, payload, depth + 1)
         }
         _ => Ok(false),
     }
@@ -207,22 +214,30 @@ fn payload_template_pattern_is_safe(
     artifact: &MantleArtifact,
     payload_ty: TypeId,
     payload: &ArtifactValueTemplate,
+    depth: usize,
 ) -> Result<bool> {
-    if validate_equality_operand_type(artifact, "equality payload", payload_ty).is_ok() {
-        return Ok(true);
+    match validate_equality_operand_type_at_depth(artifact, "equality payload", payload_ty, depth)?
+    {
+        EqualityOperandKind::Structural => Ok(true),
+        EqualityOperandKind::BuiltinVariantPatternOnly => {
+            template_is_builtin_variant_pattern_at_depth(artifact, payload_ty, payload, depth)
+        }
     }
-    template_is_builtin_variant_pattern(artifact, payload_ty, payload)
 }
 
 fn payload_value_pattern_is_safe(
     artifact: &MantleArtifact,
     payload_ty: TypeId,
     payload: &ArtifactValue,
+    depth: usize,
 ) -> Result<bool> {
-    if validate_equality_operand_type(artifact, "equality payload", payload_ty).is_ok() {
-        return Ok(true);
+    match validate_equality_operand_type_at_depth(artifact, "equality payload", payload_ty, depth)?
+    {
+        EqualityOperandKind::Structural => Ok(true),
+        EqualityOperandKind::BuiltinVariantPatternOnly => {
+            value_is_builtin_variant_pattern_at_depth(artifact, payload_ty, payload, depth)
+        }
     }
-    value_is_builtin_variant_pattern(artifact, payload_ty, payload)
 }
 
 pub(super) fn validate_scalar_value_type(

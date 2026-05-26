@@ -467,6 +467,43 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn rejects_direct_builtin_payload_enum_equality_between_runtime_values() {
+    let source = r#"
+module source_builtin_payload_enum_equality_reject;
+
+enum Bool { False, True }
+enum Phase { Ready }
+record MainState;
+enum MainMsg { Start }
+
+fn same_option(input: Option<Phase>) -> Bool ! [] ~ [] @det {
+    return input == input;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("direct builtin payload enum equality should fail");
+
+    assert!(
+        err.to_string()
+            .contains("requires one operand to be a safe built-in variant pattern"),
+        "{err}"
+    );
+}
+
+#[test]
 fn rejects_process_reference_equality() {
     let source = r#"
 module source_process_ref_equality;

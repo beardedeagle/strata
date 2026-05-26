@@ -314,7 +314,41 @@ fn loaded_admission_rejects_process_ref_spawn_outcome_structural_equality() {
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "operand_type_id must be Bool, a scalar value type, or a fieldless enum value type",
+        "built-in payload enum requires one operand to be a safe built-in variant pattern",
+    );
+}
+
+#[test]
+fn loaded_admission_rejects_send_outcome_structural_equality() {
+    let artifact = send_outcome_artifact();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let bool_type = push_loaded_type(
+        &mut program,
+        ArtifactType::enum_value("Bool", vec!["False".to_string(), "True".to_string()]),
+    );
+    program.processes[0].transitions[0]
+        .actions
+        .push(LoadedAction::IfElse {
+            condition: LoadedValueTemplate::Equality {
+                ty: bool_type,
+                operand_ty: SEND_RESULT,
+                operator: ArtifactValueEqualityOperator::Equal,
+                left: Box::new(LoadedValueTemplate::EffectOutcome {
+                    ty: SEND_RESULT,
+                    outcome: EffectOutcomeId::new(0),
+                }),
+                right: Box::new(LoadedValueTemplate::EffectOutcome {
+                    ty: SEND_RESULT,
+                    outcome: EffectOutcomeId::new(0),
+                }),
+            },
+            then_actions: Vec::new(),
+            else_actions: Vec::new(),
+        });
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "built-in payload enum requires one operand to be a safe built-in variant pattern",
     );
 }
 
@@ -384,7 +418,7 @@ fn loaded_admission_rejects_nested_process_ref_spawn_outcome_in_variant_pattern(
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process reference outcome must remain step-local",
+        "equality payload.operand_type_id must be Bool",
     );
 }
 

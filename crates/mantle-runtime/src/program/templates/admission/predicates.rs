@@ -1,6 +1,12 @@
 use super::*;
 use mantle_artifact::ArtifactEnumVariant;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EqualityOperandKind {
+    Structural,
+    BuiltinVariantPatternOnly,
+}
+
 impl LoadedTemplateAdmission<'_> {
     pub(super) fn validate_bool_contract_type(&self, field: &str, ty: TypeId) -> Result<()> {
         let type_entry = self.program.type_entry(ty)?;
@@ -12,11 +18,11 @@ impl LoadedTemplateAdmission<'_> {
         )))
     }
 
-    pub(super) fn validate_equality_operand_type(
+    fn validate_equality_operand_type(
         &self,
         field: &str,
         operand_ty: TypeId,
-    ) -> Result<()> {
+    ) -> Result<EqualityOperandKind> {
         self.validate_equality_operand_type_at_depth(field, operand_ty, 0)
     }
 
@@ -27,22 +33,21 @@ impl LoadedTemplateAdmission<'_> {
         left: &LoadedValueTemplate,
         right: &LoadedValueTemplate,
     ) -> Result<EqualityOperandAdmission> {
-        let full_error = match self.validate_equality_operand_type(field, operand_ty) {
-            Ok(()) => {
-                return Ok(EqualityOperandAdmission {
-                    allow_process_ref_effect_outcome: false,
-                });
+        match self.validate_equality_operand_type(field, operand_ty)? {
+            EqualityOperandKind::Structural => Ok(EqualityOperandAdmission {
+                allow_process_ref_effect_outcome: false,
+            }),
+            EqualityOperandKind::BuiltinVariantPatternOnly
+                if (self.template_is_builtin_variant_pattern(operand_ty, left)?
+                    || self.template_is_builtin_variant_pattern(operand_ty, right)?) =>
+            {
+                Ok(EqualityOperandAdmission {
+                    allow_process_ref_effect_outcome: true,
+                })
             }
-            Err(err) => err,
-        };
-        if self.template_is_builtin_variant_pattern(operand_ty, left)?
-            || self.template_is_builtin_variant_pattern(operand_ty, right)?
-        {
-            Ok(EqualityOperandAdmission {
-                allow_process_ref_effect_outcome: true,
-            })
-        } else {
-            Err(full_error)
+            EqualityOperandKind::BuiltinVariantPatternOnly => Err(Error::new(format!(
+                "{field}.operand_type_id built-in payload enum requires one operand to be a safe built-in variant pattern"
+            ))),
         }
     }
 
@@ -51,7 +56,7 @@ impl LoadedTemplateAdmission<'_> {
         field: &str,
         operand_ty: TypeId,
         depth: usize,
-    ) -> Result<()> {
+    ) -> Result<EqualityOperandKind> {
         if depth > MAX_VALUE_TEMPLATE_DEPTH {
             return Err(Error::new(format!(
                 "{field}.operand_type_id nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
@@ -63,28 +68,21 @@ impl LoadedTemplateAdmission<'_> {
                 "{field}.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
             ))),
             ArtifactTypeKind::Value => match type_entry.value_shape()? {
-                ArtifactValueShape::Atom if type_entry.label == "Unit" => Ok(()),
-                ArtifactValueShape::Scalar { .. } => Ok(()),
+                ArtifactValueShape::Atom if type_entry.label == "Unit" => {
+                    Ok(EqualityOperandKind::Structural)
+                }
+                ArtifactValueShape::Scalar { .. } => Ok(EqualityOperandKind::Structural),
                 ArtifactValueShape::Enum { variants }
                     if variants
                         .iter()
                         .all(|variant| variant.payload_type.is_none()) =>
                 {
-                    Ok(())
+                    Ok(EqualityOperandKind::Structural)
                 }
                 ArtifactValueShape::Enum { variants }
                     if is_recognized_builtin_equality_enum(variants) =>
                 {
-                    for variant in variants {
-                        if let Some(payload_ty) = variant.payload_type {
-                            self.validate_equality_operand_type_at_depth(
-                                field,
-                                payload_ty,
-                                depth + 1,
-                            )?;
-                        }
-                    }
-                    Ok(())
+                    Ok(EqualityOperandKind::BuiltinVariantPatternOnly)
                 }
                 _ => Err(Error::new(format!(
                     "{field}.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
@@ -143,9 +141,18 @@ impl LoadedTemplateAdmission<'_> {
         operand_ty: TypeId,
         template: &LoadedValueTemplate,
     ) -> Result<bool> {
+        self.template_is_builtin_variant_pattern_at_depth(operand_ty, template, 0)
+    }
+
+    fn template_is_builtin_variant_pattern_at_depth(
+        &self,
+        operand_ty: TypeId,
+        template: &LoadedValueTemplate,
+        depth: usize,
+    ) -> Result<bool> {
         match template {
             LoadedValueTemplate::Literal { ty, value } if *ty == operand_ty => {
-                self.value_is_builtin_variant_pattern(operand_ty, value)
+                self.value_is_builtin_variant_pattern_at_depth(operand_ty, value, depth)
             }
             LoadedValueTemplate::EnumVariant {
                 ty,
@@ -165,16 +172,17 @@ impl LoadedTemplateAdmission<'_> {
                 let Some(payload_ty) = variant_entry.payload_type else {
                     return Ok(false);
                 };
-                self.payload_template_pattern_is_safe(payload_ty, payload)
+                self.payload_template_pattern_is_safe(payload_ty, payload, depth + 1)
             }
             _ => Ok(false),
         }
     }
 
-    fn value_is_builtin_variant_pattern(
+    fn value_is_builtin_variant_pattern_at_depth(
         &self,
         operand_ty: TypeId,
         value: &RuntimeValue,
+        depth: usize,
     ) -> Result<bool> {
         let type_entry = self.program.type_entry(operand_ty)?;
         let ArtifactValueShape::Enum { variants } = type_entry.value_shape()? else {
@@ -195,7 +203,7 @@ impl LoadedTemplateAdmission<'_> {
                 let Some(payload_ty) = variant_entry.payload_type else {
                     return Ok(false);
                 };
-                self.payload_value_pattern_is_safe(payload_ty, payload)
+                self.payload_value_pattern_is_safe(payload_ty, payload, depth + 1)
             }
             _ => Ok(false),
         }
@@ -205,28 +213,28 @@ impl LoadedTemplateAdmission<'_> {
         &self,
         payload_ty: TypeId,
         payload: &LoadedValueTemplate,
+        depth: usize,
     ) -> Result<bool> {
-        if self
-            .validate_equality_operand_type("equality payload", payload_ty)
-            .is_ok()
-        {
-            return Ok(true);
+        match self.validate_equality_operand_type_at_depth("equality payload", payload_ty, depth)? {
+            EqualityOperandKind::Structural => Ok(true),
+            EqualityOperandKind::BuiltinVariantPatternOnly => {
+                self.template_is_builtin_variant_pattern_at_depth(payload_ty, payload, depth)
+            }
         }
-        self.template_is_builtin_variant_pattern(payload_ty, payload)
     }
 
     fn payload_value_pattern_is_safe(
         &self,
         payload_ty: TypeId,
         payload: &RuntimeValue,
+        depth: usize,
     ) -> Result<bool> {
-        if self
-            .validate_equality_operand_type("equality payload", payload_ty)
-            .is_ok()
-        {
-            return Ok(true);
+        match self.validate_equality_operand_type_at_depth("equality payload", payload_ty, depth)? {
+            EqualityOperandKind::Structural => Ok(true),
+            EqualityOperandKind::BuiltinVariantPatternOnly => {
+                self.value_is_builtin_variant_pattern_at_depth(payload_ty, payload, depth)
+            }
         }
-        self.value_is_builtin_variant_pattern(payload_ty, payload)
     }
 }
 

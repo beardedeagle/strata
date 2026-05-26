@@ -1,5 +1,5 @@
 use super::support::*;
-use crate::MAX_EFFECT_OUTCOMES_PER_TRANSITION;
+use crate::{MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_VALUE_TEMPLATE_DEPTH};
 
 #[test]
 fn validate_accepts_typed_send_outcome_used_as_next_state_template() {
@@ -280,10 +280,89 @@ fn validate_rejects_process_ref_spawn_outcome_structural_equality() {
 
     assert!(
         err.to_string().contains(
-            "operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
+            "built-in payload enum requires one operand to be a safe built-in variant pattern"
         ),
         "{err}"
     );
+}
+
+#[test]
+fn validate_rejects_send_outcome_structural_equality() {
+    let mut artifact = outcome_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    let send_result = artifact.processes[0].state_type;
+    artifact.processes[0].transitions[0]
+        .actions
+        .push(ArtifactAction::IfElse {
+            condition: ArtifactValueTemplate::Equality {
+                ty: bool_type,
+                operand_ty: send_result,
+                operator: ArtifactValueEqualityOperator::Equal,
+                left: Box::new(ArtifactValueTemplate::EffectOutcome {
+                    ty: send_result,
+                    outcome: EffectOutcomeId::new(0),
+                }),
+                right: Box::new(ArtifactValueTemplate::EffectOutcome {
+                    ty: send_result,
+                    outcome: EffectOutcomeId::new(0),
+                }),
+            },
+            then_actions: Vec::new(),
+            else_actions: Vec::new(),
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("send outcome structural equality should fail admission");
+
+    assert!(
+        err.to_string().contains(
+            "built-in payload enum requires one operand to be a safe built-in variant pattern"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn validate_rejects_nested_builtin_equality_pattern_past_depth_limit() {
+    let mut artifact = outcome_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    let mut payload_ty = UnitAndOutcomeTypes::UNIT;
+    let mut option_types = Vec::new();
+    for _ in 0..=MAX_VALUE_TEMPLATE_DEPTH {
+        let option_ty = push_type(&mut artifact, option_type(payload_ty));
+        option_types.push(option_ty);
+        payload_ty = option_ty;
+    }
+    let operand_ty = payload_ty;
+    artifact.processes[0].transitions[0]
+        .actions
+        .push(ArtifactAction::IfElse {
+            condition: ArtifactValueTemplate::Equality {
+                ty: bool_type,
+                operand_ty,
+                operator: ArtifactValueEqualityOperator::Equal,
+                left: Box::new(nested_some_template(
+                    &option_types,
+                    UnitAndOutcomeTypes::UNIT,
+                )),
+                right: Box::new(ArtifactValueTemplate::Literal {
+                    ty: operand_ty,
+                    value: artifact_value("None"),
+                }),
+            },
+            then_actions: Vec::new(),
+            else_actions: Vec::new(),
+        });
+
+    let err = artifact
+        .validate()
+        .expect_err("nested equality pattern beyond depth limit should fail admission");
+
+    let expected = format!(
+        "equality payload.operand_type_id nesting exceeds maximum depth of {MAX_VALUE_TEMPLATE_DEPTH}"
+    );
+    assert!(err.to_string().contains(&expected), "{err}");
 }
 
 #[test]
@@ -418,6 +497,36 @@ fn result_type(ok: TypeId, err: TypeId) -> ArtifactType {
                 payload_type: Some(err),
             },
         ],
+    )
+}
+
+fn option_type(payload: TypeId) -> ArtifactType {
+    ArtifactType::enum_value_with_payloads(
+        "Option",
+        vec![
+            ArtifactEnumVariant {
+                label: "None".to_string(),
+                payload_type: None,
+            },
+            ArtifactEnumVariant {
+                label: "Some".to_string(),
+                payload_type: Some(payload),
+            },
+        ],
+    )
+}
+
+fn nested_some_template(option_types: &[TypeId], unit_ty: TypeId) -> ArtifactValueTemplate {
+    option_types.iter().copied().fold(
+        ArtifactValueTemplate::Literal {
+            ty: unit_ty,
+            value: artifact_value("Unit"),
+        },
+        |payload, ty| ArtifactValueTemplate::EnumVariant {
+            ty,
+            variant: EnumVariantId::new(1),
+            payload: Box::new(payload),
+        },
     )
 }
 

@@ -1,6 +1,12 @@
 use super::*;
 use crate::language::checker::symbols::BuiltinValueShape;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EqualityOperandKind {
+    Structural,
+    BuiltinVariantPatternOnly,
+}
+
 pub(super) fn validate_source_equality_expr(
     scope: &SourceFunctionScope<'_>,
     expected_type: &TypeRef,
@@ -183,7 +189,7 @@ fn source_equality_fieldless_variant_matches_type(
 fn validate_source_equality_operand_type(
     scope: &SourceFunctionScope<'_>,
     operand_type: &TypeRef,
-) -> Result<()> {
+) -> Result<EqualityOperandKind> {
     validate_source_equality_operand_type_at_depth(scope, operand_type, 0)
 }
 
@@ -191,21 +197,22 @@ fn validate_source_equality_operand_type_at_depth(
     scope: &SourceFunctionScope<'_>,
     operand_type: &TypeRef,
     depth: usize,
-) -> Result<()> {
+) -> Result<EqualityOperandKind> {
     if depth > MAX_VALUE_NESTING {
         return Err(Error::new(format!(
             "equality operand type nesting exceeds maximum depth of {MAX_VALUE_NESTING}"
         )));
     }
     if scope.semantic_index.is_unit_type(operand_type)? {
-        return Ok(());
+        return Ok(EqualityOperandKind::Structural);
     }
     let bool_type = scope.semantic_index.bool_type(scope.module)?;
     if scope.semantic_index.same_type(operand_type, &bool_type) {
-        return Ok(());
+        return Ok(EqualityOperandKind::Structural);
     }
     if scope.semantic_index.scalar_type(operand_type)?.is_some() {
-        return validate_source_scalar_operand_type(scope, operand_type);
+        validate_source_scalar_operand_type(scope, operand_type)?;
+        return Ok(EqualityOperandKind::Structural);
     }
     if scope
         .semantic_index
@@ -231,17 +238,17 @@ fn validate_source_equality_operand_type_at_depth(
     if let Some(BuiltinValueShape::Enum(value_enum)) =
         scope.semantic_index.builtin_value_shape(operand_type)?
     {
-        for variant in value_enum.variants {
-            if let Some(payload_type) = variant.payload_type {
-                validate_source_equality_operand_type_at_depth(scope, &payload_type, depth + 1)
-                    .map_err(|err| {
-                        Error::new(format!(
-                            "equality payload type {payload_type} is not supported: {err}"
-                        ))
-                    })?;
-            }
-        }
-        return Ok(());
+        return Ok(
+            if value_enum
+                .variants
+                .iter()
+                .any(|variant| variant.payload_type.is_some())
+            {
+                EqualityOperandKind::BuiltinVariantPatternOnly
+            } else {
+                EqualityOperandKind::Structural
+            },
+        );
     }
     let value_enum = scope
         .semantic_index
@@ -255,7 +262,7 @@ fn validate_source_equality_operand_type_at_depth(
             "equality type {operand_type} must not declare payload-bearing enum variants"
         )));
     }
-    Ok(())
+    Ok(EqualityOperandKind::Structural)
 }
 
 fn validate_source_equality_operands(
@@ -264,16 +271,17 @@ fn validate_source_equality_operands(
     left: &ValueExpr,
     right: &ValueExpr,
 ) -> Result<()> {
-    let full_error = match validate_source_equality_operand_type(scope, operand_type) {
-        Ok(()) => return Ok(()),
-        Err(err) => err,
-    };
-    if source_builtin_variant_equality_pattern(scope, operand_type, left)?
-        || source_builtin_variant_equality_pattern(scope, operand_type, right)?
-    {
-        Ok(())
-    } else {
-        Err(full_error)
+    match validate_source_equality_operand_type(scope, operand_type)? {
+        EqualityOperandKind::Structural => Ok(()),
+        EqualityOperandKind::BuiltinVariantPatternOnly
+            if (source_builtin_variant_equality_pattern(scope, operand_type, left)?
+                || source_builtin_variant_equality_pattern(scope, operand_type, right)?) =>
+        {
+            Ok(())
+        }
+        EqualityOperandKind::BuiltinVariantPatternOnly => Err(Error::new(format!(
+            "equality over built-in payload enum {operand_type} requires one operand to be a safe built-in variant pattern"
+        ))),
     }
 }
 
@@ -281,6 +289,15 @@ fn source_builtin_variant_equality_pattern(
     scope: &SourceFunctionScope<'_>,
     operand_type: &TypeRef,
     value: &ValueExpr,
+) -> Result<bool> {
+    source_builtin_variant_equality_pattern_at_depth(scope, operand_type, value, 0)
+}
+
+fn source_builtin_variant_equality_pattern_at_depth(
+    scope: &SourceFunctionScope<'_>,
+    operand_type: &TypeRef,
+    value: &ValueExpr,
+    depth: usize,
 ) -> Result<bool> {
     let value = match value {
         ValueExpr::Grouped { value } => value.as_ref(),
@@ -298,6 +315,12 @@ fn source_builtin_variant_equality_pattern(
                 .iter()
                 .find(|variant| variant.name == *name)
             else {
+                if is_builtin_equality_variant_label(name.as_str()) {
+                    return Err(Error::new(format!(
+                        "value {name} is not a variant of enum {}",
+                        value_enum.name
+                    )));
+                }
                 return Ok(false);
             };
             Ok(variant.payload_type.is_none())
@@ -308,24 +331,50 @@ fn source_builtin_variant_equality_pattern(
                 .iter()
                 .find(|variant| variant.name == *name)
             else {
+                if is_builtin_equality_variant_label(name.as_str()) {
+                    return Err(Error::new(format!(
+                        "value {name} is not a variant of enum {}",
+                        value_enum.name
+                    )));
+                }
                 return Ok(false);
             };
             let Some(payload_type) = &variant.payload_type else {
                 return Ok(false);
             };
-            source_equality_payload_pattern_is_safe(scope, payload_type, arg)
+            source_equality_payload_pattern_is_safe(scope, payload_type, arg, depth + 1)
         }
         _ => Ok(false),
     }
+}
+
+fn is_builtin_equality_variant_label(label: &str) -> bool {
+    matches!(
+        label,
+        "None"
+            | "Some"
+            | "Ok"
+            | "Err"
+            | "Full"
+            | "Stopped"
+            | "Crashed"
+            | "MailboxClosed"
+            | "Denied"
+            | "Exhausted"
+            | "BackendUnavailable"
+    )
 }
 
 fn source_equality_payload_pattern_is_safe(
     scope: &SourceFunctionScope<'_>,
     payload_type: &TypeRef,
     payload: &ValueExpr,
+    depth: usize,
 ) -> Result<bool> {
-    if validate_source_equality_operand_type(scope, payload_type).is_ok() {
-        return Ok(true);
+    match validate_source_equality_operand_type_at_depth(scope, payload_type, depth)? {
+        EqualityOperandKind::Structural => Ok(true),
+        EqualityOperandKind::BuiltinVariantPatternOnly => {
+            source_builtin_variant_equality_pattern_at_depth(scope, payload_type, payload, depth)
+        }
     }
-    source_builtin_variant_equality_pattern(scope, payload_type, payload)
 }

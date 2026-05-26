@@ -18,9 +18,12 @@ use crate::language::checked::{
 use crate::language::diagnostic::{Error, Result};
 
 mod dependencies;
+mod equality;
 mod evaluation;
 mod payload_labels;
 mod process_refs;
+
+use equality::validate_checked_equality_template;
 
 pub(super) use dependencies::{
     checked_template_depends_on_effect_outcome, checked_template_depends_on_loop_element,
@@ -509,31 +512,6 @@ pub(super) fn validate_value_template_binding_types(
     }
 }
 
-fn validate_checked_equality_template(
-    result_ty: &CheckedTypeRef,
-    operand_ty: &CheckedTypeRef,
-    left: &CheckedValueTemplate,
-    right: &CheckedValueTemplate,
-) -> Result<()> {
-    validate_checked_bool_contract_type(result_ty)?;
-    validate_checked_equality_operand_type(operand_ty)?;
-    if left.result_type() != operand_ty {
-        return Err(Error::new(format!(
-            "equality left operand has type {}, expected {}",
-            left.result_type(),
-            operand_ty
-        )));
-    }
-    if right.result_type() != operand_ty {
-        return Err(Error::new(format!(
-            "equality right operand has type {}, expected {}",
-            right.result_type(),
-            operand_ty
-        )));
-    }
-    Ok(())
-}
-
 fn validate_checked_bool_composition_operand(
     result_ty: &CheckedTypeRef,
     operand: &CheckedValueTemplate,
@@ -549,7 +527,7 @@ fn validate_checked_bool_composition_operand(
     Ok(())
 }
 
-fn validate_checked_bool_contract_type(ty: &CheckedTypeRef) -> Result<()> {
+pub(super) fn validate_checked_bool_contract_type(ty: &CheckedTypeRef) -> Result<()> {
     if matches!(
         ty.kind(),
         CheckedTypeKind::Value { shape } if is_checked_bool_contract_shape(shape)
@@ -571,72 +549,6 @@ fn is_checked_bool_contract_shape(shape: &CheckedValueShape) -> bool {
                 && variants[1].name.as_str() == "True"
                 && variants[1].payload_type.is_none()
     )
-}
-
-fn validate_checked_equality_operand_type(operand_ty: &CheckedTypeRef) -> Result<()> {
-    match operand_ty.kind() {
-        CheckedTypeKind::Value {
-            shape: CheckedValueShape::Atom,
-        } if operand_ty.label() == "Unit" => Ok(()),
-        CheckedTypeKind::Value {
-            shape: CheckedValueShape::Scalar(_),
-        } => Ok(()),
-        CheckedTypeKind::Value {
-            shape: CheckedValueShape::Enum { variants },
-        } if variants
-            .iter()
-            .all(|variant| variant.payload_type.is_none()) =>
-        {
-            Ok(())
-        }
-        CheckedTypeKind::Value {
-            shape: CheckedValueShape::Enum { variants },
-        } if is_recognized_checked_builtin_equality_enum(variants) => Ok(()),
-        _ => Err(Error::new(format!(
-            "equality operands must be Bool, scalar values, or fieldless enum values, found {operand_ty}"
-        ))),
-    }
-}
-
-fn is_recognized_checked_builtin_equality_enum(
-    variants: &[crate::language::checked::CheckedEnumVariant],
-) -> bool {
-    match variants {
-        [none, some] => {
-            none.name.as_str() == "None"
-                && none.payload_type.is_none()
-                && some.name.as_str() == "Some"
-                && some.payload_type.is_some()
-                || none.name.as_str() == "Ok"
-                    && none.payload_type.is_some()
-                    && some.name.as_str() == "Err"
-                    && some.payload_type.is_some()
-        }
-        [first, second, third] => {
-            first.payload_type.is_some()
-                && second.payload_type.is_some()
-                && third.payload_type.is_some()
-                && first.payload_type == second.payload_type
-                && second.payload_type == third.payload_type
-                && first.name.as_str() == "Denied"
-                && second.name.as_str() == "Exhausted"
-                && third.name.as_str() == "BackendUnavailable"
-        }
-        [first, second, third, fourth] => {
-            first.payload_type.is_some()
-                && second.payload_type.is_some()
-                && third.payload_type.is_some()
-                && fourth.payload_type.is_some()
-                && first.payload_type == second.payload_type
-                && second.payload_type == third.payload_type
-                && third.payload_type == fourth.payload_type
-                && first.name.as_str() == "Full"
-                && second.name.as_str() == "Stopped"
-                && third.name.as_str() == "Crashed"
-                && fourth.name.as_str() == "MailboxClosed"
-        }
-        _ => false,
-    }
 }
 
 fn validate_checked_scalar_operand_type(ty: &CheckedTypeRef) -> Result<()> {
