@@ -242,7 +242,7 @@ capacity.
 
 Bare statement `send` and `spawn` remain fail-closed runtime effects: Mantle
 rejects pre-acceptance delivery and process-limit failures instead of silently
-drops them. Outcome-form `send` returns the typed failure result before message
+dropping them. Outcome-form `send` returns the typed failure result before message
 acceptance and commits the message only on `Ok(Unit)`.
 
 ## Collections
