@@ -177,10 +177,21 @@ effect list says the step uses `spawn`; it is not the authority proof for which
 process may be created. Unused authority descriptors are rejected as overbroad:
 
 ```strata
-authority spawn_worker: Cap<Spawn<Worker>>;
+record MainState;
+enum MainMsg { Start }
 
-let worker: ProcessRef<Worker> = spawn Worker;
-send worker Ping;
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Ping;
+        return Stop(state);
+    }
+}
 ```
 
 Spawning returns a typed process reference. Sends use that typed reference, not a
