@@ -67,6 +67,9 @@ macOS, and Windows. The Linux quality job calls `just ci-quality`, which runs
 formatting, native and cross-target checks, tests, clippy, performance smoke
 checks, build, tool metadata validation, toolchain policy validation, mdBook,
 the language surface proof substrate, source-to-runtime gates, and diff hygiene.
+The docs tool install path pins both `mdbook` and the Mermaid preprocessor, so
+Mermaid diagrams are built by the same `just docs` command locally, in quality
+CI, and in the Pages workflow.
 
 CI uses GitHub-owned, SHA-pinned checkout and cache actions. The cache stores
 Cargo registry/git data and per-job build target directories. It does not cache

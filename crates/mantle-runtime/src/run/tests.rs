@@ -5,6 +5,8 @@ mod identity_admission;
 mod process_lookup;
 mod process_ref_admission;
 mod scalar_templates;
+mod spawn_authority_admission;
+mod spawn_authority_runtime;
 mod state_message_admission;
 mod state_message_for_each_admission;
 mod state_message_for_each_nested_if_admission;

@@ -4,6 +4,7 @@ use mantle_artifact::{ArtifactAction, ArtifactSendTarget, EffectOutcomeId};
 
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
 const WORKER_PROCESS: ProcessId = ProcessId::new(1);
+const ENTRY_PROCESS: ProcessId = ProcessId::new(2);
 const PING_MESSAGE: MessageId = MessageId::new(0);
 const UNIT: TypeId = TypeId::new(10);
 const SEND_ERROR: TypeId = TypeId::new(11);
@@ -112,6 +113,7 @@ fn runtime_spawn_outcome_commits_ok_after_acceptance() {
         outcome: EffectOutcomeId::new(0),
         outcome_ty: SPAWN_RESULT,
         target: WORKER_PROCESS,
+        spawn_site: SPAWN_SITE,
     };
     let mut process_refs = LocalProcessRefs::empty();
     let mut effect_outcomes = Vec::new();
@@ -150,6 +152,7 @@ fn runtime_spawn_outcome_returns_exhausted_before_acceptance() {
         outcome: EffectOutcomeId::new(0),
         outcome_ty: SPAWN_RESULT,
         target: WORKER_PROCESS,
+        spawn_site: SPAWN_SITE,
     };
     let mut process_refs = LocalProcessRefs::empty();
     let mut effect_outcomes = Vec::new();
@@ -175,6 +178,7 @@ fn runtime_spawn_outcome_branches_by_error_variant_without_process_ref_equality(
             outcome: EffectOutcomeId::new(0),
             outcome_ty: SPAWN_RESULT,
             target: WORKER_PROCESS,
+            spawn_site: SPAWN_SITE,
         },
         ArtifactAction::IfElse {
             condition: ArtifactValueTemplate::Equality {
@@ -225,7 +229,13 @@ fn loaded_admission_rejects_spawn_outcome_targeting_entry_process() {
 fn loaded_admission_rejects_spawn_outcome_targeting_self() {
     let artifact = spawn_outcome_artifact();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-    program.entry_process = WORKER_PROCESS;
+    let mut entry_process = program.processes[1].clone();
+    entry_process.debug_name = "Entry".to_string();
+    entry_process.authorities.clear();
+    entry_process.spawn_sites.clear();
+    entry_process.process_refs.clear();
+    program.processes.push(entry_process);
+    program.entry_process = ENTRY_PROCESS;
     program.processes[0].process_refs.clear();
     let LoadedAction::SpawnOutcome { target, .. } =
         &mut program.processes[0].transitions[0].actions[0]
@@ -520,6 +530,7 @@ fn assert_direct_send_outcome_full(expected: &str) {
 
 fn send_outcome_artifact() -> MantleArtifact {
     let mut artifact = artifact_with_unbound_worker_process_ref();
+    grant_main_spawn_authority(&mut artifact);
     artifact.types[WORKER_MSG.index()] =
         ArtifactType::enum_value("WorkerMsg", vec!["Ping".to_string()]);
     push_outcome_types(&mut artifact);
@@ -547,6 +558,7 @@ fn send_outcome_artifact() -> MantleArtifact {
         ArtifactAction::Spawn {
             target: WORKER_PROCESS,
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         },
         ArtifactAction::SendOutcome {
             outcome: EffectOutcomeId::new(0),
@@ -562,6 +574,7 @@ fn send_outcome_artifact() -> MantleArtifact {
 
 fn send_outcome_process_ref_payload_artifact() -> MantleArtifact {
     let mut artifact = artifact_with_unbound_worker_process_ref();
+    grant_main_spawn_authority(&mut artifact);
     replace_process_message_variants(
         &mut artifact,
         WORKER_PROCESS.index(),
@@ -581,6 +594,7 @@ fn send_outcome_process_ref_payload_artifact() -> MantleArtifact {
         ArtifactAction::Spawn {
             target: WORKER_PROCESS,
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         },
         ArtifactAction::SendOutcome {
             outcome: EffectOutcomeId::new(0),
@@ -599,6 +613,7 @@ fn send_outcome_process_ref_payload_artifact() -> MantleArtifact {
 
 fn spawn_outcome_artifact() -> MantleArtifact {
     let mut artifact = artifact_with_unbound_worker_process_ref();
+    grant_main_spawn_authority(&mut artifact);
     push_spawn_outcome_types(&mut artifact);
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Spawn];
     artifact.processes[0].transitions[0].next_state = NextState::Current;
@@ -606,6 +621,7 @@ fn spawn_outcome_artifact() -> MantleArtifact {
         outcome: EffectOutcomeId::new(0),
         outcome_ty: SPAWN_RESULT,
         target: WORKER_PROCESS,
+        spawn_site: SPAWN_SITE,
     }];
     artifact
 }

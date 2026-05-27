@@ -21,6 +21,13 @@ pub(super) fn reject_reserved_type_name(
     Ok(())
 }
 
+pub(super) fn reject_reserved_type_name_literal(name: &str, reserved: &str) -> Result<()> {
+    if name == reserved {
+        return Err(Error::new(format!("type name {name} is reserved")));
+    }
+    Ok(())
+}
+
 pub(super) fn reject_internal_type_label_prefix(name: &str) -> Result<()> {
     if name.starts_with(CHECKED_TYPE_LABEL_PREFIX) {
         return Err(Error::new(format!(

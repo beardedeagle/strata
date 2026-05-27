@@ -120,7 +120,9 @@ Read them in this order:
 58. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
    source-created `Panic(...)` prevents a later observer from recovering the
    crash as a source-visible send outcome.
-59. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+59. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
+   denial before process acceptance.
+60. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
 
 Detailed notes are grouped by topic:

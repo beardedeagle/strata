@@ -112,6 +112,11 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_signature_worker: Cap<Spawn<SignatureWorker>>;
+    authority spawn_prefix_worker: Cap<Spawn<PrefixWorker>>;
+    authority spawn_body_worker: Cap<Spawn<BodyWorker>>;
+    authority spawn_state_worker: Cap<Spawn<StateWorker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }

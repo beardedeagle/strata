@@ -6,8 +6,12 @@ Strata programs.
 
 The source-to-runtime boundary is executable behavior:
 
-```text
-.str source -> strata check -> strata build -> .mta artifact -> mantle run
+```mermaid
+flowchart LR
+    Source[".str source"] --> Check["strata check"]
+    Check --> Build["strata build"]
+    Build --> Artifact[".mta artifact"]
+    Artifact --> Run["mantle run"]
 ```
 
 The runnable gates carry real `.str` programs through checking, Mantle Target

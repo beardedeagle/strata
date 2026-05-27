@@ -20,6 +20,13 @@ source-to-runtime success plus `Full`/`Stopped` pre-acceptance failure examples,
 direct runtime `Crashed` failure evidence, typed `MailboxClosed` admission,
 parse/check/lower, artifact-decode, and runtime-from-source fuzz seeds, bounded
 state-admission evidence, and diagnostics are recorded together.
+Local spawn authority is recorded as a runtime-bearing boundary feature:
+process-local `Cap<Spawn<Target>>` declarations, exact checked target matching,
+typed authority IDs, typed spawn-site IDs, Mantle artifact and loaded-runtime
+admission, overbroad-authority rejection, `spawn_authority_checked` trace
+evidence, `Err(Denied(Unit))` runtime denial before acceptance,
+source-to-runtime gates, fuzz seeds, bounded authority-model evidence,
+diagnostics, and docs are tracked together.
 
 Run it with:
 
@@ -55,8 +62,12 @@ This gate is the current-language-surface proof substrate for implementation
 claims. It is not a full theorem-prover proof of every semantic rule, and it
 does not replace runnable source-to-runtime behavior:
 
-```text
-.str source -> strata check -> strata build -> mantle run -> trace
+```mermaid
+flowchart LR
+    Source[".str source"] --> Check["strata check"]
+    Check --> Build["strata build"]
+    Build --> Run["mantle run"]
+    Run --> Trace["trace"]
 ```
 
 Runtime-bearing features still need source-to-runtime evidence. Trace labels,

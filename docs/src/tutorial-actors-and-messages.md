@@ -28,6 +28,8 @@ This says `Worker` accepts one message: `Ping`.
 `Main` can send that message after spawning `Worker`:
 
 ```strata
+authority spawn_worker: Cap<Spawn<Worker>>;
+
 let worker: ProcessRef<Worker> = spawn Worker;
 send worker Ping;
 return Stop(state);

@@ -1,6 +1,6 @@
 MTA0
 format=mantle-target-artifact
-schema_version=2
+schema_version=1
 source_language=strata
 module=effect_outcomes
 entry_process=0

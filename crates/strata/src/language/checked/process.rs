@@ -6,9 +6,9 @@ use crate::language::ast::{Effect, Identifier, Module};
 use crate::language::diagnostic::{Error, Result};
 
 use super::{
-    CheckedMessageId, CheckedMessageVariantId, CheckedNextState, CheckedOutputId,
-    CheckedPayloadValue, CheckedProcessId, CheckedProcessRefId, CheckedStateId, CheckedStateValue,
-    CheckedTypeRef, CheckedValueTemplate,
+    CheckedAuthorityId, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
+    CheckedOutputId, CheckedPayloadValue, CheckedProcessId, CheckedProcessRefId,
+    CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedTypeRef, CheckedValueTemplate,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,75 @@ impl CheckedProcessRef {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(in crate::language) enum CheckedCapabilityDescriptor {
+    Spawn { target: CheckedProcessId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedAuthority {
+    debug_name: Identifier,
+    descriptor: CheckedCapabilityDescriptor,
+}
+
+impl CheckedAuthority {
+    pub(in crate::language) fn new(
+        debug_name: Identifier,
+        descriptor: CheckedCapabilityDescriptor,
+    ) -> Self {
+        Self {
+            debug_name,
+            descriptor,
+        }
+    }
+
+    pub(in crate::language) fn debug_name(&self) -> &Identifier {
+        &self.debug_name
+    }
+
+    pub(in crate::language) fn descriptor(&self) -> CheckedCapabilityDescriptor {
+        self.descriptor
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) enum CheckedSpawnKind {
+    DynamicLocal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedSpawnSite {
+    target: CheckedProcessId,
+    authority: CheckedAuthorityId,
+    kind: CheckedSpawnKind,
+}
+
+impl CheckedSpawnSite {
+    pub(in crate::language) fn new(
+        target: CheckedProcessId,
+        authority: CheckedAuthorityId,
+        kind: CheckedSpawnKind,
+    ) -> Self {
+        Self {
+            target,
+            authority,
+            kind,
+        }
+    }
+
+    pub(in crate::language) fn target(&self) -> CheckedProcessId {
+        self.target
+    }
+
+    pub(in crate::language) fn authority(&self) -> CheckedAuthorityId {
+        self.authority
+    }
+
+    pub(in crate::language) fn kind(&self) -> CheckedSpawnKind {
+        self.kind
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) enum CheckedAction {
     Emit {
@@ -80,11 +149,13 @@ pub(in crate::language) enum CheckedAction {
     Spawn {
         target: CheckedProcessId,
         process_ref: CheckedProcessRefId,
+        spawn_site: CheckedSpawnSiteId,
     },
     SpawnOutcome {
         outcome: super::CheckedEffectOutcomeId,
         outcome_ty: CheckedTypeRef,
         target: CheckedProcessId,
+        spawn_site: CheckedSpawnSiteId,
     },
     Send {
         target: CheckedSendTarget,
@@ -286,13 +357,24 @@ pub(in crate::language) struct CheckedProcess {
     message_type: CheckedTypeRef,
     message_cases: Vec<CheckedMessageCase>,
     process_refs: Vec<CheckedProcessRef>,
+    authorities: Vec<CheckedAuthority>,
+    spawn_sites: Vec<CheckedSpawnSite>,
     mailbox_bound: usize,
     init_state: CheckedStateId,
     transitions: Vec<CheckedTransition>,
 }
 
 impl CheckedProcess {
+    #[cfg(test)]
     pub(in crate::language) fn new(parts: CheckedProcessParts) -> Self {
+        Self::with_authority(parts, Vec::new(), Vec::new())
+    }
+
+    pub(in crate::language) fn with_authority(
+        parts: CheckedProcessParts,
+        authorities: Vec<CheckedAuthority>,
+        spawn_sites: Vec<CheckedSpawnSite>,
+    ) -> Self {
         Self {
             debug_name: parts.debug_name,
             state_type: parts.state_type,
@@ -300,6 +382,8 @@ impl CheckedProcess {
             message_type: parts.message_type,
             message_cases: parts.message_cases,
             process_refs: parts.process_refs,
+            authorities,
+            spawn_sites,
             mailbox_bound: parts.mailbox_bound,
             init_state: parts.init_state,
             transitions: parts.transitions,
@@ -328,6 +412,14 @@ impl CheckedProcess {
 
     pub(in crate::language) fn process_refs(&self) -> &[CheckedProcessRef] {
         &self.process_refs
+    }
+
+    pub(in crate::language) fn authorities(&self) -> &[CheckedAuthority] {
+        &self.authorities
+    }
+
+    pub(in crate::language) fn spawn_sites(&self) -> &[CheckedSpawnSite] {
+        &self.spawn_sites
     }
 
     pub(in crate::language) fn mailbox_bound(&self) -> usize {

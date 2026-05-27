@@ -142,6 +142,7 @@ impl Parser {
 
         let mut state_type = None;
         let mut msg_type = None;
+        let mut authorities = Vec::new();
         let mut init = None;
         let mut functions = Vec::new();
         let mut steps = Vec::new();
@@ -176,6 +177,16 @@ impl Parser {
                         )));
                     }
                 }
+            } else if self.peek_keyword("authority") {
+                self.expect_keyword("authority")?;
+                let authority_name = self.expect_identifier()?;
+                self.expect_symbol(':')?;
+                let ty = self.parse_type()?;
+                self.expect_symbol(';')?;
+                authorities.push(AuthorityDeclaration {
+                    name: authority_name,
+                    ty,
+                });
             } else if self.peek_keyword("fn") {
                 let function = self.parse_function()?;
                 match function.name.as_str() {
@@ -195,7 +206,7 @@ impl Parser {
                     }
                 }
             } else {
-                return Err(self.error_here("expected process type alias or function"));
+                return Err(self.error_here("expected process authority, type alias, or function"));
             }
         }
         if steps.is_empty() {
@@ -205,6 +216,7 @@ impl Parser {
         Ok(Process {
             name: name.clone(),
             mailbox_bound,
+            authorities,
             state_type: state_type
                 .ok_or_else(|| Error::new(format!("process {name} must declare type State")))?,
             msg_type: msg_type

@@ -4,11 +4,12 @@ use std::process::{Command, Output};
 use std::sync::Once;
 
 pub(crate) use mantle_artifact::{
-    ArtifactAction, ArtifactEffect, ArtifactProcess, ArtifactSendTarget, ArtifactTransition,
-    ArtifactTypeKind, ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
-    ArtifactValueShape, ArtifactValueTemplate, ArtifactValueTemplateField,
-    ArtifactValueTemplateMapEntry, EffectOutcomeId, EnumVariantId, MantleArtifact, MessageId,
-    NextState, ProcessId, StateId, TypeId, read_artifact,
+    ArtifactAction, ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactProcess,
+    ArtifactSendTarget, ArtifactSpawnKind, ArtifactTransition, ArtifactTypeKind, ArtifactValue,
+    ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId,
+    EffectOutcomeId, EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId, SpawnSiteId,
+    StateId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -80,6 +81,21 @@ impl GateHarness {
         )
     }
 
+    pub(crate) fn run_mantle_success_with_args(
+        &self,
+        artifact: &str,
+        extra_args: &[&str],
+    ) -> Output {
+        let mut args = Vec::with_capacity(extra_args.len() + 2);
+        args.push("run");
+        args.push(artifact);
+        args.extend(extra_args.iter().copied());
+        assert_success(
+            self.command_slice(&self.mantle, &args, "mantle run"),
+            "mantle run",
+        )
+    }
+
     pub(crate) fn run_mantle_failure(&self, artifact: &str) -> Output {
         assert_failure(
             self.command(&self.mantle, ["run", artifact], "mantle run"),
@@ -88,6 +104,10 @@ impl GateHarness {
     }
 
     fn command<const N: usize>(&self, binary: &Path, args: [&str; N], label: &str) -> Output {
+        self.command_slice(binary, &args, label)
+    }
+
+    fn command_slice(&self, binary: &Path, args: &[&str], label: &str) -> Output {
         Command::new(binary)
             .args(args)
             .current_dir(&self.root)

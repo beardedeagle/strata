@@ -108,6 +108,11 @@ fn verify_justfile_source_to_runtime_gate(source_path: &str, contents: &str) -> 
         ));
     }
 
+    let lines: Vec<&str> = source_to_runtime_success_recipe_lines(contents)?.collect();
+    if looped_source_to_runtime_gate_covers(&lines, stem) {
+        return Ok(());
+    }
+
     let artifact_path = format!("target/strata/{stem}.mta");
     let required_commands = [
         format!(
@@ -122,7 +127,7 @@ fn verify_justfile_source_to_runtime_gate(source_path: &str, contents: &str) -> 
     ];
     let mut seen = [false; 3];
 
-    for line in source_to_runtime_success_recipe_lines(contents)? {
+    for line in lines {
         let command = line.trim_start();
         if command.is_empty() || command.starts_with('#') {
             continue;
@@ -144,6 +149,44 @@ fn verify_justfile_source_to_runtime_gate(source_path: &str, contents: &str) -> 
     }
 
     Ok(())
+}
+
+fn looped_source_to_runtime_gate_covers(lines: &[&str], stem: &str) -> bool {
+    active_lines(lines).any(|line| line == "cargo_run=(cargo +{{stable_toolchain}} run)")
+        && active_lines(lines).any(|line| line == r#""${cargo_run[@]}" -p strata --bin strata -- check "examples/${example}.str""#)
+        && active_lines(lines).any(|line| line == r#""${cargo_run[@]}" -p strata --bin strata -- build "examples/${example}.str""#)
+        && active_lines(lines).any(|line| line == r#""${cargo_run[@]}" -p mantle-runtime --bin mantle -- run "target/strata/${example}.mta""#)
+        && active_example_stems(lines).any(|example| example == stem)
+}
+
+fn active_lines<'a>(lines: &'a [&str]) -> impl Iterator<Item = &'a str> {
+    lines.iter().filter_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+fn active_example_stems<'a>(lines: &'a [&str]) -> impl Iterator<Item = &'a str> {
+    active_lines(lines)
+        .scan(false, |in_examples, line| {
+            if line == "examples=(" {
+                *in_examples = true;
+                return Some(None);
+            }
+            if !*in_examples {
+                return Some(None);
+            }
+            if line == ")" {
+                *in_examples = false;
+                return Some(None);
+            }
+            Some(Some(line))
+        })
+        .flatten()
 }
 
 fn source_to_runtime_success_recipe_lines(
@@ -181,6 +224,36 @@ source-to-runtime-failure-gates: build
 source-to-runtime-failure-gates: build
 "#;
 
+    const LOOPED_HELLO_GATE: &str = r#"source-to-runtime-success-gates: build
+    examples=(
+        hello
+    )
+
+    cargo_run=(cargo +{{stable_toolchain}} run)
+    for example in "${examples[@]}"; do
+        "${cargo_run[@]}" -p strata --bin strata -- check "examples/${example}.str"
+        "${cargo_run[@]}" -p strata --bin strata -- build "examples/${example}.str"
+        "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run "target/strata/${example}.mta"
+    done
+
+source-to-runtime-failure-gates: build
+"#;
+
+    const LOOPED_COMMENTED_HELLO_GATE: &str = r#"source-to-runtime-success-gates: build
+    examples=(
+        # hello
+    )
+
+    cargo_run=(cargo +{{stable_toolchain}} run)
+    for example in "${examples[@]}"; do
+        "${cargo_run[@]}" -p strata --bin strata -- check "examples/${example}.str"
+        "${cargo_run[@]}" -p strata --bin strata -- build "examples/${example}.str"
+        "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run "target/strata/${example}.mta"
+    done
+
+source-to-runtime-failure-gates: build
+"#;
+
     #[test]
     fn source_to_runtime_gate_accepts_active_recipe_commands() {
         verify_justfile_source_to_runtime_gate("examples/hello.str", ACTIVE_HELLO_GATE)
@@ -188,10 +261,29 @@ source-to-runtime-failure-gates: build
     }
 
     #[test]
+    fn source_to_runtime_gate_accepts_looped_recipe_commands() {
+        verify_justfile_source_to_runtime_gate("examples/hello.str", LOOPED_HELLO_GATE)
+            .expect("active Justfile loop should satisfy gate evidence");
+    }
+
+    #[test]
     fn source_to_runtime_gate_rejects_commented_recipe_text() {
         let err =
             verify_justfile_source_to_runtime_gate("examples/hello.str", COMMENTED_HELLO_GATE)
                 .expect_err("commented Justfile commands must not satisfy gate evidence");
+        assert!(
+            err.contains("missing executable command"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn source_to_runtime_gate_rejects_commented_loop_example() {
+        let err = verify_justfile_source_to_runtime_gate(
+            "examples/hello.str",
+            LOOPED_COMMENTED_HELLO_GATE,
+        )
+        .expect_err("commented loop example must not satisfy gate evidence");
         assert!(
             err.contains("missing executable command"),
             "unexpected error: {err}"

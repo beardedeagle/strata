@@ -309,7 +309,7 @@ fn static_validation_rejects_runtime_if_branch_process_ref_binding() {
     let bool_ty = enum_value_type("Bool", &["False", "True"]);
     let condition =
         CheckedValueTemplate::Literal(CheckedPayloadValue::new(bool_ty, artifact_value("True")));
-    let process = CheckedProcess::new(CheckedProcessParts {
+    let process = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -339,6 +339,7 @@ fn static_validation_rejects_runtime_if_branch_process_ref_binding() {
                 then_actions: vec![CheckedAction::Spawn {
                     target: checked_process_id(1),
                     process_ref: checked_process_ref_id(0),
+                    spawn_site: checked_spawn_site_id(0),
                 }],
                 else_actions: Vec::new(),
             }],

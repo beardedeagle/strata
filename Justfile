@@ -3,8 +3,11 @@ set dotenv-load
 stable_toolchain := "stable"
 nightly_toolchain := "nightly"
 mdbook_version := "0.5.2"
+mdbook_mermaid_version := "0.17.0"
 cargo_fuzz_version := "0.13.1"
 cfg_check_targets := "x86_64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc"
+fuzz_targets := "strata_parse_check_lower mantle_artifact_decode mantle_runtime_from_source"
+fuzz_smoke_targets := "strata_parse_check_lower:256 mantle_artifact_decode:256 mantle_runtime_from_source:128"
 
 default:
     @just --list
@@ -71,6 +74,12 @@ strata-build source:
 
 mantle-run artifact:
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "{{artifact}}"
+
+strata-authority-summary source format="text":
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-summary "{{source}}" --format "{{format}}"
+
+mantle-inspect-authority artifact format="text":
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- inspect-authority "{{artifact}}" --format "{{format}}"
 
 run-example name:
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check "examples/{{name}}.str"
@@ -148,340 +157,152 @@ toolchain-policy-check:
 source-to-runtime-gates: source-to-runtime-success-gates source-to-runtime-failure-gates
 
 source-to-runtime-success-gates: build
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/hello.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/hello.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/hello.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_ping.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_ping.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_ping.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_sequence.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_sequence.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_sequence.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/init_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/init_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/init_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/init_return_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/init_return_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/init_return_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_payload_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_payload_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_payload_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_if_else.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_if_else.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_if_else.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_local_bindings.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_local_bindings.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_local_bindings.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_prefix.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_prefix.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_prefix.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_runtime_if_prefix.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_runtime_if_prefix.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_runtime_if_prefix.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_for_prefix.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_for_prefix.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_for_prefix.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_for_if_prefix.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_for_if_prefix.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_for_if_prefix.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_if_for_prefix.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_if_for_prefix.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_if_for_prefix.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/process_return_match_arm_action_block.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/process_return_match_arm_action_block.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/process_return_match_arm_action_block.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_collection_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_collection_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_collection_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_return_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_return_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_return_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_record_pattern.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_record_pattern.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_record_pattern.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_record_return_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_record_return_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_record_return_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/function_record_body_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/function_record_body_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/function_record_body_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/state_payload_enum.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/state_payload_enum.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/state_payload_enum.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/collection_state.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/collection_state.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/collection_state.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/state_payload_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/state_payload_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/state_payload_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_instances.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_instances.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_instances.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payloads.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payloads.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payloads.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_if_else.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_if_else.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_if_else.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_scalar_priority.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_scalar_priority.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_scalar_priority.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_payload_projection_if.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_payload_projection_if.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_payload_projection_if.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_payload_projection_next_state.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_payload_projection_next_state.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_payload_projection_next_state.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_state_payload_projection_if.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_state_payload_projection_if.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_state_payload_projection_if.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_state_payload_projection_next_state.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_state_payload_projection_next_state.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_state_payload_projection_next_state.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_nested_if_actions.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_nested_if_actions.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_nested_if_actions.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_final_if_guarded_loop.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_final_if_guarded_loop.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_guarded_loop.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_final_if_nested_if_actions.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_final_if_nested_if_actions.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_if_actions.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_final_if_nested_terminal_if.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_final_if_nested_terminal_if.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_final_if_nested_terminal_if.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_guard_noop.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_guard_noop.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_guard_noop.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_for_each.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_for_each.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_for_each_empty.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_for_each_empty.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_empty.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_for_each_if.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_for_each_if.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_if.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_for_each_nested_if_actions.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_for_each_nested_if_actions.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_for_each_nested_if_actions.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_guarded_for_each.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_guarded_for_each.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_for_each.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_guarded_ref_loop.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_guarded_ref_loop.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_guarded_ref_loop_jobs.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_guarded_ref_loop_jobs.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_guarded_ref_loop_jobs.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/runtime_loop_element_projection.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/runtime_loop_element_projection.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/runtime_loop_element_projection.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_split_match.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_split_match.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_split_match.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_split_signature.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_split_signature.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_split_signature.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_split_signature_wildcard.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_split_signature_wildcard.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_split_signature_wildcard.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_state_match_split.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_state_match_split.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_state_match_split.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_payload_state_match_wildcard.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_payload_state_match_wildcard.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_payload_state_match_wildcard.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/nested_patterns.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/nested_patterns.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/nested_patterns.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_reply.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_reply.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_reply.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_emit_spawn_send.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_emit_spawn_send.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_emit_spawn_send.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcomes.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcomes.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/effect_outcomes.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcome_mailbox_full.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcome_mailbox_full.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_mailbox_full.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcome_stopped_target.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcome_stopped_target.str
-    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_stopped_target.mta
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcome_crashed_target.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcome_crashed_target.str
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    examples=(
+        hello
+        actor_ping
+        actor_sequence
+        actor_match
+        init_match
+        init_return_match
+        function_match
+        function_payload_match
+        function_if_else
+        function_local_bindings
+        process_return_match
+        process_return_match_arm_prefix
+        process_return_match_arm_runtime_if_prefix
+        process_return_match_arm_for_prefix
+        process_return_match_arm_for_if_prefix
+        process_return_match_arm_if_for_prefix
+        process_return_match_arm_action_block
+        function_collection_match
+        function_return_match
+        function_record_pattern
+        function_record_return_match
+        function_record_body_match
+        state_payload_enum
+        collection_state
+        state_payload_match
+        actor_instances
+        actor_payloads
+        runtime_if_else
+        runtime_scalar_priority
+        runtime_payload_projection_if
+        runtime_payload_projection_next_state
+        runtime_state_payload_projection_if
+        runtime_state_payload_projection_next_state
+        runtime_nested_if_actions
+        runtime_final_if_guarded_loop
+        runtime_final_if_nested_if_actions
+        runtime_final_if_nested_terminal_if
+        runtime_guard_noop
+        runtime_for_each
+        runtime_for_each_empty
+        runtime_for_each_if
+        runtime_for_each_nested_if_actions
+        runtime_guarded_for_each
+        runtime_guarded_ref_loop
+        runtime_guarded_ref_loop_jobs
+        runtime_loop_element_projection
+        actor_payload_match
+        actor_payload_split_match
+        actor_payload_split_signature
+        actor_payload_split_signature_wildcard
+        actor_payload_state_match_split
+        actor_payload_state_match_wildcard
+        nested_patterns
+        actor_reply
+        actor_emit_spawn_send
+        effect_outcomes
+        effect_outcome_mailbox_full
+        effect_outcome_stopped_target
+        effect_outcome_spawn_denied
+    )
+
+    cargo_run=(cargo +{{stable_toolchain}} run)
+    for example in "${examples[@]}"; do
+        "${cargo_run[@]}" -p strata --bin strata -- check "examples/${example}.str"
+        "${cargo_run[@]}" -p strata --bin strata -- build "examples/${example}.str"
+        "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run "target/strata/${example}.mta"
+    done
+
+    "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_spawn_denied.mta --deny-spawn-authority
+    "${cargo_run[@]}" -p strata --bin strata -- check examples/effect_outcome_crashed_target.str
+    "${cargo_run[@]}" -p strata --bin strata -- build examples/effect_outcome_crashed_target.str
 
 source-to-runtime-failure-gates: build
     #!/usr/bin/env bash
     set -euo pipefail
 
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/actor_panic_no_replay.str
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/actor_panic_no_replay.str
-    trace="target/strata/actor_panic_no_replay.observability.jsonl"
-    effect_authority_stderr="$(mktemp)"
-    function_return_if_stderr="$(mktemp)"
-    source_local_ref_stderr="$(mktemp)"
-    source_local_ref_carrier_stderr="$(mktemp)"
-    source_local_ref_shadow_stderr="$(mktemp)"
-    source_param_ref_shadow_stderr="$(mktemp)"
-    arm_nested_for_stderr="$(mktemp)"
-    arm_excessive_if_stderr="$(mktemp)"
-    arm_final_if_excessive_if_stderr="$(mktemp)"
-    scalar_overflow_stderr="$(mktemp)"
-    scalar_type_mismatch_stderr="$(mktemp)"
-    scalar_divide_by_zero_stderr="$(mktemp)"
-    scalar_runtime_stderr="$(mktemp)"
-    scalar_unsuffixed_stderr="$(mktemp)"
-    run_stderr="$(mktemp)"
-    trap 'rm -f "$effect_authority_stderr" "$function_return_if_stderr" "$source_local_ref_stderr" "$source_local_ref_carrier_stderr" "$source_local_ref_shadow_stderr" "$source_param_ref_shadow_stderr" "$arm_nested_for_stderr" "$arm_excessive_if_stderr" "$arm_final_if_excessive_if_stderr" "$scalar_overflow_stderr" "$scalar_type_mismatch_stderr" "$scalar_divide_by_zero_stderr" "$scalar_runtime_stderr" "$scalar_unsuffixed_stderr" "$run_stderr"' EXIT
+    cargo_run=(cargo +{{stable_toolchain}} run)
 
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/effect_authority_missing.str 2>"$effect_authority_stderr"; then
-        echo "Error: effect_authority_missing was expected to fail source effect authority checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'step uses effect send but does not declare it' "$effect_authority_stderr"; then
-        echo "Error: effect_authority_missing failed for an unexpected reason." >&2
-        cat "$effect_authority_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/function_return_if_statement.str 2>"$function_return_if_stderr"; then
-        echo "Error: function_return_if_statement was expected to fail source function purity checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'source function choose return-if then branch must not perform statements' "$function_return_if_stderr"; then
-        echo "Error: function_return_if_statement failed for an unexpected reason." >&2
-        cat "$function_return_if_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/source_local_binding_process_ref.str 2>"$source_local_ref_stderr"; then
-        echo "Error: source_local_binding_process_ref was expected to fail source-local binding checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'source-local binding worker_local must use a declared record, enum, scalar, list, or map type' "$source_local_ref_stderr"; then
-        echo "Error: source_local_binding_process_ref failed for an unexpected reason." >&2
-        cat "$source_local_ref_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/source_local_binding_process_ref_carrier_enum.str 2>"$source_local_ref_carrier_stderr"; then
-        echo "Error: source_local_binding_process_ref_carrier_enum was expected to fail source-local binding checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'source-local binding copy must use a declared record, enum, scalar, list, or map type without process-reference authority' "$source_local_ref_carrier_stderr"; then
-        echo "Error: source_local_binding_process_ref_carrier_enum failed for an unexpected reason." >&2
-        cat "$source_local_ref_carrier_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/source_local_binding_process_ref_shadow.str 2>"$source_local_ref_shadow_stderr"; then
-        echo "Error: source_local_binding_process_ref_shadow was expected to fail source-local binding checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'source-local binding worker conflicts with a process reference binding' "$source_local_ref_shadow_stderr"; then
-        echo "Error: source_local_binding_process_ref_shadow failed for an unexpected reason." >&2
-        cat "$source_local_ref_shadow_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/source_function_parameter_process_ref_shadow.str 2>"$source_param_ref_shadow_stderr"; then
-        echo "Error: source_function_parameter_process_ref_shadow was expected to fail source function parameter checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'source function parameter worker conflicts with a process reference binding' "$source_param_ref_shadow_stderr"; then
-        echo "Error: source_function_parameter_process_ref_shadow failed for an unexpected reason." >&2
-        cat "$source_param_ref_shadow_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/process_return_match_arm_nested_for.str 2>"$arm_nested_for_stderr"; then
-        echo "Error: process_return_match_arm_nested_for was expected to fail source loop checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'nested for loops are not supported' "$arm_nested_for_stderr"; then
-        echo "Error: process_return_match_arm_nested_for failed for an unexpected reason." >&2
-        cat "$arm_nested_for_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/process_return_match_arm_excessive_if.str 2>"$arm_excessive_if_stderr"; then
-        echo "Error: process_return_match_arm_excessive_if was expected to fail source branch-depth checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'statement-level if action nesting exceeds maximum depth' "$arm_excessive_if_stderr"; then
-        echo "Error: process_return_match_arm_excessive_if failed for an unexpected reason." >&2
-        cat "$arm_excessive_if_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/process_return_match_arm_final_if_excessive_if.str 2>"$arm_final_if_excessive_if_stderr"; then
-        echo "Error: process_return_match_arm_final_if_excessive_if was expected to fail source branch-depth checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'statement-level if action nesting exceeds maximum depth' "$arm_final_if_excessive_if_stderr"; then
-        echo "Error: process_return_match_arm_final_if_excessive_if failed for an unexpected reason." >&2
-        cat "$arm_final_if_excessive_if_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_overflow.str 2>"$scalar_overflow_stderr"; then
-        echo "Error: scalar_overflow was expected to fail scalar overflow checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'scalar arithmetic result 256 is outside U8 range' "$scalar_overflow_stderr"; then
-        echo "Error: scalar_overflow failed for an unexpected reason." >&2
-        cat "$scalar_overflow_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_type_mismatch.str 2>"$scalar_type_mismatch_stderr"; then
-        echo "Error: scalar_type_mismatch was expected to fail scalar type checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'scalar literal 2_u64 has type U64, expected U32' "$scalar_type_mismatch_stderr"; then
-        echo "Error: scalar_type_mismatch failed for an unexpected reason." >&2
-        cat "$scalar_type_mismatch_stderr" >&2
-        exit 1
-    fi
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_divide_by_zero.str 2>"$scalar_divide_by_zero_stderr"; then
-        echo "Error: scalar_divide_by_zero was expected to fail scalar divide-by-zero checks." >&2
-        exit 1
-    fi
-    if ! grep -q 'scalar division by zero' "$scalar_divide_by_zero_stderr"; then
-        echo "Error: scalar_divide_by_zero failed for an unexpected reason." >&2
-        cat "$scalar_divide_by_zero_stderr" >&2
-        exit 1
-    fi
+    expect_check_failure() {
+        local source="$1"
+        local expected="$2"
+        local label="$3"
+        local output
+
+        if output="$("${cargo_run[@]}" -p strata --bin strata -- check "$source" 2>&1)"; then
+            echo "Error: $label was expected to fail source checks." >&2
+            exit 1
+        fi
+        if [[ "$output" != *"$expected"* ]]; then
+            echo "Error: $label failed for an unexpected reason." >&2
+            printf '%s\n' "$output" >&2
+            exit 1
+        fi
+    }
+
+    "${cargo_run[@]}" -p strata --bin strata -- check examples/actor_panic_no_replay.str
+    "${cargo_run[@]}" -p strata --bin strata -- build examples/actor_panic_no_replay.str
+    trace="target/strata/actor_panic_no_replay.observability.jsonl"
+
+    expect_check_failure examples/failures/effect_authority_missing.str \
+        'step uses effect send but does not declare it' effect_authority_missing
+    expect_check_failure examples/failures/function_return_if_statement.str \
+        'source function choose return-if then branch must not perform statements' function_return_if_statement
+    expect_check_failure examples/failures/source_local_binding_process_ref.str \
+        'source-local binding worker_local must use a declared record, enum, scalar, list, or map type' source_local_binding_process_ref
+    expect_check_failure examples/failures/source_local_binding_process_ref_carrier_enum.str \
+        'source-local binding copy must use a declared record, enum, scalar, list, or map type without process-reference authority' source_local_binding_process_ref_carrier_enum
+    expect_check_failure examples/failures/source_local_binding_process_ref_shadow.str \
+        'source-local binding worker conflicts with a process reference binding' source_local_binding_process_ref_shadow
+    expect_check_failure examples/failures/source_function_parameter_process_ref_shadow.str \
+        'source function parameter worker conflicts with a process reference binding' source_function_parameter_process_ref_shadow
+    expect_check_failure examples/failures/process_return_match_arm_nested_for.str \
+        'nested for loops are not supported' process_return_match_arm_nested_for
+    expect_check_failure examples/failures/process_return_match_arm_excessive_if.str \
+        'statement-level if action nesting exceeds maximum depth' process_return_match_arm_excessive_if
+    expect_check_failure examples/failures/process_return_match_arm_final_if_excessive_if.str \
+        'statement-level if action nesting exceeds maximum depth' process_return_match_arm_final_if_excessive_if
+    expect_check_failure examples/failures/scalar_overflow.str \
+        'scalar arithmetic result 256 is outside U8 range' scalar_overflow
+    expect_check_failure examples/failures/scalar_type_mismatch.str \
+        'scalar literal 2_u64 has type U64, expected U32' scalar_type_mismatch
+    expect_check_failure examples/failures/scalar_divide_by_zero.str \
+        'scalar division by zero' scalar_divide_by_zero
     rm -f target/strata/scalar_runtime_divide_by_zero.mta target/strata/scalar_runtime_modulo_by_zero.mta
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_runtime_divide_by_zero.str 2>"$scalar_runtime_stderr"; then echo "Error: scalar_runtime_divide_by_zero was expected to fail scalar divide-by-zero checks." >&2; exit 1; fi
-    if ! grep -q 'scalar division by zero' "$scalar_runtime_stderr"; then echo "Error: scalar_runtime_divide_by_zero failed for an unexpected reason." >&2; cat "$scalar_runtime_stderr" >&2; exit 1; fi
+    expect_check_failure examples/failures/scalar_runtime_divide_by_zero.str \
+        'scalar division by zero' scalar_runtime_divide_by_zero
     test ! -f target/strata/scalar_runtime_divide_by_zero.mta
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_runtime_modulo_by_zero.str 2>"$scalar_runtime_stderr"; then echo "Error: scalar_runtime_modulo_by_zero was expected to fail scalar modulo-by-zero checks." >&2; exit 1; fi
-    if ! grep -q 'scalar modulo by zero' "$scalar_runtime_stderr"; then echo "Error: scalar_runtime_modulo_by_zero failed for an unexpected reason." >&2; cat "$scalar_runtime_stderr" >&2; exit 1; fi
+    expect_check_failure examples/failures/scalar_runtime_modulo_by_zero.str \
+        'scalar modulo by zero' scalar_runtime_modulo_by_zero
     test ! -f target/strata/scalar_runtime_modulo_by_zero.mta
-    if cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/failures/scalar_unsuffixed_literal.str 2>"$scalar_unsuffixed_stderr"; then
-        echo "Error: scalar_unsuffixed_literal was expected to fail scalar literal parsing." >&2
-        exit 1
-    fi
-    if ! grep -q 'numeric value literals require an explicit scalar suffix' "$scalar_unsuffixed_stderr"; then
-        echo "Error: scalar_unsuffixed_literal failed for an unexpected reason." >&2
-        cat "$scalar_unsuffixed_stderr" >&2
-        exit 1
-    fi
+    expect_check_failure examples/failures/scalar_unsuffixed_literal.str \
+        'numeric value literals require an explicit scalar suffix' scalar_unsuffixed_literal
 
     rm -f "$trace"
-    if cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta 2>"$run_stderr"; then
+    run_output=""
+    if run_output="$("${cargo_run[@]}" -p mantle-runtime --bin mantle -- run target/strata/actor_panic_no_replay.mta 2>&1)"; then
         echo "Error: actor_panic_no_replay was expected to fail closed." >&2
         exit 1
     fi
-    if ! grep -q 'mantle: error: process Worker panicked after consuming message Ping; message will not be replayed' "$run_stderr"; then
+    if [[ "$run_output" != *'mantle: error: process Worker panicked after consuming message Ping; message will not be replayed'* ]]; then
         echo "Error: actor_panic_no_replay failed for an unexpected reason." >&2
-        cat "$run_stderr" >&2
+        printf '%s\n' "$run_output" >&2
         exit 1
     fi
 
@@ -564,6 +385,7 @@ install-linux-metadata-tools:
 install-docs-tools:
     rustup toolchain install {{stable_toolchain}} --profile minimal
     cargo +{{stable_toolchain}} install mdbook --version {{mdbook_version}} --locked --target-dir target/cargo-install
+    cargo +{{stable_toolchain}} install mdbook-mermaid --version {{mdbook_mermaid_version}} --locked --target-dir target/cargo-install
 
 install-cfg-check-targets:
     rustup target add --toolchain {{stable_toolchain}} {{cfg_check_targets}}
@@ -588,29 +410,22 @@ fuzz-lint:
     cargo +{{nightly_toolchain}} clippy --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings
 
 fuzz-build:
-    cargo +{{nightly_toolchain}} fuzz build strata_parse_check_lower
-    cargo +{{nightly_toolchain}} fuzz build mantle_artifact_decode
-    cargo +{{nightly_toolchain}} fuzz build mantle_runtime_from_source
+    for target in {{fuzz_targets}}; do cargo +{{nightly_toolchain}} fuzz build "$target"; done
 
 fuzz-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    copy_seed_inputs() {
-        local corpus_dir="$1"
-        local seed_dir="$2"
+    targets=( {{fuzz_smoke_targets}} )
+    for target_spec in "${targets[@]}"; do
+        target="${target_spec%%:*}"
+        runs="${target_spec##*:}"
+        corpus_dir="fuzz/corpus/$target"
+        seed_dir="fuzz/seeds/$target"
 
         mkdir -p "$corpus_dir"
-        find "$seed_dir" -maxdepth 1 -type f -exec cp -f {} "$corpus_dir"/ \;
-    }
-
-    copy_seed_inputs fuzz/corpus/strata_parse_check_lower fuzz/seeds/strata_parse_check_lower
-    copy_seed_inputs fuzz/corpus/mantle_artifact_decode fuzz/seeds/mantle_artifact_decode
-    copy_seed_inputs fuzz/corpus/mantle_runtime_from_source fuzz/seeds/mantle_runtime_from_source
-
-    cargo +{{nightly_toolchain}} fuzz run strata_parse_check_lower fuzz/corpus/strata_parse_check_lower -- -runs=256
-    cargo +{{nightly_toolchain}} fuzz run mantle_artifact_decode fuzz/corpus/mantle_artifact_decode -- -runs=256
-    cargo +{{nightly_toolchain}} fuzz run mantle_runtime_from_source fuzz/corpus/mantle_runtime_from_source -- -runs=128
+        cargo +{{nightly_toolchain}} fuzz run "$target" "$corpus_dir" "$seed_dir" -- -runs="$runs"
+    done
 
 fuzz-ci: fuzz-build fuzz-lint fuzz-smoke
 
@@ -628,6 +443,8 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_uniform_arm_prefix_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_selected_arm_action_block_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_rejects_loaded_spawn_site_target_mismatched_with_authority_before_artifact_loaded
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_spawn_outcome_returns_denied_before_acceptance
 
 miri-ci: miri-setup miri-smoke
 

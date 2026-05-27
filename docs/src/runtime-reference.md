@@ -93,6 +93,8 @@ Step bodies can use a bounded runtime `for` loop over an immutable typed list
 binding:
 
 ```strata
+authority spawn_worker: Cap<Spawn<Worker>>;
+
 fn step(state: BatchState, Batch(items: List<Bool,2>)) -> ProcResult<BatchState> ! [spawn, send] ~ [] @det {
     let worker: ProcessRef<Worker> = spawn Worker;
     for item in items {
@@ -211,7 +213,7 @@ Current process-reference boundaries:
 
 | Surface | Current status |
 | --- | --- |
-| `let worker: ProcessRef<Worker> = spawn Worker;` | Supported as an immutable transition-local binding. The checker resolves the target process before lowering. |
+| `let worker: ProcessRef<Worker> = spawn Worker;` | Supported as an immutable transition-local binding when the process has exact `Cap<Spawn<Worker>>` authority. The checker resolves the target process before lowering. |
 | `send worker Ping;` | Supported for a process reference spawned earlier in the same transition. Lowering emits a process-reference table ID. |
 | `enum WorkerMsg { Work(ProcessRef<Sink>) }` | Supported only as a direct message payload type. |
 | `send worker Work(sink);` and `send reply_to Done;` | Supported for direct process-reference payload forwarding. Mantle routes by checked target process ID and runtime process ID. |
@@ -296,14 +298,19 @@ the returned state because the initial state lowers to one static state ID.
 
 ## Effects
 
-The `! [...]` effect list is source-level authority for the runtime effects used
-by each `step` clause. It must exactly match the clause actions. For a
+The `! [...]` effect list is exact source-level effect usage for each `step`
+clause. It must exactly match the clause actions. For a
 `match msg`, `match state`, or `step return match` step, the one effect list
 applies to every generated transition. Match-body arms must use exactly those
 effects. A return-match uniform prefix lowers the same actions onto each
 selected transition, and selected-arm prefixes must still leave every generated
 transition with exactly the declared effects. Missing, duplicate, and unused
 declared effects are rejected before lowering.
+
+Dynamic local process creation also requires a process-local typed authority
+declaration such as `authority spawn_worker: Cap<Spawn<Worker>>;`. The
+`! [spawn]` effect proves that the transition uses spawning; it does not prove
+which process may be spawned.
 
 | Effect | Statement |
 | --- | --- |
@@ -313,6 +320,33 @@ declared effects are rejected before lowering.
 
 `init` cannot perform statements in the buildable surface and therefore uses an
 empty effect list.
+
+## Authority Inspection
+
+Authority inspection is an optional tooling surface. It does not run during
+normal check, build, or run commands, and it does not write a report file.
+
+The source-side command checks Strata source and prints the checked process
+authorities and spawn-site classifications before lowering:
+
+```sh
+just strata-authority-summary examples/actor_emit_spawn_send.str
+just strata-authority-summary examples/actor_emit_spawn_send.str json
+```
+
+The artifact-side command admits a Mantle Target Artifact and prints the
+artifact authority and spawn-site tables without executing the program:
+
+```sh
+just strata-build examples/actor_emit_spawn_send.str
+just mantle-inspect-authority target/strata/actor_emit_spawn_send.mta
+just mantle-inspect-authority target/strata/actor_emit_spawn_send.mta json
+```
+
+Text output is intended for local review. JSON output is deterministic and uses
+typed process IDs, authority IDs, capability descriptors, and spawn-site IDs so
+CI and audit tooling can compare the source-side and artifact-side authority
+surfaces. Process and authority labels are included only as metadata.
 
 ## Step Patterns
 
@@ -537,10 +571,11 @@ it does not turn that authority into storable source state.
 
 For local spawn outcomes, accepted spawns commit the new process and return
 `Ok(process_ref)` with a typed `ProcessRef<TargetProcess>` payload. If process
-capacity is exhausted before the spawn is accepted, Mantle returns
-`Err(Exhausted(Unit))`. Bare statement `send` and `spawn` still fail closed:
-pre-acceptance failure is reported as a runtime error instead of being silently
-dropped.
+authority is denied by the admitted runtime policy before acceptance, Mantle
+returns `Err(Denied(Unit))`. If process capacity is exhausted before the spawn is
+accepted, Mantle returns `Err(Exhausted(Unit))`. Bare statement `send` and
+`spawn` still fail closed: pre-acceptance failure is reported as a runtime error
+instead of being silently dropped.
 
 Outcome values can also drive follow-up effects through ordinary immutable
 branching:
@@ -565,11 +600,13 @@ process-reference identities from `Ok(process_ref)` spawn outcomes.
 
 `examples/effect_outcome_mailbox_full.str` and
 `examples/effect_outcome_stopped_target.str` exercise source-to-runtime
-pre-acceptance failure outcomes. Direct Mantle runtime tests exercise
-`Crashed(M)` for targets already failed before acceptance, and admission tests
-cover the required `MailboxClosed(M)` send-error shape. A source-created
-`Panic(...)` currently records failure evidence and fails the run before a later
-source sender can observe that crashed target.
+pre-acceptance send failure outcomes. `examples/effect_outcome_spawn_denied.str`
+checks and builds an authorized local spawn site, then runs Mantle with denied
+spawn admission to observe `Err(Denied(Unit))` before process acceptance. Direct
+Mantle runtime tests exercise `Crashed(M)` for targets already failed before
+acceptance, and admission tests cover the required `MailboxClosed(M)` send-error
+shape. A source-created `Panic(...)` currently records failure evidence and
+fails the run before a later source sender can observe that crashed target.
 
 Current pattern-matching closure boundaries:
 

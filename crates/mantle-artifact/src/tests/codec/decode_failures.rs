@@ -117,6 +117,38 @@ fn decode_reports_unknown_fields() {
 }
 
 #[test]
+fn decode_rejects_unknown_spawn_authority_kind() {
+    let encoded = valid_artifact().encode().replace(
+        "process.0.authority.0.kind=spawn",
+        "process.0.authority.0.kind=ambient",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unknown authority kind should fail");
+
+    assert!(
+        err.to_string()
+            .contains("invalid process.0.authority.0.kind value \"ambient\""),
+        "{err}"
+    );
+}
+
+#[test]
+fn decode_rejects_unknown_spawn_site_kind() {
+    let encoded = valid_artifact().encode().replace(
+        "process.0.spawn_site.0.kind=dynamic_local",
+        "process.0.spawn_site.0.kind=remote",
+    );
+
+    let err = MantleArtifact::decode(&encoded).expect_err("unknown spawn site kind should fail");
+
+    assert!(
+        err.to_string()
+            .contains("invalid spawn_kind value \"remote\""),
+        "{err}"
+    );
+}
+
+#[test]
 fn decode_reports_artifact_value_field_context() {
     let encoded = valid_artifact().encode().replace(
         "process.0.state_value.0.value=MainState",

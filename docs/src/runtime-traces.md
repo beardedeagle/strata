@@ -51,6 +51,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 | --- | --- |
 | `artifact_loaded` | Mantle admits an artifact and loads its entry metadata. |
 | `process_spawned` | Mantle creates a runtime process instance. |
+| `spawn_authority_checked` | Mantle checked an admitted spawn-site authority before spawn acceptance. |
 | `message_accepted` | Mantle accepts a message into a process mailbox. |
 | `message_dequeued` | A process dequeued a message for handling. |
 | `branch_selected` | Mantle selected a typed runtime control-flow branch. |
@@ -68,7 +69,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"2","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"1","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -87,6 +88,19 @@ Example shape:
 
 `pid` is the runtime process instance. `process_id` is the admitted process
 definition. `spawned_by_pid` is present when another process spawned this one.
+
+## Spawn Authority Checked
+
+Example shape:
+
+```json
+{"event":"spawn_authority_checked","pid":1,"process_id":0,"process":"Main","target_process_id":1,"spawn_site_id":0,"authority_id":0,"spawn_kind":"dynamic_local","authority_result":"accepted"}
+```
+
+`spawn_site_id` and `authority_id` are admitted typed table IDs. `spawn_kind`
+currently records `dynamic_local`. `authority_result` is `accepted` or
+`denied`; a denied spawn outcome returns `Err(Denied(Unit))` before the target
+process is accepted.
 
 ## Message Accepted And Dequeued
 

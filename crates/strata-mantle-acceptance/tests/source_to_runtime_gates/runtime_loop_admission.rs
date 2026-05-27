@@ -204,6 +204,9 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+    authority spawn_sink: Cap<Spawn<Sink>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }
@@ -219,6 +222,8 @@ proc Main mailbox bounded(1) {
 proc Worker mailbox bounded(1) {
     type State = WorkerState;
     type Msg = WorkerMsg;
+
+    authority spawn_hub: Cap<Spawn<Hub>>;
 
     fn init() -> WorkerState ! [] ~ [] @det {
         return Holding(List<Bool,2>[True, False]);

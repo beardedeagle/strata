@@ -19,11 +19,13 @@ pub(super) fn decode_action(
         "spawn" => Ok(ArtifactAction::Spawn {
             target: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
             process_ref: fields.take_process_ref_id(&format!("{action_prefix}.process_ref"))?,
+            spawn_site: fields.take_spawn_site_id(&format!("{action_prefix}.spawn_site"))?,
         }),
         "spawn_outcome" => Ok(ArtifactAction::SpawnOutcome {
             outcome: fields.take_effect_outcome_id(&format!("{action_prefix}.outcome"))?,
             outcome_ty: fields.take_type_id(&format!("{action_prefix}.outcome_type_id"))?,
             target: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
+            spawn_site: fields.take_spawn_site_id(&format!("{action_prefix}.spawn_site"))?,
         }),
         "send" => {
             let target = decode_send_target(fields, action_prefix)?;

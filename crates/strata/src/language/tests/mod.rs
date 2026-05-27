@@ -37,6 +37,7 @@ mod source_function_record_patterns;
 mod source_scalar_bounded;
 mod source_scalar_values;
 mod source_value_equality;
+mod spawn_authority;
 mod state_match_payload_split;
 mod state_match_success;
 mod state_match_validation;

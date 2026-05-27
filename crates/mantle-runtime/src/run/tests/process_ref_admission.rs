@@ -11,6 +11,7 @@ fn runtime_rejects_loaded_spawn_target_mismatch_before_artifact_loaded() {
         .push(LoadedAction::Spawn {
             target: ProcessId::new(0),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         });
 
     assert_loaded_admission_rejects_before_artifact_loaded(
@@ -43,6 +44,7 @@ fn runtime_rejects_loaded_send_before_spawn_before_artifact_loaded() {
 fn runtime_rejects_loaded_send_missing_payload_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    grant_loaded_main_spawn_authority(&mut program);
     program.processes[1].message_variants[0].payload_type = Some(JOB);
     align_loaded_process_message_type(&mut program, 1);
     program.processes[0].transitions[0].effect_authority =
@@ -54,6 +56,7 @@ fn runtime_rejects_loaded_send_missing_payload_before_artifact_loaded() {
         LoadedAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -72,6 +75,7 @@ fn runtime_rejects_loaded_send_missing_payload_before_artifact_loaded() {
 fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    grant_loaded_main_spawn_authority(&mut program);
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
     align_loaded_process_message_type(&mut program, 1);
     program.processes[0].transitions[0].effect_authority =
@@ -83,6 +87,7 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
         LoadedAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -105,6 +110,7 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
 fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    grant_loaded_main_spawn_authority(&mut program);
     program.types[BOX.index()] = box_record_type("reply_to", MAIN_STATE);
     program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_WORKER);
     align_loaded_process_message_type(&mut program, 1);
@@ -117,6 +123,7 @@ fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded()
         LoadedAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),

@@ -1,7 +1,9 @@
+mod authority;
 mod init;
 mod message_cases;
 mod outputs;
 mod payload_patterns;
+mod preflight;
 mod source_functions;
 mod state_space;
 mod static_validation;
@@ -12,9 +14,8 @@ mod types;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mantle_artifact::{
-    ArtifactValue, MAX_ACTIONS_PER_PROCESS, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
-    MapProjectionMode,
+    ArtifactValue, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS, MapProjectionMode,
 };
 
 use super::ast::{
@@ -32,12 +33,18 @@ use super::checked::{
     CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeRef,
     CheckedValueTemplate, checked_action_count,
 };
+pub(in crate::language::checker) use super::checked::{
+    CheckedCapabilityDescriptor, CheckedSpawnSite,
+};
 use super::diagnostic::{Error, Result};
 use super::{LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
+pub(in crate::language::checker) use authority::{AuthorityBinding, SpawnSiteAllocator};
+use authority::{collect_authorities, validate_authority_usage};
 use init::check_init;
 use message_cases::{DiscoveredMessageCase, MessageCaseTable};
 use outputs::OutputPool;
 pub(in crate::language::checker) use payload_patterns::*;
+use preflight::{validate_enum_variant_counts, validate_process_declarations_before_message_cases};
 use source_functions::{
     check_source_value_type, resolve_source_value_expr, validate_source_function_declarations,
 };
@@ -47,7 +54,7 @@ use state_space::{
     source_value_uses_binding,
 };
 use static_validation::validate_action_references;
-use steps::{check_step, check_step_shape, pattern_binding_subject, validate_pattern_binding_name};
+use steps::{check_step, pattern_binding_subject, validate_pattern_binding_name};
 use symbols::{CollectionType, SemanticIndex};
 use types::CheckedTypeInterner;
 
@@ -82,6 +89,7 @@ struct StepCheckContext<'a> {
     process_id: CheckedProcessId,
     semantic_index: &'a SemanticIndex,
     process_ref_index: &'a BTreeMap<Identifier, ProcessRefBinding>,
+    authority_index: &'a BTreeMap<Identifier, AuthorityBinding>,
     message_cases: &'a MessageCaseTable,
 }
 
@@ -493,7 +501,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         .process_id_by_name("Main")
         .map_err(|_| Error::new("entry process Main is not declared"))?;
     validate_source_function_declarations(&module, &semantic_index)?;
-    validate_process_declarations_before_message_cases(&module, &semantic_index)?;
+    validate_process_declarations_before_message_cases(&module, &semantic_index, entry_process)?;
     let message_cases =
         MessageCaseTable::build(&module, entry_process, &semantic_index, &mut types)?;
     let mut outputs = OutputPool::new();
@@ -539,52 +547,6 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     }))
 }
 
-fn validate_enum_variant_counts(module: &Module) -> Result<()> {
-    for enum_decl in &module.enums {
-        validate_count(
-            &format!("enum {} variant_count", enum_decl.name),
-            enum_decl.variants.len(),
-            0,
-            MAX_ENUM_VARIANTS_PER_TYPE,
-        )?;
-    }
-    Ok(())
-}
-
-fn validate_process_declarations_before_message_cases(
-    module: &Module,
-    semantic_index: &SemanticIndex,
-) -> Result<()> {
-    let mut validation_types = CheckedTypeInterner::new(module, semantic_index);
-    for (process_index, process) in module.processes.iter().enumerate() {
-        validate_count(
-            &format!("process {} mailbox_bound", process.name),
-            process.mailbox_bound,
-            1,
-            MAX_MAILBOX_BOUND,
-        )?;
-        let msg_enum = semantic_index.enum_decl(module, &process.msg_type)?;
-        if msg_enum.variants.is_empty() {
-            return Err(Error::new(format!(
-                "enum {} must declare at least one variant",
-                msg_enum.name
-            )));
-        }
-        validate_count(
-            &format!("process {} message_count", process.name),
-            msg_enum.variants.len(),
-            1,
-            MAX_MESSAGE_VARIANTS_PER_PROCESS,
-        )?;
-        let _ = StateSpace::new(module, semantic_index, process, &mut validation_types)?;
-        let process_id = CheckedProcessId::from_index(process_index)?;
-        for step in &process.steps {
-            check_step_shape(module, process, process_id, semantic_index, step)?;
-        }
-    }
-    Ok(())
-}
-
 fn check_process<'a>(
     context: &ModuleCheckContext<'a>,
     process: &'a Process,
@@ -620,6 +582,12 @@ fn check_process<'a>(
         1,
         MAX_MESSAGE_VARIANTS_PER_PROCESS,
     )?;
+    let (authorities, authority_index) = collect_authorities(
+        context.module,
+        context.semantic_index,
+        process,
+        context.entry_process,
+    )?;
 
     let mut state_space = StateSpace::new(context.module, context.semantic_index, process, types)?;
     let init_state = check_init(
@@ -637,21 +605,31 @@ fn check_process<'a>(
         semantic_index: context.semantic_index,
         message_cases: context.message_cases,
     };
-    let (process_refs, transitions) =
-        check_step(&process_context, &mut state_space, outputs, types)?;
+    let (process_refs, spawn_sites, transitions) = check_step(
+        &process_context,
+        &authority_index,
+        &mut state_space,
+        outputs,
+        types,
+    )?;
+    validate_authority_usage(process, &authorities, &spawn_sites)?;
     let state_values = state_space.into_values()?;
 
-    Ok(CheckedProcess::new(CheckedProcessParts {
-        debug_name: process.name.clone(),
-        state_type: types.intern(&process.state_type)?,
-        state_values,
-        message_type: types.intern(&process.msg_type)?,
-        message_cases: context.message_cases.cases_for(process_id)?.to_vec(),
-        process_refs,
-        mailbox_bound: process.mailbox_bound,
-        init_state,
-        transitions,
-    }))
+    Ok(CheckedProcess::with_authority(
+        CheckedProcessParts {
+            debug_name: process.name.clone(),
+            state_type: types.intern(&process.state_type)?,
+            state_values,
+            message_type: types.intern(&process.msg_type)?,
+            message_cases: context.message_cases.cases_for(process_id)?.to_vec(),
+            process_refs,
+            mailbox_bound: process.mailbox_bound,
+            init_state,
+            transitions,
+        },
+        authorities,
+        spawn_sites,
+    ))
 }
 
 fn reject_payload_entry_message(

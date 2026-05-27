@@ -1,20 +1,22 @@
 use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactEffect, ArtifactEnumVariant,
-    ArtifactLoopElement, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-    ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactSendTarget,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority,
+    ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement,
+    ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactScalarArithmeticOperator,
+    ArtifactScalarOrderingOperator, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
     ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind,
     ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
-    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId,
     EffectOutcomeId, EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId,
-    ProcessId, ProcessRefId, StateId, StepResult, TypeId, source_hash_fnv1a64,
+    ProcessId, ProcessRefId, SpawnSiteId, StateId, StepResult, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
 use super::checked::{
-    CheckedAction, CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId,
-    CheckedMessageCase, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedPayloadValue,
-    CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram,
-    CheckedScalarArithmeticOperator, CheckedScalarOrderingOperator, CheckedSendTarget,
+    CheckedAction, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedEffectOutcomeId,
+    CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageCase, CheckedMessageId,
+    CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId,
+    CheckedProcessRefId, CheckedProgram, CheckedScalarArithmeticOperator,
+    CheckedScalarOrderingOperator, CheckedSendTarget, CheckedSpawnKind, CheckedSpawnSiteId,
     CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId,
     CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
     CheckedValueShape, CheckedValueTemplate,
@@ -162,6 +164,23 @@ fn lower_process(
             .iter()
             .map(|message| lower_message_variant(message, types))
             .collect::<mantle_artifact::Result<Vec<_>>>()?,
+        authorities: process
+            .authorities()
+            .iter()
+            .map(|authority| ArtifactAuthority {
+                debug_name: authority.debug_name().to_string(),
+                descriptor: lower_capability_descriptor(authority.descriptor()),
+            })
+            .collect(),
+        spawn_sites: process
+            .spawn_sites()
+            .iter()
+            .map(|spawn_site| ArtifactSpawnSite {
+                target: lower_process_id(spawn_site.target()),
+                authority: lower_authority_id(spawn_site.authority()),
+                kind: lower_spawn_kind(spawn_site.kind()),
+            })
+            .collect(),
         process_refs: process
             .process_refs()
             .iter()
@@ -238,18 +257,22 @@ fn lower_action(
         CheckedAction::Spawn {
             target,
             process_ref,
+            spawn_site,
         } => Ok(ArtifactAction::Spawn {
             target: lower_process_id(*target),
             process_ref: lower_process_ref_id(*process_ref),
+            spawn_site: lower_spawn_site_id(*spawn_site),
         }),
         CheckedAction::SpawnOutcome {
             outcome,
             outcome_ty,
             target,
+            spawn_site,
         } => Ok(ArtifactAction::SpawnOutcome {
             outcome: lower_effect_outcome_id(*outcome),
             outcome_ty: types.artifact_id(outcome_ty)?,
             target: lower_process_id(*target),
+            spawn_site: lower_spawn_site_id(*spawn_site),
         }),
         CheckedAction::Send {
             target,
@@ -655,8 +678,32 @@ fn lower_process_id(id: CheckedProcessId) -> ProcessId {
     ProcessId::new(id.as_u32())
 }
 
+fn lower_capability_descriptor(
+    descriptor: CheckedCapabilityDescriptor,
+) -> ArtifactCapabilityDescriptor {
+    match descriptor {
+        CheckedCapabilityDescriptor::Spawn { target } => ArtifactCapabilityDescriptor::Spawn {
+            target: lower_process_id(target),
+        },
+    }
+}
+
+fn lower_spawn_kind(kind: CheckedSpawnKind) -> ArtifactSpawnKind {
+    match kind {
+        CheckedSpawnKind::DynamicLocal => ArtifactSpawnKind::DynamicLocal,
+    }
+}
+
 fn lower_type_id(id: CheckedTypeId) -> TypeId {
     TypeId::new(id.as_u32())
+}
+
+fn lower_authority_id(id: CheckedAuthorityId) -> AuthorityId {
+    AuthorityId::new(id.as_u32())
+}
+
+fn lower_spawn_site_id(id: CheckedSpawnSiteId) -> SpawnSiteId {
+    SpawnSiteId::new(id.as_u32())
 }
 
 fn lower_process_ref_id(id: CheckedProcessRefId) -> ProcessRefId {

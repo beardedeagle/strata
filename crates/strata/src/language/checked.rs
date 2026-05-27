@@ -4,13 +4,14 @@ mod templates;
 mod types;
 
 pub(in crate::language) use ids::{
-    CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageId,
-    CheckedMessageVariantId, CheckedOutputId, CheckedProcessId, CheckedProcessRefId,
-    CheckedStateId, CheckedTypeId,
+    CheckedAuthorityId, CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId,
+    CheckedMessageId, CheckedMessageVariantId, CheckedOutputId, CheckedProcessId,
+    CheckedProcessRefId, CheckedSpawnSiteId, CheckedStateId, CheckedTypeId,
 };
 pub(in crate::language) use process::{
-    CheckedAction, CheckedLoopElement, CheckedMessageCase, CheckedProcess, CheckedProcessParts,
-    CheckedProcessRef, CheckedSendTarget, CheckedStepResult, CheckedTransition,
+    CheckedAction, CheckedAuthority, CheckedCapabilityDescriptor, CheckedLoopElement,
+    CheckedMessageCase, CheckedProcess, CheckedProcessParts, CheckedProcessRef, CheckedSendTarget,
+    CheckedSpawnKind, CheckedSpawnSite, CheckedStepResult, CheckedTransition,
     CheckedTransitionParts, checked_action_count,
 };
 pub(in crate::language) use templates::{

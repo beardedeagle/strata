@@ -10,6 +10,7 @@ fn artifact_round_trips_for_each_control_flow() {
         ArtifactAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_WORKER_SITE,
         },
         ArtifactAction::ForEach {
             element: ArtifactLoopElement {
@@ -55,6 +56,7 @@ fn admission_rejects_direct_process_ref_payload_inside_for_each_loop_body() {
         ArtifactAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_WORKER_SITE,
         },
         ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -114,6 +116,7 @@ fn admission_accepts_if_else_inside_for_each_loop_body() {
         ArtifactAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_WORKER_SITE,
         },
         ArtifactAction::ForEach {
             element: ArtifactLoopElement {
@@ -304,6 +307,8 @@ fn admission_accepts_one_empty_if_else_branch_inside_for_each_loop_body() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
     let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
+    artifact.processes[0].authorities = Vec::new();
+    artifact.processes[0].spawn_sites = Vec::new();
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::ForEach {
         element: ArtifactLoopElement {
@@ -416,6 +421,7 @@ fn admission_rejects_inactive_for_each_loop_element_payload() {
         ArtifactAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_WORKER_SITE,
         },
         ArtifactAction::ForEach {
             element: ArtifactLoopElement {

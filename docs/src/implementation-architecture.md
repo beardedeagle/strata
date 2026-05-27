@@ -17,15 +17,18 @@ required for writing simple Strata programs.
 
 ## Source Path
 
-```text
-source text
-  -> lexer
-  -> parser
-  -> AST
-  -> semantic checker
-  -> checked IR
-  -> lowering
-  -> Mantle Target Artifact
+```mermaid
+flowchart LR
+    Source["source text"]
+    Lexer["lexer"]
+    Parser["parser"]
+    Ast["AST"]
+    Checker["semantic checker"]
+    Checked["checked IR"]
+    Lowering["lowering"]
+    Artifact["Mantle Target Artifact"]
+
+    Source --> Lexer --> Parser --> Ast --> Checker --> Checked --> Lowering --> Artifact
 ```
 
 The parser accepts source shape. The checker assigns source-visible meaning,
@@ -37,16 +40,19 @@ process, message, state, output, and type IDs to artifact IDs.
 
 ## Runtime Path
 
-```text
-artifact text
-  -> decode
-  -> validate
-  -> load typed runtime tables
-  -> spawn Main
-  -> deliver entry message
-  -> dispatch by message ID
-  -> execute actions by typed process references and IDs
-  -> write JSONL trace
+```mermaid
+flowchart LR
+    Artifact["artifact text"]
+    Decode["decode"]
+    Validate["validate"]
+    Load["load typed runtime tables"]
+    Spawn["spawn Main"]
+    Deliver["deliver entry message"]
+    Dispatch["dispatch by message ID"]
+    Execute["execute typed actions"]
+    Trace["write JSONL trace"]
+
+    Artifact --> Decode --> Validate --> Load --> Spawn --> Deliver --> Dispatch --> Execute --> Trace
 ```
 
 Mantle must validate artifacts before execution. Runtime dispatch uses loaded
@@ -80,6 +86,29 @@ Mantle owns:
 Workspace source-to-runtime acceptance gates own the cross-boundary proof that a
 Strata program can be checked, lowered, admitted by Mantle, executed, and
 traced.
+
+```mermaid
+flowchart LR
+    subgraph Strata["Strata frontend"]
+        Syntax["source syntax"]
+        Check["semantic checking"]
+        Ir["checked IR"]
+    end
+
+    subgraph Lower["Lowering boundary"]
+        Map["typed ID mapping"]
+        Mta["Mantle Target Artifact"]
+    end
+
+    subgraph Mantle["Mantle runtime"]
+        Admit["artifact admission"]
+        Tables["loaded typed tables"]
+        Exec["runtime execution"]
+        Obs["observability"]
+    end
+
+    Syntax --> Check --> Ir --> Map --> Mta --> Admit --> Tables --> Exec --> Obs
+```
 
 Do not move source-only assumptions into Mantle as trusted runtime behavior.
 Do not make Mantle dispatch through labels that exist only for diagnostics or
@@ -164,6 +193,7 @@ The runnable examples are:
 - `examples/nested_patterns.str`;
 - `examples/actor_reply.str`;
 - `examples/actor_emit_spawn_send.str`;
+- `examples/effect_outcome_spawn_denied.str`;
 - `examples/actor_panic_no_replay.str`.
 
 The integration tests rooted at

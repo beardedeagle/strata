@@ -127,6 +127,39 @@ fn effect_outcomes_check_build_run_and_return_stopped_target_before_acceptance()
 }
 
 #[test]
+fn effect_outcomes_check_build_run_and_return_denied_before_spawn_acceptance() {
+    let gate = GateHarness::new();
+    gate.check("examples/effect_outcome_spawn_denied.str");
+    gate.build(
+        "examples/effect_outcome_spawn_denied.str",
+        "target/strata/effect_outcome_spawn_denied.mta",
+    );
+    gate.remove_trace("effect_outcome_spawn_denied");
+
+    let run = gate.run_mantle_success_with_args(
+        "target/strata/effect_outcome_spawn_denied.mta",
+        &["--deny-spawn-authority"],
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("spawn denied"));
+    assert!(!stdout.contains("mantle: spawned Worker pid=2"));
+
+    let trace = gate.read_trace("effect_outcome_spawn_denied");
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"spawn_authority_checked""#,
+            r#""target_process_id":1"#,
+            r#""spawn_site_id":0"#,
+            r#""authority_id":0"#,
+            r#""spawn_kind":"dynamic_local""#,
+            r#""authority_result":"denied""#,
+        ],
+    );
+    assert!(!trace.contains(r#""event":"process_spawned","pid":2"#));
+}
+
+#[test]
 fn effect_outcomes_check_build_and_fail_closed_when_source_creates_crashed_target() {
     let gate = GateHarness::new();
     gate.check("examples/effect_outcome_crashed_target.str");

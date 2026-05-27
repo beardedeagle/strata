@@ -160,6 +160,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::RUNTIME,
     },
     ProofDomain {
+        id: "local-spawn-authority",
+        title: "Local spawn authority and Mantle admission",
+        feature_ids: &["local-spawn-authority"],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "typed-direct-process-ref-authority",
         title: "Typed direct ProcessRef authority",
         feature_ids: &["direct-process-ref-authority"],

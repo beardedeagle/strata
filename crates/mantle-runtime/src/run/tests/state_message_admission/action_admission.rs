@@ -114,6 +114,7 @@ fn runtime_rejects_loaded_spawn_inside_runtime_if_branch_before_artifact_loaded(
         then_actions: vec![LoadedAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         }],
         else_actions: Vec::new(),
     }];
@@ -195,6 +196,7 @@ fn runtime_rejects_loaded_spawn_inside_runtime_if_branch_loop_before_artifact_lo
             body: vec![LoadedAction::Spawn {
                 target: ProcessId::new(1),
                 process_ref: ProcessRefId::new(0),
+                spawn_site: SPAWN_SITE,
             }],
         }],
         else_actions: Vec::new(),

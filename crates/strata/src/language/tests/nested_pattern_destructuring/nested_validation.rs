@@ -17,6 +17,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }
@@ -115,6 +117,8 @@ enum WorkerMsg { Envelope(Routed) }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;

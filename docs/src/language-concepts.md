@@ -34,6 +34,28 @@ Mantle runtime is where admitted execution lives:
 The two surfaces are related, but not interchangeable. Source labels are useful
 for diagnostics and traces. Runtime dispatch uses loaded typed IDs.
 
+```mermaid
+flowchart TB
+    subgraph Source["Strata source surface"]
+        Records["records and enums"]
+        Functions["pure functions"]
+        Processes["process declarations"]
+        Effects["declared effects"]
+    end
+
+    subgraph Runtime["Mantle runtime surface"]
+        Instances["process instances"]
+        Mailboxes["bounded mailboxes"]
+        Ids["loaded typed IDs"]
+        Events["runtime events"]
+    end
+
+    Source -->|"checked and lowered"| Runtime
+    Records -. diagnostics .-> Events
+    Processes -. trace metadata .-> Events
+    Ids --> Events
+```
+
 ## Processes
 
 A Strata program is organized around processes. A process declares:
@@ -52,12 +74,15 @@ Spawning a process creates a runtime process instance and binds it to an
 immutable typed process reference value:
 
 ```strata
+authority spawn_worker: Cap<Spawn<Worker>>;
+
 let worker: ProcessRef<Worker> = spawn Worker;
 ```
 
-The reference is local to the transition that spawned it. Multiple references
-may target the same process definition, which creates multiple runtime
-instances.
+The authority declaration is process-local, exact for the target process, and
+must be used by a local spawn site. The reference is local to the transition that
+spawned it. Multiple references may target the same process definition, which
+creates multiple runtime instances.
 
 ## Messages
 
@@ -150,7 +175,8 @@ Effects must be visible in the function signature. The effects are:
 - `send`.
 
 The declared effect list must exactly match the effects used by each `step`
-clause.
+clause. For `spawn`, the effect list is separate from the typed
+`Cap<Spawn<Target>>` authority descriptor.
 
 ```strata
 fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
@@ -190,8 +216,15 @@ accepted buildable programs are deterministic.
 
 The source-to-runtime path is:
 
-```text
-.str source -> parse -> check -> lower -> .mta artifact -> admit -> run -> trace
+```mermaid
+flowchart LR
+    Source[".str source"] --> Parse["parse"]
+    Parse --> Check["check"]
+    Check --> Lower["lower"]
+    Lower --> Artifact[".mta artifact"]
+    Artifact --> Admit["admit"]
+    Admit --> Run["run"]
+    Run --> Trace["trace"]
 ```
 
 Each phase has a different responsibility. Parser success alone does not mean a

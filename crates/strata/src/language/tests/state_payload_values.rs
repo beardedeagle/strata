@@ -144,6 +144,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }
@@ -158,6 +160,8 @@ proc Main mailbox bounded(1) {
 proc Worker mailbox bounded(1) {
     type State = WorkerState;
     type Msg = WorkerMsg;
+
+    authority spawn_sink: Cap<Spawn<Sink>>;
 
     fn init() -> WorkerState ! [] ~ [] @det {
         return Idle;
@@ -231,6 +235,9 @@ enum SinkMsg { Done }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+    authority spawn_sink: Cap<Spawn<Sink>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;

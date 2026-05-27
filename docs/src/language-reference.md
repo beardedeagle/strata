@@ -17,6 +17,7 @@ Mantle artifact internals.
 | Imports | Not available. |
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
+| Local spawn authority | Process-local `authority name: Cap<Spawn<Target>>;` declarations for dynamic local process creation. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Effect outcomes | Immutable step-local `Result` bindings for local `send` and the current local `spawn` success shape. |
 | Scalar values | Fixed-width integer source values `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` with explicit literal suffixes. |
@@ -99,10 +100,11 @@ _
 `mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`, `security`,
 `send`, `spawn`, `type`, and `var` are reserved everywhere identifiers are
 accepted.
-`ProcResult`, `ProcessRef`, `List`, `Map`, `Unit`, `Option`, `Result`,
-`SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and
-`I64` are reserved type names because they name built-in transition,
-process-reference, collection, effect outcome, and scalar value types.
+`ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `List`, `Map`, `Unit`, `Option`,
+`Result`, `SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`,
+`I32`, and `I64` are reserved type names because they name built-in transition,
+process-reference, capability descriptor, collection, effect outcome, and
+scalar value types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
 artifact metadata. Checked process-reference artifact labels under that prefix
 are keyed by resolved process IDs, not source process names.
@@ -237,13 +239,41 @@ creates the crash with `Panic(...)` still fails the run after recording no-repla
 evidence before a later source sender can observe the target as crashed.
 `SpawnError<A>`
 admits `Denied(A)`, `Exhausted(A)`, and
-`BackendUnavailable(A)`; the current local runtime reports exhausted process
-capacity.
+`BackendUnavailable(A)`. The current local runtime reports denied admitted
+authority as `Err(Denied(Unit))` before acceptance and exhausted process capacity
+as `Err(Exhausted(Unit))`.
 
 Bare statement `send` and `spawn` remain fail-closed runtime effects: Mantle
 rejects pre-acceptance delivery and process-limit failures instead of silently
 dropping them. Outcome-form `send` returns the typed failure result before message
 acceptance and commits the message only on `Ok(Unit)`.
+
+## Local Spawn Authority
+
+A process that dynamically creates another local process must declare an exact
+typed spawn capability:
+
+```strata
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        return Stop(state);
+    }
+}
+```
+
+`Cap<Spawn<Worker>>` authorizes only dynamic local creation of `Worker`. A
+capability for another process, a duplicate or unused descriptor, a malformed
+descriptor, a self-targeting capability, or a capability targeting the entry
+process is rejected. The `! [spawn]` effect remains exact effect usage; it does
+not prove spawn authority by itself. After checking,
+authority declarations lower to typed authority IDs and spawn-site IDs. Source
+names remain syntax, diagnostics, and trace metadata.
 
 ## Collections
 

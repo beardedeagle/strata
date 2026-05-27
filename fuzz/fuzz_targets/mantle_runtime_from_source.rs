@@ -1,13 +1,16 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use mantle_runtime::{InMemoryRuntimeHost, RunLimits, run_artifact_with_host};
+use mantle_runtime::{
+    InMemoryRuntimeHost, RunLimits, SpawnAuthorityPolicy, run_artifact_with_host,
+};
 
 const FUZZ_RUN_LIMITS: RunLimits = RunLimits {
     max_dispatches: 128,
     max_runtime_processes: 512,
     max_trace_bytes: 256 * 1024,
     max_emitted_output_bytes: 64 * 1024,
+    spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
 };
 
 fuzz_target!(|data: &[u8]| {

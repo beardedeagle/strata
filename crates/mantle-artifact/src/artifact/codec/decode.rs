@@ -1,6 +1,8 @@
 use super::super::*;
-use crate::MAX_NEXT_STATE_IF_ELSE_DEPTH;
 use crate::fields::ArtifactFields;
+use crate::{
+    MAX_AUTHORITIES_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_SPAWN_SITES_PER_PROCESS,
+};
 
 mod action_decode;
 mod scalar_decode;
@@ -55,6 +57,52 @@ impl MantleArtifact {
                     payload_type: fields.take_optional_type_id(&format!(
                         "{prefix}.message.{message_index}.payload_type_id"
                     ))?,
+                });
+            }
+
+            let authority_count = fields.take_bounded_usize(
+                &format!("{prefix}.authority_count"),
+                0,
+                MAX_AUTHORITIES_PER_PROCESS,
+            )?;
+            let mut authorities = Vec::with_capacity(authority_count);
+            for authority_index in 0..authority_count {
+                let authority_prefix = format!("{prefix}.authority.{authority_index}");
+                let debug_name = fields.take_required(&format!("{authority_prefix}.debug_name"))?;
+                let kind = fields.take_required(&format!("{authority_prefix}.kind"))?;
+                let descriptor = match kind.as_str() {
+                    "spawn" => ArtifactCapabilityDescriptor::Spawn {
+                        target: fields
+                            .take_process_id(&format!("{authority_prefix}.target_process"))?,
+                    },
+                    _ => {
+                        return Err(Error::new(format!(
+                            "invalid {authority_prefix}.kind value {kind:?}"
+                        )));
+                    }
+                };
+                authorities.push(ArtifactAuthority {
+                    debug_name,
+                    descriptor,
+                });
+            }
+
+            let spawn_site_count = fields.take_bounded_usize(
+                &format!("{prefix}.spawn_site_count"),
+                0,
+                MAX_SPAWN_SITES_PER_PROCESS,
+            )?;
+            let mut spawn_sites = Vec::with_capacity(spawn_site_count);
+            for spawn_site_index in 0..spawn_site_count {
+                let spawn_site_prefix = format!("{prefix}.spawn_site.{spawn_site_index}");
+                spawn_sites.push(ArtifactSpawnSite {
+                    target: fields
+                        .take_process_id(&format!("{spawn_site_prefix}.target_process"))?,
+                    authority: fields
+                        .take_authority_id(&format!("{spawn_site_prefix}.authority"))?,
+                    kind: ArtifactSpawnKind::parse(
+                        &fields.take_required(&format!("{spawn_site_prefix}.kind"))?,
+                    )?,
                 });
             }
 
@@ -129,6 +177,8 @@ impl MantleArtifact {
                 state_values,
                 message_type: fields.take_type_id(&format!("{prefix}.message_type_id"))?,
                 message_variants,
+                authorities,
+                spawn_sites,
                 process_refs,
                 mailbox_bound: fields.take_bounded_usize(
                     &format!("{prefix}.mailbox_bound"),

@@ -32,6 +32,7 @@ pub(super) fn checked_actions_for_statements(
     context: &mut StepCheckContext<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
+    spawn_sites: &mut SpawnSiteAllocator,
     loop_elements: &mut LoopElementAllocator,
     input: ActionCheckInput<'_, '_, '_, '_>,
     statements: &[Statement],
@@ -71,9 +72,12 @@ pub(super) fn checked_actions_for_statements(
                         context.process.name, name
                     ))
                 })?;
+                let authority = spawn_authority_for_target(context, binding.target)?;
+                let spawn_site = spawn_sites.push(binding.target, authority.id)?;
                 actions.push(CheckedAction::Spawn {
                     target: context.semantic_index.process_id(target)?,
                     process_ref: binding.id,
+                    spawn_site,
                 });
             }
             Statement::LetSpawnOutcome { name, target, .. } => {
@@ -98,12 +102,15 @@ pub(super) fn checked_actions_for_statements(
                     )));
                 }
                 let target_process = context.semantic_index.process_id(target)?;
+                let authority = spawn_authority_for_target(context, target_process)?;
+                let spawn_site = spawn_sites.push(target_process, authority.id)?;
                 let binding = effect_outcome_binding(input.outcome_bindings, name)?;
                 validate_spawn_outcome_annotation(context, target, binding.ty)?;
                 actions.push(CheckedAction::SpawnOutcome {
                     outcome: binding.id,
                     outcome_ty: binding.checked_ty.clone(),
                     target: target_process,
+                    spawn_site,
                 });
             }
             Statement::LetValue { name, .. } => {
@@ -194,6 +201,7 @@ pub(super) fn checked_actions_for_statements(
                     context,
                     outputs,
                     types,
+                    spawn_sites,
                     loop_elements,
                     input,
                     StatementRuntimeIf {
@@ -218,6 +226,7 @@ pub(super) fn checked_actions_for_statements(
                     context,
                     outputs,
                     types,
+                    spawn_sites,
                     loop_elements,
                     input,
                     ForEachAction {
@@ -230,6 +239,35 @@ pub(super) fn checked_actions_for_statements(
         }
     }
     Ok(actions)
+}
+
+fn spawn_authority_for_target(
+    context: &StepCheckContext<'_>,
+    target: CheckedProcessId,
+) -> Result<AuthorityBinding> {
+    context
+        .authority_index
+        .values()
+        .copied()
+        .find(|authority| {
+            matches!(
+                authority.descriptor,
+                CheckedCapabilityDescriptor::Spawn { target: authority_target }
+                    if authority_target == target
+            )
+        })
+        .ok_or_else(|| {
+            let target_name = context
+                .module
+                .processes
+                .get(target.index())
+                .map(|process| process.name.to_string())
+                .unwrap_or_else(|| format!("process id {}", target.as_u32()));
+            Error::new(format!(
+                "process {} spawn target {target_name} requires authority Cap<Spawn<{target_name}>>",
+                context.process.name
+            ))
+        })
 }
 
 fn validate_send_outcome_annotation(
@@ -315,6 +353,7 @@ fn checked_if_else_statement_action(
     context: &mut StepCheckContext<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
+    spawn_sites: &mut SpawnSiteAllocator,
     loop_elements: &mut LoopElementAllocator,
     input: ActionCheckInput<'_, '_, '_, '_>,
     runtime_if: StatementRuntimeIf<'_>,
@@ -336,6 +375,7 @@ fn checked_if_else_statement_action(
         context,
         outputs,
         types,
+        spawn_sites,
         loop_elements,
         branch_input,
         runtime_if.then_body,
@@ -344,6 +384,7 @@ fn checked_if_else_statement_action(
         context,
         outputs,
         types,
+        spawn_sites,
         loop_elements,
         branch_input,
         runtime_if.else_body,
@@ -365,6 +406,7 @@ fn checked_for_each_action(
     context: &mut StepCheckContext<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
+    spawn_sites: &mut SpawnSiteAllocator,
     loop_elements: &mut LoopElementAllocator,
     input: ActionCheckInput<'_, '_, '_, '_>,
     for_each: ForEachAction<'_>,
@@ -480,6 +522,7 @@ fn checked_for_each_action(
         context,
         outputs,
         types,
+        spawn_sites,
         loop_elements,
         ActionCheckInput {
             function_scope: input.function_scope,

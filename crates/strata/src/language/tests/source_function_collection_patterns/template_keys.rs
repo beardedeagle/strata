@@ -150,6 +150,8 @@ proc Main mailbox bounded(1) {
     type State = Unit;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> Unit ! [] ~ [] @det {
         return Unit;
     }
@@ -164,6 +166,8 @@ proc Main mailbox bounded(1) {
 proc Worker mailbox bounded(1) {
     type State = Unit;
     type Msg = WorkerMsg;
+
+    authority spawn_map_worker: Cap<Spawn<MapWorker>>;
 
     fn init() -> Unit ! [] ~ [] @det {
         return Unit;

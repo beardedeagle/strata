@@ -118,6 +118,26 @@ pub(crate) fn encode_json_line(event: &RuntimeEvent) -> String {
             output_id.as_u32(),
             json_escape(text)
         ),
+        RuntimeEvent::SpawnAuthorityChecked {
+            pid,
+            process_id,
+            process,
+            target_process_id,
+            spawn_site_id,
+            authority_id,
+            spawn_kind,
+            authority_result,
+        } => format!(
+            "{{\"event\":\"spawn_authority_checked\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"target_process_id\":{},\"spawn_site_id\":{},\"authority_id\":{},\"spawn_kind\":\"{}\",\"authority_result\":\"{}\"}}",
+            pid.as_u64(),
+            process_id.as_u32(),
+            json_escape(process),
+            target_process_id.as_u32(),
+            spawn_site_id.as_u32(),
+            authority_id.as_u32(),
+            spawn_kind.as_str(),
+            authority_result.as_str()
+        ),
         RuntimeEvent::BranchSelected {
             pid,
             process_id,

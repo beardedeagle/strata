@@ -359,6 +359,7 @@ fn execute_static_action(
         CheckedAction::Spawn {
             target,
             process_ref,
+            ..
         } => {
             let target_process = process_by_id(context.processes, *target)?;
             ensure_static_process_capacity(state.instances.len())?;
@@ -384,6 +385,7 @@ fn execute_static_action(
             outcome,
             outcome_ty,
             target,
+            ..
         } => {
             let target_process = process_by_id(context.processes, *target)?;
             if state.instances.len() >= STATIC_RUNTIME_PROCESS_LIMIT {

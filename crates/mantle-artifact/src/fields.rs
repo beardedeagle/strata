@@ -3,12 +3,13 @@ use std::collections::BTreeMap;
 use crate::artifact::StepResult;
 use crate::validation::validate_count;
 use crate::{
-    ARTIFACT_MAGIC, EffectOutcomeId, EnumVariantId, Error, LoopElementId, MAX_ARTIFACT_BYTES,
-    MAX_ARTIFACT_FIELDS, MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE,
-    MAX_FIELD_VALUE_BYTES, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS,
-    MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId, ProcessRefId, Result, StateId,
-    TypeId,
+    ARTIFACT_MAGIC, AuthorityId, EffectOutcomeId, EnumVariantId, Error, LoopElementId,
+    MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FIELDS, MAX_AUTHORITIES_PER_PROCESS,
+    MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
+    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId, ProcessRefId,
+    Result, SpawnSiteId, StateId, TypeId,
 };
 
 pub(crate) struct ArtifactFields {
@@ -138,6 +139,14 @@ impl ArtifactFields {
             0,
             MAX_EFFECT_OUTCOMES_PER_TRANSITION - 1,
         )?)
+    }
+
+    pub(crate) fn take_authority_id(&mut self, key: &str) -> Result<AuthorityId> {
+        AuthorityId::from_index(self.take_bounded_usize(key, 0, MAX_AUTHORITIES_PER_PROCESS - 1)?)
+    }
+
+    pub(crate) fn take_spawn_site_id(&mut self, key: &str) -> Result<SpawnSiteId> {
+        SpawnSiteId::from_index(self.take_bounded_usize(key, 0, MAX_SPAWN_SITES_PER_PROCESS - 1)?)
     }
 
     pub(crate) fn take_optional_type_id(&mut self, key: &str) -> Result<Option<TypeId>> {

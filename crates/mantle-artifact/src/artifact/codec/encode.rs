@@ -54,6 +54,38 @@ impl MantleArtifact {
                 }
             }
             encoded.push_str(&format!(
+                "{prefix}.authority_count={}\n",
+                process.authorities.len()
+            ));
+            for (authority_index, authority) in process.authorities.iter().enumerate() {
+                let authority_prefix = format!("{prefix}.authority.{authority_index}");
+                encoded.push_str(&format!(
+                    "{authority_prefix}.debug_name={}\n{authority_prefix}.kind={}\n",
+                    authority.debug_name,
+                    authority.descriptor.kind_str()
+                ));
+                match authority.descriptor {
+                    ArtifactCapabilityDescriptor::Spawn { target } => {
+                        encoded.push_str(&format!(
+                            "{authority_prefix}.target_process={}\n",
+                            target.as_u32()
+                        ));
+                    }
+                }
+            }
+            encoded.push_str(&format!(
+                "{prefix}.spawn_site_count={}\n",
+                process.spawn_sites.len()
+            ));
+            for (spawn_site_index, spawn_site) in process.spawn_sites.iter().enumerate() {
+                encoded.push_str(&format!(
+                    "{prefix}.spawn_site.{spawn_site_index}.target_process={}\n{prefix}.spawn_site.{spawn_site_index}.authority={}\n{prefix}.spawn_site.{spawn_site_index}.kind={}\n",
+                    spawn_site.target.as_u32(),
+                    spawn_site.authority.as_u32(),
+                    spawn_site.kind.as_str()
+                ));
+            }
+            encoded.push_str(&format!(
                 "{prefix}.process_ref_count={}\n",
                 process.process_refs.len()
             ));
@@ -521,23 +553,27 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
         ArtifactAction::Spawn {
             target,
             process_ref,
+            spawn_site,
         } => {
             encoded.push_str(&format!(
-                "{action_prefix}.kind=spawn\n{action_prefix}.target_process={}\n{action_prefix}.process_ref={}\n",
+                "{action_prefix}.kind=spawn\n{action_prefix}.target_process={}\n{action_prefix}.process_ref={}\n{action_prefix}.spawn_site={}\n",
                 target.as_u32(),
-                process_ref.as_u32()
+                process_ref.as_u32(),
+                spawn_site.as_u32()
             ));
         }
         ArtifactAction::SpawnOutcome {
             outcome,
             outcome_ty,
             target,
+            spawn_site,
         } => {
             encoded.push_str(&format!(
-                "{action_prefix}.kind=spawn_outcome\n{action_prefix}.outcome={}\n{action_prefix}.outcome_type_id={}\n{action_prefix}.target_process={}\n",
+                "{action_prefix}.kind=spawn_outcome\n{action_prefix}.outcome={}\n{action_prefix}.outcome_type_id={}\n{action_prefix}.target_process={}\n{action_prefix}.spawn_site={}\n",
                 outcome.as_u32(),
                 outcome_ty.as_u32(),
-                target.as_u32()
+                target.as_u32(),
+                spawn_site.as_u32()
             ));
         }
         ArtifactAction::Send {

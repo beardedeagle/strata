@@ -15,8 +15,9 @@ impl MantleArtifact {
         }
 
         let mut process_debug_names = BTreeSet::new();
-        for process in &self.processes {
-            process.validate_identity(self)?;
+        for (process_index, process) in self.processes.iter().enumerate() {
+            let process_id = ProcessId::from_index(process_index)?;
+            process.validate_identity(self, process_id)?;
             if !process_debug_names.insert(process.debug_name.as_str()) {
                 return Err(Error::new(format!(
                     "duplicate process debug_name {}",

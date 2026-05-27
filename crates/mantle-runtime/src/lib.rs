@@ -21,7 +21,7 @@ pub use event::{
 pub use host::{InMemoryRuntimeHost, RuntimeHost};
 pub use limits::{
     DEFAULT_MAX_DISPATCHES, DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES,
-    DEFAULT_MAX_TRACE_BYTES, RunLimits,
+    DEFAULT_MAX_TRACE_BYTES, RunLimits, SpawnAuthorityPolicy,
 };
 pub use program::RuntimePayload;
 pub use report::{
@@ -34,8 +34,12 @@ use program::LoadedProgram;
 use run::run_loaded_program_with_host;
 
 pub fn run_artifact_path(path: &Path) -> Result<RunReport> {
+    run_artifact_path_with_limits(path, RunLimits::default())
+}
+
+pub fn run_artifact_path_with_limits(path: &Path, limits: RunLimits) -> Result<RunReport> {
     let artifact = read_artifact(path)?;
-    run_artifact(path, &artifact)
+    run_artifact_with_limits(path, &artifact, limits)
 }
 
 pub fn run_artifact(path: &Path, artifact: &MantleArtifact) -> Result<RunReport> {

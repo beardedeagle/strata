@@ -58,6 +58,35 @@ fn actor_emit_spawn_send_checks_builds_and_runs_on_mantle() {
     assert!(stdout.contains("mantle: stopped Worker normally"));
 
     let artifact = gate.read_artifact("target/strata/actor_emit_spawn_send.mta");
+    let main = artifact_process(&artifact, "Main");
+    assert_eq!(main.authorities.len(), 1);
+    assert_eq!(
+        main.authorities[0].descriptor,
+        ArtifactCapabilityDescriptor::Spawn {
+            target: ProcessId::new(1)
+        }
+    );
+    assert_eq!(main.spawn_sites.len(), 1);
+    assert_eq!(main.spawn_sites[0].target, ProcessId::new(1));
+    assert_eq!(main.spawn_sites[0].authority, AuthorityId::new(0));
+    assert_eq!(main.spawn_sites[0].kind, ArtifactSpawnKind::DynamicLocal);
+    assert!(
+        main.transitions[0].actions.iter().any(|action| matches!(
+            action,
+            ArtifactAction::Spawn {
+                spawn_site,
+                ..
+            } if *spawn_site == SpawnSiteId::new(0)
+        )),
+        "Main transition should spawn through typed spawn-site id 0"
+    );
+    let encoded = artifact.encode();
+    assert!(encoded.contains("process.0.authority.0.debug_name=spawn_worker"));
+    assert!(encoded.contains("process.0.transition.0.action.1.spawn_site=0"));
+    assert!(
+        !encoded.contains("authority=spawn_worker"),
+        "spawn actions must reference typed spawn-site IDs, not authority names"
+    );
     assert_eq!(
         transition_effects(&artifact, "Main"),
         &[

@@ -83,6 +83,7 @@ impl LoadedAction {
             Self::Spawn {
                 target,
                 process_ref,
+                spawn_site,
             } => {
                 program.process(*target)?;
                 let declared_target = process.process_ref_target(*process_ref)?;
@@ -96,6 +97,7 @@ impl LoadedAction {
                         declared_target.as_u32()
                     )));
                 }
+                process.validate_spawn_site(*spawn_site, *target)?;
                 let Some(is_spawned) = spawned_refs.get_mut(process_ref.index()) else {
                     return Err(Error::new(format!(
                         "process {} transition {} spawn references unloaded process reference id {}",
@@ -116,7 +118,10 @@ impl LoadedAction {
                 Ok(())
             }
             Self::SpawnOutcome {
-                outcome_ty, target, ..
+                outcome_ty,
+                target,
+                spawn_site,
+                ..
             } => {
                 program.process(*target)?;
                 if *target == program.entry_process {
@@ -134,6 +139,7 @@ impl LoadedAction {
                         message.as_u32()
                     )));
                 }
+                process.validate_spawn_site(*spawn_site, *target)?;
                 validate_loaded_spawn_outcome_type(program, *outcome_ty, *target)
             }
             Self::Send {

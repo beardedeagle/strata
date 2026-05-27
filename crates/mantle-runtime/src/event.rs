@@ -2,8 +2,9 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 use mantle_artifact::{
-    ArtifactBranch, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH,
-    MessageId, OutputId, ProcessId, Result, StateId, StepResult, TypeId,
+    ArtifactBranch, AuthorityId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
+    MAX_VALUE_TEMPLATE_DEPTH, MessageId, OutputId, ProcessId, Result, SpawnSiteId, StateId,
+    StepResult, TypeId,
 };
 
 use crate::program::RuntimePayload;
@@ -189,6 +190,16 @@ pub enum RuntimeEvent {
         output_id: OutputId,
         text: String,
     },
+    SpawnAuthorityChecked {
+        pid: RuntimeProcessId,
+        process_id: ProcessId,
+        process: String,
+        target_process_id: ProcessId,
+        spawn_site_id: SpawnSiteId,
+        authority_id: AuthorityId,
+        spawn_kind: RuntimeSpawnKind,
+        authority_result: RuntimeAuthorityResult,
+    },
     BranchSelected {
         pid: RuntimeProcessId,
         process_id: ProcessId,
@@ -273,6 +284,34 @@ pub enum RuntimeEvent {
 pub enum RuntimeBranchScope {
     NextState,
     Action,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeSpawnKind {
+    DynamicLocal,
+}
+
+impl RuntimeSpawnKind {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::DynamicLocal => "dynamic_local",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeAuthorityResult {
+    Accepted,
+    Denied,
+}
+
+impl RuntimeAuthorityResult {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Denied => "denied",
+        }
+    }
 }
 
 impl RuntimeBranchScope {

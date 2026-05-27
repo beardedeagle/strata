@@ -39,7 +39,15 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             LoadedAction::Spawn {
                 target,
                 process_ref,
+                spawn_site,
             } => {
+                if !self.record_spawn_authority(step, *target, *spawn_site)? {
+                    return Err(Error::new(format!(
+                        "process {} spawn authority denied for process id {}",
+                        step.process_name,
+                        target.as_u32()
+                    )));
+                }
                 let declared_target = self.process_ref_target(step, *process_ref)?;
                 if declared_target != *target {
                     return Err(Error::new(format!(
@@ -59,8 +67,10 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 outcome,
                 outcome_ty,
                 target,
+                spawn_site,
             } => {
-                let payload = self.execute_spawn_outcome(step, *outcome_ty, *target)?;
+                let payload =
+                    self.execute_spawn_outcome(step, *outcome_ty, *target, *spawn_site)?;
                 bind_effect_outcome(effect_outcomes, *outcome, payload)?;
                 Ok(true)
             }
@@ -93,8 +103,12 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         outcome_ty: TypeId,
         target: ProcessId,
+        spawn_site: mantle_artifact::SpawnSiteId,
     ) -> Result<RuntimePayload> {
         self.program.process(target)?;
+        if !self.record_spawn_authority(step, target, spawn_site)? {
+            return self.spawn_error_outcome(outcome_ty, "Denied");
+        }
         if self.processes.len() >= self.max_runtime_processes {
             return self.spawn_error_outcome(outcome_ty, "Exhausted");
         }
