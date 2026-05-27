@@ -13,10 +13,8 @@ edition = "2024"
 
 [output.html]
 git-repository-url = "https://github.com/beardedeagle/strata"
-# Held back from the first review push to keep large local docs runtime assets
-# out of the initial PR. Re-enable with the matching files before merge.
-# additional-js = ["theme/strata-highlight.js", "mermaid.min.js", "svg-pan-zoom.min.js", "mermaid-init.js"]
-# additional-css = ["mermaid-zoom.css"]
+additional-js = ["theme/strata-highlight.js", "mermaid.min.js", "svg-pan-zoom.min.js", "mermaid-init.js"]
+additional-css = ["mermaid-zoom.css"]
 
 [preprocessor.mermaid]
 command = "mdbook-mermaid"
