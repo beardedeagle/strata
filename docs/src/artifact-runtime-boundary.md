@@ -9,6 +9,20 @@ This separation keeps names, metadata, and runtime identity from collapsing into
 one surface. Source names are useful for diagnostics and traces, but executable
 runtime dispatch must use loaded typed IDs.
 
+```mermaid
+flowchart LR
+    Source["Strata source names"]
+    Checked["checked symbols and IDs"]
+    Artifact["artifact typed tables"]
+    Runtime["loaded runtime IDs"]
+    Trace["trace labels"]
+
+    Source --> Checked --> Artifact --> Runtime
+    Source -. metadata .-> Trace
+    Artifact -. labels .-> Trace
+    Runtime --> Trace
+```
+
 Mantle crates are structurally language-neutral. They may carry `source_language`
 as opaque artifact metadata, but they must not own Strata source constants,
 Strata output-directory defaults, `.str` examples, or source-to-runtime gates.
@@ -36,11 +50,13 @@ execution, the artifact decoder and validator check:
 - unique process debug names;
 - unique typed state value identities per process;
 - unique process reference names per process;
+- unique typed authority descriptors, referenced authority IDs, and spawn-site
+  table entries per process;
 - either one unguarded transition per accepted message or one state-specific
   transition for each admitted state value;
-- exact transition effect authority for emitted, spawned, and sent actions;
+- exact transition effect usage for emitted, spawned, and sent actions;
 - transition references to known messages, state values, type IDs, process
-  references, outputs, and process IDs.
+  references, authority IDs, spawn-site IDs, outputs, and process IDs.
 
 Decode-time bounds must happen before allocation when counts come from the
 artifact body.
@@ -60,14 +76,20 @@ descriptor-relative race resistance.
 Mantle loads admitted transitions into indexed runtime tables. Before emitting
 `ArtifactLoaded` or executing runtime side effects, Mantle validates loaded
 entry metadata, state tables, transition state targets and templates, outputs,
-process references, sends, payload templates, and transition effect authority.
+process references, sends, payload templates, and transition effect usage.
+Loaded authority tables and spawn-site tables are validated before any runtime
+side effect. A spawn action references a typed spawn-site ID; that site
+references a typed authority ID whose descriptor must be an exact local
+`Spawn` capability for the same target process. Loaded authorities that are not
+referenced by any spawn site are rejected as overbroad. Authority debug names and
+source labels are metadata, not dispatch inputs.
 A dequeued message selects the transition by typed message ID, and by admitted
 current state ID when the transition table is state-specific. Dynamic next-state
 templates resolve to an admitted state ID by typed state value identity, not by
 display label text.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
-effect authority, and must exactly match the action effects that execute.
+effect usage, and must exactly match the action effects that execute.
 Runtime `if` conditions are admitted as typed `Bool` value templates. Mantle
 validates both branch bodies before execution, executes only the selected
 branch, admits one direct nested runtime branch action layer, rejects deeper
@@ -83,7 +105,8 @@ built from `!`, `&&`, `||`, direct Bool templates, and typed equality templates.
 The action set covers:
 
 - emitting declared output;
-- spawning a declared process through a process reference;
+- spawning a declared process through a process reference and admitted spawn
+  authority;
 - sending a declared message through a bound process reference;
 - selecting a typed runtime branch over admitted action blocks;
 - iterating over an admitted bounded list template with a typed active loop
@@ -100,3 +123,9 @@ Runtime traces are line-delimited JSON. They include labels for readability and
 numeric IDs for process, message, state, payload type, and output identity. A
 trace is evidence of runtime execution, not a substitute for running the
 source-to-runtime gate.
+
+`mantle inspect-authority` is a read-only inspection command for admitted
+artifacts. It validates the `.mta` through the same artifact reader used before
+execution, then prints the typed authority and spawn-site tables. It does not
+dispatch by source names, execute runtime actions, or generate a mandatory
+report; JSON output is available only when explicitly requested by the caller.

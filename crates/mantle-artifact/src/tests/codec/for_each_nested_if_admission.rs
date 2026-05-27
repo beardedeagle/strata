@@ -5,6 +5,8 @@ fn admission_accepts_one_nested_if_else_inside_for_each_loop_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
     let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
+    artifact.processes[0].authorities = Vec::new();
+    artifact.processes[0].spawn_sites = Vec::new();
     let condition = ArtifactValueTemplate::LoopElement {
         ty: bool_type,
         element: LoopElementId::new(0),

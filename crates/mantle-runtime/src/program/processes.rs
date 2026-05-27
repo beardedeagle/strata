@@ -2,6 +2,77 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+const AUTHORITY_REFERENCE_WORD_BITS: usize = u64::BITS as usize;
+const AUTHORITY_REFERENCE_WORDS: usize =
+    MAX_AUTHORITIES_PER_PROCESS.div_ceil(AUTHORITY_REFERENCE_WORD_BITS);
+const SPAWN_SITE_REFERENCE_WORDS: usize =
+    MAX_SPAWN_SITES_PER_PROCESS.div_ceil(AUTHORITY_REFERENCE_WORD_BITS);
+
+struct LoadedSpawnAuthorityUsage {
+    referenced_spawn_sites: [u64; SPAWN_SITE_REFERENCE_WORDS],
+    referenced_authorities: [u64; AUTHORITY_REFERENCE_WORDS],
+}
+
+impl LoadedSpawnAuthorityUsage {
+    const fn new() -> Self {
+        Self {
+            referenced_spawn_sites: [0_u64; SPAWN_SITE_REFERENCE_WORDS],
+            referenced_authorities: [0_u64; AUTHORITY_REFERENCE_WORDS],
+        }
+    }
+
+    fn mark_spawn_site(&mut self, process_name: &str, spawn_site_index: usize) -> Result<()> {
+        mark_reference(
+            &mut self.referenced_spawn_sites,
+            process_name,
+            "loaded spawn site",
+            spawn_site_index,
+        )
+    }
+
+    fn mark_authority(&mut self, process_name: &str, authority_index: usize) -> Result<()> {
+        mark_reference(
+            &mut self.referenced_authorities,
+            process_name,
+            "loaded authority",
+            authority_index,
+        )
+    }
+
+    fn spawn_site_referenced(&self, spawn_site_index: usize) -> bool {
+        reference_marked(&self.referenced_spawn_sites, spawn_site_index)
+    }
+
+    fn authority_referenced(&self, authority_index: usize) -> bool {
+        reference_marked(&self.referenced_authorities, authority_index)
+    }
+}
+
+fn mark_reference<const N: usize>(
+    references: &mut [u64; N],
+    process_name: &str,
+    reference_name: &str,
+    reference_index: usize,
+) -> Result<()> {
+    let word_index = reference_index / AUTHORITY_REFERENCE_WORD_BITS;
+    let bit_index = reference_index % AUTHORITY_REFERENCE_WORD_BITS;
+    let Some(word) = references.get_mut(word_index) else {
+        return Err(Error::new(format!(
+            "process {process_name} {reference_name} id {reference_index} exceeds reference capacity"
+        )));
+    };
+    *word |= 1_u64 << bit_index;
+    Ok(())
+}
+
+fn reference_marked<const N: usize>(references: &[u64; N], reference_index: usize) -> bool {
+    let word_index = reference_index / AUTHORITY_REFERENCE_WORD_BITS;
+    let bit_index = reference_index % AUTHORITY_REFERENCE_WORD_BITS;
+    references
+        .get(word_index)
+        .is_some_and(|word| (word & (1_u64 << bit_index)) != 0)
+}
+
 impl LoadedProcess {
     pub(in crate::program) fn from_artifact(process: &ArtifactProcess) -> Result<Self> {
         let transitions = load_transitions(process)?;
@@ -20,6 +91,16 @@ impl LoadedProcess {
                 .message_variants
                 .iter()
                 .map(LoadedMessageVariant::from_artifact)
+                .collect(),
+            authorities: process
+                .authorities
+                .iter()
+                .map(LoadedAuthority::from_artifact)
+                .collect(),
+            spawn_sites: process
+                .spawn_sites
+                .iter()
+                .map(LoadedSpawnSite::from_artifact)
                 .collect(),
             process_refs: process
                 .process_refs
@@ -106,6 +187,7 @@ impl LoadedProcess {
     ) -> Result<()> {
         self.validate_state_table(program)?;
         self.validate_message_table(program)?;
+        self.validate_authorities(program, process_id)?;
         self.validate_process_refs(program, process_id)?;
         if self.mailbox_bound == 0 || self.mailbox_bound > MAX_MAILBOX_BOUND {
             return Err(Error::new(format!(
@@ -143,17 +225,154 @@ impl LoadedProcess {
         }
 
         validate_loaded_transition_coverage(self)?;
+        let mut spawn_authority_usage = LoadedSpawnAuthorityUsage::new();
         for transition in &self.transitions {
             let message = transition.message;
             transition.validate_admission(program, self, process_id, message)?;
+            self.collect_spawn_authority_usage(&transition.actions, &mut spawn_authority_usage)?;
             transition.effect_authority.validate_actions(
                 &self.debug_name,
                 message,
                 &transition.actions,
             )?;
         }
+        self.validate_spawn_authority_usage(&spawn_authority_usage)?;
         self.validate_message_type_shape(program)?;
         Ok(())
+    }
+
+    fn validate_authorities(&self, program: &LoadedProgram, process_id: ProcessId) -> Result<()> {
+        if self.authorities.len() > MAX_AUTHORITIES_PER_PROCESS {
+            return Err(Error::new(format!(
+                "process {} loaded authority_count must be no greater than {MAX_AUTHORITIES_PER_PROCESS}",
+                self.debug_name
+            )));
+        }
+        if self.spawn_sites.len() > MAX_SPAWN_SITES_PER_PROCESS {
+            return Err(Error::new(format!(
+                "process {} loaded spawn_site_count must be no greater than {MAX_SPAWN_SITES_PER_PROCESS}",
+                self.debug_name
+            )));
+        }
+        let mut names = BTreeSet::new();
+        let mut descriptors = BTreeSet::new();
+        for authority in &self.authorities {
+            validate_loaded_ident_field("authority debug_name", &authority.debug_name)?;
+            if !names.insert(authority.debug_name.as_str()) {
+                return Err(Error::new(format!(
+                    "process {} duplicates loaded authority {}",
+                    self.debug_name, authority.debug_name
+                )));
+            }
+            if !descriptors.insert(authority.descriptor) {
+                return Err(Error::new(format!(
+                    "process {} duplicates loaded authority descriptor",
+                    self.debug_name
+                )));
+            }
+            let LoadedCapabilityDescriptor::Spawn { target } = authority.descriptor;
+            program.process(target)?;
+            if target == program.entry_process {
+                return Err(Error::new(format!(
+                    "process {} loaded authority {} targets entry process id {}",
+                    self.debug_name,
+                    authority.debug_name,
+                    target.as_u32()
+                )));
+            }
+            if target == process_id {
+                return Err(Error::new(format!(
+                    "process {} loaded authority {} targets itself, which is not supported",
+                    self.debug_name, authority.debug_name
+                )));
+            }
+        }
+        for (index, spawn_site) in self.spawn_sites.iter().enumerate() {
+            let authority_index = spawn_site.authority.index();
+            let authority = self.authorities.get(authority_index).ok_or_else(|| {
+                Error::new(format!(
+                    "process {} loaded spawn site {index} references undefined authority id {}",
+                    self.debug_name,
+                    spawn_site.authority.as_u32()
+                ))
+            })?;
+            let LoadedCapabilityDescriptor::Spawn { target } = authority.descriptor;
+            if target != spawn_site.target {
+                return Err(Error::new(format!(
+                    "process {} loaded spawn site {index} targets process id {}, but authority id {} targets {}",
+                    self.debug_name,
+                    spawn_site.target.as_u32(),
+                    spawn_site.authority.as_u32(),
+                    target.as_u32()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_spawn_authority_usage(&self, usage: &LoadedSpawnAuthorityUsage) -> Result<()> {
+        for (spawn_site_index, _) in self.spawn_sites.iter().enumerate() {
+            if !usage.spawn_site_referenced(spawn_site_index) {
+                return Err(Error::new(format!(
+                    "process {} declares unused loaded spawn site {spawn_site_index}",
+                    self.debug_name
+                )));
+            }
+        }
+        for (authority_index, authority) in self.authorities.iter().enumerate() {
+            if !usage.authority_referenced(authority_index) {
+                return Err(Error::new(format!(
+                    "process {} declares unused loaded authority {}",
+                    self.debug_name, authority.debug_name
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_spawn_authority_usage(
+        &self,
+        actions: &[LoadedAction],
+        usage: &mut LoadedSpawnAuthorityUsage,
+    ) -> Result<()> {
+        for action in actions {
+            match action {
+                LoadedAction::Spawn {
+                    target, spawn_site, ..
+                }
+                | LoadedAction::SpawnOutcome {
+                    target, spawn_site, ..
+                } => {
+                    self.record_spawn_site_usage(usage, *spawn_site, *target)?;
+                }
+                LoadedAction::IfElse {
+                    then_actions,
+                    else_actions,
+                    ..
+                } => {
+                    self.collect_spawn_authority_usage(then_actions, usage)?;
+                    self.collect_spawn_authority_usage(else_actions, usage)?;
+                }
+                LoadedAction::ForEach { body, .. } => {
+                    self.collect_spawn_authority_usage(body, usage)?;
+                }
+                LoadedAction::Emit { .. }
+                | LoadedAction::Send { .. }
+                | LoadedAction::SendOutcome { .. } => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn record_spawn_site_usage(
+        &self,
+        usage: &mut LoadedSpawnAuthorityUsage,
+        spawn_site: SpawnSiteId,
+        target: ProcessId,
+    ) -> Result<()> {
+        let site = self.validate_spawn_site(spawn_site, target)?;
+        usage.mark_spawn_site(&self.debug_name, spawn_site.index())?;
+        usage.mark_authority(&self.debug_name, site.authority.index())
     }
 
     fn validate_state_table(&self, program: &LoadedProgram) -> Result<()> {
@@ -350,5 +569,53 @@ impl LoadedProcess {
                     process_ref.as_u32()
                 ))
             })
+    }
+
+    pub(crate) fn validate_spawn_site(
+        &self,
+        spawn_site: SpawnSiteId,
+        target: ProcessId,
+    ) -> Result<&LoadedSpawnSite> {
+        let site = self.spawn_sites.get(spawn_site.index()).ok_or_else(|| {
+            Error::new(format!(
+                "process {} references unloaded spawn site id {}",
+                self.debug_name,
+                spawn_site.as_u32()
+            ))
+        })?;
+        if site.target != target {
+            return Err(Error::new(format!(
+                "process {} spawn site id {} targets process id {}, expected {}",
+                self.debug_name,
+                spawn_site.as_u32(),
+                site.target.as_u32(),
+                target.as_u32()
+            )));
+        }
+        let authority = self
+            .authorities
+            .get(site.authority.index())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} spawn site id {} references unloaded authority id {}",
+                    self.debug_name,
+                    spawn_site.as_u32(),
+                    site.authority.as_u32()
+                ))
+            })?;
+        let LoadedCapabilityDescriptor::Spawn {
+            target: authority_target,
+        } = authority.descriptor;
+        if authority_target != target {
+            return Err(Error::new(format!(
+                "process {} spawn site id {} authority id {} targets process id {}, expected {}",
+                self.debug_name,
+                spawn_site.as_u32(),
+                site.authority.as_u32(),
+                authority_target.as_u32(),
+                target.as_u32()
+            )));
+        }
+        Ok(site)
     }
 }

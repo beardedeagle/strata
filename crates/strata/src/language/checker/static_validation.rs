@@ -11,6 +11,7 @@ use mantle_artifact::{MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_VALUE_TEMPLATE_FIE
 mod loop_elements;
 mod process_refs;
 mod runtime_order;
+mod spawn_authority;
 mod templates;
 mod transition_coverage;
 
@@ -19,6 +20,7 @@ use process_refs::{
     message_payload_type, process_by_id, process_label, process_ref_target, validate_send_target,
 };
 use runtime_order::validate_static_runtime_order;
+use spawn_authority::validate_spawn_site;
 use templates::{
     current_state_payload_type, validate_bool_condition_template, validate_next_state,
     validate_static_bool_condition_value, validate_value_template_binding_types,
@@ -252,7 +254,9 @@ fn validate_action_reference(
         CheckedAction::Spawn {
             target,
             process_ref,
+            spawn_site,
         } => {
+            validate_spawn_site(process, *spawn_site, *target)?;
             if scope.is_inside_runtime_if_branch() {
                 return Err(Error::new(format!(
                     "process {} runtime if branch cannot bind process references",
@@ -304,7 +308,10 @@ fn validate_action_reference(
                 )));
             }
         }
-        CheckedAction::SpawnOutcome { target, .. } => {
+        CheckedAction::SpawnOutcome {
+            target, spawn_site, ..
+        } => {
+            validate_spawn_site(process, *spawn_site, *target)?;
             if scope.is_inside_runtime_if_branch() {
                 return Err(Error::new(format!(
                     "process {} runtime if branch cannot bind spawn outcomes",

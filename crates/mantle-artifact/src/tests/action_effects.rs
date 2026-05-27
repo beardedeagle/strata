@@ -143,6 +143,7 @@ fn validate_rejects_process_ref_spawned_in_runtime_if_branch() {
             then_actions: vec![ArtifactAction::Spawn {
                 target: ProcessId::new(1),
                 process_ref: ProcessRefId::new(0),
+                spawn_site: SPAWN_WORKER_SITE,
             }],
             else_actions: Vec::new(),
         },
@@ -177,10 +178,12 @@ fn validate_rejects_process_ref_spawned_in_both_runtime_if_branches() {
             then_actions: vec![ArtifactAction::Spawn {
                 target: ProcessId::new(1),
                 process_ref: ProcessRefId::new(0),
+                spawn_site: SPAWN_WORKER_SITE,
             }],
             else_actions: vec![ArtifactAction::Spawn {
                 target: ProcessId::new(1),
                 process_ref: ProcessRefId::new(0),
+                spawn_site: SPAWN_WORKER_SITE,
             }],
         },
         ArtifactAction::Send {

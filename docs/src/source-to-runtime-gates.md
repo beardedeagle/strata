@@ -6,8 +6,16 @@ source-to-runtime behavior.
 
 The normal gate shape is:
 
-```text
-.str source -> strata check -> strata build -> mantle run -> trace
+```mermaid
+flowchart LR
+    Source[".str source"]
+    Check["strata check"]
+    Build["strata build"]
+    Artifact[".mta artifact"]
+    Run["mantle run"]
+    Trace["observability trace"]
+
+    Source --> Check --> Build --> Artifact --> Run --> Trace
 ```
 
 For fail-closed runtime behavior, the source must check and build, and
@@ -111,6 +119,15 @@ just run-example runtime_loop_element_projection
 just run-example effect_outcomes
 just run-example effect_outcome_mailbox_full
 just run-example effect_outcome_stopped_target
+```
+
+The local spawn authority denial gate uses the same check/build path and then
+runs Mantle with denied admitted spawn authority:
+
+```sh
+just strata-check examples/effect_outcome_spawn_denied.str
+just strata-build examples/effect_outcome_spawn_denied.str
+just mantle-run-deny-spawn-authority target/strata/effect_outcome_spawn_denied.mta
 ```
 
 A source rejection gate must fail during checking and must not create a target

@@ -3,18 +3,20 @@ pub(super) use super::super::*;
 pub(super) use crate::host::InMemoryRuntimeHost;
 pub(super) use crate::limits::RunLimits;
 pub(super) use crate::program::{
-    LoadedNextState, LoadedProgram, LoadedSendTarget, LoadedStateValue, LoadedValueTemplate,
-    RuntimePayload, RuntimeValue,
+    LoadedAuthority, LoadedCapabilityDescriptor, LoadedEffectAuthority, LoadedNextState,
+    LoadedProgram, LoadedSendTarget, LoadedSpawnKind, LoadedSpawnSite, LoadedStateValue,
+    LoadedValueTemplate, RuntimePayload, RuntimeValue,
 };
 pub(super) use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactEffect, ArtifactEnumVariant,
-    ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
-    ArtifactProcessRefPayload, ArtifactRecordField, ArtifactStateValue, ArtifactTransition,
-    ArtifactType, ArtifactTypeField, ArtifactValue, ArtifactValueBooleanOperator,
-    ArtifactValueEqualityOperator, ArtifactValueTemplate, ArtifactValueTemplateField,
-    EnumVariantId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_NEXT_STATE_IF_ELSE_DEPTH,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAuthority, ArtifactCapabilityDescriptor,
+    ArtifactEffect, ArtifactEnumVariant, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
+    ArtifactProcessRef, ArtifactProcessRefPayload, ArtifactRecordField, ArtifactSpawnKind,
+    ArtifactSpawnSite, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField,
+    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
+    ArtifactValueTemplate, ArtifactValueTemplateField, AuthorityId, EnumVariantId,
+    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_NEXT_STATE_IF_ELSE_DEPTH,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, StateId, StepResult, TypeId,
+    OutputId, ProcessId, ProcessRefId, SpawnSiteId, StateId, StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
@@ -27,6 +29,8 @@ pub(super) const BOX: TypeId = TypeId::new(5);
 pub(super) const LEAF: TypeId = TypeId::new(6);
 pub(super) const START_PAYLOAD: TypeId = TypeId::new(7);
 pub(super) const PROCESS_REF_WORKER: TypeId = TypeId::new(8);
+pub(super) const SPAWN_AUTHORITY: AuthorityId = AuthorityId::new(0);
+pub(super) const SPAWN_SITE: SpawnSiteId = SpawnSiteId::new(0);
 
 pub(super) fn assert_loaded_admission_rejects_before_artifact_loaded(
     program: &LoadedProgram,
@@ -88,6 +92,8 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
                 state_values: state_values(MAIN_STATE, &["MainState"]),
                 message_type: MAIN_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
+                authorities: Vec::new(),
+                spawn_sites: Vec::new(),
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -110,6 +116,8 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
                 state_values: state_values(WORKER_STATE, &["Idle"]),
                 message_type: WORKER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
+                authorities: Vec::new(),
+                spawn_sites: Vec::new(),
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
@@ -138,6 +146,40 @@ pub(super) fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact 
         })
         .collect();
     artifact
+}
+
+pub(super) fn spawn_authorities(target: ProcessId) -> Vec<ArtifactAuthority> {
+    vec![ArtifactAuthority {
+        debug_name: "spawn_target".to_string(),
+        descriptor: ArtifactCapabilityDescriptor::Spawn { target },
+    }]
+}
+
+pub(super) fn spawn_sites(target: ProcessId) -> Vec<ArtifactSpawnSite> {
+    vec![ArtifactSpawnSite {
+        target,
+        authority: SPAWN_AUTHORITY,
+        kind: ArtifactSpawnKind::DynamicLocal,
+    }]
+}
+
+pub(super) fn grant_main_spawn_authority(artifact: &mut MantleArtifact) {
+    artifact.processes[0].authorities = spawn_authorities(ProcessId::new(1));
+    artifact.processes[0].spawn_sites = spawn_sites(ProcessId::new(1));
+}
+
+pub(super) fn grant_loaded_main_spawn_authority(program: &mut LoadedProgram) {
+    program.processes[0].authorities = vec![LoadedAuthority {
+        debug_name: "spawn_target".to_string(),
+        descriptor: LoadedCapabilityDescriptor::Spawn {
+            target: ProcessId::new(1),
+        },
+    }];
+    program.processes[0].spawn_sites = vec![LoadedSpawnSite {
+        target: ProcessId::new(1),
+        authority: SPAWN_AUTHORITY,
+        kind: LoadedSpawnKind::DynamicLocal,
+    }];
 }
 
 pub(super) fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {

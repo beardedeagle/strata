@@ -28,6 +28,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }
@@ -53,7 +55,8 @@ proc Main mailbox bounded(1) {
         [
             CheckedAction::Spawn {
                 target: checked_process_id(0),
-                process_ref: checked_process_ref_id(0)
+                process_ref: checked_process_ref_id(0),
+                spawn_site: checked_spawn_site_id(0)
             },
             CheckedAction::Send {
                 target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
@@ -169,6 +172,8 @@ enum WorkerMsg { Ping }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
@@ -444,6 +449,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }
@@ -459,6 +466,8 @@ proc Worker mailbox bounded(1) {
     type State = WorkerState;
     type Msg = WorkerMsg;
 
+    authority spawn_peer: Cap<Spawn<Peer>>;
+
     fn init() -> WorkerState ! [] ~ [] @det {
         return Idle;
     }
@@ -473,6 +482,8 @@ proc Worker mailbox bounded(1) {
 proc Peer mailbox bounded(1) {
     type State = PeerState;
     type Msg = PeerMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> PeerState ! [] ~ [] @det {
         return Idle;

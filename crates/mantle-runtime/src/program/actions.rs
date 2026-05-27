@@ -15,11 +15,13 @@ pub(crate) enum LoadedAction {
     Spawn {
         target: ProcessId,
         process_ref: ProcessRefId,
+        spawn_site: SpawnSiteId,
     },
     SpawnOutcome {
         outcome: EffectOutcomeId,
         outcome_ty: TypeId,
         target: ProcessId,
+        spawn_site: SpawnSiteId,
     },
     Send {
         target: LoadedSendTarget,
@@ -129,18 +131,22 @@ impl LoadedAction {
             ArtifactAction::Spawn {
                 target,
                 process_ref,
+                spawn_site,
             } => Ok(Self::Spawn {
                 target: *target,
                 process_ref: *process_ref,
+                spawn_site: *spawn_site,
             }),
             ArtifactAction::SpawnOutcome {
                 outcome,
                 outcome_ty,
                 target,
+                spawn_site,
             } => Ok(Self::SpawnOutcome {
                 outcome: *outcome,
                 outcome_ty: *outcome_ty,
                 target: *target,
+                spawn_site: *spawn_site,
             }),
             ArtifactAction::Send {
                 target,

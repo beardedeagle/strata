@@ -22,10 +22,15 @@ use transition::check_step_transition;
 
 pub(in crate::language::checker) fn check_step<'state>(
     context: &ProcessCheckContext<'_>,
+    authority_index: &BTreeMap<Identifier, AuthorityBinding>,
     state_space: &mut StateSpace<'state>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'state>,
-) -> Result<(Vec<CheckedProcessRef>, Vec<CheckedTransition>)> {
+) -> Result<(
+    Vec<CheckedProcessRef>,
+    Vec<CheckedSpawnSite>,
+    Vec<CheckedTransition>,
+)> {
     let step_clauses = check_step_clauses(
         context.module,
         context.process,
@@ -48,13 +53,16 @@ pub(in crate::language::checker) fn check_step<'state>(
         process_id: context.process_id,
         semantic_index: context.semantic_index,
         process_ref_index: &process_ref_index,
+        authority_index,
         message_cases: context.message_cases,
     };
 
     let mut transitions = Vec::with_capacity(step_clauses.len());
+    let mut spawn_sites = SpawnSiteAllocator::default();
     for clause in step_clauses {
         let transition = check_step_transition(
             &mut step_context,
+            &mut spawn_sites,
             state_space,
             outputs,
             types,
@@ -89,5 +97,5 @@ pub(in crate::language::checker) fn check_step<'state>(
         MAX_ACTIONS_PER_PROCESS,
     )?;
 
-    Ok((process_refs, transitions))
+    Ok((process_refs, spawn_sites.into_sites(), transitions))
 }

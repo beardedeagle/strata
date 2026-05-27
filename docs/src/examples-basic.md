@@ -31,7 +31,8 @@ just run-example actor_ping
 
 Key source ideas:
 
-- `Main` uses `let worker: ProcessRef<Worker> = spawn Worker;` before `send worker Ping;`.
+- `Main` declares `authority spawn_worker: Cap<Spawn<Worker>>;`, then uses
+  `let worker: ProcessRef<Worker> = spawn Worker;` before `send worker Ping;`.
 - `WorkerMsg.Ping` is checked against `Worker`'s message type.
 - `Worker` replaces `Idle` with `Handled`.
 - Both processes stop normally.

@@ -22,6 +22,7 @@ use state_values::populate_template_state_values;
 
 pub(super) fn check_step_transition(
     context: &mut StepCheckContext<'_>,
+    spawn_sites: &mut SpawnSiteAllocator,
     state_space: &mut StateSpace<'_>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'_>,
@@ -83,6 +84,13 @@ pub(super) fn check_step_transition(
         });
     }
     let mut loop_elements = LoopElementAllocator::default();
+    let mut resources = StepTransitionResources {
+        state_space,
+        outputs,
+        types,
+        spawn_sites,
+        loop_elements: &mut loop_elements,
+    };
     let transition_env = StepTransitionEnv {
         function_scope: &function_scope,
         source_bindings: &source_bindings,
@@ -92,10 +100,7 @@ pub(super) fn check_step_transition(
     };
     let outcome = check_step_block_outcome(
         context,
-        state_space,
-        outputs,
-        types,
-        &mut loop_elements,
+        &mut resources,
         transition_env,
         StepBlockInput {
             body: input.body,
@@ -121,6 +126,14 @@ struct CheckedBlockOutcome {
     step_result: CheckedStepResult,
     next_state: CheckedNextState,
     actions: Vec<CheckedAction>,
+}
+
+struct StepTransitionResources<'a, 'state, 'types> {
+    state_space: &'a mut StateSpace<'state>,
+    outputs: &'a mut OutputPool,
+    types: &'a mut CheckedTypeInterner<'types>,
+    spawn_sites: &'a mut SpawnSiteAllocator,
+    loop_elements: &'a mut LoopElementAllocator,
 }
 
 #[derive(Clone, Copy)]
@@ -258,18 +271,16 @@ impl LoopElementAllocator {
 
 fn check_step_block_outcome(
     context: &mut StepCheckContext<'_>,
-    state_space: &mut StateSpace<'_>,
-    outputs: &mut OutputPool,
-    types: &mut CheckedTypeInterner<'_>,
-    loop_elements: &mut LoopElementAllocator,
+    resources: &mut StepTransitionResources<'_, '_, '_>,
     env: StepTransitionEnv<'_, '_, '_, '_, '_>,
     block: StepBlockInput<'_>,
 ) -> Result<CheckedBlockOutcome> {
     let mut actions = checked_actions_for_statements(
         context,
-        outputs,
-        types,
-        loop_elements,
+        resources.outputs,
+        resources.types,
+        resources.spawn_sites,
+        resources.loop_elements,
         ActionCheckInput {
             function_scope: env.function_scope,
             source_bindings: env.source_bindings,
@@ -280,33 +291,23 @@ fn check_step_block_outcome(
         },
         &block.body.statements,
     )?;
-    let outcome = checked_return_outcome(
-        context,
-        state_space,
-        outputs,
-        types,
-        loop_elements,
-        env,
-        block,
-    )?;
+    let outcome = checked_return_outcome(context, resources, env, block)?;
     actions.extend(outcome.actions);
     Ok(CheckedBlockOutcome { actions, ..outcome })
 }
 
 fn check_runtime_if_branch_block_outcome(
     context: &mut StepCheckContext<'_>,
-    state_space: &mut StateSpace<'_>,
-    outputs: &mut OutputPool,
-    types: &mut CheckedTypeInterner<'_>,
-    loop_elements: &mut LoopElementAllocator,
+    resources: &mut StepTransitionResources<'_, '_, '_>,
     env: StepTransitionEnv<'_, '_, '_, '_, '_>,
     block: StepBlockInput<'_>,
 ) -> Result<CheckedBlockOutcome> {
     let mut actions = checked_actions_for_statements(
         context,
-        outputs,
-        types,
-        loop_elements,
+        resources.outputs,
+        resources.types,
+        resources.spawn_sites,
+        resources.loop_elements,
         ActionCheckInput {
             function_scope: env.function_scope,
             source_bindings: env.source_bindings,
@@ -317,25 +318,14 @@ fn check_runtime_if_branch_block_outcome(
         },
         &block.body.statements,
     )?;
-    let outcome = checked_return_outcome(
-        context,
-        state_space,
-        outputs,
-        types,
-        loop_elements,
-        env,
-        block,
-    )?;
+    let outcome = checked_return_outcome(context, resources, env, block)?;
     actions.extend(outcome.actions);
     Ok(CheckedBlockOutcome { actions, ..outcome })
 }
 
 fn checked_return_outcome(
     context: &mut StepCheckContext<'_>,
-    state_space: &mut StateSpace<'_>,
-    outputs: &mut OutputPool,
-    types: &mut CheckedTypeInterner<'_>,
-    loop_elements: &mut LoopElementAllocator,
+    resources: &mut StepTransitionResources<'_, '_, '_>,
     env: StepTransitionEnv<'_, '_, '_, '_, '_>,
     block: StepBlockInput<'_>,
 ) -> Result<CheckedBlockOutcome> {
@@ -347,10 +337,7 @@ fn checked_return_outcome(
     {
         return checked_if_else_return_outcome(
             context,
-            state_space,
-            outputs,
-            types,
-            loop_elements,
+            resources,
             env,
             RuntimeIfReturnInput {
                 condition,
@@ -378,21 +365,21 @@ fn checked_return_outcome(
     )?;
     validate_return_match_arm_action_statements(
         context,
-        types,
+        resources.types,
         env.function_scope,
         ReturnMatchArmActionInput {
             source_bindings: env.source_bindings,
             template_bindings: env.template_bindings,
             input: env.input,
             action_scope: block.action_scope.for_step_return_match_arm(),
-            loop_element_base: loop_elements.next_index(),
+            loop_element_base: resources.loop_elements.next_index(),
             body: block.body,
         },
     )?;
     let next_state = checked_next_state_for_arg(
         context,
-        state_space,
-        types,
+        resources.state_space,
+        resources.types,
         env,
         NextStateInput {
             state_arg: &step_return.state_arg,
@@ -404,9 +391,10 @@ fn checked_return_outcome(
     } else {
         checked_actions_for_statements(
             context,
-            outputs,
-            types,
-            loop_elements,
+            resources.outputs,
+            resources.types,
+            resources.spawn_sites,
+            resources.loop_elements,
             ActionCheckInput {
                 function_scope: env.function_scope,
                 source_bindings: env.source_bindings,
@@ -427,10 +415,7 @@ fn checked_return_outcome(
 
 fn checked_if_else_return_outcome(
     context: &mut StepCheckContext<'_>,
-    state_space: &mut StateSpace<'_>,
-    outputs: &mut OutputPool,
-    types: &mut CheckedTypeInterner<'_>,
-    loop_elements: &mut LoopElementAllocator,
+    resources: &mut StepTransitionResources<'_, '_, '_>,
     env: StepTransitionEnv<'_, '_, '_, '_, '_>,
     runtime_if: RuntimeIfReturnInput<'_>,
 ) -> Result<CheckedBlockOutcome> {
@@ -441,7 +426,7 @@ fn checked_if_else_return_outcome(
     let branch_action_scope = runtime_if.action_scope.for_final_runtime_if_branch();
     let condition = checked_runtime_bool_condition(
         context,
-        types,
+        resources.types,
         env.function_scope,
         env.source_bindings,
         env.template_bindings,
@@ -449,10 +434,7 @@ fn checked_if_else_return_outcome(
     )?;
     let then_outcome = check_runtime_if_branch_block_outcome(
         context,
-        state_space,
-        outputs,
-        types,
-        loop_elements,
+        resources,
         env,
         StepBlockInput {
             body: runtime_if.then_branch,
@@ -462,10 +444,7 @@ fn checked_if_else_return_outcome(
     )?;
     let else_outcome = check_runtime_if_branch_block_outcome(
         context,
-        state_space,
-        outputs,
-        types,
-        loop_elements,
+        resources,
         env,
         StepBlockInput {
             body: runtime_if.else_branch,

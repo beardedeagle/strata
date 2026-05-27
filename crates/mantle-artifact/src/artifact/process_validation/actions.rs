@@ -1,8 +1,12 @@
+use super::authorities::SpawnAuthorityUsage;
 use super::templates::{
     validate_bool_condition_template, validate_for_each_collection_type,
     validate_template_loop_elements,
 };
 use super::*;
+use outcome_types::{validate_send_outcome_type, validate_spawn_outcome_type};
+
+mod outcome_types;
 
 impl ArtifactProcess {
     pub(in crate::artifact) fn validate_action_reference(
@@ -27,6 +31,7 @@ impl ArtifactProcess {
             ArtifactAction::Spawn {
                 target,
                 process_ref,
+                spawn_site,
             } => {
                 if scope.is_inside_runtime_if_branch() {
                     return Err(Error::new(format!(
@@ -52,6 +57,7 @@ impl ArtifactProcess {
                         declared_target.as_u32()
                     )));
                 }
+                self.validate_spawn_site(*spawn_site, *target)?;
                 if !spawned_refs.insert(*process_ref) {
                     return Err(Error::new(format!(
                         "process {} duplicates process reference id {} within message transition {}",
@@ -62,7 +68,10 @@ impl ArtifactProcess {
                 }
             }
             ArtifactAction::SpawnOutcome {
-                outcome_ty, target, ..
+                outcome_ty,
+                target,
+                spawn_site,
+                ..
             } => {
                 if scope.is_inside_runtime_if_branch() {
                     return Err(Error::new(format!(
@@ -98,6 +107,7 @@ impl ArtifactProcess {
                         self.debug_name
                     )));
                 }
+                self.validate_spawn_site(*spawn_site, *target)?;
                 validate_spawn_outcome_type(artifact, *outcome_ty, *target)?;
             }
             ArtifactAction::Send {
@@ -387,6 +397,40 @@ impl ArtifactProcess {
         Ok(())
     }
 
+    pub(in crate::artifact::process_validation) fn collect_spawn_authority_usage(
+        &self,
+        actions: &[ArtifactAction],
+        usage: &mut SpawnAuthorityUsage,
+    ) -> Result<()> {
+        for action in actions {
+            match action {
+                ArtifactAction::Spawn {
+                    target, spawn_site, ..
+                }
+                | ArtifactAction::SpawnOutcome {
+                    target, spawn_site, ..
+                } => {
+                    self.record_spawn_site_usage(usage, *spawn_site, *target)?;
+                }
+                ArtifactAction::IfElse {
+                    then_actions,
+                    else_actions,
+                    ..
+                } => {
+                    self.collect_spawn_authority_usage(then_actions, usage)?;
+                    self.collect_spawn_authority_usage(else_actions, usage)?;
+                }
+                ArtifactAction::ForEach { body, .. } => {
+                    self.collect_spawn_authority_usage(body, usage)?;
+                }
+                ArtifactAction::Emit { .. }
+                | ArtifactAction::Send { .. }
+                | ArtifactAction::SendOutcome { .. } => {}
+            }
+        }
+        Ok(())
+    }
+
     fn validate_send_target_reference(
         &self,
         artifact: &MantleArtifact,
@@ -560,185 +604,40 @@ impl ArtifactProcess {
                 ))
             })
     }
-}
 
-fn validate_send_outcome_type(
-    artifact: &MantleArtifact,
-    outcome_ty: TypeId,
-    message_ty: TypeId,
-) -> Result<()> {
-    let (ok_ty, err_ty) = result_payload_types(artifact, "send outcome type", outcome_ty)?;
-    validate_unit_type(artifact, ok_ty)?;
-    validate_error_enum_payloads(
-        artifact,
-        "send outcome error type",
-        err_ty,
-        &["Full", "Stopped", "Crashed", "MailboxClosed"],
-        message_ty,
-    )
-}
-
-fn validate_spawn_outcome_type(
-    artifact: &MantleArtifact,
-    outcome_ty: TypeId,
-    target: ProcessId,
-) -> Result<()> {
-    let (ok_ty, err_ty) = result_payload_types(artifact, "spawn outcome type", outcome_ty)?;
-    artifact.validate_process_ref_type_id_target("spawn outcome success type", ok_ty, target)?;
-    let unit_ty = validate_error_enum_shared_payload_type(
-        artifact,
-        "spawn outcome error type",
-        err_ty,
-        &["Denied", "Exhausted", "BackendUnavailable"],
-    )?;
-    validate_unit_type(artifact, unit_ty)
-}
-
-fn result_payload_types(
-    artifact: &MantleArtifact,
-    field: &str,
-    outcome_ty: TypeId,
-) -> Result<(TypeId, TypeId)> {
-    let variants = enum_variants(artifact, field, outcome_ty)?;
-    let [ok, err] = variants else {
-        return Err(Error::new(format!(
-            "{field} type id {} must have exactly Ok and Err variants",
-            outcome_ty.as_u32()
-        )));
-    };
-    if ok.label != "Ok" || err.label != "Err" {
-        return Err(Error::new(format!(
-            "{field} type id {} must declare Ok then Err variants",
-            outcome_ty.as_u32()
-        )));
+    fn record_spawn_site_usage(
+        &self,
+        usage: &mut SpawnAuthorityUsage,
+        spawn_site: SpawnSiteId,
+        target: ProcessId,
+    ) -> Result<()> {
+        let site = self.validate_spawn_site(spawn_site, target)?;
+        usage.mark_spawn_site(&self.debug_name, spawn_site.index())?;
+        usage.mark_authority(&self.debug_name, site.authority.index())
     }
-    let ok_ty = ok.payload_type.ok_or_else(|| {
-        Error::new(format!(
-            "{field} type id {} Ok variant must carry a success value",
-            outcome_ty.as_u32()
-        ))
-    })?;
-    let err_ty = err.payload_type.ok_or_else(|| {
-        Error::new(format!(
-            "{field} type id {} Err variant must carry an error value",
-            outcome_ty.as_u32()
-        ))
-    })?;
-    Ok((ok_ty, err_ty))
-}
 
-fn validate_error_enum_shared_payload_type(
-    artifact: &MantleArtifact,
-    field: &str,
-    error_ty: TypeId,
-    expected_labels: &[&str],
-) -> Result<TypeId> {
-    let variants = enum_variants(artifact, field, error_ty)?;
-    if variants.len() != expected_labels.len() {
-        return Err(Error::new(format!(
-            "{field} type id {} has {} variants, expected {}",
-            error_ty.as_u32(),
-            variants.len(),
-            expected_labels.len()
-        )));
-    }
-    let mut payload_ty: Option<TypeId> = None;
-    for (variant, expected_label) in variants.iter().zip(expected_labels) {
-        if variant.label != *expected_label {
+    fn validate_spawn_site(
+        &self,
+        spawn_site: SpawnSiteId,
+        target: ProcessId,
+    ) -> Result<&ArtifactSpawnSite> {
+        let site = self.spawn_sites.get(spawn_site.index()).ok_or_else(|| {
+            Error::new(format!(
+                "process {} references undefined spawn site id {}",
+                self.debug_name,
+                spawn_site.as_u32()
+            ))
+        })?;
+        if site.target != target {
             return Err(Error::new(format!(
-                "{field} type id {} declares variant {}, expected {}",
-                error_ty.as_u32(),
-                variant.label,
-                expected_label
+                "process {} spawn site id {} targets process id {}, expected {}",
+                self.debug_name,
+                spawn_site.as_u32(),
+                site.target.as_u32(),
+                target.as_u32()
             )));
         }
-        let Some(variant_payload_ty) = variant.payload_type else {
-            return Err(Error::new(format!(
-                "{field} variant {} must carry a payload",
-                variant.label
-            )));
-        };
-        match payload_ty {
-            Some(expected) if expected != variant_payload_ty => {
-                return Err(Error::new(format!(
-                    "{field} variant {} carries payload type id {}, expected {}",
-                    variant.label,
-                    variant_payload_ty.as_u32(),
-                    expected.as_u32()
-                )));
-            }
-            Some(_) => {}
-            None => payload_ty = Some(variant_payload_ty),
-        }
+        let ArtifactSpawnKind::DynamicLocal = site.kind;
+        Ok(site)
     }
-    payload_ty.ok_or_else(|| Error::new(format!("{field} must declare at least one variant")))
-}
-
-fn validate_unit_type(artifact: &MantleArtifact, ty: TypeId) -> Result<()> {
-    let entry = artifact.type_entry(ty)?;
-    let ArtifactValueShape::Atom = entry.value_shape()? else {
-        return Err(Error::new(format!(
-            "effect outcome Unit type id {} must be an atom value type",
-            ty.as_u32()
-        )));
-    };
-    if entry.label != "Unit" {
-        return Err(Error::new(format!(
-            "effect outcome Unit type id {} must be labeled Unit",
-            ty.as_u32()
-        )));
-    }
-    Ok(())
-}
-
-fn validate_error_enum_payloads(
-    artifact: &MantleArtifact,
-    field: &str,
-    error_ty: TypeId,
-    expected_labels: &[&str],
-    payload_ty: TypeId,
-) -> Result<()> {
-    let variants = enum_variants(artifact, field, error_ty)?;
-    if variants.len() != expected_labels.len() {
-        return Err(Error::new(format!(
-            "{field} type id {} has {} variants, expected {}",
-            error_ty.as_u32(),
-            variants.len(),
-            expected_labels.len()
-        )));
-    }
-    for (variant, expected_label) in variants.iter().zip(expected_labels) {
-        if variant.label != *expected_label {
-            return Err(Error::new(format!(
-                "{field} type id {} declares variant {}, expected {}",
-                error_ty.as_u32(),
-                variant.label,
-                expected_label
-            )));
-        }
-        if variant.payload_type != Some(payload_ty) {
-            return Err(Error::new(format!(
-                "{field} variant {} must preserve payload type id {}",
-                variant.label,
-                payload_ty.as_u32()
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn enum_variants<'a>(
-    artifact: &'a MantleArtifact,
-    field: &str,
-    ty: TypeId,
-) -> Result<&'a [ArtifactEnumVariant]> {
-    artifact.validate_value_type(field, ty)?;
-    let entry = artifact.type_entry(ty)?;
-    let ArtifactValueShape::Enum { variants } = entry.value_shape()? else {
-        return Err(Error::new(format!(
-            "{field} type id {} must be an enum value type",
-            ty.as_u32()
-        )));
-    };
-    Ok(variants)
 }

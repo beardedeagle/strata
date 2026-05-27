@@ -13,3 +13,12 @@ edition = "2024"
 
 [output.html]
 git-repository-url = "https://github.com/beardedeagle/strata"
+additional-js = ["theme/strata-highlight.js", "mermaid.min.js", "svg-pan-zoom.min.js", "mermaid-init.js"]
+additional-css = ["mermaid-zoom.css"]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output.html.fold]
+enable = true
+level = 0

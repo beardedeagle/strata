@@ -7,5 +7,6 @@ mod message_payloads;
 mod process_ref_payloads;
 mod process_refs;
 mod scalar_templates;
+mod spawn_authority;
 mod state_transitions;
 mod support;

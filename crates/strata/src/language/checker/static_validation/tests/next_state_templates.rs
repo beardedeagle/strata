@@ -142,7 +142,7 @@ fn static_validation_rejects_static_next_state_template_outside_state_table() {
 
 #[test]
 fn static_validation_rejects_process_ref_next_state_template() {
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -221,7 +221,7 @@ fn static_validation_rejects_process_ref_next_state_template() {
 
 #[test]
 fn static_validation_rejects_process_ref_payload_enum_next_state_template() {
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -297,7 +297,7 @@ fn static_validation_rejects_process_ref_payload_enum_next_state_template() {
 
 #[test]
 fn static_validation_rejects_payload_template_next_state_outside_state_table() {
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -326,6 +326,7 @@ fn static_validation_rejects_payload_template_next_state_outside_state_table() {
                 CheckedAction::Spawn {
                     target: checked_process_id(1),
                     process_ref: checked_process_ref_id(0),
+                    spawn_site: checked_spawn_site_id(0),
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
@@ -388,7 +389,7 @@ fn static_validation_rejects_payload_template_next_state_outside_state_table() {
 
 #[test]
 fn static_validation_rejects_payload_enum_template_next_state_outside_state_table() {
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -417,6 +418,7 @@ fn static_validation_rejects_payload_enum_template_next_state_outside_state_tabl
                 CheckedAction::Spawn {
                     target: checked_process_id(1),
                     process_ref: checked_process_ref_id(0),
+                    spawn_site: checked_spawn_site_id(0),
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),

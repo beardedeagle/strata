@@ -24,15 +24,17 @@ mod type_validation;
 mod values;
 
 use mantle_artifact::{
-    ArtifactAction, ArtifactEnumVariant, ArtifactMessageVariant, ArtifactProcess,
-    ArtifactProcessRef, ArtifactScalarType, ArtifactSendTarget, ArtifactTransition, ArtifactType,
-    ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape, EffectOutcomeId, EnumVariantId, Error,
-    LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_EFFECT_OUTCOMES_PER_TRANSITION,
-    MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS,
-    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId,
-    NextState, OutputId, ProcessId, ProcessRefId, Result, StateId, StepResult, TypeId,
+    ArtifactAction, ArtifactAuthority, ArtifactCapabilityDescriptor, ArtifactEnumVariant,
+    ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactScalarType,
+    ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite, ArtifactTransition, ArtifactType,
+    ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape, AuthorityId, EffectOutcomeId,
+    EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_AUTHORITIES_PER_PROCESS,
+    MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS,
+    MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS, MAX_SPAWN_SITES_PER_PROCESS,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
+    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
+    OutputId, ProcessId, ProcessRefId, Result, SpawnSiteId, StateId, StepResult, TypeId,
     validate_message_label, validate_state_value_identity_label,
 };
 
@@ -369,11 +371,65 @@ pub(crate) struct LoadedProcess {
     pub(crate) state_values: Vec<LoadedStateValue>,
     pub(crate) message_type: TypeId,
     pub(crate) message_variants: Vec<LoadedMessageVariant>,
+    pub(crate) authorities: Vec<LoadedAuthority>,
+    pub(crate) spawn_sites: Vec<LoadedSpawnSite>,
     pub(crate) process_refs: Vec<LoadedProcessRef>,
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
     pub(crate) transitions: Vec<LoadedTransition>,
     transition_lookup: TransitionLookup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedAuthority {
+    pub(crate) debug_name: String,
+    pub(crate) descriptor: LoadedCapabilityDescriptor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum LoadedCapabilityDescriptor {
+    Spawn { target: ProcessId },
+}
+
+impl LoadedAuthority {
+    fn from_artifact(authority: &ArtifactAuthority) -> Self {
+        Self {
+            debug_name: authority.debug_name.clone(),
+            descriptor: LoadedCapabilityDescriptor::from_artifact(authority.descriptor),
+        }
+    }
+}
+
+impl LoadedCapabilityDescriptor {
+    fn from_artifact(descriptor: ArtifactCapabilityDescriptor) -> Self {
+        match descriptor {
+            ArtifactCapabilityDescriptor::Spawn { target } => Self::Spawn { target },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoadedSpawnKind {
+    DynamicLocal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedSpawnSite {
+    pub(crate) target: ProcessId,
+    pub(crate) authority: AuthorityId,
+    pub(crate) kind: LoadedSpawnKind,
+}
+
+impl LoadedSpawnSite {
+    fn from_artifact(spawn_site: &ArtifactSpawnSite) -> Self {
+        Self {
+            target: spawn_site.target,
+            authority: spawn_site.authority,
+            kind: match spawn_site.kind {
+                ArtifactSpawnKind::DynamicLocal => LoadedSpawnKind::DynamicLocal,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

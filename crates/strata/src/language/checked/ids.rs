@@ -30,6 +30,8 @@ define_checked_id!(CheckedTypeId);
 define_checked_id!(CheckedEnumVariantId);
 define_checked_id!(CheckedLoopElementId);
 define_checked_id!(CheckedEffectOutcomeId);
+define_checked_id!(CheckedAuthorityId);
+define_checked_id!(CheckedSpawnSiteId);
 
 impl CheckedProcessId {
     pub(in crate::language) fn index(self) -> usize {
@@ -73,6 +75,18 @@ impl CheckedTypeId {
 }
 
 impl CheckedEnumVariantId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl CheckedAuthorityId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl CheckedSpawnSiteId {
     pub(in crate::language) fn index(self) -> usize {
         self.0 as usize
     }

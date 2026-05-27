@@ -60,6 +60,7 @@ fn validate_rejects_spawn_process_ref_target_mismatch() {
     artifact.processes[0].transitions[0].actions[0] = ArtifactAction::Spawn {
         target: ProcessId::new(0),
         process_ref: ProcessRefId::new(0),
+        spawn_site: SPAWN_WORKER_SITE,
     };
 
     let err = artifact
@@ -80,6 +81,7 @@ fn validate_rejects_duplicate_spawn_process_ref_with_transition_context() {
         .push(ArtifactAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_WORKER_SITE,
         });
 
     let err = artifact

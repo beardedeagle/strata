@@ -11,6 +11,8 @@ fn in_memory_host_preserves_current_next_state() {
         state_values: state_values(WORKER_STATE, &["Idle", "Handled"]),
         message_type: WORKER_MSG,
         message_variants: vec![ArtifactMessageVariant::unit("Ping")],
+        authorities: Vec::new(),
+        spawn_sites: Vec::new(),
         process_refs: Vec::new(),
         mailbox_bound: 1,
         init_state: StateId::new(1),

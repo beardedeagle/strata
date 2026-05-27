@@ -162,6 +162,11 @@ Key source ideas:
   closed before a later sender can observe `Err(Crashed(...))`; the direct
   Mantle runtime outcome test covers already-failed targets, and admission tests
   cover the required `MailboxClosed` shape.
+- `examples/effect_outcome_spawn_denied.str` covers the typed local spawn
+  authority denial path. It declares `Cap<Spawn<Worker>>`, builds successfully,
+  and the acceptance gate runs Mantle with denied admitted spawn authority so
+  the step observes `Err(Denied(Unit))` before a `Worker` runtime instance is
+  accepted.
 
 ## Runtime If Else
 
@@ -696,9 +701,9 @@ Key source ideas:
 ## Actor Emit Spawn Send
 
 `examples/actor_emit_spawn_send.str` combines `emit`, `spawn`, and `send` in
-one checked transition. `Main` declares each effect, spawns `Worker`, sends
-`Ping` through the typed process reference, and stops with a whole replacement
-state.
+one checked transition. `Main` declares each effect and exact
+`Cap<Spawn<Worker>>` authority, spawns `Worker`, sends `Ping` through the typed
+process reference, and stops with a whole replacement state.
 
 ```sh
 just run-example actor_emit_spawn_send
@@ -706,8 +711,10 @@ just run-example actor_emit_spawn_send
 
 Key source ideas:
 
+- `authority spawn_worker: Cap<Spawn<Worker>>;` declares the exact local spawn
+  capability.
 - `fn step(...) -> ProcResult<MainState> ! [emit, spawn, send]` declares the
-  exact authority used by the body.
+  exact effects used by the body.
 - `let worker: ProcessRef<Worker> = spawn Worker;` creates a typed process
   reference.
 - `send worker Ping;` dispatches by the checked process-reference target and

@@ -6,13 +6,14 @@ pub(super) use super::super::validate_action_references;
 pub(super) use crate::language::STATIC_RUNTIME_PROCESS_LIMIT;
 pub(super) use crate::language::ast::{Effect, Identifier};
 pub(super) use crate::language::checked::{
-    CheckedAction, CheckedEnumVariant, CheckedEnumVariantId, CheckedLoopElement,
-    CheckedLoopElementId, CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId,
-    CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId,
-    CheckedProcessParts, CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedStateId,
-    CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTransitionParts,
-    CheckedTypeKind, CheckedTypeRef, CheckedValueShape, CheckedValueTemplate,
-    CheckedValueTemplateField, CheckedValueTemplateMapEntry,
+    CheckedAction, CheckedAuthority, CheckedAuthorityId, CheckedCapabilityDescriptor,
+    CheckedEnumVariant, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,
+    CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
+    CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts,
+    CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedSpawnKind, CheckedSpawnSite,
+    CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition,
+    CheckedTransitionParts, CheckedTypeKind, CheckedTypeRef, CheckedValueShape,
+    CheckedValueTemplate, CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
 pub(super) use mantle_artifact::ArtifactValue;
 
@@ -39,6 +40,23 @@ pub(super) fn checked_process_with_declared_refs(process_ref_count: usize) -> Ch
         init_state: CheckedStateId::from_index(0).expect("valid checked state id"),
         transitions: Vec::new(),
     })
+}
+
+pub(super) fn checked_process_with_spawn_to_worker(parts: CheckedProcessParts) -> CheckedProcess {
+    CheckedProcess::with_authority(
+        parts,
+        vec![CheckedAuthority::new(
+            ident("spawn_worker"),
+            CheckedCapabilityDescriptor::Spawn {
+                target: checked_process_id(1),
+            },
+        )],
+        vec![CheckedSpawnSite::new(
+            checked_process_id(1),
+            checked_authority_id(0),
+            CheckedSpawnKind::DynamicLocal,
+        )],
+    )
 }
 
 pub(super) fn ident(value: &str) -> Identifier {
@@ -131,6 +149,14 @@ pub(super) fn checked_process_id(index: usize) -> CheckedProcessId {
 
 pub(super) fn checked_process_ref_id(index: usize) -> CheckedProcessRefId {
     CheckedProcessRefId::from_index(index).expect("valid checked process reference id")
+}
+
+pub(super) fn checked_authority_id(index: usize) -> CheckedAuthorityId {
+    CheckedAuthorityId::from_index(index).expect("valid checked authority id")
+}
+
+pub(super) fn checked_spawn_site_id(index: usize) -> CheckedSpawnSiteId {
+    CheckedSpawnSiteId::from_index(index).expect("valid checked spawn site id")
 }
 
 pub(super) fn checked_state_id(index: usize) -> CheckedStateId {

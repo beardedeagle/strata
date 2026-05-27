@@ -1,0 +1,58 @@
+module effect_outcome_spawn_denied;
+
+enum MainState {
+    Ready,
+    Done,
+}
+
+enum MainMsg {
+    Start,
+}
+
+enum Bool {
+    False,
+    True,
+}
+
+enum WorkerState {
+    Idle,
+    Done,
+}
+
+enum WorkerMsg {
+    Work,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return Ready;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn] ~ [] @det {
+        let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;
+        if (spawn_result == Err(Denied(Unit))) {
+            emit "spawn denied";
+        } else {
+            emit "spawn accepted";
+        }
+        return Stop(Done);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(Done);
+    }
+}

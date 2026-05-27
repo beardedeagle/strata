@@ -127,6 +127,7 @@ fn assert_final_if_nested_action_shape(artifact: &MantleArtifact) {
         ArtifactAction::Spawn {
             target,
             process_ref,
+            ..
         },
         ArtifactAction::IfElse {
             condition,

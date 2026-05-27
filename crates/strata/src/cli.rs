@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 
 use mantle_artifact::write_artifact;
 
-use crate::language::{MAX_SOURCE_BYTES, check_source, lower_to_artifact};
+use crate::language::{
+    AuthoritySummaryFormat, MAX_SOURCE_BYTES, check_source, lower_to_artifact,
+    render_authority_summary,
+};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -113,6 +116,21 @@ where
                 path.display(),
                 artifact_path.display()
             );
+            Ok(())
+        }
+        Some("authority-summary") => {
+            let path = required_path(
+                args.next(),
+                "strata authority-summary <path.str> [--format text|json]",
+            )?;
+            let format = authority_summary_format_from_args(
+                args,
+                "strata authority-summary <path.str> [--format text|json]",
+            )?;
+            let source = read_source_file(&path)?;
+            let checked = check_source(&source)?;
+            let summary = render_authority_summary(&checked, &path.display().to_string(), format);
+            print_summary(&summary);
             Ok(())
         }
         Some("--help") | Some("-h") => {
@@ -274,10 +292,51 @@ fn ensure_no_extra_args(args: impl IntoIterator<Item = String>) -> Result<()> {
     }
 }
 
+fn authority_summary_format_from_args(
+    args: impl IntoIterator<Item = String>,
+    usage: &str,
+) -> Result<AuthoritySummaryFormat> {
+    let mut format = AuthoritySummaryFormat::Text;
+    let mut format_seen = false;
+    let mut rest = args.into_iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--format" => {
+                if format_seen {
+                    return Err(Error::new("duplicate --format argument"));
+                }
+                format_seen = true;
+                let value = rest
+                    .next()
+                    .ok_or_else(|| Error::new(format!("missing --format value; usage: {usage}")))?;
+                format = match value.as_str() {
+                    "text" => AuthoritySummaryFormat::Text,
+                    "json" => AuthoritySummaryFormat::Json,
+                    _ => {
+                        return Err(Error::new(format!(
+                            "unsupported --format value {value:?}; expected text or json"
+                        )));
+                    }
+                };
+            }
+            other => return Err(Error::new(format!("unexpected argument {other:?}"))),
+        }
+    }
+    Ok(format)
+}
+
+fn print_summary(summary: &str) {
+    print!("{summary}");
+    if !summary.ends_with('\n') {
+        println!();
+    }
+}
+
 fn print_strata_usage() {
     println!("usage:");
     println!("  strata check <path.str>");
     println!("  strata build <path.str> [--output <path.mta>]");
+    println!("  strata authority-summary <path.str> [--format text|json]");
 }
 
 pub fn run_strata_from_env() -> Result<()> {
@@ -387,6 +446,33 @@ mod tests {
         .expect_err("duplicate output should fail");
 
         assert!(err.to_string().contains("duplicate --output argument"));
+    }
+
+    #[test]
+    fn authority_summary_format_parser_accepts_json() {
+        let format = authority_summary_format_from_args(
+            ["--format".to_string(), "json".to_string()],
+            "usage",
+        )
+        .expect("json format should parse");
+
+        assert_eq!(format, AuthoritySummaryFormat::Json);
+    }
+
+    #[test]
+    fn authority_summary_format_parser_rejects_duplicate_format() {
+        let err = authority_summary_format_from_args(
+            [
+                "--format".to_string(),
+                "text".to_string(),
+                "--format".to_string(),
+                "json".to_string(),
+            ],
+            "usage",
+        )
+        .expect_err("duplicate format should fail");
+
+        assert!(err.to_string().contains("duplicate --format argument"));
     }
 
     #[test]

@@ -4,6 +4,8 @@ use super::super::support::*;
 fn admission_accepts_one_nested_if_else_inside_runtime_if_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
+    artifact.processes[0].authorities = Vec::new();
+    artifact.processes[0].spawn_sites = Vec::new();
     let condition = ArtifactValueTemplate::Literal {
         ty: bool_type,
         value: artifact_value("True"),
@@ -74,6 +76,7 @@ fn admission_rejects_spawn_inside_runtime_if_branch() {
         then_actions: vec![ArtifactAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_WORKER_SITE,
         }],
         else_actions: Vec::new(),
     }];
@@ -93,6 +96,8 @@ fn admission_accepts_for_each_inside_runtime_if_branch() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);
     let list_type = append_list_type(&mut artifact, "BoolList", bool_type, 1);
+    artifact.processes[0].authorities = Vec::new();
+    artifact.processes[0].spawn_sites = Vec::new();
     artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Emit];
     artifact.processes[0].transitions[0].actions = vec![ArtifactAction::IfElse {
         condition: ArtifactValueTemplate::Literal {
@@ -194,6 +199,7 @@ fn admission_rejects_spawn_inside_runtime_if_branch_loop() {
             body: vec![ArtifactAction::Spawn {
                 target: ProcessId::new(1),
                 process_ref: ProcessRefId::new(0),
+                spawn_site: SPAWN_WORKER_SITE,
             }],
         }],
         else_actions: Vec::new(),

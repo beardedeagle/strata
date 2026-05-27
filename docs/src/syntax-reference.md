@@ -70,6 +70,7 @@ process_decl =
 process_member =
     state_alias
   | message_alias
+  | authority_decl
   | init_function
   | step_function
   | source_function
@@ -79,21 +80,29 @@ state_alias =
 
 message_alias =
     "type" "Msg" "=" type_ref ";"
+
+authority_decl =
+    "authority" ident ":" "Cap" "<" "Spawn" "<" ident ">" ">" ";"
 ```
 
-The aliases and functions may appear in any order. `State`, `Msg`, and `init`
-must each appear exactly once. Non-`init`/`step` functions are process-local
-source functions. Each concrete message case must resolve to exactly one generated
-transition, either through an explicit constructor pattern, through one wildcard
-pattern, through one `match msg` step body, or through a state-match step for a
-constructor or wildcard message pattern. Parameter-pattern, state-match, and
-whole-body `match msg` dispatch may split same top-level message constructor
-clauses by exact typed payload guard when their nested predicates are provably
-disjoint over discovered concrete payload cases. A payload-sensitive state-match
-wildcard fallback may cover discovered concrete payload cases not matched by an
-explicit same-message state-match clause; it lowers exact typed payload guards,
-not an open runtime catch-all. A process cannot mix parameter-pattern/state-match
-step forms with a `match msg` step body. Other process members are rejected.
+The aliases, authority declarations, and functions may appear in any order.
+`State`, `Msg`, and `init` must each appear exactly once. An authority
+declaration is a process-local typed capability descriptor; the current accepted
+descriptor is exactly `Cap<Spawn<ProcessName>>`. It must target another declared
+non-entry process, must be referenced by at least one local spawn site, and does
+not replace `! [spawn]` effect usage. Non-`init`/`step`
+functions are process-local source functions. Each concrete message case must
+resolve to exactly one generated transition, either through an explicit
+constructor pattern, through one wildcard pattern, through one `match msg` step
+body, or through a state-match step for a constructor or wildcard message
+pattern. Parameter-pattern, state-match, and whole-body `match msg` dispatch may
+split same top-level message constructor clauses by exact typed payload guard
+when their nested predicates are provably disjoint over discovered concrete
+payload cases. A payload-sensitive state-match wildcard fallback may cover
+discovered concrete payload cases not matched by an explicit same-message
+state-match clause; it lowers exact typed payload guards, not an open runtime
+catch-all. A process cannot mix parameter-pattern/state-match step forms with a
+`match msg` step body. Other process members are rejected.
 
 ## Functions
 
@@ -541,7 +550,8 @@ type_arg =
 The built-in generic types accepted by checking are
 `ProcResult<StateType>` as a `step` return type and
 `ProcessRef<ProcessName>` in spawn bindings, message payload declarations, and
-payload-binding step patterns. `List<T,N>` and `Map<K,V,N>` are accepted source
+payload-binding step patterns. `Cap<Spawn<ProcessName>>` is accepted only in
+process authority declarations. `List<T,N>` and `Map<K,V,N>` are accepted source
 value types when their element, key, and value arguments are source value types
 and `N` is a numeric capacity. `Unit`, `Option<T>`, `Result<T,E>`,
 `SendError<M>`, and `SpawnError<A>` are built-in value shapes for explicit
@@ -722,11 +732,13 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`_`, `as`, `bounded`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`,
-`mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`, `security`,
-`send`, `spawn`, `type`, and `var` are reserved everywhere identifiers are
-accepted. The single `_` token is reserved for wildcard patterns.
-`ProcResult`, `ProcessRef`, `List`, `Map`, `Unit`, `Option`, `Result`,
-`SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and
-`I64` are reserved type names because they name built-in transition,
-process-reference, collection, effect outcome, and scalar value types.
+`_`, `as`, `authority`, `bounded`, `else`, `emit`, `enum`, `fn`, `for`, `if`,
+`in`, `let`, `mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`,
+`security`, `send`, `spawn`, `type`, and `var` are reserved everywhere
+identifiers are accepted. The single `_` token is reserved for wildcard
+patterns.
+`ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `List`, `Map`, `Unit`, `Option`,
+`Result`, `SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`,
+`I32`, and `I64` are reserved type names because they name built-in transition,
+process-reference, capability descriptor, collection, effect outcome, and
+scalar value types.

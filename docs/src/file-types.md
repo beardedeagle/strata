@@ -29,13 +29,13 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=2
+schema_version=1
 source_language=strata
 ```
 
 The schema version identifies the admitted `.mta` encoding shape. It is not a
 Strata language release, a migration counter, or a stability guarantee. In the
-current greenfield implementation, `2` is the single admitted artifact schema
+current greenfield implementation, `1` is the single admitted artifact schema
 baseline. Unsupported schema versions are rejected; artifact producers must emit
 the admitted schema.
 
@@ -43,7 +43,7 @@ Executable references, type identity, and state transitions inside `.mta` use
 validated table IDs and typed transition forms. Process transition records are
 encoded by transition index and carry a `message` ID field, an optional
 `current_state` ID guard, an optional exact typed payload guard, and exact
-effect authority for their actions.
+effect usage for their actions.
 Validation requires each message to have either a transition base with no
 current-state guard or one transition base for every admitted current-state ID.
 Within each message/current-state base, validation admits either one
@@ -75,6 +75,11 @@ binds a process-reference ID to a runtime process instance for the transition.
 A send action targets either a process-reference ID or a received
 typed process-reference payload plus a message ID. Reference debug names remain
 metadata; runtime delivery uses admitted IDs and runtime process instance IDs.
+
+Local spawn authority is encoded as per-process authority tables and spawn-site
+tables. A spawn action references a spawn-site ID, which references an authority
+ID with a typed `Spawn` descriptor for the same target process. Authority names
+remain metadata; admission and runtime checks use typed IDs and descriptors.
 
 Message variants may carry an optional payload type ID. Send actions may carry
 an immutable payload value template, and Mantle delivers the evaluated value in

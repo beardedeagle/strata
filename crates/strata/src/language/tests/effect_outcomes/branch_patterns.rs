@@ -84,6 +84,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return Ready;
     }
@@ -143,6 +145,8 @@ enum WorkerMsg { Work(Job) }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return Ready;
@@ -204,6 +208,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return Ready;
     }
@@ -264,6 +270,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return Ready;
     }
@@ -320,6 +328,8 @@ enum Bool { False, True }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return Ready;

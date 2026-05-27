@@ -15,13 +15,15 @@ Useful local tools:
 rustup toolchain install stable --profile minimal --component rustfmt,clippy
 cargo +stable install just --version 1.50.0 --locked
 cargo +stable install mdbook --version 0.5.2 --locked
+cargo +stable install mdbook-mermaid --version 0.17.0 --locked
 ```
 
 The `1.50.0` value above is the pinned `just` command runner version, not the
 Rust compiler version.
 
 The standard `just quality` gate runs documentation and metadata checks on every
-local platform. Install `jq`, `xmllint`, and `mdbook` before using that bundle.
+local platform. Install `jq`, `xmllint`, `mdbook`, and `mdbook-mermaid` before
+using that bundle.
 Ubuntu-based environments can install the metadata tools with:
 
 ```sh
@@ -37,7 +39,7 @@ brew install jq libxml2
 Windows systems should install `jq` and an `xmllint` provider such as libxml2
 with their package manager, or run the full `just quality` bundle in a WSL
 Ubuntu environment. Confirm the tools are on `PATH` with `jq --version`,
-`xmllint --version`, and `mdbook --version`.
+`xmllint --version`, `mdbook --version`, and `mdbook-mermaid --version`.
 
 Do not set a repository-wide nightly Rust override. Use `just install-fuzz-tools`
 and `just install-miri-tools` only when running the nightly fuzz or Miri gates.
@@ -105,6 +107,21 @@ mantle: trace target/strata/hello.observability.jsonl
 
 The trace path is important. It records what Mantle actually validated and
 executed.
+
+## Inspect Local Spawn Authority
+
+For programs that declare local spawn authority, the optional inspection
+commands show the checked source authority surface and the admitted artifact
+authority tables without changing the normal build or run path:
+
+```sh
+just strata-authority-summary examples/actor_emit_spawn_send.str
+just strata-build examples/actor_emit_spawn_send.str
+just mantle-inspect-authority target/strata/actor_emit_spawn_send.mta
+```
+
+Pass `json` as the final recipe argument when CI or audit tooling needs
+deterministic machine-readable output.
 
 ## Run The Standard Gate
 

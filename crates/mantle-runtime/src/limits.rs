@@ -6,11 +6,18 @@ pub const DEFAULT_MAX_TRACE_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_MAX_EMITTED_OUTPUT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnAuthorityPolicy {
+    AdmitDeclared,
+    DenyDeclared,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunLimits {
     pub max_dispatches: usize,
     pub max_runtime_processes: usize,
     pub max_trace_bytes: usize,
     pub max_emitted_output_bytes: usize,
+    pub spawn_authority_policy: SpawnAuthorityPolicy,
 }
 
 impl Default for RunLimits {
@@ -20,6 +27,7 @@ impl Default for RunLimits {
             max_runtime_processes: DEFAULT_MAX_RUNTIME_PROCESSES,
             max_trace_bytes: DEFAULT_MAX_TRACE_BYTES,
             max_emitted_output_bytes: DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
+            spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
         }
     }
 }

@@ -16,6 +16,8 @@ pub(super) const BOX: TypeId = TypeId::new(6);
 pub(super) const MAIN_PAYLOAD: TypeId = TypeId::new(7);
 pub(super) const PROCESS_REF_MAIN: TypeId = TypeId::new(8);
 pub(super) const PROCESS_REF_WORKER: TypeId = TypeId::new(9);
+pub(super) const SPAWN_WORKER_AUTHORITY: AuthorityId = AuthorityId::new(0);
+pub(super) const SPAWN_WORKER_SITE: SpawnSiteId = SpawnSiteId::new(0);
 
 #[cfg(unix)]
 pub(super) fn create_fifo(path: &Path) {
@@ -62,6 +64,17 @@ pub(super) fn valid_artifact() -> MantleArtifact {
                 state_values: state_values(MAIN_STATE, &["MainState"]),
                 message_type: MAIN_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
+                authorities: vec![ArtifactAuthority {
+                    debug_name: "spawn_worker".to_string(),
+                    descriptor: ArtifactCapabilityDescriptor::Spawn {
+                        target: ProcessId::new(1),
+                    },
+                }],
+                spawn_sites: vec![ArtifactSpawnSite {
+                    target: ProcessId::new(1),
+                    authority: SPAWN_WORKER_AUTHORITY,
+                    kind: ArtifactSpawnKind::DynamicLocal,
+                }],
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -79,6 +92,7 @@ pub(super) fn valid_artifact() -> MantleArtifact {
                         ArtifactAction::Spawn {
                             target: ProcessId::new(1),
                             process_ref: ProcessRefId::new(0),
+                            spawn_site: SPAWN_WORKER_SITE,
                         },
                         ArtifactAction::Send {
                             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -94,6 +108,8 @@ pub(super) fn valid_artifact() -> MantleArtifact {
                 state_values: state_values(WORKER_STATE, &["Idle", "Handled"]),
                 message_type: WORKER_MSG,
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
+                authorities: Vec::new(),
+                spawn_sites: Vec::new(),
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),

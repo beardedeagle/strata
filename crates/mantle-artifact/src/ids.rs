@@ -37,3 +37,5 @@ define_id!(TypeId);
 define_id!(EnumVariantId);
 define_id!(LoopElementId);
 define_id!(EffectOutcomeId);
+define_id!(AuthorityId);
+define_id!(SpawnSiteId);

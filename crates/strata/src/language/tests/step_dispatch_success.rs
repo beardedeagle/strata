@@ -46,6 +46,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }
@@ -149,6 +151,9 @@ enum WorkerMsg {
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+    authority spawn_body_worker: Cap<Spawn<BodyWorker>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
@@ -270,6 +275,8 @@ enum WorkerMsg { First, Second }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
@@ -427,6 +434,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }
@@ -492,6 +501,8 @@ enum WorkerMsg {
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
@@ -563,6 +574,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
     }
@@ -632,6 +645,8 @@ enum WorkerMsg { Advance }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;

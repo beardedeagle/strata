@@ -89,7 +89,8 @@ fn parses_and_checks_actor_ping() {
         [
             CheckedAction::Spawn {
                 target: checked_process_id(1),
-                process_ref: checked_process_ref_id(0)
+                process_ref: checked_process_ref_id(0),
+                spawn_site: checked_spawn_site_id(0)
             },
             CheckedAction::Send {
                 target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
@@ -224,11 +225,13 @@ fn parses_and_checks_actor_instances_with_distinct_process_refs() {
         [
             CheckedAction::Spawn {
                 target: checked_process_id(1),
-                process_ref: checked_process_ref_id(0)
+                process_ref: checked_process_ref_id(0),
+                spawn_site: checked_spawn_site_id(0)
             },
             CheckedAction::Spawn {
                 target: checked_process_id(1),
-                process_ref: checked_process_ref_id(1)
+                process_ref: checked_process_ref_id(1),
+                spawn_site: checked_spawn_site_id(1)
             },
             CheckedAction::Send {
                 target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),

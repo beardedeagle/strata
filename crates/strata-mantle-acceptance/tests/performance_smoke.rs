@@ -4,7 +4,9 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use mantle_runtime::{InMemoryRuntimeHost, RunLimits, run_artifact_with_host};
+use mantle_runtime::{
+    InMemoryRuntimeHost, RunLimits, SpawnAuthorityPolicy, run_artifact_with_host,
+};
 
 const PERFORMANCE_BASELINE: &str = include_str!("../../../benchmarks/performance-smoke.baseline");
 const COLLECTION_STATE_SOURCE: &str = include_str!("../../../examples/collection_state.str");
@@ -35,6 +37,7 @@ const PERF_RUN_LIMITS: RunLimits = RunLimits {
     max_runtime_processes: 128,
     max_trace_bytes: 256 * 1024,
     max_emitted_output_bytes: 64 * 1024,
+    spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
 };
 
 #[test]

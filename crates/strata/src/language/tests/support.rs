@@ -1,8 +1,9 @@
 pub(super) use super::super::ast::EnumVariant;
 pub(super) use super::super::checked::{
-    CheckedAction, CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedProcess,
-    CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId, CheckedStepResult,
-    CheckedTransition, CheckedTypeKind, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
+    CheckedAction, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedMessageId,
+    CheckedNextState, CheckedOutputId, CheckedProcess, CheckedProcessId, CheckedProcessRefId,
+    CheckedSendTarget, CheckedSpawnSiteId, CheckedStateId, CheckedStepResult, CheckedTransition,
+    CheckedTypeKind, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
     CheckedValueTemplate,
 };
 pub(super) use super::super::lexer::{Lexer, TokenKind};
@@ -42,6 +43,8 @@ enum WorkerMsg {{ Assign(Job) }}
 proc Main mailbox bounded(1) {{
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn init() -> MainState ! [] ~ [] @det {{
         return MainState;
@@ -121,6 +124,7 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
             mailbox_bound: 1,
             state_type: state_type.clone(),
             msg_type: TypeRef::Named(ident(msg_name)),
+            authorities: Vec::new(),
             init: Function {
                 name: ident("init"),
                 params: Vec::new(),
@@ -202,6 +206,8 @@ proc Main mailbox bounded(16) {{
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn init() -> MainState ! [] ~ [] @det {{
         return MainState;
     }}
@@ -270,6 +276,14 @@ pub(super) fn checked_process_id(index: usize) -> CheckedProcessId {
 
 pub(super) fn checked_process_ref_id(index: usize) -> CheckedProcessRefId {
     CheckedProcessRefId::from_index(index).expect("valid checked process reference id")
+}
+
+pub(super) fn checked_authority_id(index: usize) -> CheckedAuthorityId {
+    CheckedAuthorityId::from_index(index).expect("valid checked authority id")
+}
+
+pub(super) fn checked_spawn_site_id(index: usize) -> CheckedSpawnSiteId {
+    CheckedSpawnSiteId::from_index(index).expect("valid checked spawn site id")
 }
 
 pub(super) fn checked_state_id(index: usize) -> CheckedStateId {

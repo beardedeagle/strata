@@ -1,6 +1,7 @@
 use crate::{
-    ARTIFACT_MAGIC, ArtifactAction, ArtifactSendTarget, ArtifactTypeKind, ArtifactValueShape,
-    Error, MAX_ARTIFACT_BYTES, MantleArtifact, NextState, Result,
+    ARTIFACT_MAGIC, ArtifactAction, ArtifactCapabilityDescriptor, ArtifactSendTarget,
+    ArtifactTypeKind, ArtifactValueShape, Error, MAX_ARTIFACT_BYTES, MantleArtifact, NextState,
+    Result,
 };
 
 mod templates;
@@ -165,6 +166,52 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                     payload_type.as_u32(),
                 )?;
             }
+        }
+        add_field_usize(
+            &mut encoded_len,
+            prefix.child("authority_count"),
+            process.authorities.len(),
+        )?;
+        for (authority_index, authority) in process.authorities.iter().enumerate() {
+            let authority_prefix = prefix.indexed_child("authority", authority_index);
+            add_field_bytes(
+                &mut encoded_len,
+                authority_prefix.child("debug_name"),
+                &authority.debug_name,
+            )?;
+            match authority.descriptor {
+                ArtifactCapabilityDescriptor::Spawn { target } => {
+                    add_field_bytes(&mut encoded_len, authority_prefix.child("kind"), "spawn")?;
+                    add_field_u32(
+                        &mut encoded_len,
+                        authority_prefix.child("target_process"),
+                        target.as_u32(),
+                    )?;
+                }
+            }
+        }
+        add_field_usize(
+            &mut encoded_len,
+            prefix.child("spawn_site_count"),
+            process.spawn_sites.len(),
+        )?;
+        for (spawn_site_index, spawn_site) in process.spawn_sites.iter().enumerate() {
+            let spawn_site_prefix = prefix.indexed_child("spawn_site", spawn_site_index);
+            add_field_u32(
+                &mut encoded_len,
+                spawn_site_prefix.child("target_process"),
+                spawn_site.target.as_u32(),
+            )?;
+            add_field_u32(
+                &mut encoded_len,
+                spawn_site_prefix.child("authority"),
+                spawn_site.authority.as_u32(),
+            )?;
+            add_field_bytes(
+                &mut encoded_len,
+                spawn_site_prefix.child("kind"),
+                spawn_site.kind.as_str(),
+            )?;
         }
         add_field_usize(
             &mut encoded_len,
@@ -413,6 +460,7 @@ fn add_action_bytes(
         ArtifactAction::Spawn {
             target,
             process_ref,
+            spawn_site,
         } => {
             add_field_bytes(total, action_prefix.child("kind"), "spawn")?;
             add_field_u32(
@@ -424,12 +472,18 @@ fn add_action_bytes(
                 total,
                 action_prefix.child("process_ref"),
                 process_ref.as_u32(),
+            )?;
+            add_field_u32(
+                total,
+                action_prefix.child("spawn_site"),
+                spawn_site.as_u32(),
             )
         }
         ArtifactAction::SpawnOutcome {
             outcome,
             outcome_ty,
             target,
+            spawn_site,
         } => {
             add_field_bytes(total, action_prefix.child("kind"), "spawn_outcome")?;
             add_field_u32(total, action_prefix.child("outcome"), outcome.as_u32())?;
@@ -442,6 +496,11 @@ fn add_action_bytes(
                 total,
                 action_prefix.child("target_process"),
                 target.as_u32(),
+            )?;
+            add_field_u32(
+                total,
+                action_prefix.child("spawn_site"),
+                spawn_site.as_u32(),
             )
         }
         ArtifactAction::Send {

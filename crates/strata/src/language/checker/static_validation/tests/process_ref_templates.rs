@@ -249,7 +249,7 @@ fn static_validation_rejects_received_payload_send_target_with_non_process_ref_t
 
 #[test]
 fn static_validation_rejects_process_ref_template_with_non_process_ref_type() {
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -278,6 +278,7 @@ fn static_validation_rejects_process_ref_template_with_non_process_ref_type() {
                 CheckedAction::Spawn {
                     target: checked_process_id(1),
                     process_ref: checked_process_ref_id(0),
+                    spawn_site: checked_spawn_site_id(0),
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
@@ -332,7 +333,7 @@ fn static_validation_rejects_process_ref_template_with_non_process_ref_type() {
 
 #[test]
 fn static_validation_formats_process_ref_type_diagnostics_without_internal_labels() {
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -361,6 +362,7 @@ fn static_validation_formats_process_ref_type_diagnostics_without_internal_label
                 CheckedAction::Spawn {
                     target: checked_process_id(1),
                     process_ref: checked_process_ref_id(0),
+                    spawn_site: checked_spawn_site_id(0),
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
@@ -416,7 +418,7 @@ fn static_validation_formats_process_ref_type_diagnostics_without_internal_label
 
 #[test]
 fn static_validation_rejects_nested_process_ref_payload_template() {
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -445,6 +447,7 @@ fn static_validation_rejects_nested_process_ref_payload_template() {
                 CheckedAction::Spawn {
                     target: checked_process_id(1),
                     process_ref: checked_process_ref_id(0),
+                    spawn_site: checked_spawn_site_id(0),
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
@@ -507,7 +510,7 @@ fn static_validation_rejects_nested_process_ref_payload_template() {
 fn static_validation_rejects_projected_process_ref_payload_template() {
     let route =
         enum_value_type_with_payloads("Route", &[("Reply", Some(process_ref_type("Worker")))]);
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -536,6 +539,7 @@ fn static_validation_rejects_projected_process_ref_payload_template() {
                 CheckedAction::Spawn {
                     target: checked_process_id(1),
                     process_ref: checked_process_ref_id(0),
+                    spawn_site: checked_spawn_site_id(0),
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
@@ -592,7 +596,7 @@ fn static_validation_rejects_projected_process_ref_payload_template() {
 fn static_validation_rejects_received_process_ref_nested_in_enum_payload_template() {
     let route =
         enum_value_type_with_payloads("Route", &[("Reply", Some(process_ref_type("Worker")))]);
-    let main = CheckedProcess::new(CheckedProcessParts {
+    let main = checked_process_with_spawn_to_worker(CheckedProcessParts {
         debug_name: ident("Main"),
         state_type: value_type("MainState"),
         state_values: checked_state_values("MainState", &["MainState"]),
@@ -621,6 +625,7 @@ fn static_validation_rejects_received_process_ref_nested_in_enum_payload_templat
                 CheckedAction::Spawn {
                     target: checked_process_id(1),
                     process_ref: checked_process_ref_id(0),
+                    spawn_site: checked_spawn_site_id(0),
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),

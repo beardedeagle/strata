@@ -6,8 +6,8 @@ use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, 
 use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
 use super::super::diagnostic::{Error, Result};
 use super::super::{
-    BOOL_FALSE, BOOL_TRUE, BOOL_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE, PROC_RESULT_TYPE,
-    PROCESS_REF_TYPE, RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, UNIT_TYPE,
+    BOOL_FALSE, BOOL_TRUE, BOOL_TYPE, CAP_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE, PROC_RESULT_TYPE,
+    PROCESS_REF_TYPE, RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
 };
 mod builtins;
 mod collection_type;
@@ -20,8 +20,9 @@ pub(super) use collection_type::CollectionType;
 use type_decls::{TypeDecl, TypeDeclMap};
 use type_validation::{
     BuiltinTypeSymbols, MessagePayloadTypeContext, SourceValueTypeContext,
-    reject_internal_type_label_prefix, reject_reserved_type_name, validate_collection_capacity,
-    validate_message_payload_type, validate_record_fields, validate_source_value_type,
+    reject_internal_type_label_prefix, reject_reserved_type_name,
+    reject_reserved_type_name_literal, validate_collection_capacity, validate_message_payload_type,
+    validate_record_fields, validate_source_value_type,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -134,6 +135,8 @@ impl SemanticIndex {
             let symbol = symbols.intern(&record.name)?;
             reject_reserved_type_name(record.name.as_str(), symbol, proc_result_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, process_ref_type)?;
+            reject_reserved_type_name_literal(record.name.as_str(), CAP_TYPE)?;
+            reject_reserved_type_name_literal(record.name.as_str(), SPAWN_TYPE)?;
             reject_reserved_type_name(record.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, map_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, unit_type)?;
@@ -167,6 +170,8 @@ impl SemanticIndex {
             let symbol = symbols.intern(&item.name)?;
             reject_reserved_type_name(item.name.as_str(), symbol, proc_result_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, process_ref_type)?;
+            reject_reserved_type_name_literal(item.name.as_str(), CAP_TYPE)?;
+            reject_reserved_type_name_literal(item.name.as_str(), SPAWN_TYPE)?;
             reject_reserved_type_name(item.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, map_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, unit_type)?;

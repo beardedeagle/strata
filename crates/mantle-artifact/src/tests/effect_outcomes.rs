@@ -158,6 +158,7 @@ fn validate_rejects_spawn_outcome_targeting_self() {
         outcome: EffectOutcomeId::new(0),
         outcome_ty: SpawnOutcomeTypes::SPAWN_RESULT,
         target: ProcessId::new(1),
+        spawn_site: SPAWN_WORKER_SITE,
     }];
 
     let err = artifact
@@ -223,6 +224,7 @@ fn validate_accepts_spawn_outcome_variant_branch_without_process_ref_equality() 
             outcome: EffectOutcomeId::new(0),
             outcome_ty: SpawnOutcomeTypes::SPAWN_RESULT,
             target: ProcessId::new(1),
+            spawn_site: SPAWN_WORKER_SITE,
         },
         ArtifactAction::IfElse {
             condition: ArtifactValueTemplate::Equality {
@@ -420,6 +422,7 @@ fn outcome_artifact() -> MantleArtifact {
         ArtifactAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_WORKER_SITE,
         },
         ArtifactAction::SendOutcome {
             outcome: EffectOutcomeId::new(0),
@@ -441,6 +444,7 @@ fn spawn_outcome_artifact() -> MantleArtifact {
         outcome: EffectOutcomeId::new(0),
         outcome_ty: types.spawn_result,
         target: ProcessId::new(1),
+        spawn_site: SPAWN_WORKER_SITE,
     }];
     artifact
 }

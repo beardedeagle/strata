@@ -1,14 +1,16 @@
 use super::value_template::ValueTemplatePayloadValidation;
 use super::*;
 use crate::{
-    MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH, MAX_EFFECT_OUTCOMES_PER_TRANSITION,
-    MAX_NEXT_STATE_IF_ELSE_DEPTH,
+    MAX_AUTHORITIES_PER_PROCESS, MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH,
+    MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_SPAWN_SITES_PER_PROCESS,
 };
 
 mod actions;
+mod authorities;
 mod effect_outcomes;
 mod templates;
 
+use authorities::SpawnAuthorityUsage;
 use templates::{
     transition_payload_guard_key, transition_payload_guard_label, validate_bool_condition_template,
     validate_template_loop_elements,
@@ -105,7 +107,11 @@ impl<'a> ActionReferenceScope<'a> {
 }
 
 impl ArtifactProcess {
-    pub(super) fn validate_identity(&self, artifact: &MantleArtifact) -> Result<()> {
+    pub(super) fn validate_identity(
+        &self,
+        artifact: &MantleArtifact,
+        process_id: ProcessId,
+    ) -> Result<()> {
         validate_ident_field("process debug_name", &self.debug_name)?;
         artifact.validate_value_type("state_type", self.state_type)?;
         artifact.validate_value_type("message_type", self.message_type)?;
@@ -121,6 +127,18 @@ impl ArtifactProcess {
             self.message_variants.len(),
             1,
             MAX_MESSAGE_VARIANTS_PER_PROCESS,
+        )?;
+        validate_count(
+            "authority_count",
+            self.authorities.len(),
+            0,
+            MAX_AUTHORITIES_PER_PROCESS,
+        )?;
+        validate_count(
+            "spawn_site_count",
+            self.spawn_sites.len(),
+            0,
+            MAX_SPAWN_SITES_PER_PROCESS,
         )?;
         validate_count(
             "process_ref_count",
@@ -179,6 +197,7 @@ impl ArtifactProcess {
                 })?;
             }
         }
+        self.validate_authorities(artifact, process_id)?;
         validate_unique_process_ref_list(&self.process_refs)?;
         if self.init_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(
@@ -559,6 +578,7 @@ impl ArtifactProcess {
         artifact: &MantleArtifact,
         process_id: ProcessId,
     ) -> Result<()> {
+        let mut spawn_authority_usage = SpawnAuthorityUsage::new();
         for process_ref in &self.process_refs {
             if process_ref.target.index() >= artifact.processes.len() {
                 return Err(Error::new(format!(
@@ -609,6 +629,7 @@ impl ArtifactProcess {
                     ActionReferenceScope::root(),
                 )?;
             }
+            self.collect_spawn_authority_usage(&transition.actions, &mut spawn_authority_usage)?;
             self.validate_effect_outcome_templates(transition)?;
             for declared_effect in &declared_effects {
                 if !used_effects.contains(declared_effect) {
@@ -620,6 +641,7 @@ impl ArtifactProcess {
                 }
             }
         }
+        self.validate_spawn_authority_usage(&spawn_authority_usage)?;
         Ok(())
     }
 }

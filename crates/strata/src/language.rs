@@ -1,4 +1,5 @@
 mod ast;
+mod authority_summary;
 mod checked;
 mod checker;
 mod diagnostic;
@@ -10,13 +11,15 @@ mod parser;
 mod tests;
 
 pub use ast::{
-    CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect, Enum, ForEachItem,
-    Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, ListPattern, ListValue,
-    MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm,
-    Module, OutputLiteral, Param, Pattern, Process, Record, RecordField, RecordValue,
-    RecordValueField, ReturnExpr, Statement, TypeRef, ValueBooleanOperator, ValueEqualityOperator,
-    ValueExpr, ValueScalarArithmeticOperator, ValueScalarOrderingOperator,
+    AuthorityDeclaration, CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect,
+    Enum, ForEachItem, Function, FunctionBlock, FunctionBody, FunctionParam, Identifier,
+    ListPattern, ListValue, MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue,
+    MapValueEntry, Match, MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record,
+    RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
+    ValueBooleanOperator, ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator,
+    ValueScalarOrderingOperator,
 };
+pub use authority_summary::{AuthoritySummaryFormat, render_authority_summary};
 pub use checked::CheckedProgram;
 pub use checker::check_module;
 pub use diagnostic::{Error, Result};
@@ -31,6 +34,8 @@ const MAX_TYPE_NESTING: usize = 32;
 const MAX_VALUE_NESTING: usize = 32;
 const PROC_RESULT_TYPE: &str = "ProcResult";
 const PROCESS_REF_TYPE: &str = "ProcessRef";
+const CAP_TYPE: &str = "Cap";
+const SPAWN_TYPE: &str = "Spawn";
 const LIST_TYPE: &str = "List";
 const MAP_TYPE: &str = "Map";
 const UNIT_TYPE: &str = "Unit";

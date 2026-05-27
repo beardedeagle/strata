@@ -28,9 +28,18 @@ This says `Worker` accepts one message: `Ping`.
 `Main` can send that message after spawning `Worker`:
 
 ```strata
-let worker: ProcessRef<Worker> = spawn Worker;
-send worker Ping;
-return Stop(state);
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Ping;
+        return Stop(state);
+    }
+}
 ```
 
 `worker` is an immutable process reference for the spawned runtime instance. The

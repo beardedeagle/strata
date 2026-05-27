@@ -9,14 +9,15 @@ use process_refs::LocalProcessRefs;
 use templates::evaluate_runtime_template;
 
 use crate::event::{
-    RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope, RuntimeEvent,
-    RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
-    RuntimeStepResult, RuntimeStopReason,
+    RuntimeAuthorityResult, RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope,
+    RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
+    RuntimeSpawnKind, RuntimeStepResult, RuntimeStopReason,
 };
 use crate::host::RuntimeHost;
-use crate::limits::RunLimits;
+use crate::limits::{RunLimits, SpawnAuthorityPolicy};
 use crate::program::{
-    LoadedAction, LoadedNextState, LoadedProgram, LoadedValueTemplate, RuntimePayload,
+    LoadedAction, LoadedNextState, LoadedProgram, LoadedSpawnKind, LoadedValueTemplate,
+    RuntimePayload,
 };
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
@@ -123,6 +124,7 @@ struct RuntimeRun<'program, 'host, H: RuntimeHost> {
     max_trace_bytes: usize,
     emitted_output_bytes: usize,
     max_emitted_output_bytes: usize,
+    spawn_authority_policy: SpawnAuthorityPolicy,
     spawned_processes: Vec<SpawnReport>,
     delivered_messages: Vec<MessageDelivery>,
     emitted_outputs: Vec<String>,
@@ -142,10 +144,18 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             max_trace_bytes: limits.max_trace_bytes,
             emitted_output_bytes: 0,
             max_emitted_output_bytes: limits.max_emitted_output_bytes,
+            spawn_authority_policy: limits.spawn_authority_policy,
             spawned_processes: Vec::new(),
             delivered_messages: Vec::new(),
             emitted_outputs: Vec::new(),
         }
+    }
+
+    pub(super) fn is_spawn_authority_admitted(&self) -> bool {
+        matches!(
+            self.spawn_authority_policy,
+            SpawnAuthorityPolicy::AdmitDeclared
+        )
     }
 
     fn record_event(&mut self, event: RuntimeEvent) -> Result<()> {
@@ -160,6 +170,34 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         self.host.record_event(&record)?;
         self.trace_bytes = event_bytes;
         Ok(())
+    }
+
+    pub(super) fn record_spawn_authority(
+        &mut self,
+        step: &ActiveStep,
+        target: ProcessId,
+        spawn_site: mantle_artifact::SpawnSiteId,
+    ) -> Result<bool> {
+        let process = self.program.process(step.process_id)?;
+        let site = process.validate_spawn_site(spawn_site, target)?;
+        let admitted = self.is_spawn_authority_admitted();
+        self.record_event(RuntimeEvent::SpawnAuthorityChecked {
+            pid: step.pid,
+            process_id: step.process_id,
+            process: step.process_name.clone(),
+            target_process_id: target,
+            spawn_site_id: spawn_site,
+            authority_id: site.authority,
+            spawn_kind: match site.kind {
+                LoadedSpawnKind::DynamicLocal => RuntimeSpawnKind::DynamicLocal,
+            },
+            authority_result: if admitted {
+                RuntimeAuthorityResult::Accepted
+            } else {
+                RuntimeAuthorityResult::Denied
+            },
+        })?;
+        Ok(admitted)
     }
 
     fn flush_host(&mut self) -> Result<()> {
@@ -297,7 +335,15 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             LoadedAction::Spawn {
                 target,
                 process_ref,
+                spawn_site,
             } => {
+                if !self.record_spawn_authority(step, *target, *spawn_site)? {
+                    return Err(Error::new(format!(
+                        "process {} spawn authority denied for process id {}",
+                        step.process_name,
+                        target.as_u32()
+                    )));
+                }
                 let declared_target = self.process_ref_target(step, *process_ref)?;
                 if declared_target != *target {
                     return Err(Error::new(format!(

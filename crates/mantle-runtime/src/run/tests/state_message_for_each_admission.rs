@@ -4,6 +4,7 @@ use super::support::*;
 fn runtime_rejects_loaded_dynamic_for_each_non_list_collection_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    grant_loaded_main_spawn_authority(&mut program);
     program.processes[1].message_variants[0].payload_type = Some(JOB);
     align_loaded_process_message_type(&mut program, 1);
     program.processes[0].transitions[0].effect_authority =
@@ -15,6 +16,7 @@ fn runtime_rejects_loaded_dynamic_for_each_non_list_collection_before_artifact_l
         LoadedAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
@@ -47,6 +49,7 @@ fn runtime_rejects_loaded_dynamic_for_each_non_list_collection_before_artifact_l
 fn runtime_rejects_loaded_dynamic_for_each_collection_element_mismatch_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    grant_loaded_main_spawn_authority(&mut program);
     let box_list = push_list_type(&mut program, "BoxList", BOX, 1);
     program.processes[1].message_variants[0].payload_type = Some(box_list);
     align_loaded_process_message_type(&mut program, 1);
@@ -59,6 +62,7 @@ fn runtime_rejects_loaded_dynamic_for_each_collection_element_mismatch_before_ar
         LoadedAction::Spawn {
             target: ProcessId::new(1),
             process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),

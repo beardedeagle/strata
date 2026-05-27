@@ -25,13 +25,13 @@ pub use value_template::{
 };
 
 use crate::{
-    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, EffectOutcomeId, EnumVariantId,
-    Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION,
+    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, AuthorityId, EffectOutcomeId,
+    EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION,
     MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
     MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
     MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
     MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId,
-    ProcessRefId, Result, StateId, TypeId,
+    ProcessRefId, Result, SpawnSiteId, StateId, TypeId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,10 +366,58 @@ pub struct ArtifactProcess {
     pub state_values: Vec<ArtifactStateValue>,
     pub message_type: TypeId,
     pub message_variants: Vec<ArtifactMessageVariant>,
+    pub authorities: Vec<ArtifactAuthority>,
+    pub spawn_sites: Vec<ArtifactSpawnSite>,
     pub process_refs: Vec<ArtifactProcessRef>,
     pub mailbox_bound: usize,
     pub init_state: StateId,
     pub transitions: Vec<ArtifactTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactAuthority {
+    pub debug_name: String,
+    pub descriptor: ArtifactCapabilityDescriptor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ArtifactCapabilityDescriptor {
+    Spawn { target: ProcessId },
+}
+
+impl ArtifactCapabilityDescriptor {
+    pub(crate) const fn kind_str(self) -> &'static str {
+        match self {
+            Self::Spawn { .. } => "spawn",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactSpawnKind {
+    DynamicLocal,
+}
+
+impl ArtifactSpawnKind {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::DynamicLocal => "dynamic_local",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self> {
+        match value {
+            "dynamic_local" => Ok(Self::DynamicLocal),
+            _ => Err(Error::new(format!("invalid spawn_kind value {value:?}"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactSpawnSite {
+    pub target: ProcessId,
+    pub authority: AuthorityId,
+    pub kind: ArtifactSpawnKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -450,11 +498,13 @@ pub enum ArtifactAction {
     Spawn {
         target: ProcessId,
         process_ref: ProcessRefId,
+        spawn_site: SpawnSiteId,
     },
     SpawnOutcome {
         outcome: EffectOutcomeId,
         outcome_ty: TypeId,
         target: ProcessId,
+        spawn_site: SpawnSiteId,
     },
     Send {
         target: ArtifactSendTarget,

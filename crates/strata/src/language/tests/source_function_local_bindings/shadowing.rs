@@ -110,6 +110,8 @@ proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
     fn route(worker: Phase) -> Phase ! [] ~ [] @det {
         return worker;
     }
@@ -162,6 +164,8 @@ enum WorkerMsg { Ping }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn route(phase: Phase) -> Phase ! [] ~ [] @det {
         let worker: Phase = phase;
@@ -234,6 +238,8 @@ enum WorkerMsg { Ping }
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
 
     fn route(Boxed { worker }) -> Phase ! [] ~ [] @det {
         return worker;

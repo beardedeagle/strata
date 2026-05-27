@@ -21,6 +21,7 @@ result of the first invalid shape.
 | --- | --- | --- |
 | `expected record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `record`, `enum`, `fn`, or `proc` after `module`. |
 | `entry process Main is not declared` | The program has no `Main` process. | Add `proc Main ...`. |
+| `type name ... is reserved` | A source record or enum tries to use a built-in transition, capability, collection, outcome, or scalar type name. | Rename the source type. |
 | `uses reserved prefix __strata_checked_` | A source type name collides with internal checked type metadata. | Rename the source type without the reserved prefix. |
 | `checked type_count exceeds Mantle artifact limit` | The checked program needs more distinct artifact types than the Mantle artifact limit allows. | Reduce the number of distinct state, message, payload, and process-reference types. |
 | `process ... must declare type State` | A process is missing its state alias. | Add `type State = StateType;`. |
@@ -42,9 +43,9 @@ result of the first invalid shape.
 | `step body must return Stop..., Continue..., or Panic...` | A `step` returns a bare state value or an unsupported result form. | Return one whole state value inside `Continue(...)`, `Stop(...)`, or `Panic(...)`. |
 | `step may-behaviors must be empty` | The `~ [...]` list is not empty. | Use `~ []`. |
 | `step must be deterministic` | `step` uses `@nondet`. | Use `@det`. |
-| `uses effect ... but does not declare it` | The body performs `emit`, `spawn`, or `send` without matching effect authority. | Add the exact used effect to `! [...]` or remove the statement. |
+| `uses effect ... but does not declare it` | The body performs `emit`, `spawn`, or `send` without matching effect usage. | Add the exact used effect to `! [...]` or remove the statement. |
 | `declares effect ... but does not use it` | The effect list is wider than the body. | Remove the unused effect. |
-| `declares duplicate effect` | The effect list repeats one authority. | Keep each effect at most once. |
+| `declares duplicate effect` | The effect list repeats one effect. | Keep each effect at most once. |
 | `send outcome binding must have type Result<Unit,SendError<...>>` | A local send outcome annotation does not preserve the target process message type. | Annotate the binding as `Result<Unit,SendError<TargetMsg>>`. |
 | `spawn outcome binding must have type Result<ProcessRef<...>,SpawnError<Unit>>` | A local spawn outcome annotation does not return the committed process reference on success. | Annotate the binding as `Result<ProcessRef<TargetProcess>,SpawnError<Unit>>`. |
 | `effect outcome binding ... conflicts with ...` | An outcome binding reuses a step state parameter, process reference, process declaration, or source value name. | Give the immutable outcome a fresh step-local name. |
@@ -215,6 +216,13 @@ result of the first invalid shape.
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
 | `spawns itself` | A process tries to spawn itself. | Spawn another declared process. |
+| `authority type must be Cap<Spawn<ProcessName>>` | A process authority declaration uses a malformed capability wrapper. | Declare local spawn authority as `authority name: Cap<Spawn<TargetProcess>>;`. |
+| `authority descriptor must be Spawn<ProcessName>` | A `Cap<...>` authority declaration does not contain the supported spawn descriptor. | Use `Cap<Spawn<TargetProcess>>`; other capability algebra is not admitted in this slice. |
+| `spawn authority target must be a process name` | The spawn descriptor target is not a bare process name. | Target a declared process directly, for example `Cap<Spawn<Worker>>`. |
+| `spawn authority targets entry process` | A process authority declaration tries to create the already-started entry process. | Target a non-entry worker process. |
+| `spawn target ... requires authority Cap<Spawn<...>>` | A step uses local dynamic `spawn` without exact authority for that target process. | Add a process-local `authority` declaration for the exact target, or remove the spawn. |
+| `duplicates spawn authority descriptor` | A process declares the same spawn capability more than once. | Keep one declaration per exact target process. |
+| `declares unused spawn authority` | A process declares spawn authority that no local spawn site uses. | Remove the unused declaration or add the corresponding local spawn. |
 | `conflicts with a process declaration` | A process reference uses the same name as a process definition. | Use a distinct reference name. |
 | `undeclared process reference` | A send references a name that is never spawned in the process. | Add a matching `let worker: ProcessRef<Worker> = spawn Worker;` statement. |
 | `send target ... is not a process reference payload` | A send target names a payload binding whose type is not `ProcessRef<T>`. | Send through a process reference binding or a received `ProcessRef<T>` payload. |
