@@ -125,9 +125,9 @@ The local spawn authority denial gate uses the same check/build path and then
 runs Mantle with denied admitted spawn authority:
 
 ```sh
-strata check examples/effect_outcome_spawn_denied.str
-strata build examples/effect_outcome_spawn_denied.str
-mantle run target/strata/effect_outcome_spawn_denied.mta --deny-spawn-authority
+just strata-check examples/effect_outcome_spawn_denied.str
+just strata-build examples/effect_outcome_spawn_denied.str
+just mantle-run-deny-spawn-authority target/strata/effect_outcome_spawn_denied.mta
 ```
 
 A source rejection gate must fail during checking and must not create a target

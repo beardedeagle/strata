@@ -96,10 +96,10 @@ worker-name
 _
 ```
 
-`_`, `as`, `bounded`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`,
-`mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`, `security`,
-`send`, `spawn`, `type`, and `var` are reserved everywhere identifiers are
-accepted.
+`_`, `as`, `authority`, `bounded`, `else`, `emit`, `enum`, `fn`, `for`, `if`,
+`in`, `let`, `mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`,
+`security`, `send`, `spawn`, `type`, and `var` are reserved everywhere
+identifiers are accepted.
 `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `List`, `Map`, `Unit`, `Option`,
 `Result`, `SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`,
 `I32`, and `I64` are reserved type names because they name built-in transition,

@@ -75,6 +75,9 @@ strata-build source:
 mantle-run artifact:
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "{{artifact}}"
 
+mantle-run-deny-spawn-authority artifact:
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "{{artifact}}" --deny-spawn-authority
+
 strata-authority-summary source format="text":
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-summary "{{source}}" --format "{{format}}"
 
