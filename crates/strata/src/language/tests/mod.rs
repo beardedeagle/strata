@@ -5,6 +5,7 @@ mod examples;
 mod fixtures;
 mod init_matching;
 mod limits;
+mod local_supervision;
 mod message_payload_flow;
 mod message_payload_process_refs;
 mod message_payload_validation;

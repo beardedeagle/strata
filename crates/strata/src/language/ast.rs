@@ -122,6 +122,13 @@ fn is_reserved_identifier(value: &str) -> bool {
             | "security"
             | "send"
             | "spawn"
+            | "child"
+            | "local"
+            | "one_for_one"
+            | "permanent"
+            | "supervise"
+            | "temporary"
+            | "transient"
             | "type"
             | "var"
     )
@@ -182,6 +189,7 @@ pub struct Process {
     pub name: Identifier,
     pub mailbox_bound: usize,
     pub authorities: Vec<AuthorityDeclaration>,
+    pub supervisors: Vec<SupervisorDeclaration>,
     pub state_type: TypeRef,
     pub msg_type: TypeRef,
     pub init: Function,
@@ -193,6 +201,34 @@ pub struct Process {
 pub struct AuthorityDeclaration {
     pub name: Identifier,
     pub ty: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupervisorDeclaration {
+    pub strategy: SupervisorStrategy,
+    pub max_restarts: u32,
+    pub within_ms: u64,
+    pub children: Vec<SupervisorChildDeclaration>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorStrategy {
+    OneForOne,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupervisorChildDeclaration {
+    pub name: Identifier,
+    pub process: Identifier,
+    pub spawn_target: Identifier,
+    pub mode: SupervisorChildMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorChildMode {
+    Permanent,
+    Transient,
+    Temporary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,0 +1,37 @@
+module local_supervision_permanent_stop;
+
+record MainState;
+record WorkerState;
+enum MainMsg { Start }
+enum WorkerMsg { Work }
+
+proc Main mailbox bounded(2) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    supervise local one_for_one(max_restarts: 2_u32, within_ms: 1000_u64) {
+        child worker: Worker = spawn Worker as permanent;
+    }
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [send] ~ [] @det {
+        send worker Work;
+        return Continue(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

@@ -2,11 +2,11 @@ use super::*;
 use crate::ArtifactScalarValue;
 
 impl ArtifactValueTemplate {
-    pub fn evaluate_state_value(
+    pub fn evaluate_state_value<'types>(
         &self,
         received_payload: Option<&ArtifactPayload>,
         current_state_payload: Option<&ArtifactPayload>,
-        type_entry: &dyn Fn(TypeId) -> Result<ArtifactType>,
+        type_entry: &dyn Fn(TypeId) -> Result<&'types ArtifactType>,
     ) -> Result<ArtifactStateValue> {
         match self {
             Self::Literal { ty, value } => ArtifactStateValue::from_value(*ty, value.clone()),
@@ -56,9 +56,9 @@ impl ArtifactValueTemplate {
                     type_entry,
                 )?;
                 let value_type = type_entry(value.ty)?;
-                let variant = enum_variant_label_for_template(value.ty, &value_type, *variant)?;
+                let variant = enum_variant_label_for_template(value.ty, value_type, *variant)?;
                 let payload = value.value.project_enum_payload(variant)?;
-                validate_value_label("enum payload projection value", &payload.label())?;
+                payload.validate_generated_label_len("enum payload projection value")?;
                 ArtifactStateValue::from_value(*ty, payload)
             }
             Self::RecordField { ty, record, field } => {
@@ -68,7 +68,7 @@ impl ArtifactValueTemplate {
                     type_entry,
                 )?;
                 let value = record.value.project_record_field(field)?;
-                validate_value_label("record field projection value", &value.label())?;
+                value.validate_generated_label_len("record field projection value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::ListElement {
@@ -80,7 +80,7 @@ impl ArtifactValueTemplate {
                 let list =
                     list.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = list.value.project_list_element(*index, *len)?;
-                validate_value_label("list element projection value", &value.label())?;
+                value.validate_generated_label_len("list element projection value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::ListPrefixElement {
@@ -94,7 +94,7 @@ impl ArtifactValueTemplate {
                 let value = list
                     .value
                     .project_list_prefix_element(*index, *prefix_len)?;
-                validate_value_label("list prefix projection value", &value.label())?;
+                value.validate_generated_label_len("list prefix projection value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::ListRest {
@@ -105,7 +105,7 @@ impl ArtifactValueTemplate {
                 let list =
                     list.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = list.value.project_list_rest(*prefix_len)?;
-                validate_value_label("list rest projection value", &value.label())?;
+                value.validate_generated_label_len("list rest projection value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::MapValue {
@@ -118,7 +118,7 @@ impl ArtifactValueTemplate {
                 let map =
                     map.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = map.value.project_map_value(key, keys, *projection)?;
-                validate_value_label("map value projection value", &value.label())?;
+                value.validate_generated_label_len("map value projection value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::MapRest {
@@ -129,7 +129,7 @@ impl ArtifactValueTemplate {
                 let map =
                     map.evaluate_state_value(received_payload, current_state_payload, type_entry)?;
                 let value = map.value.project_map_rest(excluded_keys)?;
-                validate_value_label("map rest projection value", &value.label())?;
+                value.validate_generated_label_len("map rest projection value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::ProcessRef { .. } => Err(Error::new(
@@ -149,16 +149,16 @@ impl ArtifactValueTemplate {
                     type_entry,
                 )?;
                 let value_type = type_entry(*ty)?;
-                let variant = enum_variant_label_for_template(*ty, &value_type, *variant)?;
+                let variant = enum_variant_label_for_template(*ty, value_type, *variant)?;
                 let value = ArtifactValue::EnumVariant {
                     variant: variant.to_string(),
                     payload: Box::new(payload.value),
                 };
-                validate_value_label("enum variant template value", &value.label())?;
+                value.validate_generated_label_len("enum variant template value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::Record { ty, fields } => {
-                let ty_label = type_entry(*ty)?.label;
+                let ty_label = type_entry(*ty)?.label.clone();
                 let mut values = Vec::with_capacity(fields.len());
                 for (index, field) in fields.iter().enumerate() {
                     let value = field.value.evaluate_state_value(
@@ -184,7 +184,7 @@ impl ArtifactValueTemplate {
                     constructor: ty_label,
                     fields: values,
                 };
-                validate_value_label("record template value", &value.label())?;
+                value.validate_generated_label_len("record template value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::List { ty, items } => {
@@ -198,7 +198,7 @@ impl ArtifactValueTemplate {
                     values.push(item_value.value);
                 }
                 let value = ArtifactValue::List(values);
-                validate_value_label("list template value", &value.label())?;
+                value.validate_generated_label_len("list template value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::Map { ty, entries } => {
@@ -226,7 +226,7 @@ impl ArtifactValueTemplate {
                     });
                 }
                 let value = ArtifactValue::Map(values);
-                validate_value_label("map template value", &value.label())?;
+                value.validate_generated_label_len("map template value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::IfElse {

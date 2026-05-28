@@ -2,14 +2,18 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::hint::black_box;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use mantle_runtime::{
     InMemoryRuntimeHost, RunLimits, SpawnAuthorityPolicy, run_artifact_with_host,
+    run_artifact_with_limits,
 };
 
 const PERFORMANCE_BASELINE: &str = include_str!("../../../benchmarks/performance-smoke.baseline");
 const COLLECTION_STATE_SOURCE: &str = include_str!("../../../examples/collection_state.str");
+const LOCAL_SUPERVISION_SOURCE: &str =
+    include_str!("../../../examples/local_supervision_restart.str");
 const CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "collection_state.check_lower",
     label: "collection_state check+lower",
@@ -18,6 +22,28 @@ const IN_MEMORY_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "collection_state.in_memory_runtime",
     label: "collection_state in-memory runtime",
 };
+const ARTIFACT_CODEC_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "collection_state.artifact_codec",
+    label: "collection_state artifact encode+decode",
+};
+const JSONL_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "collection_state.jsonl_runtime",
+    label: "collection_state JSONL runtime",
+};
+const LOCAL_SUPERVISION_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "local_supervision_restart.in_memory_runtime",
+    label: "local_supervision_restart in-memory runtime",
+};
+const PROFILE_SELECTOR_ENV: &str = "STRATA_PERFORMANCE_SMOKE_PROFILE";
+const ALL_PROFILES: [BenchmarkProfile; 5] = [
+    CHECK_LOWER_PROFILE,
+    IN_MEMORY_RUNTIME_PROFILE,
+    ARTIFACT_CODEC_PROFILE,
+    JSONL_RUNTIME_PROFILE,
+    LOCAL_SUPERVISION_RUNTIME_PROFILE,
+];
+const PROFILE_KEY_LIST: &str = "collection_state.check_lower, collection_state.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
+const JSONL_RUNTIME_ARTIFACT_PATH: &str = "target/performance-smoke/collection_state.mta";
 #[cfg(any(
     target_os = "linux",
     target_os = "macos",
@@ -43,30 +69,117 @@ const PERF_RUN_LIMITS: RunLimits = RunLimits {
 #[test]
 #[ignore = "run through `just performance-smoke` so timing checks stay explicit"]
 fn collection_state_compilation_and_runtime_performance_smoke() {
-    let check_lower_budget = PerformanceBudget::load(CHECK_LOWER_PROFILE);
-    let in_memory_runtime_budget = PerformanceBudget::load(IN_MEMORY_RUNTIME_PROFILE);
+    let selected_profile = std::env::var(PROFILE_SELECTOR_ENV).ok();
+    let selected_profile = selected_profile.as_deref();
+    validate_selected_profile(selected_profile);
 
-    let checked = strata::language::check_source(COLLECTION_STATE_SOURCE)
-        .expect("performance smoke source should check");
-    let artifact = strata::language::lower_to_artifact(&checked, COLLECTION_STATE_SOURCE)
-        .expect("performance smoke source should lower");
-    run_collection_state_artifact(&artifact);
+    if profile_is_selected(selected_profile, CHECK_LOWER_PROFILE) {
+        run_check_lower_profile();
+    }
+    if profile_is_selected(selected_profile, IN_MEMORY_RUNTIME_PROFILE) {
+        run_in_memory_runtime_profile();
+    }
+    if profile_is_selected(selected_profile, ARTIFACT_CODEC_PROFILE) {
+        run_artifact_codec_profile();
+    }
+    if profile_is_selected(selected_profile, JSONL_RUNTIME_PROFILE) {
+        run_jsonl_runtime_profile();
+    }
+    if profile_is_selected(selected_profile, LOCAL_SUPERVISION_RUNTIME_PROFILE) {
+        run_local_supervision_runtime_profile();
+    }
+}
 
-    let compilation_metrics = measure_for(check_lower_budget.iterations, || {
+fn validate_selected_profile(selected_profile: Option<&str>) {
+    if let Some(selected_profile) = selected_profile {
+        assert!(
+            ALL_PROFILES
+                .iter()
+                .any(|profile| profile.key == selected_profile),
+            "{PROFILE_SELECTOR_ENV} must be one of: {}",
+            PROFILE_KEY_LIST
+        );
+    }
+}
+
+fn profile_is_selected(selected_profile: Option<&str>, profile: BenchmarkProfile) -> bool {
+    match selected_profile {
+        Some(selected_profile) => selected_profile == profile.key,
+        None => true,
+    }
+}
+
+fn run_check_lower_profile() {
+    let budget = PerformanceBudget::load(CHECK_LOWER_PROFILE);
+    let metrics = measure_for(budget.iterations, || {
         let checked = strata::language::check_source(COLLECTION_STATE_SOURCE)
             .expect("performance smoke source should check");
         let artifact = strata::language::lower_to_artifact(&checked, COLLECTION_STATE_SOURCE)
             .expect("performance smoke source should lower");
         black_box(artifact);
     });
+    assert_within_budget(budget, metrics);
+}
 
-    let runtime_metrics = measure_for(in_memory_runtime_budget.iterations, || {
+fn collection_state_artifact() -> mantle_artifact::MantleArtifact {
+    let checked = strata::language::check_source(COLLECTION_STATE_SOURCE)
+        .expect("performance smoke source should check");
+    let artifact = strata::language::lower_to_artifact(&checked, COLLECTION_STATE_SOURCE)
+        .expect("performance smoke source should lower");
+    run_collection_state_artifact(&artifact);
+    artifact
+}
+
+fn run_in_memory_runtime_profile() {
+    let budget = PerformanceBudget::load(IN_MEMORY_RUNTIME_PROFILE);
+    let artifact = collection_state_artifact();
+    let metrics = measure_for(budget.iterations, || {
         let report = run_collection_state_artifact(&artifact);
         black_box(report);
     });
+    assert_within_budget(budget, metrics);
+}
 
-    assert_within_budget(check_lower_budget, compilation_metrics);
-    assert_within_budget(in_memory_runtime_budget, runtime_metrics);
+fn run_artifact_codec_profile() {
+    let budget = PerformanceBudget::load(ARTIFACT_CODEC_PROFILE);
+    let artifact = collection_state_artifact();
+    let metrics = measure_for(budget.iterations, || {
+        let encoded = artifact.encode();
+        let decoded = mantle_artifact::MantleArtifact::decode(&encoded)
+            .expect("performance smoke encoded artifact should decode");
+        black_box(decoded);
+    });
+    assert_within_budget(budget, metrics);
+}
+
+fn run_jsonl_runtime_profile() {
+    let budget = PerformanceBudget::load(JSONL_RUNTIME_PROFILE);
+    let artifact = collection_state_artifact();
+    run_collection_state_artifact_with_jsonl_trace(&artifact);
+    let metrics = measure_for(budget.iterations, || {
+        let report = run_collection_state_artifact_with_jsonl_trace(&artifact);
+        black_box(report);
+    });
+    assert_within_budget(budget, metrics);
+}
+
+fn local_supervision_artifact() -> mantle_artifact::MantleArtifact {
+    let checked = strata::language::check_source(LOCAL_SUPERVISION_SOURCE)
+        .expect("local supervision performance smoke source should check");
+    let artifact = strata::language::lower_to_artifact(&checked, LOCAL_SUPERVISION_SOURCE)
+        .expect("local supervision performance smoke source should lower");
+    run_local_supervision_artifact(&artifact);
+    artifact
+}
+
+fn run_local_supervision_runtime_profile() {
+    let budget = PerformanceBudget::load(LOCAL_SUPERVISION_RUNTIME_PROFILE);
+    let artifact = local_supervision_artifact();
+    let metrics = measure_for(budget.iterations, || {
+        let report = run_local_supervision_artifact(&artifact);
+        black_box(report);
+    });
+    assert_within_budget(budget, metrics);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -334,6 +447,29 @@ fn run_collection_state_artifact(
     report
 }
 
+fn run_collection_state_artifact_with_jsonl_trace(
+    artifact: &mantle_artifact::MantleArtifact,
+) -> mantle_runtime::RunReport {
+    let artifact_path = Path::new(JSONL_RUNTIME_ARTIFACT_PATH);
+    let report = run_artifact_with_limits(artifact_path, artifact, PERF_RUN_LIMITS)
+        .expect("performance smoke artifact should run with JSONL trace");
+    assert_eq!(report.spawned_processes.len(), 3);
+    assert_eq!(report.delivered_messages.len(), 3);
+    assert_eq!(report.emitted_outputs.len(), 2);
+    report
+}
+
+fn run_local_supervision_artifact(
+    artifact: &mantle_artifact::MantleArtifact,
+) -> mantle_runtime::RuntimeReport {
+    let mut host = InMemoryRuntimeHost::default();
+    let report = run_artifact_with_host(artifact, &mut host, PERF_RUN_LIMITS)
+        .expect("local supervision performance smoke artifact should run");
+    assert!(!report.spawned_processes.is_empty());
+    assert!(!report.processes.is_empty());
+    report
+}
+
 fn assert_within_budget(budget: PerformanceBudget, metrics: ResourceMetrics) {
     let iterations =
         u32::try_from(budget.iterations).expect("performance smoke iteration count should fit u32");
@@ -419,6 +555,21 @@ fn assert_within_budget(budget: PerformanceBudget, metrics: ResourceMetrics) {
         budget.reference.rss_kib,
         format_reference_allocations(budget.reference),
     );
+    println!(
+        "PERFORMANCE_SMOKE_METRICS profile={} iterations={} wall_nanos={} cpu_nanos={} current_rss_kib={} peak_rss_kib={} allocation_count={} deallocation_count={} allocated_bytes={} deallocated_bytes={} net_live_bytes_delta={} peak_live_bytes_over_start={}",
+        budget.profile.key,
+        budget.iterations,
+        metrics.wall.as_nanos(),
+        format_optional_duration_nanos(metrics.cpu),
+        format_optional_u64(metrics.current_rss_kib),
+        format_optional_u64(metrics.peak_rss_kib),
+        metrics.allocations.allocation_count,
+        metrics.allocations.deallocation_count,
+        metrics.allocations.allocated_bytes,
+        metrics.allocations.deallocated_bytes,
+        metrics.allocations.net_live_bytes_delta,
+        metrics.allocations.peak_live_bytes_over_start,
+    );
 }
 
 fn assert_allocation_budget(profile: &str, metric: &str, value: u64, budget: u64) {
@@ -500,6 +651,17 @@ fn format_optional_duration(duration: Option<Duration>) -> String {
         || "unavailable".to_owned(),
         |duration| format!("{duration:?}"),
     )
+}
+
+fn format_optional_duration_nanos(duration: Option<Duration>) -> String {
+    duration.map_or_else(
+        || "unavailable".to_owned(),
+        |duration| duration.as_nanos().to_string(),
+    )
+}
+
+fn format_optional_u64(value: Option<u64>) -> String {
+    value.map_or_else(|| "unavailable".to_owned(), |value| value.to_string())
 }
 
 fn format_memory(metrics: ResourceMetrics) -> String {

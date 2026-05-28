@@ -4,6 +4,7 @@ use super::ast::{
     Identifier, ListPattern, ListValue, MapPattern, MapPatternCompleteness, MapPatternEntry,
     MapValue, MapValueEntry, Match, MatchArm, Module, OutputLiteral, Param, Pattern, Process,
     Record, RecordField, RecordPatternField, RecordValue, RecordValueField, ReturnExpr, Statement,
+    SupervisorChildDeclaration, SupervisorChildMode, SupervisorDeclaration, SupervisorStrategy,
     TypeRef, ValueBooleanOperator, ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator,
     ValueScalarOrderingOperator,
 };

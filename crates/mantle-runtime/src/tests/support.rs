@@ -46,6 +46,7 @@ pub(crate) fn valid_artifact() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 authorities: spawn_authorities(ProcessId::new(1)),
                 spawn_sites: spawn_sites(ProcessId::new(1)),
+                supervisor_plans: Vec::new(),
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -81,6 +82,7 @@ pub(crate) fn valid_artifact() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 authorities: Vec::new(),
                 spawn_sites: Vec::new(),
+                supervisor_plans: Vec::new(),
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
@@ -245,6 +247,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 authorities: spawn_authorities(ProcessId::new(1)),
                 spawn_sites: spawn_sites(ProcessId::new(1)),
+                supervisor_plans: Vec::new(),
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -280,6 +283,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 authorities: spawn_authorities(ProcessId::new(2)),
                 spawn_sites: spawn_sites(ProcessId::new(2)),
+                supervisor_plans: Vec::new(),
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "peer".to_string(),
                     target: ProcessId::new(2),
@@ -315,6 +319,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 authorities: spawn_authorities(ProcessId::new(1)),
                 spawn_sites: spawn_sites(ProcessId::new(1)),
+                supervisor_plans: Vec::new(),
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -369,6 +374,7 @@ pub(crate) fn sequence_artifact() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 authorities: spawn_authorities(ProcessId::new(1)),
                 spawn_sites: spawn_sites(ProcessId::new(1)),
+                supervisor_plans: Vec::new(),
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -412,6 +418,7 @@ pub(crate) fn sequence_artifact() -> MantleArtifact {
                 ],
                 authorities: Vec::new(),
                 spawn_sites: Vec::new(),
+                supervisor_plans: Vec::new(),
                 process_refs: Vec::new(),
                 mailbox_bound: 2,
                 init_state: StateId::new(0),
@@ -457,7 +464,9 @@ pub(crate) fn spawn_authorities(target: ProcessId) -> Vec<ArtifactAuthority> {
 pub(crate) fn spawn_sites(target: ProcessId) -> Vec<ArtifactSpawnSite> {
     vec![ArtifactSpawnSite {
         target,
-        authority: SPAWN_AUTHORITY,
+        authority: Some(SPAWN_AUTHORITY),
+        supervisor: None,
+        child: None,
         kind: ArtifactSpawnKind::DynamicLocal,
     }]
 }

@@ -48,7 +48,10 @@ fn render_text(artifact: &MantleArtifact, artifact_path: &str) -> String {
         }
         out.push('\n');
 
-        if process.authorities.is_empty() && process.spawn_sites.is_empty() {
+        if process.authorities.is_empty()
+            && process.spawn_sites.is_empty()
+            && process.supervisor_plans.is_empty()
+        {
             out.push_str("  no local spawn authority\n");
             continue;
         }
@@ -78,13 +81,51 @@ fn render_text(artifact: &MantleArtifact, artifact_path: &str) -> String {
             out.push_str(&site.target.as_u32().to_string());
             out.push_str(" target=");
             out.push_str(artifact_process_label(artifact, site.target));
-            out.push_str(" authority=");
-            out.push_str(&site.authority.as_u32().to_string());
-            if let Some(authority) = process.authorities.get(site.authority.index()) {
-                out.push(' ');
-                out.push_str(&authority.debug_name);
+            match site.authority {
+                Some(authority_id) => {
+                    out.push_str(" authority=");
+                    out.push_str(&authority_id.as_u32().to_string());
+                    if let Some(authority) = process.authorities.get(authority_id.index()) {
+                        out.push(' ');
+                        out.push_str(&authority.debug_name);
+                    }
+                }
+                None => {
+                    out.push_str(" supervisor=");
+                    push_optional_id(&mut out, site.supervisor.map(|id| id.as_u32()));
+                    out.push_str(" child=");
+                    push_optional_id(&mut out, site.child.map(|id| id.as_u32()));
+                }
             }
             out.push('\n');
+        }
+
+        for (supervisor_index, supervisor) in process.supervisor_plans.iter().enumerate() {
+            out.push_str("  supervisor ");
+            out.push_str(&supervisor_index.to_string());
+            out.push_str(" strategy=");
+            out.push_str(supervisor.strategy.as_str());
+            out.push_str(" max_restarts=");
+            out.push_str(&supervisor.intensity.max_restarts.to_string());
+            out.push_str(" within_ms=");
+            out.push_str(&supervisor.intensity.within_ms.to_string());
+            out.push('\n');
+
+            for (child_index, child) in supervisor.children.iter().enumerate() {
+                out.push_str("    child ");
+                out.push_str(&child_index.to_string());
+                out.push(' ');
+                out.push_str(&child.debug_name);
+                out.push_str(" mode=");
+                out.push_str(child.mode.as_str());
+                out.push_str(" target_process_id=");
+                out.push_str(&child.target.as_u32().to_string());
+                out.push_str(" target=");
+                out.push_str(artifact_process_label(artifact, child.target));
+                out.push_str(" spawn_site=");
+                out.push_str(&child.spawn_site.as_u32().to_string());
+                out.push('\n');
+            }
         }
     }
 
@@ -163,12 +204,65 @@ fn render_json(artifact: &MantleArtifact, artifact_path: &str) -> String {
                 artifact_process_label(artifact, site.target),
             );
             out.push_str(",\"authority_id\":");
-            out.push_str(&site.authority.as_u32().to_string());
-            if let Some(authority) = process.authorities.get(site.authority.index()) {
-                out.push(',');
-                push_json_field(&mut out, "authority_name", &authority.debug_name);
+            match site.authority {
+                Some(authority_id) => {
+                    out.push_str(&authority_id.as_u32().to_string());
+                    if let Some(authority) = process.authorities.get(authority_id.index()) {
+                        out.push(',');
+                        push_json_field(&mut out, "authority_name", &authority.debug_name);
+                    }
+                }
+                None => out.push_str("null"),
+            }
+            if let Some(supervisor) = site.supervisor {
+                out.push_str(",\"supervisor_id\":");
+                out.push_str(&supervisor.as_u32().to_string());
+            }
+            if let Some(child) = site.child {
+                out.push_str(",\"supervisor_child_id\":");
+                out.push_str(&child.as_u32().to_string());
             }
             out.push('}');
+        }
+        out.push_str("],\"supervisors\":[");
+        for (supervisor_index, supervisor) in process.supervisor_plans.iter().enumerate() {
+            if supervisor_index > 0 {
+                out.push(',');
+            }
+            out.push('{');
+            out.push_str("\"supervisor_id\":");
+            out.push_str(&supervisor_index.to_string());
+            out.push(',');
+            push_json_field(&mut out, "strategy", supervisor.strategy.as_str());
+            out.push_str(",\"max_restarts\":");
+            out.push_str(&supervisor.intensity.max_restarts.to_string());
+            out.push_str(",\"within_ms\":");
+            out.push_str(&supervisor.intensity.within_ms.to_string());
+            out.push_str(",\"children\":[");
+            for (child_index, child) in supervisor.children.iter().enumerate() {
+                if child_index > 0 {
+                    out.push(',');
+                }
+                out.push('{');
+                out.push_str("\"child_id\":");
+                out.push_str(&child_index.to_string());
+                out.push(',');
+                push_json_field(&mut out, "child", &child.debug_name);
+                out.push(',');
+                push_json_field(&mut out, "mode", child.mode.as_str());
+                out.push_str(",\"target_process_id\":");
+                out.push_str(&child.target.as_u32().to_string());
+                out.push(',');
+                push_json_field(
+                    &mut out,
+                    "target_process",
+                    artifact_process_label(artifact, child.target),
+                );
+                out.push_str(",\"spawn_site_id\":");
+                out.push_str(&child.spawn_site.as_u32().to_string());
+                out.push('}');
+            }
+            out.push_str("]}");
         }
         out.push_str("]}");
     }
@@ -223,7 +317,7 @@ fn push_artifact_used_spawn_sites(
     };
     let mut needs_separator = false;
     for (site_index, site) in sites.iter().enumerate() {
-        if site.authority == authority {
+        if site.authority == Some(authority) {
             if needs_separator {
                 out.push(',');
             }
@@ -245,6 +339,14 @@ fn artifact_process_label(artifact: &MantleArtifact, id: ProcessId) -> &str {
 fn artifact_spawn_kind_str(kind: ArtifactSpawnKind) -> &'static str {
     match kind {
         ArtifactSpawnKind::DynamicLocal => "dynamic_local",
+        ArtifactSpawnKind::LexicalSupervisorChild => "lexical_supervisor_child",
+    }
+}
+
+fn push_optional_id(out: &mut String, id: Option<u32>) {
+    match id {
+        Some(id) => out.push_str(&id.to_string()),
+        None => out.push_str("none"),
     }
 }
 
@@ -284,8 +386,10 @@ mod tests {
     use crate::{
         ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority,
         ArtifactEffect, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-        ArtifactSendTarget, ArtifactSpawnSite, ArtifactStateValue, ArtifactTransition,
-        ArtifactType, MessageId, NextState, ProcessRefId, SpawnSiteId, StateId, StepResult, TypeId,
+        ArtifactSendTarget, ArtifactSpawnSite, ArtifactStateValue, ArtifactSupervisorChild,
+        ArtifactSupervisorChildMode, ArtifactSupervisorPlan, ArtifactSupervisorRestartIntensity,
+        ArtifactSupervisorStrategy, ArtifactTransition, ArtifactType, MessageId, NextState,
+        ProcessRefId, SpawnSiteId, StateId, StepResult, TypeId,
     };
 
     #[test]
@@ -307,6 +411,12 @@ mod tests {
         assert!(summary.contains(
             "spawn_site 0 dynamic_local target_process_id=1 target=Worker authority=0 spawn_worker"
         ));
+        assert!(
+            summary.contains("supervisor 0 strategy=one_for_one max_restarts=2 within_ms=1000")
+        );
+        assert!(summary.contains(
+            "child 0 supervised_worker mode=permanent target_process_id=1 target=Worker spawn_site=1"
+        ));
     }
 
     #[test]
@@ -324,6 +434,12 @@ mod tests {
         assert!(summary.contains("\"authority_id\":0"));
         assert!(summary.contains("\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1,\"target_process\":\"Worker\"}"));
         assert!(summary.contains("\"used_by_spawn_site_ids\":[0]"));
+        assert!(summary.contains("\"supervisors\":[{\"supervisor_id\":0"));
+        assert!(summary.contains("\"strategy\":\"one_for_one\""));
+        assert!(summary.contains("\"max_restarts\":2"));
+        assert!(summary.contains("\"within_ms\":1000"));
+        assert!(summary.contains("\"child\":\"supervised_worker\""));
+        assert!(summary.contains("\"mode\":\"permanent\""));
     }
 
     #[test]
@@ -340,7 +456,7 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("spawn site 0 targets process id 99"),
+                .contains("spawn site 0 targets undefined process id 99"),
             "{err}"
         );
     }
@@ -379,10 +495,34 @@ mod tests {
                             target: ProcessId::new(1),
                         },
                     }],
-                    spawn_sites: vec![ArtifactSpawnSite {
-                        target: ProcessId::new(1),
-                        authority: AuthorityId::new(0),
-                        kind: ArtifactSpawnKind::DynamicLocal,
+                    spawn_sites: vec![
+                        ArtifactSpawnSite {
+                            target: ProcessId::new(1),
+                            authority: Some(AuthorityId::new(0)),
+                            supervisor: None,
+                            child: None,
+                            kind: ArtifactSpawnKind::DynamicLocal,
+                        },
+                        ArtifactSpawnSite {
+                            target: ProcessId::new(1),
+                            authority: None,
+                            supervisor: Some(crate::SupervisorId::new(0)),
+                            child: Some(crate::SupervisorChildId::new(0)),
+                            kind: ArtifactSpawnKind::LexicalSupervisorChild,
+                        },
+                    ],
+                    supervisor_plans: vec![ArtifactSupervisorPlan {
+                        strategy: ArtifactSupervisorStrategy::OneForOne,
+                        intensity: ArtifactSupervisorRestartIntensity {
+                            max_restarts: 2,
+                            within_ms: 1000,
+                        },
+                        children: vec![ArtifactSupervisorChild {
+                            debug_name: "supervised_worker".to_string(),
+                            target: ProcessId::new(1),
+                            mode: ArtifactSupervisorChildMode::Permanent,
+                            spawn_site: SpawnSiteId::new(1),
+                        }],
                     }],
                     process_refs: vec![ArtifactProcessRef {
                         debug_name: "worker".to_string(),
@@ -425,6 +565,7 @@ mod tests {
                     message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                     authorities: Vec::new(),
                     spawn_sites: Vec::new(),
+                    supervisor_plans: Vec::new(),
                     process_refs: Vec::new(),
                     mailbox_bound: 1,
                     init_state: StateId::new(0),

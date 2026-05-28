@@ -451,6 +451,39 @@ impl ArtifactProcess {
                 }
                 Ok(target_process_id)
             }
+            ArtifactSendTarget::SupervisorChild {
+                supervisor,
+                child,
+                target_process,
+            } => {
+                let plan = self
+                    .supervisor_plans
+                    .get(supervisor.index())
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} references undefined supervisor id {}",
+                            self.debug_name,
+                            supervisor.as_u32()
+                        ))
+                    })?;
+                let child_plan = plan.children.get(child.index()).ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} references undefined supervisor child id {}",
+                        self.debug_name,
+                        child.as_u32()
+                    ))
+                })?;
+                if child_plan.target != *target_process {
+                    return Err(Error::new(format!(
+                        "process {} supervisor child id {} targets process id {}, expected {}",
+                        self.debug_name,
+                        child.as_u32(),
+                        child_plan.target.as_u32(),
+                        target_process.as_u32()
+                    )));
+                }
+                Ok(*target_process)
+            }
             ArtifactSendTarget::ReceivedPayload { ty, target_process } => {
                 artifact.validate_process_ref_type_id_target(
                     "send target payload type",
@@ -613,7 +646,14 @@ impl ArtifactProcess {
     ) -> Result<()> {
         let site = self.validate_spawn_site(spawn_site, target)?;
         usage.mark_spawn_site(&self.debug_name, spawn_site.index())?;
-        usage.mark_authority(&self.debug_name, site.authority.index())
+        let authority = site.authority.ok_or_else(|| {
+            Error::new(format!(
+                "process {} dynamic spawn site id {} does not reference an authority",
+                self.debug_name,
+                spawn_site.as_u32()
+            ))
+        })?;
+        usage.mark_authority(&self.debug_name, authority.index())
     }
 
     fn validate_spawn_site(
@@ -637,7 +677,13 @@ impl ArtifactProcess {
                 target.as_u32()
             )));
         }
-        let ArtifactSpawnKind::DynamicLocal = site.kind;
+        if site.kind != ArtifactSpawnKind::DynamicLocal {
+            return Err(Error::new(format!(
+                "process {} spawn site id {} is not a dynamic local spawn site",
+                self.debug_name,
+                spawn_site.as_u32()
+            )));
+        }
         Ok(site)
     }
 }

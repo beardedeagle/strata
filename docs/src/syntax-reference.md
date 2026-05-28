@@ -71,6 +71,7 @@ process_member =
     state_alias
   | message_alias
   | authority_decl
+  | supervisor_decl
   | init_function
   | step_function
   | source_function
@@ -83,16 +84,21 @@ message_alias =
 
 authority_decl =
     "authority" ident ":" "Cap" "<" "Spawn" "<" ident ">" ">" ";"
+
+supervisor_decl =
+    "supervise" "local" "one_for_one" "(" "max_restarts" ":" number "_u32" "," "within_ms" ":" number "_u64" ")" "{" supervisor_child+ "}"
+
+supervisor_child =
+    "child" ident ":" ident "=" "spawn" ident "as" ("permanent" | "transient" | "temporary") ";"
 ```
 
-The aliases, authority declarations, and functions may appear in any order.
-`State`, `Msg`, and `init` must each appear exactly once. An authority
+The aliases, authority declarations, supervisor declarations, and functions may appear in any order. `State`, `Msg`, and `init` must each appear exactly once. An authority
 declaration is a process-local typed capability descriptor; the current accepted
 descriptor is exactly `Cap<Spawn<ProcessName>>`. It must target another declared
 non-entry process, must be referenced by at least one local spawn site, and does
-not replace `! [spawn]` effect usage. Non-`init`/`step`
-functions are process-local source functions. Each concrete message case must
-resolve to exactly one generated transition, either through an explicit
+not replace `! [spawn]` effect usage. Non-`init`/`step` functions are process-local source functions.
+A local supervisor declaration declares static lexical children and does not grant dynamic spawn authority.
+Each concrete message case must resolve to exactly one generated transition, either through an explicit
 constructor pattern, through one wildcard pattern, through one `match msg` step
 body, or through a state-match step for a constructor or wildcard message
 pattern. Parameter-pattern, state-match, and whole-body `match msg` dispatch may
@@ -732,9 +738,9 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`_`, `as`, `authority`, `bounded`, `else`, `emit`, `enum`, `fn`, `for`, `if`,
-`in`, `let`, `mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`,
-`security`, `send`, `spawn`, `type`, and `var` are reserved everywhere
+`_`, `as`, `authority`, `bounded`, `child`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`,
+`local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`, `permanent`, `proc`, `record`,
+`return`, `security`, `send`, `spawn`, `supervise`, `temporary`, `transient`, `type`, and `var` are reserved everywhere
 identifiers are accepted. The single `_` token is reserved for wildcard
 patterns.
 `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `List`, `Map`, `Unit`, `Option`,

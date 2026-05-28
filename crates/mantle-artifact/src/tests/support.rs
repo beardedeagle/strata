@@ -72,9 +72,12 @@ pub(super) fn valid_artifact() -> MantleArtifact {
                 }],
                 spawn_sites: vec![ArtifactSpawnSite {
                     target: ProcessId::new(1),
-                    authority: SPAWN_WORKER_AUTHORITY,
+                    authority: Some(SPAWN_WORKER_AUTHORITY),
+                    supervisor: None,
+                    child: None,
                     kind: ArtifactSpawnKind::DynamicLocal,
                 }],
+                supervisor_plans: Vec::new(),
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -110,6 +113,7 @@ pub(super) fn valid_artifact() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 authorities: Vec::new(),
                 spawn_sites: Vec::new(),
+                supervisor_plans: Vec::new(),
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),

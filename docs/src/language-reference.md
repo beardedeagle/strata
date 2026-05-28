@@ -18,6 +18,7 @@ Mantle artifact internals.
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Local spawn authority | Process-local `authority name: Cap<Spawn<Target>>;` declarations for dynamic local process creation. |
+| Local supervision | Process-local `supervise local one_for_one(max_restarts: N_u32, within_ms: N_u64) { child name: Process = spawn Process as permanent|transient|temporary; }` declarations for static lexical local children. |
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
 | Effect outcomes | Immutable step-local `Result` bindings for local `send` and the current local `spawn` success shape. |
 | Scalar values | Fixed-width integer source values `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` with explicit literal suffixes. |
@@ -96,9 +97,8 @@ worker-name
 _
 ```
 
-`_`, `as`, `authority`, `bounded`, `else`, `emit`, `enum`, `fn`, `for`, `if`,
-`in`, `let`, `mailbox`, `match`, `module`, `mut`, `proc`, `record`, `return`,
-`security`, `send`, `spawn`, `type`, and `var` are reserved everywhere
+`_`, `as`, `authority`, `bounded`, `child`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`, `local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`,
+`permanent`, `proc`, `record`, `return`, `security`, `send`, `spawn`, `supervise`, `temporary`, `transient`, `type`, and `var` are reserved everywhere
 identifiers are accepted.
 `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `List`, `Map`, `Unit`, `Option`,
 `Result`, `SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`,
@@ -274,6 +274,14 @@ process is rejected. The `! [spawn]` effect remains exact effect usage; it does
 not prove spawn authority by itself. After checking,
 authority declarations lower to typed authority IDs and spawn-site IDs. Source
 names remain syntax, diagnostics, and trace metadata.
+
+## Local Supervision
+
+`supervise local one_for_one(max_restarts: 2_u32, within_ms: 1000_u64) { child worker: Worker = spawn Worker as permanent; }`
+declares static lexical child processes owned by a process, separate from dynamic `Cap<Spawn<Target>>` authority.
+The current surface supports local `one_for_one` supervisors only. Child names are unique, restart intensity is explicit,
+modes are `permanent`, `transient`, or `temporary`, and local supervisor child graphs must be acyclic.
+`send worker Work;` resolves `worker` to typed supervisor and child IDs, not a source string, dynamic process reference, or general `Cap<Spawn<Worker>>`.
 
 ## Collections
 

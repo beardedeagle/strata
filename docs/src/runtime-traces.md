@@ -63,13 +63,15 @@ instances share `process_id` and label metadata but have different `pid` values.
 | `program_output` | A process emitted declared output. |
 | `process_stopped` | A process stopped normally. |
 | `process_failed` | A process failed abnormally after a consumed message. |
+| `supervisor_child_started` | A supervisor started a declared lexical child. |
+| `supervisor_restart_decision` | A supervisor accepted, denied, or skipped a child restart. |
 
 ## Artifact Loaded
 
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"1","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"2","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -234,7 +236,10 @@ Example shape:
 {"event":"process_stopped","pid":2,"process_id":1,"process":"Worker","reason":"normal"}
 ```
 
-The stop reason is `normal`.
+The stop reason is `normal` for source-level `Stop(...)` termination,
+`supervisor_shutdown` when a running supervisor stops its child tree during
+orderly shutdown, and `supervisor_failure` when a failed supervisor or failed
+supervised process forces its child tree to stop.
 
 ## Process Failed
 
@@ -246,4 +251,27 @@ Example shape:
 
 `Panic(value)` records a `process_stepped` event with `result:"Panic"`, then a
 `process_failed` event. The dequeued message is already consumed and is not
-replayed. The failure reason is `panic`.
+replayed. The failure reason is `panic`. Supervisor-scope failures also use
+`process_failed`; current supervisor failure reasons are
+`supervisor_restart_intensity_exceeded`,
+`supervisor_restart_capacity_exceeded`, and `supervisor_restart_throttled`.
+
+## Supervisor Lifecycle Events
+
+Example shapes:
+
+```json
+{"event":"supervisor_child_started","supervisor_pid":1,"supervisor_process_id":0,"supervisor_process":"Main","supervisor_id":0,"child_id":0,"child":"worker","child_pid":2,"child_process_id":1,"child_process":"Worker","spawn_site_id":0,"spawn_kind":"lexical_supervisor_child"}
+{"event":"supervisor_restart_decision","supervisor_pid":1,"supervisor_process_id":0,"supervisor_process":"Main","supervisor_id":0,"child_id":0,"child":"worker","child_pid":2,"child_process_id":1,"child_process":"Worker","reason":"panic","decision":"restarted","restart_time_ms":0,"restart_window_count":1,"restart_window_limit":3,"restart_window_ms":1000,"new_child_pid":3}
+```
+
+`supervisor_id`, `child_id`, and `spawn_site_id` are admitted typed IDs.
+`spawn_kind` records the lexical supervisor-child classification.
+`child`, `supervisor_process`, and `child_process` are trace labels only.
+`restart_time_ms` is the sampled monotonic runtime time for restart-window
+decisions, or `null` when the child mode does not permit a restart. The restart
+window fields record the observed count and configured limit/window after stale
+entries are pruned. A denied restart fails the supervisor scope when intensity,
+capacity, or the default same-monotonic-tick throttle prevents a restart.
+Runtime supervision uses admitted supervisor tables and typed child IDs, not
+labels.

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use mantle_artifact::{ArtifactValue, MapProjectionMode};
 
 use crate::language::ast::Identifier;
@@ -185,13 +187,13 @@ pub(in crate::language) enum CheckedValueTemplate {
         ty: CheckedTypeRef,
         map: Box<CheckedValueTemplate>,
         key: ArtifactValue,
-        keys: Vec<ArtifactValue>,
+        keys: Arc<[ArtifactValue]>,
         projection: MapProjectionMode,
     },
     MapRest {
         ty: CheckedTypeRef,
         map: Box<CheckedValueTemplate>,
-        excluded_keys: Vec<ArtifactValue>,
+        excluded_keys: Arc<[ArtifactValue]>,
     },
     ProcessRef {
         ty: CheckedTypeRef,

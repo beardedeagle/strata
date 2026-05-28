@@ -501,8 +501,9 @@ proc Worker mailbox bounded(1) {
     let err = check_source(source).expect_err("unselected arm send should still be validated");
 
     assert!(
-        err.to_string()
-            .contains("process Worker sends to undeclared process reference missing_ref"),
+        err.to_string().contains(
+            "process Worker sends to undeclared process reference or supervisor child missing_ref"
+        ),
         "unexpected error: {err}"
     );
 }

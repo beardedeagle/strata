@@ -16,6 +16,16 @@ pub(super) fn resolve_checked_send_target(
             target_process: binding.target,
         });
     }
+    if let Some(binding) = context.supervisor_child_index.get(target) {
+        return Ok(ResolvedCheckedSendTarget {
+            target: CheckedSendTarget::SupervisorChild {
+                supervisor: binding.supervisor,
+                child: binding.child,
+                target: binding.target,
+            },
+            target_process: binding.target,
+        });
+    }
     if let Some(binding) = payload_bindings
         .iter()
         .find(|binding| binding.name == *target)
@@ -38,7 +48,7 @@ pub(super) fn resolve_checked_send_target(
         });
     }
     Err(Error::new(format!(
-        "process {} sends to undeclared process reference {}",
+        "process {} sends to undeclared process reference or supervisor child {}",
         context.process.name, target
     )))
 }

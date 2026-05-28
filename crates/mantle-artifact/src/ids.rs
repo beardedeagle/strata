@@ -39,3 +39,5 @@ define_id!(LoopElementId);
 define_id!(EffectOutcomeId);
 define_id!(AuthorityId);
 define_id!(SpawnSiteId);
+define_id!(SupervisorId);
+define_id!(SupervisorChildId);

@@ -2,9 +2,9 @@ pub(super) use super::super::ast::EnumVariant;
 pub(super) use super::super::checked::{
     CheckedAction, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedMessageId,
     CheckedNextState, CheckedOutputId, CheckedProcess, CheckedProcessId, CheckedProcessRefId,
-    CheckedSendTarget, CheckedSpawnSiteId, CheckedStateId, CheckedStepResult, CheckedTransition,
-    CheckedTypeKind, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
-    CheckedValueTemplate,
+    CheckedSendTarget, CheckedSpawnKind, CheckedSpawnSiteId, CheckedStateId, CheckedStepResult,
+    CheckedSupervisorChildMode, CheckedTransition, CheckedTypeKind, CheckedValueBooleanOperator,
+    CheckedValueEqualityOperator, CheckedValueTemplate,
 };
 pub(super) use super::super::lexer::{Lexer, TokenKind};
 pub(super) use super::super::*;
@@ -125,6 +125,7 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
             state_type: state_type.clone(),
             msg_type: TypeRef::Named(ident(msg_name)),
             authorities: Vec::new(),
+            supervisors: Vec::new(),
             init: Function {
                 name: ident("init"),
                 params: Vec::new(),

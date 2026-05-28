@@ -119,6 +119,12 @@ just run-example runtime_loop_element_projection
 just run-example effect_outcomes
 just run-example effect_outcome_mailbox_full
 just run-example effect_outcome_stopped_target
+just run-example local_supervision_restart
+just run-example local_supervision_permanent_stop
+just run-example local_supervision_temporary
+just run-example local_supervision_transient_restart
+just run-example local_supervision_transient
+just run-example local_supervision_inactive_send_outcome
 ```
 
 The local spawn authority denial gate uses the same check/build path and then

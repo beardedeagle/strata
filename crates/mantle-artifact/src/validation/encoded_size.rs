@@ -4,8 +4,10 @@ use crate::{
     Result,
 };
 
+mod supervision;
 mod templates;
 
+use supervision::{add_spawn_site_bytes, add_supervisor_plan_bytes};
 use templates::add_value_template_bytes;
 
 #[derive(Clone, Copy)]
@@ -30,6 +32,10 @@ impl KeyLen {
 }
 
 pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
+    encoded_artifact_len(artifact).map(|_| ())
+}
+
+pub(crate) fn encoded_artifact_len(artifact: &MantleArtifact) -> Result<usize> {
     let mut encoded_len = 0usize;
     add_encoded_bytes(&mut encoded_len, ARTIFACT_MAGIC.len() + 1)?;
     add_field_bytes(
@@ -190,29 +196,8 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
                 }
             }
         }
-        add_field_usize(
-            &mut encoded_len,
-            prefix.child("spawn_site_count"),
-            process.spawn_sites.len(),
-        )?;
-        for (spawn_site_index, spawn_site) in process.spawn_sites.iter().enumerate() {
-            let spawn_site_prefix = prefix.indexed_child("spawn_site", spawn_site_index);
-            add_field_u32(
-                &mut encoded_len,
-                spawn_site_prefix.child("target_process"),
-                spawn_site.target.as_u32(),
-            )?;
-            add_field_u32(
-                &mut encoded_len,
-                spawn_site_prefix.child("authority"),
-                spawn_site.authority.as_u32(),
-            )?;
-            add_field_bytes(
-                &mut encoded_len,
-                spawn_site_prefix.child("kind"),
-                spawn_site.kind.as_str(),
-            )?;
-        }
+        add_spawn_site_bytes(&mut encoded_len, prefix, process)?;
+        add_supervisor_plan_bytes(&mut encoded_len, prefix, process)?;
         add_field_usize(
             &mut encoded_len,
             prefix.child("process_ref_count"),
@@ -312,7 +297,7 @@ pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Resul
         KeyLen::new("source_hash_fnv1a64".len()),
         &artifact.source_hash_fnv1a64,
     )?;
-    Ok(())
+    Ok(encoded_len)
 }
 
 fn add_type_shape_bytes(
@@ -384,6 +369,10 @@ pub(super) fn add_field_value_label_len(
 
 pub(super) fn add_field_u32(total: &mut usize, key: KeyLen, value: u32) -> Result<()> {
     add_field_value_len(total, key, decimal_len_u32(value))
+}
+
+pub(super) fn add_field_u64(total: &mut usize, key: KeyLen, value: u64) -> Result<()> {
+    add_field_value_len(total, key, decimal_len_u64(value))
 }
 
 pub(super) fn add_field_usize(total: &mut usize, key: KeyLen, value: usize) -> Result<()> {
@@ -632,6 +621,28 @@ fn add_send_target_bytes(
                 total,
                 action_prefix.child("target_process_ref"),
                 process_ref.as_u32(),
+            )?;
+        }
+        ArtifactSendTarget::SupervisorChild {
+            supervisor,
+            child,
+            target_process,
+        } => {
+            add_field_bytes(total, action_prefix.child("target"), "supervisor_child")?;
+            add_field_u32(
+                total,
+                action_prefix.child("target_supervisor"),
+                supervisor.as_u32(),
+            )?;
+            add_field_u32(
+                total,
+                action_prefix.child("target_supervisor_child"),
+                child.as_u32(),
+            )?;
+            add_field_u32(
+                total,
+                action_prefix.child("target_process"),
+                target_process.as_u32(),
             )?;
         }
         ArtifactSendTarget::ReceivedPayload { ty, target_process } => {

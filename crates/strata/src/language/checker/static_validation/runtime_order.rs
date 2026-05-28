@@ -5,7 +5,7 @@ use mantle_artifact::ArtifactValue;
 use super::super::super::checked::{
     CheckedAction, CheckedLoopElementId, CheckedMessageId, CheckedNextState, CheckedPayloadValue,
     CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedSendTarget, CheckedStateId,
-    CheckedStepResult, CheckedValueTemplate,
+    CheckedValueTemplate,
 };
 use super::super::super::diagnostic::{Error, Result};
 use super::super::super::{STATIC_RUNTIME_DISPATCH_LIMIT, STATIC_RUNTIME_PROCESS_LIMIT};
@@ -13,15 +13,32 @@ use super::process_refs::{process_by_id, process_label, process_ref_target};
 
 mod conditions;
 mod effect_outcomes;
+mod send_outcomes;
+mod send_targets;
+mod step_results;
+mod supervision;
 mod templates;
+#[cfg(test)]
+mod test_support;
 mod transitions;
 
 use conditions::evaluate_checked_bool_condition;
 use effect_outcomes::{
     StaticEffectOutcomeBinding, bind_static_effect_outcome, ok_process_ref_outcome,
-    ok_unit_outcome, send_error_outcome, spawn_error_outcome, static_original_message,
+    spawn_error_outcome,
+};
+use send_outcomes::execute_static_send_outcome;
+use send_targets::resolve_static_send_target;
+use step_results::apply_static_step_result;
+use supervision::{
+    StaticSupervisorChildKey, spawn_static_instance, static_spawn_capacity_available,
 };
 use templates::{checked_payload_value, evaluate_checked_runtime_template};
+#[cfg(test)]
+pub(in crate::language::checker::static_validation) use test_support::{
+    static_spawn_capacity_available_for_test, static_spawn_outcome_execution_for_test,
+    static_supervised_restart_exit_for_test,
+};
 use transitions::transition_for_message;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +51,7 @@ struct StaticLoopElementBinding {
 struct StaticActionContext<'a> {
     processes: &'a [CheckedProcess],
     process: &'a CheckedProcess,
+    current_pid: StaticProcessId,
     envelope: &'a StaticMessageEnvelope,
     current_state_payload: Option<&'a CheckedPayloadValue>,
     loop_elements: &'a [StaticLoopElementBinding],
@@ -58,6 +76,7 @@ struct StaticActionState<'a> {
     instances: &'a mut Vec<StaticProcessInstance>,
     next_pid: &'a mut StaticProcessId,
     local_process_refs: &'a mut BTreeMap<CheckedProcessRefId, StaticProcessId>,
+    supervisor_children: &'a mut BTreeMap<StaticSupervisorChildKey, StaticProcessId>,
     effect_outcomes: &'a mut Vec<StaticEffectOutcomeBinding>,
 }
 
@@ -92,6 +111,7 @@ pub(super) struct StaticProcessInstance {
     pub(super) process_id: CheckedProcessId,
     pub(super) state: CheckedStateId,
     pub(super) status: StaticProcessStatus,
+    pub(super) supervisor_parent: Option<StaticSupervisorChildKey>,
     pub(super) mailbox: VecDeque<StaticMessageEnvelope>,
 }
 
@@ -137,48 +157,6 @@ pub(super) fn resolve_static_process_ref(
     })
 }
 
-fn resolve_static_send_target(
-    process: &CheckedProcess,
-    process_refs: &BTreeMap<CheckedProcessRefId, StaticProcessId>,
-    target: &CheckedSendTarget,
-    received_payload: Option<&CheckedPayloadValue>,
-) -> Result<StaticProcessId> {
-    match target {
-        CheckedSendTarget::ProcessRef(process_ref) => {
-            resolve_static_process_ref(process, process_refs, *process_ref)
-        }
-        CheckedSendTarget::ReceivedPayload { ty, target } => {
-            let payload = received_payload.ok_or_else(|| {
-                Error::new("received process reference send target requires a payload")
-            })?;
-            if payload.ty() != ty {
-                return Err(Error::new(format!(
-                    "received process reference send target has type {}, expected {}",
-                    payload.ty(),
-                    ty
-                )));
-            }
-            let process_ref = payload
-                .process_ref_payload()
-                .ok_or_else(|| Error::new("received payload is not a process reference value"))?;
-            if process_ref.target() != *target {
-                return Err(Error::new(format!(
-                    "received process reference targets process id {}, expected {}",
-                    process_ref.target().as_u32(),
-                    target.as_u32()
-                )));
-            }
-            let pid = u32::try_from(process_ref.pid()).map_err(|_| {
-                Error::new(format!(
-                    "received process reference pid {} cannot be represented by static validation",
-                    process_ref.pid()
-                ))
-            })?;
-            Ok(StaticProcessId(pid))
-        }
-    }
-}
-
 pub(super) fn static_process_index_for_pid(
     instances: &[StaticProcessInstance],
     pid: StaticProcessId,
@@ -222,15 +200,23 @@ pub(super) fn validate_static_runtime_order(
     entry_process: CheckedProcessId,
     entry_message: CheckedMessageId,
 ) -> Result<()> {
-    let entry_definition = process_by_id(processes, entry_process)?;
-    let mut instances = vec![StaticProcessInstance {
-        pid: StaticProcessId::FIRST,
-        process_id: entry_process,
-        state: entry_definition.init_state(),
-        status: StaticProcessStatus::Running,
-        mailbox: VecDeque::from([StaticMessageEnvelope::new(entry_message, None)]),
-    }];
+    let mut instances = Vec::new();
     let mut next_pid = StaticProcessId::FIRST.checked_next()?;
+    let mut supervisor_children = BTreeMap::new();
+    let mut supervisor_restart_counts = BTreeMap::new();
+    spawn_static_instance(
+        processes,
+        &mut instances,
+        &mut next_pid,
+        &mut supervisor_children,
+        entry_process,
+        StaticProcessId::FIRST,
+        None,
+    )?;
+    let entry_index = static_process_index_for_pid(&instances, StaticProcessId::FIRST)?;
+    instances[entry_index]
+        .mailbox
+        .push_back(StaticMessageEnvelope::new(entry_message, None));
     let mut dispatches = 0usize;
 
     while let Some(process_index) = next_static_runnable(&instances) {
@@ -278,6 +264,7 @@ pub(super) fn validate_static_runtime_order(
             let action_context = StaticActionContext {
                 processes,
                 process,
+                current_pid: instances[process_index].pid,
                 envelope: &envelope,
                 current_state_payload,
                 loop_elements: &[],
@@ -286,6 +273,7 @@ pub(super) fn validate_static_runtime_order(
                 instances: &mut instances,
                 next_pid: &mut next_pid,
                 local_process_refs: &mut local_process_refs,
+                supervisor_children: &mut supervisor_children,
                 effect_outcomes: &mut effect_outcomes,
             };
             for action in transition.actions() {
@@ -305,15 +293,16 @@ pub(super) fn validate_static_runtime_order(
             )?,
         };
         instances[process_index].state = final_state;
-        match transition.step_result() {
-            CheckedStepResult::Continue => {}
-            CheckedStepResult::Stop => {
-                instances[process_index].status = StaticProcessStatus::Stopped;
-            }
-            CheckedStepResult::Panic => {
-                instances[process_index].status = StaticProcessStatus::Failed;
-                return Ok(());
-            }
+        if !apply_static_step_result(
+            processes,
+            &mut instances,
+            &mut next_pid,
+            &mut supervisor_children,
+            &mut supervisor_restart_counts,
+            process_index,
+            transition.step_result(),
+        )? {
+            return Ok(());
         }
         dispatches += 1;
     }
@@ -361,8 +350,6 @@ fn execute_static_action(
             process_ref,
             ..
         } => {
-            let target_process = process_by_id(context.processes, *target)?;
-            ensure_static_process_capacity(state.instances.len())?;
             let spawned_pid = *state.next_pid;
             *state.next_pid = state.next_pid.checked_next()?;
             bind_static_process_ref(
@@ -372,13 +359,15 @@ fn execute_static_action(
                 spawned_pid,
             )
             .map_err(|err| Error::new(format!("process {} {err}", context.process.debug_name())))?;
-            state.instances.push(StaticProcessInstance {
-                pid: spawned_pid,
-                process_id: *target,
-                state: target_process.init_state(),
-                status: StaticProcessStatus::Running,
-                mailbox: VecDeque::new(),
-            });
+            spawn_static_instance(
+                context.processes,
+                state.instances,
+                state.next_pid,
+                state.supervisor_children,
+                *target,
+                spawned_pid,
+                None,
+            )?;
             Ok(())
         }
         CheckedAction::SpawnOutcome {
@@ -387,8 +376,8 @@ fn execute_static_action(
             target,
             ..
         } => {
-            let target_process = process_by_id(context.processes, *target)?;
-            if state.instances.len() >= STATIC_RUNTIME_PROCESS_LIMIT {
+            if !static_spawn_capacity_available(context.processes, state.instances.len(), *target)?
+            {
                 return bind_static_effect_outcome(
                     context.process,
                     state,
@@ -399,13 +388,15 @@ fn execute_static_action(
             }
             let spawned_pid = *state.next_pid;
             *state.next_pid = state.next_pid.checked_next()?;
-            state.instances.push(StaticProcessInstance {
-                pid: spawned_pid,
-                process_id: *target,
-                state: target_process.init_state(),
-                status: StaticProcessStatus::Running,
-                mailbox: VecDeque::new(),
-            });
+            spawn_static_instance(
+                context.processes,
+                state.instances,
+                state.next_pid,
+                state.supervisor_children,
+                *target,
+                spawned_pid,
+                None,
+            )?;
             bind_static_effect_outcome(
                 context.process,
                 state,
@@ -431,75 +422,15 @@ fn execute_static_action(
             target,
             message,
             payload,
-        } => {
-            let target_pid = resolve_static_send_target(
-                context.process,
-                state.local_process_refs,
-                target,
-                context.envelope.payload.as_ref(),
-            )
-            .map_err(|err| Error::new(format!("process {} {err}", context.process.debug_name())))?;
-            let target_index =
-                static_process_index_for_pid(state.instances, target_pid).map_err(|err| {
-                    Error::new(format!(
-                        "process {} sends through process reference to {err}",
-                        context.process.debug_name()
-                    ))
-                })?;
-            let target_process =
-                process_by_id(context.processes, state.instances[target_index].process_id)?;
-            if message.index() >= target_process.message_cases().len() {
-                return Err(Error::new(format!(
-                    "process {} sends message id {} not accepted by {}",
-                    context.process.debug_name(),
-                    message.as_u32(),
-                    target_process.debug_name()
-                )));
-            }
-
-            let prepared_payload = match payload {
-                Some(payload) => Some(evaluate_checked_runtime_template(
-                    payload,
-                    context.envelope.payload.as_ref(),
-                    context.current_state_payload,
-                    context.process,
-                    state.local_process_refs,
-                    context.loop_elements,
-                    state.effect_outcomes,
-                )?),
-                None => None,
-            };
-            let failure_variant = match state.instances[target_index].status {
-                StaticProcessStatus::Running => None,
-                StaticProcessStatus::Stopped => Some("Stopped"),
-                StaticProcessStatus::Failed => Some("Crashed"),
-            }
-            .or_else(|| {
-                (state.instances[target_index].mailbox.len() >= target_process.mailbox_bound())
-                    .then_some("Full")
-            });
-            if let Some(error_variant) = failure_variant {
-                let original_message =
-                    static_original_message(target_process, *message, prepared_payload.as_ref())?;
-                return bind_static_effect_outcome(
-                    context.process,
-                    state,
-                    *outcome,
-                    outcome_ty,
-                    send_error_outcome(outcome_ty, error_variant, original_message)?,
-                );
-            }
-            state.instances[target_index]
-                .mailbox
-                .push_back(StaticMessageEnvelope::new(*message, prepared_payload));
-            bind_static_effect_outcome(
-                context.process,
-                state,
-                *outcome,
-                outcome_ty,
-                ok_unit_outcome(outcome_ty)?,
-            )
-        }
+        } => execute_static_send_outcome(
+            context,
+            state,
+            *outcome,
+            outcome_ty,
+            target,
+            *message,
+            payload.as_ref().map(Box::as_ref),
+        ),
         CheckedAction::IfElse {
             condition,
             then_actions,
@@ -582,7 +513,9 @@ fn execute_static_send(
 ) -> Result<()> {
     let target_pid = resolve_static_send_target(
         context.process,
+        context.current_pid,
         state.local_process_refs,
+        state.supervisor_children,
         target,
         context.envelope.payload.as_ref(),
     )

@@ -1,0 +1,37 @@
+module local_supervision_temporary;
+
+record MainState;
+record WorkerState;
+enum MainMsg { Start }
+enum WorkerMsg { Crash }
+
+proc Main mailbox bounded(2) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    supervise local one_for_one(max_restarts: 2_u32, within_ms: 1000_u64) {
+        child worker: Worker = spawn Worker as temporary;
+    }
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [send] ~ [] @det {
+        send worker Crash;
+        return Continue(state);
+    }
+}
+
+proc Worker mailbox bounded(2) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Crash) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Panic(state);
+    }
+}

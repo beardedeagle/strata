@@ -73,7 +73,7 @@ pub(super) fn checked_actions_for_statements(
                     ))
                 })?;
                 let authority = spawn_authority_for_target(context, binding.target)?;
-                let spawn_site = spawn_sites.push(binding.target, authority.id)?;
+                let spawn_site = spawn_sites.push_dynamic_local(binding.target, authority.id)?;
                 actions.push(CheckedAction::Spawn {
                     target: context.semantic_index.process_id(target)?,
                     process_ref: binding.id,
@@ -103,7 +103,7 @@ pub(super) fn checked_actions_for_statements(
                 }
                 let target_process = context.semantic_index.process_id(target)?;
                 let authority = spawn_authority_for_target(context, target_process)?;
-                let spawn_site = spawn_sites.push(target_process, authority.id)?;
+                let spawn_site = spawn_sites.push_dynamic_local(target_process, authority.id)?;
                 let binding = effect_outcome_binding(input.outcome_bindings, name)?;
                 validate_spawn_outcome_annotation(context, target, binding.ty)?;
                 actions.push(CheckedAction::SpawnOutcome {
@@ -685,6 +685,12 @@ fn validate_loop_element_binding(
     if context.process_ref_index.contains_key(item) {
         return Err(Error::new(format!(
             "process {} loop element binding {} conflicts with a process reference binding",
+            context.process.name, item
+        )));
+    }
+    if context.supervisor_child_index.contains_key(item) {
+        return Err(Error::new(format!(
+            "process {} loop element binding {} conflicts with a supervisor child binding",
             context.process.name, item
         )));
     }

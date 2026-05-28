@@ -122,8 +122,9 @@ fn rejects_send_to_process_definition_name() {
     let err = check_source(&source).expect_err("send to process definition should be rejected");
 
     assert!(
-        err.to_string()
-            .contains("process Main sends to undeclared process reference Worker")
+        err.to_string().contains(
+            "process Main sends to undeclared process reference or supervisor child Worker"
+        )
     );
 }
 
@@ -215,7 +216,7 @@ fn rejects_static_self_spawn() {
         .replace("! [emit] ~ [] @det", "! [spawn] ~ [] @det")
         .replace(
             r#"emit "worker handled Ping";"#,
-            "let child: ProcessRef<Worker> = spawn Worker;",
+            "let loopback: ProcessRef<Worker> = spawn Worker;",
         );
 
     let err = check_source(&source).expect_err("self-spawn should be rejected");
@@ -390,7 +391,7 @@ fn rejects_send_without_static_spawn() {
 
     assert!(
         err.to_string()
-            .contains("sends to undeclared process reference worker")
+            .contains("sends to undeclared process reference or supervisor child worker")
     );
 }
 

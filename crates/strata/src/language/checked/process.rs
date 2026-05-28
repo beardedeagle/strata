@@ -8,7 +8,8 @@ use crate::language::diagnostic::{Error, Result};
 use super::{
     CheckedAuthorityId, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
     CheckedOutputId, CheckedPayloadValue, CheckedProcessId, CheckedProcessRefId,
-    CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedTypeRef, CheckedValueTemplate,
+    CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedSupervisorChildId,
+    CheckedSupervisorId, CheckedTypeRef, CheckedValueTemplate,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,25 +107,43 @@ impl CheckedAuthority {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::language) enum CheckedSpawnKind {
     DynamicLocal,
+    LexicalSupervisorChild,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) struct CheckedSpawnSite {
     target: CheckedProcessId,
-    authority: CheckedAuthorityId,
+    authority: Option<CheckedAuthorityId>,
+    supervisor: Option<CheckedSupervisorId>,
+    child: Option<CheckedSupervisorChildId>,
     kind: CheckedSpawnKind,
 }
 
 impl CheckedSpawnSite {
-    pub(in crate::language) fn new(
+    pub(in crate::language) fn dynamic_local(
         target: CheckedProcessId,
         authority: CheckedAuthorityId,
-        kind: CheckedSpawnKind,
     ) -> Self {
         Self {
             target,
-            authority,
-            kind,
+            authority: Some(authority),
+            supervisor: None,
+            child: None,
+            kind: CheckedSpawnKind::DynamicLocal,
+        }
+    }
+
+    pub(in crate::language) fn lexical_supervisor_child(
+        target: CheckedProcessId,
+        supervisor: CheckedSupervisorId,
+        child: CheckedSupervisorChildId,
+    ) -> Self {
+        Self {
+            target,
+            authority: None,
+            supervisor: Some(supervisor),
+            child: Some(child),
+            kind: CheckedSpawnKind::LexicalSupervisorChild,
         }
     }
 
@@ -132,12 +151,143 @@ impl CheckedSpawnSite {
         self.target
     }
 
-    pub(in crate::language) fn authority(&self) -> CheckedAuthorityId {
+    pub(in crate::language) fn authority(&self) -> Option<CheckedAuthorityId> {
         self.authority
+    }
+
+    pub(in crate::language) fn supervisor(&self) -> Option<CheckedSupervisorId> {
+        self.supervisor
+    }
+
+    pub(in crate::language) fn child(&self) -> Option<CheckedSupervisorChildId> {
+        self.child
     }
 
     pub(in crate::language) fn kind(&self) -> CheckedSpawnKind {
         self.kind
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) enum CheckedSupervisorStrategy {
+    OneForOne,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) enum CheckedSupervisorChildMode {
+    Permanent,
+    Transient,
+    Temporary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::language) struct CheckedSupervisorRestartIntensity {
+    max_restarts: u32,
+    within_ms: u64,
+}
+
+impl CheckedSupervisorRestartIntensity {
+    pub(in crate::language) fn new(max_restarts: u32, within_ms: u64) -> Result<Self> {
+        if max_restarts == 0 {
+            return Err(Error::new(
+                "supervisor restart intensity max_restarts must be greater than zero",
+            ));
+        }
+        if within_ms == 0 {
+            return Err(Error::new(
+                "supervisor restart intensity within_ms must be greater than zero",
+            ));
+        }
+        Ok(Self {
+            max_restarts,
+            within_ms,
+        })
+    }
+
+    pub(in crate::language) fn max_restarts(&self) -> u32 {
+        self.max_restarts
+    }
+
+    pub(in crate::language) fn within_ms(&self) -> u64 {
+        self.within_ms
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedSupervisorChild {
+    debug_name: Identifier,
+    target: CheckedProcessId,
+    mode: CheckedSupervisorChildMode,
+    spawn_site: CheckedSpawnSiteId,
+}
+
+impl CheckedSupervisorChild {
+    pub(in crate::language) fn new(
+        debug_name: Identifier,
+        target: CheckedProcessId,
+        mode: CheckedSupervisorChildMode,
+        spawn_site: CheckedSpawnSiteId,
+    ) -> Self {
+        Self {
+            debug_name,
+            target,
+            mode,
+            spawn_site,
+        }
+    }
+
+    pub(in crate::language) fn debug_name(&self) -> &Identifier {
+        &self.debug_name
+    }
+
+    pub(in crate::language) fn target(&self) -> CheckedProcessId {
+        self.target
+    }
+
+    pub(in crate::language) fn mode(&self) -> CheckedSupervisorChildMode {
+        self.mode
+    }
+
+    pub(in crate::language) fn spawn_site(&self) -> CheckedSpawnSiteId {
+        self.spawn_site
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::language) struct CheckedSupervisorPlan {
+    strategy: CheckedSupervisorStrategy,
+    intensity: CheckedSupervisorRestartIntensity,
+    children: Vec<CheckedSupervisorChild>,
+}
+
+impl CheckedSupervisorPlan {
+    pub(in crate::language) fn new(
+        strategy: CheckedSupervisorStrategy,
+        intensity: CheckedSupervisorRestartIntensity,
+        children: Vec<CheckedSupervisorChild>,
+    ) -> Result<Self> {
+        if children.is_empty() {
+            return Err(Error::new(
+                "supervisor declarations must contain at least one child",
+            ));
+        }
+        Ok(Self {
+            strategy,
+            intensity,
+            children,
+        })
+    }
+
+    pub(in crate::language) fn strategy(&self) -> CheckedSupervisorStrategy {
+        self.strategy
+    }
+
+    pub(in crate::language) fn intensity(&self) -> CheckedSupervisorRestartIntensity {
+        self.intensity
+    }
+
+    pub(in crate::language) fn children(&self) -> &[CheckedSupervisorChild] {
+        &self.children
     }
 }
 
@@ -271,6 +421,11 @@ pub(in crate::language) fn checked_action_count(actions: &[CheckedAction]) -> Re
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::language) enum CheckedSendTarget {
     ProcessRef(CheckedProcessRefId),
+    SupervisorChild {
+        supervisor: CheckedSupervisorId,
+        child: CheckedSupervisorChildId,
+        target: CheckedProcessId,
+    },
     ReceivedPayload {
         ty: CheckedTypeRef,
         target: CheckedProcessId,
@@ -359,6 +514,7 @@ pub(in crate::language) struct CheckedProcess {
     process_refs: Vec<CheckedProcessRef>,
     authorities: Vec<CheckedAuthority>,
     spawn_sites: Vec<CheckedSpawnSite>,
+    supervisor_plans: Vec<CheckedSupervisorPlan>,
     mailbox_bound: usize,
     init_state: CheckedStateId,
     transitions: Vec<CheckedTransition>,
@@ -367,13 +523,14 @@ pub(in crate::language) struct CheckedProcess {
 impl CheckedProcess {
     #[cfg(test)]
     pub(in crate::language) fn new(parts: CheckedProcessParts) -> Self {
-        Self::with_authority(parts, Vec::new(), Vec::new())
+        Self::with_authority(parts, Vec::new(), Vec::new(), Vec::new())
     }
 
     pub(in crate::language) fn with_authority(
         parts: CheckedProcessParts,
         authorities: Vec<CheckedAuthority>,
         spawn_sites: Vec<CheckedSpawnSite>,
+        supervisor_plans: Vec<CheckedSupervisorPlan>,
     ) -> Self {
         Self {
             debug_name: parts.debug_name,
@@ -384,6 +541,7 @@ impl CheckedProcess {
             process_refs: parts.process_refs,
             authorities,
             spawn_sites,
+            supervisor_plans,
             mailbox_bound: parts.mailbox_bound,
             init_state: parts.init_state,
             transitions: parts.transitions,
@@ -420,6 +578,10 @@ impl CheckedProcess {
 
     pub(in crate::language) fn spawn_sites(&self) -> &[CheckedSpawnSite] {
         &self.spawn_sites
+    }
+
+    pub(in crate::language) fn supervisor_plans(&self) -> &[CheckedSupervisorPlan] {
+        &self.supervisor_plans
     }
 
     pub(in crate::language) fn mailbox_bound(&self) -> usize {

@@ -286,10 +286,10 @@ fn check_destructured_payload_bindings(
     }
 }
 
-pub(in crate::language::checker) fn check_nested_pattern_bindings(
-    scope: &mut NestedPatternBindingScope<'_, '_>,
+pub(in crate::language::checker) fn check_nested_pattern_bindings<'a>(
+    scope: &mut NestedPatternBindingScope<'a, '_>,
     expected_type: &TypeRef,
-    pattern: &Pattern,
+    pattern: &'a Pattern,
     base_path: &PayloadBindingPath,
     empty_constructor: EmptyConstructorPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
@@ -396,10 +396,10 @@ pub(in crate::language::checker) fn check_nested_pattern_bindings(
     }
 }
 
-fn check_constructor_payload_pattern_bindings(
-    scope: &mut NestedPatternBindingScope<'_, '_>,
+fn check_constructor_payload_pattern_bindings<'a>(
+    scope: &mut NestedPatternBindingScope<'a, '_>,
     enum_type: &TypeRef,
-    pattern: &Pattern,
+    pattern: &'a Pattern,
     base_path: &PayloadBindingPath,
     empty_constructor: EmptyConstructorPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
@@ -462,6 +462,7 @@ fn check_constructor_payload_pattern_bindings(
             add_pattern_payload_binding(
                 &subject,
                 scope.seen_bindings,
+                &binding.name,
                 PatternPayloadParam {
                     name: binding.name.clone(),
                     ty: binding.ty.clone(),
@@ -490,12 +491,13 @@ fn check_constructor_payload_pattern_bindings(
     }
 }
 
-fn add_pattern_payload_binding(
+fn add_pattern_payload_binding<'a>(
     subject: &str,
-    seen_bindings: &mut BTreeSet<String>,
+    seen_bindings: &mut BTreeSet<&'a str>,
+    binding_name: &'a Identifier,
     binding: PatternPayloadParam,
 ) -> Result<Vec<PatternPayloadParam>> {
-    if !seen_bindings.insert(binding.name.to_string()) {
+    if !seen_bindings.insert(binding_name.as_str()) {
         return Err(Error::new(format!(
             "{subject} payload binding {} is declared more than once",
             binding.name
@@ -504,10 +506,10 @@ fn add_pattern_payload_binding(
     Ok(vec![binding])
 }
 
-fn check_record_payload_pattern_bindings(
-    scope: &mut NestedPatternBindingScope<'_, '_>,
+fn check_record_payload_pattern_bindings<'a>(
+    scope: &mut NestedPatternBindingScope<'a, '_>,
     record: &Record,
-    fields: &[RecordPatternField],
+    fields: &'a [RecordPatternField],
     base_path: &PayloadBindingPath,
 ) -> Result<Vec<PatternPayloadParam>> {
     if fields.is_empty() {
@@ -538,7 +540,7 @@ fn check_record_payload_pattern_bindings(
                 scope.context, record.name, field.field
             )));
         };
-        if !scope.seen_bindings.insert(field.binding.to_string()) {
+        if !scope.seen_bindings.insert(field.binding.as_str()) {
             return Err(Error::new(format!(
                 "{subject} {} payload binding {} is declared more than once",
                 scope.context, field.binding

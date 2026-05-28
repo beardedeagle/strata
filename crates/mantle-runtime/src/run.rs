@@ -11,7 +11,7 @@ use templates::evaluate_runtime_template;
 use crate::event::{
     RuntimeAuthorityResult, RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope,
     RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
-    RuntimeSpawnKind, RuntimeStepResult, RuntimeStopReason,
+    RuntimeSpawnKind, RuntimeStepResult, RuntimeStopReason, RuntimeSupervisorExitReason,
 };
 use crate::host::RuntimeHost;
 use crate::limits::{RunLimits, SpawnAuthorityPolicy};
@@ -26,16 +26,18 @@ mod control_flow;
 mod delivery;
 mod effect_outcomes;
 mod model;
+mod process_lifecycle;
 mod process_refs;
+mod supervision;
 mod templates;
 
 use effect_outcomes::RuntimeEffectOutcome;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RuntimeLoopElement {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RuntimeLoopElement<'a> {
     id: LoopElementId,
     index: usize,
-    payload: RuntimePayload,
+    payload: &'a RuntimePayload,
 }
 
 struct BranchSelection<'a> {
@@ -44,7 +46,7 @@ struct BranchSelection<'a> {
     branch_path: RuntimeBranchPath,
     condition: &'a LoadedValueTemplate,
     local_process_refs: &'a LocalProcessRefs,
-    loop_elements: &'a [RuntimeLoopElement],
+    loop_elements: &'a [RuntimeLoopElement<'a>],
     effect_outcomes: &'a [RuntimeEffectOutcome],
 }
 
@@ -159,7 +161,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     }
 
     fn record_event(&mut self, event: RuntimeEvent) -> Result<()> {
-        let record = RuntimeEventRecord::new(event);
+        let record = RuntimeEventRecord::new(event)?;
         let event_bytes = checked_trace_event_bytes(self.trace_bytes, &record)?;
         if event_bytes > self.max_trace_bytes {
             return Err(Error::new(format!(
@@ -167,7 +169,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 self.max_trace_bytes
             )));
         }
-        self.host.record_event(&record)?;
+        self.host.record_event(record)?;
         self.trace_bytes = event_bytes;
         Ok(())
     }
@@ -180,6 +182,13 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
     ) -> Result<bool> {
         let process = self.program.process(step.process_id)?;
         let site = process.validate_spawn_site(spawn_site, target)?;
+        let authority_id = site.authority.ok_or_else(|| {
+            Error::new(format!(
+                "process {} dynamic spawn site id {} does not reference an authority",
+                step.process_name,
+                spawn_site.as_u32()
+            ))
+        })?;
         let admitted = self.is_spawn_authority_admitted();
         self.record_event(RuntimeEvent::SpawnAuthorityChecked {
             pid: step.pid,
@@ -187,9 +196,10 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             process: step.process_name.clone(),
             target_process_id: target,
             spawn_site_id: spawn_site,
-            authority_id: site.authority,
+            authority_id,
             spawn_kind: match site.kind {
                 LoadedSpawnKind::DynamicLocal => RuntimeSpawnKind::DynamicLocal,
+                LoadedSpawnKind::LexicalSupervisorChild => RuntimeSpawnKind::LexicalSupervisorChild,
             },
             authority_result: if admitted {
                 RuntimeAuthorityResult::Accepted
@@ -202,49 +212,6 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
 
     fn flush_host(&mut self) -> Result<()> {
         self.host.flush()
-    }
-
-    fn spawn_process(
-        &mut self,
-        process_id: ProcessId,
-        spawned_by_pid: Option<RuntimeProcessId>,
-    ) -> Result<RuntimeProcessId> {
-        if self.processes.len() >= self.max_runtime_processes {
-            return Err(Error::new(format!(
-                "runtime process instance limit exceeded at {} process instance(s)",
-                self.max_runtime_processes
-            )));
-        }
-        let definition = self.program.process(process_id)?;
-        let pid = self.next_pid;
-        self.next_pid = self.next_pid.checked_next()?;
-        let process = ProcessInstance {
-            pid,
-            process_id,
-            state: definition.init_state,
-            status: ProcessStatus::Running,
-            mailbox_bound: definition.mailbox_bound,
-            mailbox: std::collections::VecDeque::new(),
-        };
-
-        self.record_event(RuntimeEvent::ProcessSpawned {
-            pid,
-            process_id,
-            process: definition.debug_name.clone(),
-            state_id: process.state,
-            state: self
-                .program
-                .state_label(process_id, process.state)?
-                .to_string(),
-            mailbox_bound: process.mailbox_bound,
-            spawned_by_pid,
-        })?;
-        self.spawned_processes.push(SpawnReport {
-            pid,
-            process: definition.debug_name.clone(),
-        });
-        self.processes.push(process);
-        Ok(pid)
     }
 
     fn step_process(
@@ -327,7 +294,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         action: &LoadedAction,
         branch_path: RuntimeBranchPath,
-        loop_elements: &[RuntimeLoopElement],
+        loop_elements: &[RuntimeLoopElement<'_>],
         effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<()> {
         match action {
@@ -490,9 +457,9 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     *max_items,
                     item_count,
                 )?;
-                for (index, payload) in loop_payloads.into_iter().enumerate() {
+                for (index, payload) in loop_payloads.iter().enumerate() {
                     self.consume_loop_iteration()?;
-                    self.record_loop_iteration(step, element.id, index, &payload)?;
+                    self.record_loop_iteration(step, element.id, index, payload)?;
                     let active = [RuntimeLoopElement {
                         id: element.id,
                         index,
@@ -676,6 +643,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         match step_result {
             StepResult::Continue => Ok(()),
             StepResult::Stop => {
+                self.stop_supervised_children(step.pid, RuntimeStopReason::SupervisorShutdown)?;
                 self.record_event(RuntimeEvent::ProcessStopped {
                     pid: step.pid,
                     process_id: step.process_id,
@@ -683,7 +651,13 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     reason: RuntimeStopReason::Normal,
                 })?;
                 self.processes[process_index].status = ProcessStatus::Stopped;
-                Ok(())
+                self.handle_supervised_exit(
+                    process_index,
+                    step.pid,
+                    step.process_id,
+                    &step.process_name,
+                    RuntimeSupervisorExitReason::Normal,
+                )
             }
             StepResult::Panic => {
                 let state_id = self.processes[process_index].state;
@@ -700,11 +674,23 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     reason: RuntimeFailureReason::Panic,
                 })?;
                 self.processes[process_index].status = ProcessStatus::Failed;
-                self.flush_host()?;
-                Err(Error::new(format!(
-                    "process {} panicked after consuming message {}; message will not be replayed",
-                    step.process_name, step.message_label
-                )))
+                self.stop_supervised_children(step.pid, RuntimeStopReason::SupervisorFailure)?;
+                match self.handle_supervised_exit(
+                    process_index,
+                    step.pid,
+                    step.process_id,
+                    &step.process_name,
+                    RuntimeSupervisorExitReason::Panic,
+                ) {
+                    Ok(()) => Ok(()),
+                    Err(err) => {
+                        self.flush_host()?;
+                        Err(Error::new(format!(
+                            "process {} panicked after consuming message {}; message will not be replayed: {err}",
+                            step.process_name, step.message_label
+                        )))
+                    }
+                }
             }
         }
     }

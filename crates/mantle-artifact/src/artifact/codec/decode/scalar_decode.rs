@@ -13,7 +13,7 @@ pub(super) fn decode_scalar_shape(
     Ok(ArtifactValueShape::Scalar {
         scalar: ArtifactScalarType::parse_artifact_name(
             &format!("{prefix}.scalar_type"),
-            &fields.take_required(&format!("{prefix}.scalar_type"))?,
+            fields.take_required(&format!("{prefix}.scalar_type"))?,
         )?,
     })
 }
@@ -28,7 +28,7 @@ pub(super) fn decode_scalar_arithmetic_template(
         ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
         operator: ArtifactScalarArithmeticOperator::parse(
             &operator_field,
-            &fields.take_required(&operator_field)?,
+            fields.take_required(&operator_field)?,
         )?,
         left: Box::new(decode_value_template(
             fields,
@@ -54,7 +54,7 @@ pub(super) fn decode_scalar_ordering_template(
         operand_ty: fields.take_type_id(&format!("{prefix}.operand_type_id"))?,
         operator: ArtifactScalarOrderingOperator::parse(
             &operator_field,
-            &fields.take_required(&operator_field)?,
+            fields.take_required(&operator_field)?,
         )?,
         left: Box::new(decode_value_template(
             fields,

@@ -10,8 +10,10 @@ pub(super) use crate::language::checked::{
     CheckedEnumVariant, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,
     CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
     CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts,
-    CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedSpawnKind, CheckedSpawnSite,
-    CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition,
+    CheckedProcessRef, CheckedProcessRefId, CheckedSendTarget, CheckedSpawnSite,
+    CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedStepResult,
+    CheckedSupervisorChild, CheckedSupervisorChildMode, CheckedSupervisorPlan,
+    CheckedSupervisorRestartIntensity, CheckedSupervisorStrategy, CheckedTransition,
     CheckedTransitionParts, CheckedTypeKind, CheckedTypeRef, CheckedValueShape,
     CheckedValueTemplate, CheckedValueTemplateField, CheckedValueTemplateMapEntry,
 };
@@ -51,11 +53,11 @@ pub(super) fn checked_process_with_spawn_to_worker(parts: CheckedProcessParts) -
                 target: checked_process_id(1),
             },
         )],
-        vec![CheckedSpawnSite::new(
+        vec![CheckedSpawnSite::dynamic_local(
             checked_process_id(1),
             checked_authority_id(0),
-            CheckedSpawnKind::DynamicLocal,
         )],
+        Vec::new(),
     )
 }
 

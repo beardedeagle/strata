@@ -18,7 +18,7 @@ pub(super) fn check_list_pattern_bindings(
         ));
         match binding {
             CollectionPatternBinding::Binding(name) => {
-                if !seen_bindings.insert(name.to_string()) {
+                if !seen_bindings.insert(name.as_str()) {
                     return Err(Error::new(format!(
                         "{subject} list pattern binding {name} is declared more than once"
                     )));
@@ -56,7 +56,7 @@ pub(super) fn check_list_pattern_bindings(
         }
     }
     if let Some(rest) = &pattern.rest {
-        if !seen_bindings.insert(rest.to_string()) {
+        if !seen_bindings.insert(rest.as_str()) {
             return Err(Error::new(format!(
                 "{subject} list pattern binding {rest} is declared more than once"
             )));
@@ -85,6 +85,7 @@ pub(super) fn check_map_pattern_bindings(
     pattern: &MapPattern,
 ) -> Result<Vec<PatternPayloadParam>> {
     let keys = canonical_map_pattern_keys(module, semantic_index, subject, key_type, pattern)?;
+    let keys = std::sync::Arc::<[ArtifactValue]>::from(keys);
     let mut seen_bindings = BTreeSet::new();
     let mut bindings = Vec::new();
     for entry in &pattern.entries {
@@ -97,7 +98,7 @@ pub(super) fn check_map_pattern_bindings(
         ));
         match &entry.binding {
             CollectionPatternBinding::Binding(name) => {
-                if !seen_bindings.insert(name.to_string()) {
+                if !seen_bindings.insert(name.as_str()) {
                     return Err(Error::new(format!(
                         "{subject} map pattern binding {name} is declared more than once"
                     )));
@@ -135,7 +136,7 @@ pub(super) fn check_map_pattern_bindings(
         }
     }
     if let Some(rest) = &pattern.rest {
-        if !seen_bindings.insert(rest.to_string()) {
+        if !seen_bindings.insert(rest.as_str()) {
             return Err(Error::new(format!(
                 "{subject} map pattern binding {rest} is declared more than once"
             )));

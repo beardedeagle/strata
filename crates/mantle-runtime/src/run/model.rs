@@ -1,16 +1,46 @@
 use std::collections::VecDeque;
 
-use mantle_artifact::{Error, MessageId, ProcessId, Result, StateId};
+use mantle_artifact::{
+    Error, MessageId, ProcessId, Result, StateId, SupervisorChildId, SupervisorId,
+};
 
 use crate::event::RuntimeProcessId;
-use crate::program::{LoadedProgram, RuntimePayload};
+use crate::program::{LoadedProgram, LoadedSupervisorPlan, RuntimePayload};
 use crate::report::ProcessStatus;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RuntimeSupervisorRef {
+    pub(super) supervisor: SupervisorId,
+    pub(super) child: SupervisorChildId,
+}
+
+pub(super) struct RuntimeSupervisorChildState {
+    pub(super) current_pid: Option<RuntimeProcessId>,
+}
+
+pub(super) struct RuntimeSupervisorState {
+    pub(super) children: Vec<RuntimeSupervisorChildState>,
+    pub(super) restart_window: VecDeque<u64>,
+}
+
+impl RuntimeSupervisorState {
+    pub(super) fn from_plan(plan: &LoadedSupervisorPlan) -> Self {
+        Self {
+            children: (0..plan.children.len())
+                .map(|_| RuntimeSupervisorChildState { current_pid: None })
+                .collect(),
+            restart_window: VecDeque::new(),
+        }
+    }
+}
 
 pub(super) struct ProcessInstance {
     pub(super) pid: RuntimeProcessId,
     pub(super) process_id: ProcessId,
     pub(super) state: StateId,
     pub(super) status: ProcessStatus,
+    pub(super) supervisor_parent: Option<(RuntimeProcessId, RuntimeSupervisorRef)>,
+    pub(super) supervisors: Vec<RuntimeSupervisorState>,
     pub(super) mailbox_bound: usize,
     pub(super) mailbox: VecDeque<RuntimeMessageEnvelope>,
 }
@@ -96,7 +126,15 @@ impl RuntimeMessageEnvelope {
 
     pub(super) fn display_label(&self, message_label: &str) -> String {
         match &self.payload {
-            Some(payload) => format!("{message_label}({})", payload.label()),
+            Some(payload) => {
+                let payload_len = payload.label_len().unwrap_or(0);
+                let mut label = String::with_capacity(message_label.len() + 2 + payload_len);
+                label.push_str(message_label);
+                label.push('(');
+                payload.write_label(&mut label);
+                label.push(')');
+                label
+            }
             None => message_label.to_string(),
         }
     }

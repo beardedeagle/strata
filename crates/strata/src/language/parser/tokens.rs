@@ -16,10 +16,11 @@ impl Parser {
     }
 
     pub(super) fn expect_ident(&mut self) -> Result<String> {
-        if let TokenKind::Ident(value) = self.peek_kind() {
-            let value = value.clone();
-            self.advance();
-            Ok(value)
+        if matches!(self.peek_kind(), TokenKind::Ident(_)) {
+            match self.advance_kind() {
+                TokenKind::Ident(value) => Ok(value),
+                _ => unreachable!("peeked identifier must advance as identifier"),
+            }
         } else {
             Err(self.error_here("expected identifier"))
         }
@@ -30,10 +31,11 @@ impl Parser {
     }
 
     pub(super) fn expect_number(&mut self) -> Result<String> {
-        if let TokenKind::Number(value) = self.peek_kind() {
-            let value = value.clone();
-            self.advance();
-            Ok(value)
+        if matches!(self.peek_kind(), TokenKind::Number(_)) {
+            match self.advance_kind() {
+                TokenKind::Number(value) => Ok(value),
+                _ => unreachable!("peeked number must advance as number"),
+            }
         } else {
             Err(self.error_here("expected number"))
         }
@@ -53,20 +55,22 @@ impl Parser {
     }
 
     pub(super) fn expect_string_literal(&mut self) -> Result<String> {
-        if let TokenKind::StringLiteral(value) = self.peek_kind() {
-            let value = value.clone();
-            self.advance();
-            Ok(value)
+        if matches!(self.peek_kind(), TokenKind::StringLiteral(_)) {
+            match self.advance_kind() {
+                TokenKind::StringLiteral(value) => Ok(value),
+                _ => unreachable!("peeked string literal must advance as string literal"),
+            }
         } else {
             Err(self.error_here("expected string literal"))
         }
     }
 
     pub(super) fn expect_at_ident(&mut self) -> Result<String> {
-        if let TokenKind::AtIdent(value) = self.peek_kind() {
-            let value = value.clone();
-            self.advance();
-            Ok(value)
+        if matches!(self.peek_kind(), TokenKind::AtIdent(_)) {
+            match self.advance_kind() {
+                TokenKind::AtIdent(value) => Ok(value),
+                _ => unreachable!("peeked @identifier must advance as @identifier"),
+            }
         } else {
             Err(self.error_here("expected @identifier"))
         }
@@ -363,6 +367,14 @@ impl Parser {
         if !self.at_eof() {
             self.index += 1;
         }
+    }
+
+    fn advance_kind(&mut self) -> TokenKind {
+        let kind = std::mem::replace(&mut self.tokens[self.index].kind, TokenKind::Eof);
+        if !matches!(kind, TokenKind::Eof) {
+            self.index += 1;
+        }
+        kind
     }
 
     pub(super) fn peek_kind(&self) -> &TokenKind {

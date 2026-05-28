@@ -7,8 +7,9 @@ use mantle_artifact::{Error, Result};
 use crate::{RuntimeEvent, RuntimeEventRecord};
 
 pub trait RuntimeHost {
-    fn record_event(&mut self, event: &RuntimeEventRecord) -> Result<()>;
+    fn record_event(&mut self, event: RuntimeEventRecord) -> Result<()>;
     fn emit_stdout(&mut self, text: &str) -> Result<()>;
+    fn monotonic_ms(&mut self) -> Result<u64>;
     fn flush(&mut self) -> Result<()>;
 }
 
@@ -16,6 +17,7 @@ pub trait RuntimeHost {
 pub struct InMemoryRuntimeHost {
     events: Vec<RuntimeEvent>,
     stdout: Vec<String>,
+    monotonic_ms: u64,
 }
 
 impl InMemoryRuntimeHost {
@@ -29,14 +31,23 @@ impl InMemoryRuntimeHost {
 }
 
 impl RuntimeHost for InMemoryRuntimeHost {
-    fn record_event(&mut self, event: &RuntimeEventRecord) -> Result<()> {
-        self.events.push(event.event().clone());
+    fn record_event(&mut self, event: RuntimeEventRecord) -> Result<()> {
+        self.events.push(event.into_event());
         Ok(())
     }
 
     fn emit_stdout(&mut self, text: &str) -> Result<()> {
         self.stdout.push(text.to_string());
         Ok(())
+    }
+
+    fn monotonic_ms(&mut self) -> Result<u64> {
+        let now = self.monotonic_ms;
+        self.monotonic_ms = self
+            .monotonic_ms
+            .checked_add(1)
+            .ok_or_else(|| Error::new("runtime monotonic clock overflowed"))?;
+        Ok(now)
     }
 
     fn flush(&mut self) -> Result<()> {
@@ -48,6 +59,7 @@ pub(crate) struct JsonlTraceHost {
     file: LineWriter<File>,
     bytes_written: usize,
     max_bytes: usize,
+    started_at: std::time::Instant,
 }
 
 impl JsonlTraceHost {
@@ -56,14 +68,14 @@ impl JsonlTraceHost {
             file: LineWriter::new(file),
             bytes_written: 0,
             max_bytes,
+            started_at: std::time::Instant::now(),
         }
     }
+}
 
-    fn push(&mut self, line: &str) -> Result<()> {
-        let line_bytes = line
-            .len()
-            .checked_add(1)
-            .ok_or_else(|| Error::new("runtime trace line size overflowed"))?;
+impl RuntimeHost for JsonlTraceHost {
+    fn record_event(&mut self, event: RuntimeEventRecord) -> Result<()> {
+        let line_bytes = event.jsonl_line_bytes_with_newline()?;
         let next_bytes = self
             .bytes_written
             .checked_add(line_bytes)
@@ -75,22 +87,19 @@ impl JsonlTraceHost {
             )));
         }
 
-        let mut trace_line = String::with_capacity(line_bytes);
-        trace_line.push_str(line);
-        trace_line.push('\n');
-        self.file.write_all(trace_line.as_bytes())?;
+        event.write_jsonl_line(&mut self.file)?;
+        self.file.write_all(b"\n")?;
         self.bytes_written = next_bytes;
         Ok(())
-    }
-}
-
-impl RuntimeHost for JsonlTraceHost {
-    fn record_event(&mut self, event: &RuntimeEventRecord) -> Result<()> {
-        self.push(event.jsonl_line())
     }
 
     fn emit_stdout(&mut self, _text: &str) -> Result<()> {
         Ok(())
+    }
+
+    fn monotonic_ms(&mut self) -> Result<u64> {
+        u64::try_from(self.started_at.elapsed().as_millis())
+            .map_err(|_| Error::new("runtime monotonic clock cannot fit into u64 milliseconds"))
     }
 
     fn flush(&mut self) -> Result<()> {

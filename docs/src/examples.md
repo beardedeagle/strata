@@ -124,6 +124,12 @@ Read them in this order:
    denial before process acceptance.
 60. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
+61. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
+   `local_supervision_temporary.str`, `local_supervision_transient_restart.str`,
+   `local_supervision_transient.str`, and
+   `local_supervision_inactive_send_outcome.str` for local `one_for_one`
+   supervision, lexical child sends, restart modes, stopped-child send outcomes,
+   and restart observability.
 
 Detailed notes are grouped by topic:
 

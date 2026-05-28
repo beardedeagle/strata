@@ -23,14 +23,12 @@ use transition::check_step_transition;
 pub(in crate::language::checker) fn check_step<'state>(
     context: &ProcessCheckContext<'_>,
     authority_index: &BTreeMap<Identifier, AuthorityBinding>,
+    supervisor_child_index: &BTreeMap<Identifier, SupervisorChildBinding>,
+    spawn_sites: &mut SpawnSiteAllocator,
     state_space: &mut StateSpace<'state>,
     outputs: &mut OutputPool,
     types: &mut CheckedTypeInterner<'state>,
-) -> Result<(
-    Vec<CheckedProcessRef>,
-    Vec<CheckedSpawnSite>,
-    Vec<CheckedTransition>,
-)> {
+) -> Result<(Vec<CheckedProcessRef>, Vec<CheckedTransition>)> {
     let step_clauses = check_step_clauses(
         context.module,
         context.process,
@@ -40,6 +38,7 @@ pub(in crate::language::checker) fn check_step<'state>(
         state_space,
         types,
     )?;
+    validate_supervisor_child_binding_conflicts(context, supervisor_child_index, &step_clauses)?;
     let (process_refs, process_ref_index) = collect_process_refs(
         context.process,
         context.process_id,
@@ -47,22 +46,31 @@ pub(in crate::language::checker) fn check_step<'state>(
         context.semantic_index,
         &step_clauses,
     )?;
+    for process_ref in &process_refs {
+        if supervisor_child_index.contains_key(process_ref.debug_name()) {
+            return Err(Error::new(format!(
+                "process {} declares supervisor child and process reference with the same name {}",
+                context.process.name,
+                process_ref.debug_name()
+            )));
+        }
+    }
     let mut step_context = StepCheckContext {
         module: context.module,
         process: context.process,
         process_id: context.process_id,
         semantic_index: context.semantic_index,
         process_ref_index: &process_ref_index,
+        supervisor_child_index,
         authority_index,
         message_cases: context.message_cases,
     };
 
     let mut transitions = Vec::with_capacity(step_clauses.len());
-    let mut spawn_sites = SpawnSiteAllocator::default();
     for clause in step_clauses {
         let transition = check_step_transition(
             &mut step_context,
-            &mut spawn_sites,
+            spawn_sites,
             state_space,
             outputs,
             types,
@@ -97,5 +105,31 @@ pub(in crate::language::checker) fn check_step<'state>(
         MAX_ACTIONS_PER_PROCESS,
     )?;
 
-    Ok((process_refs, spawn_sites.into_sites(), transitions))
+    Ok((process_refs, transitions))
+}
+
+fn validate_supervisor_child_binding_conflicts(
+    context: &ProcessCheckContext<'_>,
+    supervisor_child_index: &BTreeMap<Identifier, SupervisorChildBinding>,
+    step_clauses: &[StepClause<'_>],
+) -> Result<()> {
+    for clause in step_clauses {
+        for binding in &clause.payload_bindings {
+            if supervisor_child_index.contains_key(&binding.name) {
+                return Err(Error::new(format!(
+                    "process {} payload binding {} conflicts with a supervisor child binding",
+                    context.process.name, binding.name
+                )));
+            }
+        }
+        for binding in &clause.state_payload_bindings {
+            if supervisor_child_index.contains_key(&binding.name) {
+                return Err(Error::new(format!(
+                    "process {} state payload binding {} conflicts with a supervisor child binding",
+                    context.process.name, binding.name
+                )));
+            }
+        }
+    }
+    Ok(())
 }

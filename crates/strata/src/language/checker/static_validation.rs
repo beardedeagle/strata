@@ -12,6 +12,7 @@ mod loop_elements;
 mod process_refs;
 mod runtime_order;
 mod spawn_authority;
+mod supervision_graph;
 mod templates;
 mod transition_coverage;
 
@@ -21,6 +22,7 @@ use process_refs::{
 };
 use runtime_order::validate_static_runtime_order;
 use spawn_authority::validate_spawn_site;
+use supervision_graph::validate_supervision_graph_acyclic;
 use templates::{
     current_state_payload_type, validate_bool_condition_template, validate_next_state,
     validate_static_bool_condition_value, validate_value_template_binding_types,
@@ -119,6 +121,7 @@ pub(super) fn validate_action_references(
         }
         validate_transition_coverage(process)?;
     }
+    validate_supervision_graph_acyclic(processes)?;
     validate_static_runtime_order(processes, *entry_process, *entry_message)?;
     Ok(())
 }

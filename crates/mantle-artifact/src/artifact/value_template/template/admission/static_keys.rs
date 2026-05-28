@@ -5,7 +5,7 @@ pub(super) fn static_map_key_template_value(
     template: &ArtifactValueTemplate,
 ) -> Result<ArtifactValue> {
     template
-        .evaluate_state_value(None, None, &|ty| artifact.type_entry(ty).cloned())
+        .evaluate_state_value(None, None, &|ty| artifact.type_entry(ty))
         .map(|value| value.value)
 }
 

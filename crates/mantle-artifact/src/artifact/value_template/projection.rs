@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use super::model::{ArtifactValue, MapProjectionMode};
 use crate::validation::validate_count;
 use crate::{Error, MAX_VALUE_TEMPLATE_FIELDS, Result};
@@ -77,30 +75,46 @@ pub(super) fn validate_projection_key_set(
         1,
         MAX_VALUE_TEMPLATE_FIELDS,
     )?;
-    let mut seen = BTreeSet::new();
-    for map_key in keys {
+    for (index, map_key) in keys.iter().enumerate() {
         map_key.validate_without_process_ref(&format!("{field}.{}", kind.field_name()))?;
-        if !seen.insert(map_key.clone()) {
+        if index > 0 && keys[index - 1] == *map_key {
             return Err(Error::new(format!(
                 "{field} duplicates {} {}",
                 kind.singular(),
                 map_key.label()
             )));
         }
-    }
-    if seen.into_iter().collect::<Vec<_>>() != keys {
-        return Err(Error::new(format!(
-            "{field} {} must be sorted canonically",
-            kind.plural()
-        )));
+        if index > 0 && keys[index - 1] > *map_key {
+            return Err(Error::new(format!(
+                "{field} {} must be sorted canonically",
+                kind.plural()
+            )));
+        }
     }
     Ok(())
 }
 
 pub(super) fn labels(values: &[ArtifactValue]) -> String {
-    values
+    let capacity = values
         .iter()
-        .map(ArtifactValue::label)
-        .collect::<Vec<_>>()
-        .join(",")
+        .enumerate()
+        .try_fold(0usize, |len, (index, value)| {
+            let len = if index > 0 {
+                len.checked_add(1)
+                    .ok_or_else(|| Error::new("artifact value label length overflowed"))?
+            } else {
+                len
+            };
+            len.checked_add(value.label_len()?)
+                .ok_or_else(|| Error::new("artifact value label length overflowed"))
+        })
+        .unwrap_or(0);
+    let mut output = String::with_capacity(capacity);
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        value.write_label(&mut output);
+    }
+    output
 }

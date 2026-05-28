@@ -94,6 +94,7 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Start")],
                 authorities: Vec::new(),
                 spawn_sites: Vec::new(),
+                supervisor_plans: Vec::new(),
                 process_refs: vec![ArtifactProcessRef {
                     debug_name: "worker".to_string(),
                     target: ProcessId::new(1),
@@ -118,6 +119,7 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
                 message_variants: vec![ArtifactMessageVariant::unit("Ping")],
                 authorities: Vec::new(),
                 spawn_sites: Vec::new(),
+                supervisor_plans: Vec::new(),
                 process_refs: Vec::new(),
                 mailbox_bound: 1,
                 init_state: StateId::new(0),
@@ -158,7 +160,9 @@ pub(super) fn spawn_authorities(target: ProcessId) -> Vec<ArtifactAuthority> {
 pub(super) fn spawn_sites(target: ProcessId) -> Vec<ArtifactSpawnSite> {
     vec![ArtifactSpawnSite {
         target,
-        authority: SPAWN_AUTHORITY,
+        authority: Some(SPAWN_AUTHORITY),
+        supervisor: None,
+        child: None,
         kind: ArtifactSpawnKind::DynamicLocal,
     }]
 }
@@ -177,7 +181,9 @@ pub(super) fn grant_loaded_main_spawn_authority(program: &mut LoadedProgram) {
     }];
     program.processes[0].spawn_sites = vec![LoadedSpawnSite {
         target: ProcessId::new(1),
-        authority: SPAWN_AUTHORITY,
+        authority: Some(SPAWN_AUTHORITY),
+        supervisor: None,
+        child: None,
         kind: LoadedSpawnKind::DynamicLocal,
     }];
 }

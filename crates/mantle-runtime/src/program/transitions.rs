@@ -1,37 +1,30 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{ArtifactProcess, ArtifactValue, Error, MessageId, Result, StateId, TypeId};
+use mantle_artifact::{ArtifactProcess, Error, MessageId, Result, StateId};
 
 use super::{LoadedProcess, LoadedTransition, RuntimePayload};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct PayloadDispatchKey {
-    ty: TypeId,
-    value: ArtifactValue,
-}
-
-type TransitionDispatchKey = (u32, Option<u32>, Option<PayloadDispatchKey>);
 type TransitionBaseKey = (u32, Option<u32>);
 
-impl PayloadDispatchKey {
-    fn from_payload(payload: &RuntimePayload) -> Self {
-        Self {
-            ty: payload.ty,
-            value: payload.value.clone(),
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct TransitionCoverageKey {
+    message: u32,
+    current_state: Option<u32>,
+    payload_guarded: bool,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct TransitionLookup {
-    by_key: BTreeMap<TransitionDispatchKey, usize>,
+    unguarded_by_key: BTreeMap<TransitionBaseKey, usize>,
+    guarded_indexes: Vec<usize>,
     state_specific_messages: BTreeSet<u32>,
     payload_specific_transitions: BTreeSet<TransitionBaseKey>,
 }
 
 impl TransitionLookup {
     pub(super) fn from_transitions(transitions: &[LoadedTransition]) -> Self {
-        let mut by_key: BTreeMap<TransitionDispatchKey, usize> = BTreeMap::new();
+        let mut unguarded_by_key: BTreeMap<TransitionBaseKey, usize> = BTreeMap::new();
+        let mut guarded_indexes = Vec::new();
         let mut state_specific_messages = BTreeSet::new();
         let mut payload_specific_transitions: BTreeSet<TransitionBaseKey> = BTreeSet::new();
         for (index, transition) in transitions.iter().enumerate() {
@@ -40,17 +33,16 @@ impl TransitionLookup {
             if current_state.is_some() {
                 state_specific_messages.insert(message);
             }
-            let payload_guard = transition
-                .payload_guard
-                .as_ref()
-                .map(PayloadDispatchKey::from_payload);
-            if payload_guard.is_some() {
+            if transition.payload_guard.is_some() {
                 payload_specific_transitions.insert((message, current_state));
+                guarded_indexes.push(index);
+            } else {
+                unguarded_by_key.insert((message, current_state), index);
             }
-            by_key.insert((message, current_state, payload_guard), index);
         }
         Self {
-            by_key,
+            unguarded_by_key,
+            guarded_indexes,
             state_specific_messages,
             payload_specific_transitions,
         }
@@ -61,6 +53,7 @@ impl TransitionLookup {
         message: MessageId,
         current_state: StateId,
         payload: Option<&RuntimePayload>,
+        transitions: &[LoadedTransition],
     ) -> Option<usize> {
         let current_state = self
             .is_state_specific_message(message)
@@ -69,26 +62,23 @@ impl TransitionLookup {
             .payload_specific_transitions
             .contains(&(message.as_u32(), current_state.map(StateId::as_u32)))
         {
-            let payload = payload.map(PayloadDispatchKey::from_payload)?;
-            self.exact(message, current_state, Some(payload))
+            let payload = payload?;
+            self.guarded_indexes.iter().copied().find(|index| {
+                let Some(transition) = transitions.get(*index) else {
+                    return false;
+                };
+                transition.message == message
+                    && transition.current_state == current_state
+                    && transition
+                        .payload_guard
+                        .as_ref()
+                        .is_some_and(|guard| guard.ty == payload.ty && guard.value == payload.value)
+            })
         } else {
-            self.exact(message, current_state, None)
+            self.unguarded_by_key
+                .get(&(message.as_u32(), current_state.map(StateId::as_u32)))
+                .copied()
         }
-    }
-
-    fn exact(
-        &self,
-        message: MessageId,
-        current_state: Option<StateId>,
-        payload: Option<PayloadDispatchKey>,
-    ) -> Option<usize> {
-        self.by_key
-            .get(&(
-                message.as_u32(),
-                current_state.map(StateId::as_u32),
-                payload,
-            ))
-            .copied()
     }
 
     pub(super) fn is_state_specific_message(&self, message: MessageId) -> bool {
@@ -123,45 +113,52 @@ pub(super) fn load_transitions(process: &ArtifactProcess) -> Result<Vec<LoadedTr
 }
 
 pub(super) fn validate_loaded_transition_coverage(process: &LoadedProcess) -> Result<()> {
-    let mut transition_keys: BTreeSet<TransitionDispatchKey> = BTreeSet::new();
-    for transition in &process.transitions {
-        let payload_guard = transition
-            .payload_guard
-            .as_ref()
-            .map(PayloadDispatchKey::from_payload);
-        if !transition_keys.insert((
-            transition.message.as_u32(),
-            transition.current_state.map(StateId::as_u32),
-            payload_guard,
-        )) {
+    for (index, transition) in process.transitions.iter().enumerate() {
+        if process.transitions[..index].iter().any(|previous| {
+            previous.message == transition.message
+                && previous.current_state == transition.current_state
+                && previous.payload_guard == transition.payload_guard
+        }) {
+            let payload_guard = transition
+                .payload_guard
+                .as_ref()
+                .map(RuntimePayload::label)
+                .unwrap_or_else(|| "<none>".to_string());
             return Err(Error::new(format!(
                 "process {} declares duplicate transition for message id {} current_state {:?} payload_guard {}",
                 process.debug_name,
                 transition.message.as_u32(),
                 transition.current_state.map(StateId::as_u32),
-                transition
-                    .payload_guard
-                    .as_ref()
-                    .map(RuntimePayload::label)
-                    .unwrap_or("<none>")
+                payload_guard
             )));
         }
     }
 
-    for (message, current_state, _) in &transition_keys {
-        let has_unguarded_payload = transition_keys.contains(&(*message, *current_state, None));
-        let has_guarded_payload =
-            transition_keys
-                .iter()
-                .any(|(transition_message, transition_state, payload_guard)| {
-                    transition_message == message
-                        && transition_state == current_state
-                        && payload_guard.is_some()
-                });
+    let transition_keys = process
+        .transitions
+        .iter()
+        .map(|transition| TransitionCoverageKey {
+            message: transition.message.as_u32(),
+            current_state: transition.current_state.map(StateId::as_u32),
+            payload_guarded: transition.payload_guard.is_some(),
+        })
+        .collect::<BTreeSet<_>>();
+
+    for key in &transition_keys {
+        let has_unguarded_payload = transition_keys.contains(&TransitionCoverageKey {
+            message: key.message,
+            current_state: key.current_state,
+            payload_guarded: false,
+        });
+        let has_guarded_payload = transition_keys.contains(&TransitionCoverageKey {
+            message: key.message,
+            current_state: key.current_state,
+            payload_guarded: true,
+        });
         if has_unguarded_payload && has_guarded_payload {
             return Err(Error::new(format!(
                 "process {} mixes payload-guarded and unguarded transitions for message id {} current_state {:?}",
-                process.debug_name, message, current_state
+                process.debug_name, key.message, key.current_state
             )));
         }
     }
@@ -170,15 +167,11 @@ pub(super) fn validate_loaded_transition_coverage(process: &LoadedProcess) -> Re
         let message = message_index as u32;
         let has_unguarded = transition_keys
             .iter()
-            .any(|(transition_message, current_state, _)| {
-                *transition_message == message && current_state.is_none()
-            });
+            .any(|key| key.message == message && key.current_state.is_none());
         let has_guarded = (0..process.state_values.len()).any(|state_index| {
             transition_keys
                 .iter()
-                .any(|(transition_message, current_state, _)| {
-                    *transition_message == message && *current_state == Some(state_index as u32)
-                })
+                .any(|key| key.message == message && key.current_state == Some(state_index as u32))
         });
         if has_unguarded {
             if has_guarded {
@@ -198,9 +191,7 @@ pub(super) fn validate_loaded_transition_coverage(process: &LoadedProcess) -> Re
         for state_index in 0..process.state_values.len() {
             if !transition_keys
                 .iter()
-                .any(|(transition_message, current_state, _)| {
-                    *transition_message == message && *current_state == Some(state_index as u32)
-                })
+                .any(|key| key.message == message && key.current_state == Some(state_index as u32))
             {
                 return Err(Error::new(format!(
                     "process {} has no transition for message id {} current_state id {}",

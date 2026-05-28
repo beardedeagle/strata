@@ -86,7 +86,7 @@ fn static_validation_rejects_duplicate_map_projection_keys() {
             artifact_value("Map[Done=>Ready,Ready=>Done]"),
         ))),
         key: artifact_value("Ready"),
-        keys: vec![artifact_value("Ready"), artifact_value("Ready")],
+        keys: vec![artifact_value("Ready"), artifact_value("Ready")].into(),
         projection: mantle_artifact::MapProjectionMode::Exact,
     };
     let err = validate_value_template_payload_labels(&template)
@@ -107,7 +107,7 @@ fn static_validation_rejects_duplicate_map_rest_projection_keys() {
             value_type("PhaseMap"),
             artifact_value("Map[Done=>Ready,Ready=>Done]"),
         ))),
-        excluded_keys: vec![artifact_value("Ready"), artifact_value("Ready")],
+        excluded_keys: vec![artifact_value("Ready"), artifact_value("Ready")].into(),
     };
     let err = validate_value_template_payload_labels(&template)
         .expect_err("duplicate map rest keys should fail static validation");

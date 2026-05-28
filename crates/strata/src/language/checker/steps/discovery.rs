@@ -260,6 +260,14 @@ pub(in crate::language::checker) fn resolve_send_target_process_for_discovery(
     if let Some(target_process) = process_refs.get(target) {
         return Ok(*target_process);
     }
+    if let Some(child) = process
+        .supervisors
+        .iter()
+        .flat_map(|supervisor| supervisor.children.iter())
+        .find(|child| child.name == *target)
+    {
+        return semantic_index.process_id(&child.process);
+    }
     if let StepPattern::Variant { bindings, .. } = pattern
         && let Some(param) = bindings.iter().find(|binding| binding.name == *target)
     {
@@ -273,7 +281,7 @@ pub(in crate::language::checker) fn resolve_send_target_process_for_discovery(
             });
     }
     Err(Error::new(format!(
-        "process {} sends to undeclared process reference {}",
+        "process {} sends to undeclared process reference or supervisor child {}",
         process.name, target
     )))
 }
