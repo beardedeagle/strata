@@ -261,6 +261,85 @@ proc Main mailbox bounded(1) {{
 }
 
 #[test]
+fn rejects_combined_dynamic_and_supervisor_spawn_sites_above_artifact_limit_during_checking() {
+    let message_count = 16usize;
+    let spawns_per_message = MAX_SPAWN_SITES_PER_PROCESS / message_count;
+    assert_eq!(
+        message_count * spawns_per_message,
+        MAX_SPAWN_SITES_PER_PROCESS
+    );
+
+    let messages = (0..message_count)
+        .map(|index| format!("M{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut steps = String::new();
+    for message_index in 0..message_count {
+        steps.push_str(&format!(
+            r#"
+    fn step(state: MainState, M{message_index}) -> ProcResult<MainState> ! [spawn] ~ [] @det {{
+"#
+        ));
+        for spawn_index in 0..spawns_per_message {
+            steps.push_str(&format!(
+                "        let spawn_result_{message_index}_{spawn_index}: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;\n"
+            ));
+        }
+        steps.push_str(
+            r#"        return Continue(state);
+    }
+"#,
+        );
+    }
+    let source = format!(
+        r#"
+module spawn_site_budget;
+
+record MainState;
+record WorkerState;
+enum MainMsg {{ {messages} }}
+enum WorkerMsg {{ Work }}
+
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
+    supervise local one_for_one(max_restarts: 1_u32, within_ms: 1000_u64) {{
+        child supervised_worker: Worker = spawn Worker as temporary;
+    }}
+
+    fn init() -> MainState ! [] ~ [] @det {{
+        return MainState;
+    }}
+{steps}
+}}
+
+proc Worker mailbox bounded(1) {{
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {{
+        return WorkerState;
+    }}
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {{
+        return Stop(state);
+    }}
+}}
+"#
+    );
+    let module = parse_source(&source).expect("spawn-site-budget source should parse");
+
+    let err = check_module(module).expect_err("combined spawn site budget should fail");
+
+    assert!(err.to_string().contains(&format!(
+        "process Main spawn_site_count must be no greater than {MAX_SPAWN_SITES_PER_PROCESS}"
+    )));
+}
+
+#[test]
 fn rejects_oversized_source_before_tokenizing() {
     let source = " ".repeat(MAX_SOURCE_BYTES + 1);
 

@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use mantle_artifact::{
     ArtifactValue, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS, MapProjectionMode,
+    MAX_PROCESS_COUNT, MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
+    MapProjectionMode,
 };
 
 use super::ast::{
@@ -626,6 +627,12 @@ fn check_process<'a>(
         types,
     )?;
     let spawn_sites = spawn_sites.into_sites();
+    validate_count(
+        &format!("process {} spawn_site_count", process.name),
+        spawn_sites.len(),
+        0,
+        MAX_SPAWN_SITES_PER_PROCESS,
+    )?;
     validate_authority_usage(process, &authorities, &spawn_sites)?;
     let state_values = state_space.into_values()?;
 
