@@ -136,7 +136,7 @@ fn validate_rejects_spawn_authority_targeting_same_process() {
 #[test]
 fn validate_rejects_spawn_site_referencing_unknown_authority() {
     let mut artifact = valid_artifact();
-    artifact.processes[0].spawn_sites[0].authority = AuthorityId::new(99);
+    artifact.processes[0].spawn_sites[0].authority = Some(AuthorityId::new(99));
 
     let err = artifact
         .validate()
@@ -178,7 +178,7 @@ fn validate_rejects_unused_spawn_site_even_when_authority_matches() {
 
     assert!(
         err.to_string()
-            .contains("process Main declares unused spawn site 0"),
+            .contains("process Main declares unused dynamic spawn site 0"),
         "{err}"
     );
 }

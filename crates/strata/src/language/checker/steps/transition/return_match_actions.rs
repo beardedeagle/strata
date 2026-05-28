@@ -205,6 +205,12 @@ fn step_return_match_arm_source_bindings<'a>(
                 context.process.name, binding.name
             )));
         }
+        if context.supervisor_child_index.contains_key(&binding.name) {
+            return Err(Error::new(format!(
+                "process {} step return match payload binding {} conflicts with a supervisor child binding",
+                context.process.name, binding.name
+            )));
+        }
     }
     if bindings.is_empty() {
         return Ok(source_bindings);
@@ -546,6 +552,9 @@ fn validate_step_return_match_arm_send_target(
     if let Some(binding) = context.process_ref_index.get(target) {
         return Ok(binding.target);
     }
+    if let Some(binding) = context.supervisor_child_index.get(target) {
+        return Ok(binding.target);
+    }
     if let Some(binding) = payload_bindings
         .iter()
         .find(|binding| binding.name == *target)
@@ -561,7 +570,7 @@ fn validate_step_return_match_arm_send_target(
             });
     }
     Err(Error::new(format!(
-        "process {} sends to undeclared process reference {}",
+        "process {} sends to undeclared process reference or supervisor child {}",
         context.process.name, target
     )))
 }

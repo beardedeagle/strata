@@ -60,6 +60,39 @@ pub(super) fn validate_send_target(
             }
             Ok(target_process_id)
         }
+        CheckedSendTarget::SupervisorChild {
+            supervisor,
+            child,
+            target,
+        } => {
+            let plan = process
+                .supervisor_plans()
+                .get(supervisor.index())
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} references undefined supervisor id {}",
+                        process.debug_name(),
+                        supervisor.as_u32()
+                    ))
+                })?;
+            let child_plan = plan.children().get(child.index()).ok_or_else(|| {
+                Error::new(format!(
+                    "process {} references undefined supervisor child id {}",
+                    process.debug_name(),
+                    child.as_u32()
+                ))
+            })?;
+            if child_plan.target() != *target {
+                return Err(Error::new(format!(
+                    "process {} supervisor child id {} targets process id {}, expected {}",
+                    process.debug_name(),
+                    child.as_u32(),
+                    child_plan.target().as_u32(),
+                    target.as_u32()
+                )));
+            }
+            Ok(*target)
+        }
         CheckedSendTarget::ReceivedPayload { ty, target } => {
             validate_process_ref_type_target(processes, ty, *target)?;
             let Some(received_type) = message_payload_type(process, current_message)? else {

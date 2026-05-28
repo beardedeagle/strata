@@ -16,11 +16,13 @@ pub(in crate::language::checker::source_functions) fn collection_shape_label(
                 MapPatternCompleteness::Exact => "exact",
                 MapPatternCompleteness::Subset => "subset",
             };
-            let key_labels = keys
-                .iter()
-                .map(ArtifactValue::label)
-                .collect::<Vec<_>>()
-                .join(",");
+            let mut key_labels = String::new();
+            for (index, key) in keys.iter().enumerate() {
+                if index > 0 {
+                    key_labels.push(',');
+                }
+                key.write_label(&mut key_labels);
+            }
             format!("Map {marker} keys [{key_labels}]")
         }
     }

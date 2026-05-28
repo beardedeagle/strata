@@ -223,8 +223,13 @@ result of the first invalid shape.
 | `spawn target ... requires authority Cap<Spawn<...>>` | A step uses local dynamic `spawn` without exact authority for that target process. | Add a process-local `authority` declaration for the exact target, or remove the spawn. |
 | `duplicates spawn authority descriptor` | A process declares the same spawn capability more than once. | Keep one declaration per exact target process. |
 | `declares unused spawn authority` | A process declares spawn authority that no local spawn site uses. | Remove the unused declaration or add the corresponding local spawn. |
+| `declares duplicate supervisor child` | A local supervisor declares the same lexical child name more than once in one owner process. | Give each child a unique name. |
+| `local supervisor graph contains cycle` | Static lexical supervisor declarations contain an indirect child cycle. | Make each local supervisor child tree acyclic. |
+| `restart intensity ... must be greater than zero` | A supervisor plan omits a positive restart count or restart window. | Use explicit positive `max_restarts: N_u32` and `within_ms: N_u64` values. |
+| `lexical supervisor child spawn site ... carries dynamic authority` | A Mantle artifact tries to use dynamic spawn authority for a lexical child site. | Emit lexical supervisor child sites with supervisor and child IDs only. |
+| `supervisor child ... spawn site targets` | A supervisor plan and its lexical spawn site disagree on the child target. | Keep the child declaration target, spawn target, and spawn-site target identical. |
 | `conflicts with a process declaration` | A process reference uses the same name as a process definition. | Use a distinct reference name. |
-| `undeclared process reference` | A send references a name that is never spawned in the process. | Add a matching `let worker: ProcessRef<Worker> = spawn Worker;` statement. |
+| `undeclared process reference or supervisor child` | A send references a name that is never spawned in the process and is not a lexical supervisor child. | Add a matching `let worker: ProcessRef<Worker> = spawn Worker;` statement, or target a declared lexical supervisor child. |
 | `send target ... is not a process reference payload` | A send target names a payload binding whose type is not `ProcessRef<T>`. | Send through a process reference binding or a received `ProcessRef<T>` payload. |
 | `unbound process reference` | A transition sends through a reference before it is bound. | Spawn the reference before sending through it. |
 | `duplicates process reference id` | A transition binds the same reference twice. | Use two distinct references or bind once. |

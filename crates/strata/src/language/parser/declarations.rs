@@ -143,6 +143,7 @@ impl Parser {
         let mut state_type = None;
         let mut msg_type = None;
         let mut authorities = Vec::new();
+        let mut supervisors = Vec::new();
         let mut init = None;
         let mut functions = Vec::new();
         let mut steps = Vec::new();
@@ -187,6 +188,8 @@ impl Parser {
                     name: authority_name,
                     ty,
                 });
+            } else if self.peek_keyword("supervise") {
+                supervisors.push(self.parse_supervisor()?);
             } else if self.peek_keyword("fn") {
                 let function = self.parse_function()?;
                 match function.name.as_str() {
@@ -206,7 +209,9 @@ impl Parser {
                     }
                 }
             } else {
-                return Err(self.error_here("expected process authority, type alias, or function"));
+                return Err(self.error_here(
+                    "expected process authority, supervisor, type alias, or function",
+                ));
             }
         }
         if steps.is_empty() {
@@ -217,6 +222,7 @@ impl Parser {
             name: name.clone(),
             mailbox_bound,
             authorities,
+            supervisors,
             state_type: state_type
                 .ok_or_else(|| Error::new(format!("process {name} must declare type State")))?,
             msg_type: msg_type
@@ -225,6 +231,109 @@ impl Parser {
             functions,
             steps,
         })
+    }
+
+    fn parse_supervisor(&mut self) -> Result<SupervisorDeclaration> {
+        self.expect_keyword("supervise")?;
+        self.expect_keyword("local")?;
+        self.expect_keyword("one_for_one")?;
+        self.expect_symbol('(')?;
+        self.expect_keyword("max_restarts")?;
+        self.expect_symbol(':')?;
+        let max_restarts = self.parse_supervisor_u32_literal("max_restarts")?;
+        self.expect_symbol(',')?;
+        self.expect_keyword("within_ms")?;
+        self.expect_symbol(':')?;
+        let within_ms = self.parse_supervisor_u64_literal("within_ms")?;
+        self.expect_symbol(')')?;
+        self.expect_symbol('{')?;
+
+        let mut children = Vec::new();
+        if self.peek_symbol('}') {
+            return Err(self.error_here("local supervisor must declare at least one child"));
+        }
+        while !self.consume_symbol('}') {
+            children.push(self.parse_supervisor_child()?);
+        }
+
+        Ok(SupervisorDeclaration {
+            strategy: SupervisorStrategy::OneForOne,
+            max_restarts,
+            within_ms,
+            children,
+        })
+    }
+
+    fn parse_supervisor_child(&mut self) -> Result<SupervisorChildDeclaration> {
+        self.expect_keyword("child")?;
+        let name = self.expect_identifier()?;
+        self.expect_symbol(':')?;
+        let process = self.expect_identifier()?;
+        self.expect_symbol('=')?;
+        self.expect_keyword("spawn")?;
+        let spawn_target = self.expect_identifier()?;
+        self.expect_keyword("as")?;
+        let mode = self.parse_supervisor_child_mode()?;
+        self.expect_symbol(';')?;
+        Ok(SupervisorChildDeclaration {
+            name,
+            process,
+            spawn_target,
+            mode,
+        })
+    }
+
+    fn parse_supervisor_child_mode(&mut self) -> Result<SupervisorChildMode> {
+        if self.peek_keyword("permanent") {
+            self.expect_keyword("permanent")?;
+            return Ok(SupervisorChildMode::Permanent);
+        }
+        if self.peek_keyword("transient") {
+            self.expect_keyword("transient")?;
+            return Ok(SupervisorChildMode::Transient);
+        }
+        if self.peek_keyword("temporary") {
+            self.expect_keyword("temporary")?;
+            return Ok(SupervisorChildMode::Temporary);
+        }
+        Err(self.error_here("expected child mode permanent, transient, or temporary"))
+    }
+
+    fn parse_supervisor_u32_literal(&mut self, field: &str) -> Result<u32> {
+        let value = self.parse_supervisor_unsigned_literal(field, "_u32")?;
+        u32::try_from(value).map_err(|_| self.error_previous(format!("{field} must fit in U32")))
+    }
+
+    fn parse_supervisor_u64_literal(&mut self, field: &str) -> Result<u64> {
+        self.parse_supervisor_unsigned_literal(field, "_u64")
+    }
+
+    fn parse_supervisor_unsigned_literal(
+        &mut self,
+        field: &str,
+        expected_suffix: &str,
+    ) -> Result<u64> {
+        let number_offset = self.tokens[self.index].offset;
+        let digits = self.expect_number()?;
+        let suffix_offset = self.tokens[self.index].offset;
+        let suffix = self.expect_ident().map_err(|_| {
+            self.error_here(format!(
+                "{field} requires explicit {expected_suffix} suffix"
+            ))
+        })?;
+        if suffix_offset != number_offset + digits.len() {
+            return Err(
+                self.error_previous(format!("{field} suffix must be contiguous with digits"))
+            );
+        }
+        if suffix != expected_suffix {
+            return Err(self.error_previous(format!(
+                "{field} requires {expected_suffix} suffix, got {suffix:?}"
+            )));
+        }
+        digits
+            .parse::<u64>()
+            .map_err(|_| self.error_previous(format!("{field} must be a base-10 integer")))
     }
 
     pub(super) fn parse_function(&mut self) -> Result<Function> {

@@ -68,7 +68,7 @@ fn actor_emit_spawn_send_checks_builds_and_runs_on_mantle() {
     );
     assert_eq!(main.spawn_sites.len(), 1);
     assert_eq!(main.spawn_sites[0].target, ProcessId::new(1));
-    assert_eq!(main.spawn_sites[0].authority, AuthorityId::new(0));
+    assert_eq!(main.spawn_sites[0].authority, Some(AuthorityId::new(0)));
     assert_eq!(main.spawn_sites[0].kind, ArtifactSpawnKind::DynamicLocal);
     assert!(
         main.transitions[0].actions.iter().any(|action| matches!(

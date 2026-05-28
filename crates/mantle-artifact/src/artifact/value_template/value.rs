@@ -5,6 +5,7 @@ use super::projection::{
 };
 use crate::validation::{validate_count, validate_ident_field, validate_value_label};
 use crate::{Error, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result, TypeId};
+use std::fmt::Write as _;
 
 impl ArtifactValue {
     pub fn parse(label: &str) -> Result<Self> {
@@ -129,44 +130,68 @@ impl ArtifactValue {
     }
 
     pub fn label(&self) -> String {
+        let mut label = String::with_capacity(self.label_len().unwrap_or(0));
+        self.write_label(&mut label);
+        label
+    }
+
+    pub fn write_label(&self, output: &mut String) {
         match self {
-            Self::Atom(value) => value.clone(),
-            Self::Scalar(value) => value.label(),
+            Self::Atom(value) => output.push_str(value),
+            Self::Scalar(value) => {
+                let _ = write!(output, "{}{}", value.value(), value.ty().suffix());
+            }
             Self::EnumVariant { variant, payload } => {
-                format!("{variant}({})", payload.label())
+                output.push_str(variant);
+                output.push('(');
+                payload.write_label(output);
+                output.push(')');
             }
             Self::Record {
                 constructor,
                 fields,
-            } => format!(
-                "{constructor}{{{}}}",
-                fields
-                    .iter()
-                    .map(|field| format!("{}:{}", field.name, field.value.label()))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-            Self::List(items) => format!(
-                "List[{}]",
-                items
-                    .iter()
-                    .map(ArtifactValue::label)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-            Self::Map(entries) => format!(
-                "Map[{}]",
-                entries
-                    .iter()
-                    .map(|entry| format!("{}=>{}", entry.key.label(), entry.value.label()))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-            Self::ProcessRef { type_id, pid } => format!("type{}#{pid}", type_id.as_u32()),
+            } => {
+                output.push_str(constructor);
+                output.push('{');
+                for (index, field) in fields.iter().enumerate() {
+                    if index > 0 {
+                        output.push(',');
+                    }
+                    output.push_str(&field.name);
+                    output.push(':');
+                    field.value.write_label(output);
+                }
+                output.push('}');
+            }
+            Self::List(items) => {
+                output.push_str("List[");
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        output.push(',');
+                    }
+                    item.write_label(output);
+                }
+                output.push(']');
+            }
+            Self::Map(entries) => {
+                output.push_str("Map[");
+                for (index, entry) in entries.iter().enumerate() {
+                    if index > 0 {
+                        output.push(',');
+                    }
+                    entry.key.write_label(output);
+                    output.push_str("=>");
+                    entry.value.write_label(output);
+                }
+                output.push(']');
+            }
+            Self::ProcessRef { type_id, pid } => {
+                let _ = write!(output, "type{}#{pid}", type_id.as_u32());
+            }
         }
     }
 
-    pub(crate) fn label_len(&self) -> Result<usize> {
+    pub fn label_len(&self) -> Result<usize> {
         match self {
             Self::Atom(value) => Ok(value.len()),
             Self::Scalar(value) => {
@@ -299,7 +324,7 @@ impl ArtifactValue {
         }
     }
 
-    fn validate_generated_label_len(&self, field: &str) -> Result<()> {
+    pub(crate) fn validate_generated_label_len(&self, field: &str) -> Result<()> {
         let len = self.label_len()?;
         if len > crate::MAX_FIELD_VALUE_BYTES {
             return Err(Error::new(format!(
@@ -447,13 +472,9 @@ impl ArtifactValue {
                 self.label()
             )));
         };
-        let entry_keys = entries
-            .iter()
-            .map(|entry| entry.key.clone())
-            .collect::<Vec<_>>();
         match projection {
             MapProjectionMode::Exact => {
-                if entry_keys.len() != keys.len()
+                if entries.len() != keys.len()
                     || !keys
                         .iter()
                         .all(|expected_key| entries.iter().any(|entry| entry.key == *expected_key))
@@ -461,7 +482,7 @@ impl ArtifactValue {
                     return Err(Error::new(format!(
                         "map projection expected exact keys [{}], found [{}]",
                         labels(keys),
-                        labels(&entry_keys)
+                        entry_key_labels(entries)
                     )));
                 }
             }
@@ -471,7 +492,7 @@ impl ArtifactValue {
                         return Err(Error::new(format!(
                             "map projection expected key {}, found [{}]",
                             expected_key.label(),
-                            labels(&entry_keys)
+                            entry_key_labels(entries)
                         )));
                     }
                 }
@@ -502,16 +523,12 @@ impl ArtifactValue {
                 self.label()
             )));
         };
-        let entry_keys = entries
-            .iter()
-            .map(|entry| entry.key.clone())
-            .collect::<Vec<_>>();
         for excluded_key in excluded_keys {
             if !entries.iter().any(|entry| entry.key == *excluded_key) {
                 return Err(Error::new(format!(
                     "map rest projection expected excluded map key {}, found [{}]",
                     excluded_key.label(),
-                    labels(&entry_keys)
+                    entry_key_labels(entries)
                 )));
             }
         }
@@ -523,6 +540,29 @@ impl ArtifactValue {
                 .collect(),
         ))
     }
+}
+
+fn entry_key_labels(entries: &[super::model::ArtifactMapEntry]) -> String {
+    let capacity = entries
+        .iter()
+        .enumerate()
+        .try_fold(0usize, |len, (index, entry)| {
+            let len = if index > 0 {
+                checked_add_len(len, 1)?
+            } else {
+                len
+            };
+            checked_add_len(len, entry.key.label_len()?)
+        })
+        .unwrap_or(0);
+    let mut output = String::with_capacity(capacity);
+    for (index, entry) in entries.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        entry.key.write_label(&mut output);
+    }
+    output
 }
 
 fn checked_add_len(left: usize, right: usize) -> Result<usize> {

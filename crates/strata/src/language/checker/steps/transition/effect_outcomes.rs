@@ -68,6 +68,12 @@ fn validate_effect_outcome_binding_name(
             context.process.name, name
         )));
     }
+    if context.supervisor_child_index.contains_key(name) {
+        return Err(Error::new(format!(
+            "process {} effect outcome binding {} conflicts with a supervisor child binding",
+            context.process.name, name
+        )));
+    }
     if context.semantic_index.process_id(name).is_ok() {
         return Err(Error::new(format!(
             "process {} effect outcome binding {} conflicts with a process declaration",

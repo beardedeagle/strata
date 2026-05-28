@@ -1,5 +1,6 @@
 use crate::language::checked::{
-    CheckedCapabilityDescriptor, CheckedProcess, CheckedProcessId, CheckedSpawnSiteId,
+    CheckedCapabilityDescriptor, CheckedProcess, CheckedProcessId, CheckedSpawnKind,
+    CheckedSpawnSiteId,
 };
 use crate::language::diagnostic::{Error, Result};
 
@@ -27,15 +28,29 @@ pub(super) fn validate_spawn_site(
             target.as_u32()
         )));
     }
+    if site.kind() != CheckedSpawnKind::DynamicLocal {
+        return Err(Error::new(format!(
+            "process {} spawn site id {} is not a dynamic local spawn site",
+            process.debug_name(),
+            spawn_site.as_u32()
+        )));
+    }
+    let authority_id = site.authority().ok_or_else(|| {
+        Error::new(format!(
+            "process {} dynamic spawn site id {} does not reference an authority",
+            process.debug_name(),
+            spawn_site.as_u32()
+        ))
+    })?;
     let authority = process
         .authorities()
-        .get(site.authority().index())
+        .get(authority_id.index())
         .ok_or_else(|| {
             Error::new(format!(
                 "process {} spawn site id {} references undefined authority id {}",
                 process.debug_name(),
                 spawn_site.as_u32(),
-                site.authority().as_u32()
+                authority_id.as_u32()
             ))
         })?;
     match authority.descriptor() {

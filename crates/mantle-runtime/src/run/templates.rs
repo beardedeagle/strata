@@ -14,7 +14,7 @@ pub(super) fn evaluate_runtime_template(
     received_payload: Option<&RuntimePayload>,
     step: &ActiveStep,
     process_refs: &LocalProcessRefs,
-    loop_elements: &[RuntimeLoopElement],
+    loop_elements: &[RuntimeLoopElement<'_>],
     effect_outcomes: &[RuntimeEffectOutcome],
 ) -> Result<RuntimePayload> {
     match template {
@@ -191,7 +191,7 @@ pub(super) fn evaluate_runtime_template(
             let payload = loop_elements
                 .iter()
                 .find(|binding| binding.id == *element)
-                .map(|binding| &binding.payload)
+                .map(|binding| binding.payload)
                 .ok_or_else(|| {
                     Error::new(format!(
                         "process {} references inactive loop element id {}",

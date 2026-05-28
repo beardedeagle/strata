@@ -13,6 +13,7 @@ fn in_memory_host_preserves_current_next_state() {
         message_variants: vec![ArtifactMessageVariant::unit("Ping")],
         authorities: Vec::new(),
         spawn_sites: Vec::new(),
+        supervisor_plans: Vec::new(),
         process_refs: Vec::new(),
         mailbox_bound: 1,
         init_state: StateId::new(1),

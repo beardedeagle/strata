@@ -167,6 +167,16 @@ Key source ideas:
   and the acceptance gate runs Mantle with denied admitted spawn authority so
   the step observes `Err(Denied(Unit))` before a `Worker` runtime instance is
   accepted.
+- `examples/local_supervision_restart.str`,
+  `examples/local_supervision_permanent_stop.str`,
+  `examples/local_supervision_temporary.str`,
+  `examples/local_supervision_transient_restart.str`,
+  `examples/local_supervision_transient.str`, and
+  `examples/local_supervision_inactive_send_outcome.str` cover local
+  `one_for_one` supervision. They use lexical child sends, explicit restart
+  intensity, `permanent`, `temporary`, and `transient` child modes, stopped-child
+  send outcomes, and trace restart decisions without replaying consumed
+  messages.
 
 ## Runtime If Else
 

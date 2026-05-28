@@ -5,7 +5,7 @@ use mantle_artifact::MAX_AUTHORITIES_PER_PROCESS;
 use super::super::ast::{Identifier, Module, Process, TypeRef};
 use super::super::checked::{
     CheckedAuthority, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedProcessId,
-    CheckedSpawnKind, CheckedSpawnSite, CheckedSpawnSiteId,
+    CheckedSpawnSite, CheckedSpawnSiteId, CheckedSupervisorChildId, CheckedSupervisorId,
 };
 use super::super::diagnostic::{Error, Result};
 use super::super::{CAP_TYPE, SPAWN_TYPE};
@@ -24,16 +24,26 @@ pub(in crate::language::checker) struct SpawnSiteAllocator {
 }
 
 impl SpawnSiteAllocator {
-    pub(in crate::language::checker) fn push(
+    pub(in crate::language::checker) fn push_dynamic_local(
         &mut self,
         target: CheckedProcessId,
         authority: CheckedAuthorityId,
     ) -> Result<CheckedSpawnSiteId> {
         let id = CheckedSpawnSiteId::from_index(self.sites.len())?;
-        self.sites.push(CheckedSpawnSite::new(
-            target,
-            authority,
-            CheckedSpawnKind::DynamicLocal,
+        self.sites
+            .push(CheckedSpawnSite::dynamic_local(target, authority));
+        Ok(id)
+    }
+
+    pub(in crate::language::checker) fn push_lexical_supervisor_child(
+        &mut self,
+        target: CheckedProcessId,
+        supervisor: CheckedSupervisorId,
+        child: CheckedSupervisorChildId,
+    ) -> Result<CheckedSpawnSiteId> {
+        let id = CheckedSpawnSiteId::from_index(self.sites.len())?;
+        self.sites.push(CheckedSpawnSite::lexical_supervisor_child(
+            target, supervisor, child,
         ));
         Ok(id)
     }
@@ -121,10 +131,10 @@ pub(in crate::language::checker) fn validate_authority_usage(
     spawn_sites: &[CheckedSpawnSite],
 ) -> Result<()> {
     for (authority_index, authority) in authorities.iter().enumerate() {
-        if !spawn_sites
-            .iter()
-            .any(|site| site.authority().index() == authority_index)
-        {
+        if !spawn_sites.iter().any(|site| {
+            site.authority()
+                .is_some_and(|id| id.index() == authority_index)
+        }) {
             return Err(Error::new(format!(
                 "process {} declares unused spawn authority {}",
                 process.name,

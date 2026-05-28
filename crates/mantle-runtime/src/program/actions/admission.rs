@@ -608,6 +608,42 @@ impl LoadedSendTarget {
                 }
                 Ok(target_process)
             }
+            Self::SupervisorChild {
+                supervisor,
+                child,
+                target_process,
+            } => {
+                let plan = process
+                    .supervisor_plans
+                    .get(supervisor.index())
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} transition {} references unloaded supervisor id {}",
+                            process.debug_name,
+                            message.as_u32(),
+                            supervisor.as_u32()
+                        ))
+                    })?;
+                let child_plan = plan.children.get(child.index()).ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} transition {} references unloaded supervisor child id {}",
+                        process.debug_name,
+                        message.as_u32(),
+                        child.as_u32()
+                    ))
+                })?;
+                if child_plan.target != *target_process {
+                    return Err(Error::new(format!(
+                        "process {} transition {} supervisor child id {} targets process id {}, expected {}",
+                        process.debug_name,
+                        message.as_u32(),
+                        child.as_u32(),
+                        child_plan.target.as_u32(),
+                        target_process.as_u32()
+                    )));
+                }
+                Ok(*target_process)
+            }
             Self::ReceivedPayload { ty, target_process } => {
                 program.validate_process_ref_type_id_target(
                     "send target payload type",

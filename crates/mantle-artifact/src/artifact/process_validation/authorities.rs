@@ -111,35 +111,88 @@ impl ArtifactProcess {
         }
 
         for (spawn_site_index, spawn_site) in self.spawn_sites.iter().enumerate() {
-            let authority_index = spawn_site.authority.index();
-            let authority = self.authorities.get(authority_index).ok_or_else(|| {
-                Error::new(format!(
-                    "process {} spawn site {spawn_site_index} references undefined authority id {}",
-                    self.debug_name,
-                    spawn_site.authority.as_u32()
-                ))
-            })?;
-            let ArtifactCapabilityDescriptor::Spawn { target } = authority.descriptor;
-            if target != spawn_site.target {
-                return Err(Error::new(format!(
-                    "process {} spawn site {spawn_site_index} targets process id {}, but authority id {} targets {}",
-                    self.debug_name,
-                    spawn_site.target.as_u32(),
-                    spawn_site.authority.as_u32(),
-                    target.as_u32()
-                )));
+            artifact
+                .processes
+                .get(spawn_site.target.index())
+                .ok_or_else(|| {
+                    Error::new(format!(
+                        "process {} spawn site {spawn_site_index} targets undefined process id {}",
+                        self.debug_name,
+                        spawn_site.target.as_u32()
+                    ))
+                })?;
+            match spawn_site.kind {
+                ArtifactSpawnKind::DynamicLocal => {
+                    if spawn_site.supervisor.is_some() || spawn_site.child.is_some() {
+                        return Err(Error::new(format!(
+                            "process {} dynamic spawn site {spawn_site_index} carries supervisor ids",
+                            self.debug_name
+                        )));
+                    }
+                    let authority_id = spawn_site.authority.ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} dynamic spawn site {spawn_site_index} has no authority id",
+                            self.debug_name
+                        ))
+                    })?;
+                    let authority_index = authority_id.index();
+                    let authority = self.authorities.get(authority_index).ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} spawn site {spawn_site_index} references undefined authority id {}",
+                            self.debug_name,
+                            authority_id.as_u32()
+                        ))
+                    })?;
+                    let ArtifactCapabilityDescriptor::Spawn { target } = authority.descriptor;
+                    if target != spawn_site.target {
+                        return Err(Error::new(format!(
+                            "process {} spawn site {spawn_site_index} targets process id {}, but authority id {} targets {}",
+                            self.debug_name,
+                            spawn_site.target.as_u32(),
+                            authority_id.as_u32(),
+                            target.as_u32()
+                        )));
+                    }
+                }
+                ArtifactSpawnKind::LexicalSupervisorChild => {
+                    if spawn_site.authority.is_some() {
+                        return Err(Error::new(format!(
+                            "process {} lexical supervisor child spawn site {spawn_site_index} carries dynamic authority",
+                            self.debug_name
+                        )));
+                    }
+                    if spawn_site.supervisor.is_none() || spawn_site.child.is_none() {
+                        return Err(Error::new(format!(
+                            "process {} lexical supervisor child spawn site {spawn_site_index} must carry supervisor and child ids",
+                            self.debug_name
+                        )));
+                    }
+                }
             }
         }
         Ok(())
     }
 
     pub(super) fn validate_spawn_authority_usage(&self, usage: &SpawnAuthorityUsage) -> Result<()> {
-        for (spawn_site_index, _) in self.spawn_sites.iter().enumerate() {
-            if !usage.spawn_site_referenced(spawn_site_index) {
-                return Err(Error::new(format!(
-                    "process {} declares unused spawn site {spawn_site_index}",
-                    self.debug_name
-                )));
+        for (spawn_site_index, spawn_site) in self.spawn_sites.iter().enumerate() {
+            match spawn_site.kind {
+                ArtifactSpawnKind::DynamicLocal
+                    if !usage.spawn_site_referenced(spawn_site_index) =>
+                {
+                    return Err(Error::new(format!(
+                        "process {} declares unused dynamic spawn site {spawn_site_index}",
+                        self.debug_name
+                    )));
+                }
+                ArtifactSpawnKind::LexicalSupervisorChild
+                    if !self.supervisor_spawn_site_referenced(spawn_site_index) =>
+                {
+                    return Err(Error::new(format!(
+                        "process {} declares unused lexical supervisor child spawn site {spawn_site_index}",
+                        self.debug_name
+                    )));
+                }
+                _ => {}
             }
         }
         for (authority_index, authority) in self.authorities.iter().enumerate() {
@@ -152,6 +205,14 @@ impl ArtifactProcess {
         }
 
         Ok(())
+    }
+
+    fn supervisor_spawn_site_referenced(&self, spawn_site_index: usize) -> bool {
+        self.supervisor_plans.iter().any(|plan| {
+            plan.children
+                .iter()
+                .any(|child| child.spawn_site.index() == spawn_site_index)
+        })
     }
 }
 

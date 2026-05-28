@@ -57,6 +57,11 @@ pub(crate) struct LoadedLoopElement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LoadedSendTarget {
     ProcessRef(ProcessRefId),
+    SupervisorChild {
+        supervisor: SupervisorId,
+        child: SupervisorChildId,
+        target_process: ProcessId,
+    },
     ReceivedPayload {
         ty: TypeId,
         target_process: ProcessId,
@@ -228,6 +233,15 @@ impl LoadedSendTarget {
     fn from_artifact(target: &ArtifactSendTarget) -> Self {
         match target {
             ArtifactSendTarget::ProcessRef(process_ref) => Self::ProcessRef(*process_ref),
+            ArtifactSendTarget::SupervisorChild {
+                supervisor,
+                child,
+                target_process,
+            } => Self::SupervisorChild {
+                supervisor: *supervisor,
+                child: *child,
+                target_process: *target_process,
+            },
             ArtifactSendTarget::ReceivedPayload { ty, target_process } => Self::ReceivedPayload {
                 ty: *ty,
                 target_process: *target_process,

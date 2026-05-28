@@ -14,7 +14,7 @@ use super::payload::ArtifactPayload;
 use super::projection::{
     ProjectionKeySetKind, validate_projection_key_set, validate_projection_keys,
 };
-use crate::validation::{validate_count, validate_ident_field, validate_value_label};
+use crate::validation::{validate_count, validate_ident_field};
 use crate::{Error, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result, TypeId};
 
 #[derive(Debug, Clone, Copy)]

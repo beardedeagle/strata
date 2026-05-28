@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+mod supervision;
+
 const AUTHORITY_REFERENCE_WORD_BITS: usize = u64::BITS as usize;
 const AUTHORITY_REFERENCE_WORDS: usize =
     MAX_AUTHORITIES_PER_PROCESS.div_ceil(AUTHORITY_REFERENCE_WORD_BITS);
@@ -102,6 +104,11 @@ impl LoadedProcess {
                 .iter()
                 .map(LoadedSpawnSite::from_artifact)
                 .collect(),
+            supervisor_plans: process
+                .supervisor_plans
+                .iter()
+                .map(LoadedSupervisorPlan::from_artifact)
+                .collect(),
             process_refs: process
                 .process_refs
                 .iter()
@@ -129,7 +136,7 @@ impl LoadedProcess {
             .is_payload_specific_base(message, lookup_state);
         let transition_index = self
             .transition_lookup
-            .for_dispatch(message, current_state, payload)
+            .for_dispatch(message, current_state, payload, &self.transitions)
             .ok_or_else(|| {
                 self.transition_lookup_error(message, lookup_state, payload_specific, payload)
             })?;
@@ -254,6 +261,12 @@ impl LoadedProcess {
                 self.debug_name
             )));
         }
+        if self.supervisor_plans.len() > MAX_SUPERVISORS_PER_PROCESS {
+            return Err(Error::new(format!(
+                "process {} loaded supervisor_count must be no greater than {MAX_SUPERVISORS_PER_PROCESS}",
+                self.debug_name
+            )));
+        }
         let mut names = BTreeSet::new();
         let mut descriptors = BTreeSet::new();
         for authority in &self.authorities {
@@ -288,35 +301,78 @@ impl LoadedProcess {
             }
         }
         for (index, spawn_site) in self.spawn_sites.iter().enumerate() {
-            let authority_index = spawn_site.authority.index();
-            let authority = self.authorities.get(authority_index).ok_or_else(|| {
-                Error::new(format!(
-                    "process {} loaded spawn site {index} references undefined authority id {}",
-                    self.debug_name,
-                    spawn_site.authority.as_u32()
-                ))
-            })?;
-            let LoadedCapabilityDescriptor::Spawn { target } = authority.descriptor;
-            if target != spawn_site.target {
-                return Err(Error::new(format!(
-                    "process {} loaded spawn site {index} targets process id {}, but authority id {} targets {}",
-                    self.debug_name,
-                    spawn_site.target.as_u32(),
-                    spawn_site.authority.as_u32(),
-                    target.as_u32()
-                )));
+            program.process(spawn_site.target)?;
+            match spawn_site.kind {
+                LoadedSpawnKind::DynamicLocal => {
+                    if spawn_site.supervisor.is_some() || spawn_site.child.is_some() {
+                        return Err(Error::new(format!(
+                            "process {} dynamic loaded spawn site {index} carries supervisor ids",
+                            self.debug_name
+                        )));
+                    }
+                    let authority_id = spawn_site.authority.ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} dynamic loaded spawn site {index} has no authority id",
+                            self.debug_name
+                        ))
+                    })?;
+                    let authority_index = authority_id.index();
+                    let authority = self.authorities.get(authority_index).ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} loaded spawn site {index} references undefined authority id {}",
+                            self.debug_name,
+                            authority_id.as_u32()
+                        ))
+                    })?;
+                    let LoadedCapabilityDescriptor::Spawn { target } = authority.descriptor;
+                    if target != spawn_site.target {
+                        return Err(Error::new(format!(
+                            "process {} loaded spawn site {index} targets process id {}, but authority id {} targets {}",
+                            self.debug_name,
+                            spawn_site.target.as_u32(),
+                            authority_id.as_u32(),
+                            target.as_u32()
+                        )));
+                    }
+                }
+                LoadedSpawnKind::LexicalSupervisorChild => {
+                    if spawn_site.authority.is_some() {
+                        return Err(Error::new(format!(
+                            "process {} lexical supervisor child spawn site {index} carries dynamic authority",
+                            self.debug_name
+                        )));
+                    }
+                    if spawn_site.supervisor.is_none() || spawn_site.child.is_none() {
+                        return Err(Error::new(format!(
+                            "process {} lexical supervisor child spawn site {index} must carry supervisor and child ids",
+                            self.debug_name
+                        )));
+                    }
+                }
             }
         }
+        self.validate_supervisors(program, process_id)?;
         Ok(())
     }
 
     fn validate_spawn_authority_usage(&self, usage: &LoadedSpawnAuthorityUsage) -> Result<()> {
-        for (spawn_site_index, _) in self.spawn_sites.iter().enumerate() {
-            if !usage.spawn_site_referenced(spawn_site_index) {
-                return Err(Error::new(format!(
-                    "process {} declares unused loaded spawn site {spawn_site_index}",
-                    self.debug_name
-                )));
+        for (spawn_site_index, spawn_site) in self.spawn_sites.iter().enumerate() {
+            match spawn_site.kind {
+                LoadedSpawnKind::DynamicLocal if !usage.spawn_site_referenced(spawn_site_index) => {
+                    return Err(Error::new(format!(
+                        "process {} declares unused loaded dynamic spawn site {spawn_site_index}",
+                        self.debug_name
+                    )));
+                }
+                LoadedSpawnKind::LexicalSupervisorChild
+                    if !self.supervisor_spawn_site_referenced(spawn_site_index) =>
+                {
+                    return Err(Error::new(format!(
+                        "process {} declares unused loaded lexical supervisor child spawn site {spawn_site_index}",
+                        self.debug_name
+                    )));
+                }
+                _ => {}
             }
         }
         for (authority_index, authority) in self.authorities.iter().enumerate() {
@@ -328,6 +384,14 @@ impl LoadedProcess {
             }
         }
         Ok(())
+    }
+
+    fn supervisor_spawn_site_referenced(&self, spawn_site_index: usize) -> bool {
+        self.supervisor_plans.iter().any(|plan| {
+            plan.children
+                .iter()
+                .any(|child| child.spawn_site.index() == spawn_site_index)
+        })
     }
 
     fn collect_spawn_authority_usage(
@@ -372,7 +436,14 @@ impl LoadedProcess {
     ) -> Result<()> {
         let site = self.validate_spawn_site(spawn_site, target)?;
         usage.mark_spawn_site(&self.debug_name, spawn_site.index())?;
-        usage.mark_authority(&self.debug_name, site.authority.index())
+        let authority = site.authority.ok_or_else(|| {
+            Error::new(format!(
+                "process {} dynamic spawn site id {} does not reference an authority",
+                self.debug_name,
+                spawn_site.as_u32()
+            ))
+        })?;
+        usage.mark_authority(&self.debug_name, authority.index())
     }
 
     fn validate_state_table(&self, program: &LoadedProgram) -> Result<()> {
@@ -592,17 +663,28 @@ impl LoadedProcess {
                 target.as_u32()
             )));
         }
-        let authority = self
-            .authorities
-            .get(site.authority.index())
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "process {} spawn site id {} references unloaded authority id {}",
-                    self.debug_name,
-                    spawn_site.as_u32(),
-                    site.authority.as_u32()
-                ))
-            })?;
+        if site.kind != LoadedSpawnKind::DynamicLocal {
+            return Err(Error::new(format!(
+                "process {} spawn site id {} is not a dynamic local spawn site",
+                self.debug_name,
+                spawn_site.as_u32()
+            )));
+        }
+        let authority_id = site.authority.ok_or_else(|| {
+            Error::new(format!(
+                "process {} dynamic spawn site id {} does not reference an authority",
+                self.debug_name,
+                spawn_site.as_u32()
+            ))
+        })?;
+        let authority = self.authorities.get(authority_id.index()).ok_or_else(|| {
+            Error::new(format!(
+                "process {} spawn site id {} references unloaded authority id {}",
+                self.debug_name,
+                spawn_site.as_u32(),
+                authority_id.as_u32()
+            ))
+        })?;
         let LoadedCapabilityDescriptor::Spawn {
             target: authority_target,
         } = authority.descriptor;
@@ -611,7 +693,7 @@ impl LoadedProcess {
                 "process {} spawn site id {} authority id {} targets process id {}, expected {}",
                 self.debug_name,
                 spawn_site.as_u32(),
-                site.authority.as_u32(),
+                authority_id.as_u32(),
                 authority_target.as_u32(),
                 target.as_u32()
             )));

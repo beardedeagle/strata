@@ -58,7 +58,9 @@ fn runtime_rejects_loaded_spawn_site_referencing_unknown_authority_before_artifa
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     program.processes[0].spawn_sites = vec![LoadedSpawnSite {
         target: ProcessId::new(1),
-        authority: AuthorityId::new(99),
+        authority: Some(AuthorityId::new(99)),
+        supervisor: None,
+        child: None,
         kind: LoadedSpawnKind::DynamicLocal,
     }];
 
@@ -80,7 +82,9 @@ fn runtime_rejects_loaded_spawn_site_target_mismatched_with_authority_before_art
     }];
     program.processes[0].spawn_sites = vec![LoadedSpawnSite {
         target: ProcessId::new(0),
-        authority: SPAWN_AUTHORITY,
+        authority: Some(SPAWN_AUTHORITY),
+        supervisor: None,
+        child: None,
         kind: LoadedSpawnKind::DynamicLocal,
     }];
 
@@ -101,7 +105,7 @@ fn runtime_rejects_unused_loaded_spawn_site_before_artifact_loaded() {
 
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
-        "process Main declares unused loaded spawn site 0",
+        "process Main declares unused loaded dynamic spawn site 0",
     );
 }
 

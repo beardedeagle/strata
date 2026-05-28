@@ -90,7 +90,7 @@ fn runtime_rejects_send_to_failed_process_before_acceptance() {
             .expect_err("worker panic should fail after consuming the first message");
         assert_eq!(
             panic_err.to_string(),
-            "process Worker panicked after consuming message Ping; message will not be replayed"
+            "process Worker panicked after consuming message Ping; message will not be replayed: unsupervised process failed"
         );
 
         let worker_index = process_index_for_pid(&run, worker_pid);

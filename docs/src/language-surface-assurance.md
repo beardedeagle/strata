@@ -28,6 +28,13 @@ evidence, `Err(Denied(Unit))` runtime denial before acceptance,
 source-to-runtime gates, fuzz seeds, bounded authority-model evidence,
 diagnostics, and docs are tracked together.
 
+Local supervision is recorded as a runtime-bearing boundary feature: local
+`one_for_one` supervisor declarations, lexical child IDs, child restart modes,
+explicit restart intensity, lexical spawn-site classification, Mantle artifact
+and loaded-runtime admission, acyclic child-graph validation, restart trace
+evidence, no message replay after panic, source-to-runtime gates, fuzz seeds,
+diagnostics, and docs are tracked together.
+
 Run it with:
 
 ```sh

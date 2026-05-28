@@ -2,12 +2,13 @@ use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority,
     ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement,
     ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactScalarArithmeticOperator,
-    ArtifactScalarOrderingOperator, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
-    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind,
-    ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
-    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId,
-    EffectOutcomeId, EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId,
-    ProcessId, ProcessRefId, SpawnSiteId, StateId, StepResult, TypeId, source_hash_fnv1a64,
+    ArtifactScalarOrderingOperator, ArtifactSendTarget, ArtifactStateValue, ArtifactTransition,
+    ArtifactType, ArtifactTypeField, ArtifactTypeKind, ArtifactValueBooleanOperator,
+    ArtifactValueEqualityOperator, ArtifactValueShape, ArtifactValueTemplate,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId, EffectOutcomeId,
+    EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
+    ProcessRefId, SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId, TypeId,
+    source_hash_fnv1a64,
 };
 
 use super::Effect;
@@ -16,11 +17,15 @@ use super::checked::{
     CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageCase, CheckedMessageId,
     CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId,
     CheckedProcessRefId, CheckedProgram, CheckedScalarArithmeticOperator,
-    CheckedScalarOrderingOperator, CheckedSendTarget, CheckedSpawnKind, CheckedSpawnSiteId,
-    CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedTransition, CheckedTypeId,
+    CheckedScalarOrderingOperator, CheckedSendTarget, CheckedSpawnSiteId, CheckedStateId,
+    CheckedStateValue, CheckedStepResult, CheckedSupervisorId, CheckedTransition, CheckedTypeId,
     CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
     CheckedValueShape, CheckedValueTemplate,
 };
+
+mod supervision;
+
+use supervision::{lower_spawn_site, lower_supervisor_plans};
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
 
@@ -172,15 +177,8 @@ fn lower_process(
                 descriptor: lower_capability_descriptor(authority.descriptor()),
             })
             .collect(),
-        spawn_sites: process
-            .spawn_sites()
-            .iter()
-            .map(|spawn_site| ArtifactSpawnSite {
-                target: lower_process_id(spawn_site.target()),
-                authority: lower_authority_id(spawn_site.authority()),
-                kind: lower_spawn_kind(spawn_site.kind()),
-            })
-            .collect(),
+        spawn_sites: process.spawn_sites().iter().map(lower_spawn_site).collect(),
+        supervisor_plans: lower_supervisor_plans(process),
         process_refs: process
             .process_refs()
             .iter()
@@ -475,7 +473,7 @@ fn lower_value_template(
             ty: types.artifact_id(ty)?,
             map: Box::new(lower_value_template(map, types)?),
             key: key.clone(),
-            keys: keys.clone(),
+            keys: keys.to_vec(),
             projection: *projection,
         }),
         CheckedValueTemplate::MapRest {
@@ -485,7 +483,7 @@ fn lower_value_template(
         } => Ok(ArtifactValueTemplate::MapRest {
             ty: types.artifact_id(ty)?,
             map: Box::new(lower_value_template(map, types)?),
-            excluded_keys: excluded_keys.clone(),
+            excluded_keys: excluded_keys.to_vec(),
         }),
         CheckedValueTemplate::ProcessRef {
             ty,
@@ -657,6 +655,15 @@ fn lower_send_target(
         CheckedSendTarget::ProcessRef(process_ref) => Ok(ArtifactSendTarget::ProcessRef(
             lower_process_ref_id(*process_ref),
         )),
+        CheckedSendTarget::SupervisorChild {
+            supervisor,
+            child,
+            target,
+        } => Ok(ArtifactSendTarget::SupervisorChild {
+            supervisor: lower_supervisor_id(*supervisor),
+            child: lower_supervisor_child_id(*child),
+            target_process: lower_process_id(*target),
+        }),
         CheckedSendTarget::ReceivedPayload { ty, target } => {
             Ok(ArtifactSendTarget::ReceivedPayload {
                 ty: types.artifact_id(ty)?,
@@ -688,12 +695,6 @@ fn lower_capability_descriptor(
     }
 }
 
-fn lower_spawn_kind(kind: CheckedSpawnKind) -> ArtifactSpawnKind {
-    match kind {
-        CheckedSpawnKind::DynamicLocal => ArtifactSpawnKind::DynamicLocal,
-    }
-}
-
 fn lower_type_id(id: CheckedTypeId) -> TypeId {
     TypeId::new(id.as_u32())
 }
@@ -704,6 +705,16 @@ fn lower_authority_id(id: CheckedAuthorityId) -> AuthorityId {
 
 fn lower_spawn_site_id(id: CheckedSpawnSiteId) -> SpawnSiteId {
     SpawnSiteId::new(id.as_u32())
+}
+
+pub(super) fn lower_supervisor_id(id: CheckedSupervisorId) -> SupervisorId {
+    SupervisorId::new(id.as_u32())
+}
+
+pub(super) fn lower_supervisor_child_id(
+    id: super::checked::CheckedSupervisorChildId,
+) -> SupervisorChildId {
+    SupervisorChildId::new(id.as_u32())
 }
 
 fn lower_process_ref_id(id: CheckedProcessRefId) -> ProcessRefId {

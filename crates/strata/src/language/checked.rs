@@ -6,13 +6,15 @@ mod types;
 pub(in crate::language) use ids::{
     CheckedAuthorityId, CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId,
     CheckedMessageId, CheckedMessageVariantId, CheckedOutputId, CheckedProcessId,
-    CheckedProcessRefId, CheckedSpawnSiteId, CheckedStateId, CheckedTypeId,
+    CheckedProcessRefId, CheckedSpawnSiteId, CheckedStateId, CheckedSupervisorChildId,
+    CheckedSupervisorId, CheckedTypeId,
 };
 pub(in crate::language) use process::{
     CheckedAction, CheckedAuthority, CheckedCapabilityDescriptor, CheckedLoopElement,
     CheckedMessageCase, CheckedProcess, CheckedProcessParts, CheckedProcessRef, CheckedSendTarget,
-    CheckedSpawnKind, CheckedSpawnSite, CheckedStepResult, CheckedTransition,
-    CheckedTransitionParts, checked_action_count,
+    CheckedSpawnKind, CheckedSpawnSite, CheckedStepResult, CheckedSupervisorChild,
+    CheckedSupervisorChildMode, CheckedSupervisorPlan, CheckedSupervisorRestartIntensity,
+    CheckedSupervisorStrategy, CheckedTransition, CheckedTransitionParts, checked_action_count,
 };
 pub(in crate::language) use templates::{
     CheckedNextState, CheckedPayloadValue, CheckedScalarArithmeticOperator,

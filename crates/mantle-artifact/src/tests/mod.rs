@@ -9,4 +9,5 @@ mod process_refs;
 mod scalar_templates;
 mod spawn_authority;
 mod state_transitions;
+mod supervision;
 mod support;

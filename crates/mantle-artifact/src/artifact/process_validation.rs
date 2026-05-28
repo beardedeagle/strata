@@ -3,11 +3,13 @@ use super::*;
 use crate::{
     MAX_AUTHORITIES_PER_PROCESS, MAX_DIRECT_RUNTIME_IF_ACTION_DEPTH,
     MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_SPAWN_SITES_PER_PROCESS,
+    MAX_SUPERVISORS_PER_PROCESS,
 };
 
 mod actions;
 mod authorities;
 mod effect_outcomes;
+mod supervision;
 mod templates;
 
 use authorities::SpawnAuthorityUsage;
@@ -141,6 +143,12 @@ impl ArtifactProcess {
             MAX_SPAWN_SITES_PER_PROCESS,
         )?;
         validate_count(
+            "supervisor_count",
+            self.supervisor_plans.len(),
+            0,
+            MAX_SUPERVISORS_PER_PROCESS,
+        )?;
+        validate_count(
             "process_ref_count",
             self.process_refs.len(),
             0,
@@ -198,6 +206,7 @@ impl ArtifactProcess {
             }
         }
         self.validate_authorities(artifact, process_id)?;
+        self.validate_supervisors(artifact, process_id)?;
         validate_unique_process_ref_list(&self.process_refs)?;
         if self.init_state.index() >= self.state_values.len() {
             return Err(Error::new(format!(

@@ -25,6 +25,7 @@ impl MantleArtifact {
                 )));
             }
         }
+        self.validate_supervision_graph_acyclic()?;
 
         let Some(entry_process) = self.processes.get(self.entry_process.index()) else {
             return Err(Error::new(format!(
@@ -148,7 +149,7 @@ impl MantleArtifact {
         current_state_payload: Option<&ArtifactPayload>,
     ) -> Result<ArtifactStateValue> {
         template.evaluate_state_value(received_payload, current_state_payload, &|ty| {
-            self.type_entry(ty).cloned()
+            self.type_entry(ty)
         })
     }
 

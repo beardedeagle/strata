@@ -12,7 +12,7 @@ pub(super) fn decode_action(
         )));
     }
     let kind = fields.take_required(&format!("{action_prefix}.kind"))?;
-    match kind.as_str() {
+    match kind {
         "emit" => Ok(ArtifactAction::Emit {
             output: fields.take_output_id(&format!("{action_prefix}.output"))?,
         }),
@@ -91,10 +91,16 @@ fn decode_send_target(
     action_prefix: &str,
 ) -> Result<ArtifactSendTarget> {
     let key = format!("{action_prefix}.target");
-    match fields.take_required(&key)?.as_str() {
+    match fields.take_required(&key)? {
         "process_ref" => Ok(ArtifactSendTarget::ProcessRef(
             fields.take_process_ref_id(&format!("{action_prefix}.target_process_ref"))?,
         )),
+        "supervisor_child" => Ok(ArtifactSendTarget::SupervisorChild {
+            supervisor: fields.take_supervisor_id(&format!("{action_prefix}.target_supervisor"))?,
+            child: fields
+                .take_supervisor_child_id(&format!("{action_prefix}.target_supervisor_child"))?,
+            target_process: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
+        }),
         "received_payload" => Ok(ArtifactSendTarget::ReceivedPayload {
             ty: fields.take_type_id(&format!("{action_prefix}.target_payload_type_id"))?,
             target_process: fields.take_process_id(&format!("{action_prefix}.target_process"))?,
@@ -108,7 +114,7 @@ fn decode_optional_payload_template(
     action_prefix: &str,
 ) -> Result<Option<ArtifactValueTemplate>> {
     let payload_key = format!("{action_prefix}.payload");
-    match fields.take_required(&payload_key)?.as_str() {
+    match fields.take_required(&payload_key)? {
         "none" => Ok(None),
         "template" => Ok(Some(decode_value_template(
             fields,

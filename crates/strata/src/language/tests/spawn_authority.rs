@@ -73,7 +73,10 @@ fn accepts_exact_spawn_authority_for_dynamic_local_spawn() {
         CheckedCapabilityDescriptor::Spawn { target }
             if target == checked_process_id(1)
     ));
-    assert_eq!(main.spawn_sites()[0].authority(), checked_authority_id(0));
+    assert_eq!(
+        main.spawn_sites()[0].authority(),
+        Some(checked_authority_id(0))
+    );
     assert_eq!(main.spawn_sites()[0].target(), checked_process_id(1));
 }
 

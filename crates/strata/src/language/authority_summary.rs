@@ -1,6 +1,6 @@
 use super::checked::{
     CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedProgram, CheckedSpawnKind,
-    CheckedSpawnSite,
+    CheckedSpawnSite, CheckedSupervisorChildMode, CheckedSupervisorStrategy,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,7 +39,10 @@ fn render_text(program: &CheckedProgram, source_path: &str) -> String {
         }
         out.push('\n');
 
-        if process.authorities().is_empty() && process.spawn_sites().is_empty() {
+        if process.authorities().is_empty()
+            && process.spawn_sites().is_empty()
+            && process.supervisor_plans().is_empty()
+        {
             out.push_str("  no local spawn authority\n");
             continue;
         }
@@ -67,13 +70,49 @@ fn render_text(program: &CheckedProgram, source_path: &str) -> String {
             out.push_str(checked_spawn_kind_str(site.kind()));
             out.push_str(" target=");
             out.push_str(checked_process_label(program, site.target()));
-            out.push_str(" authority=");
-            out.push_str(&site.authority().as_u32().to_string());
-            if let Some(authority) = process.authorities().get(site.authority().index()) {
-                out.push(' ');
-                out.push_str(authority.debug_name().as_str());
+            match site.authority() {
+                Some(authority_id) => {
+                    out.push_str(" authority=");
+                    out.push_str(&authority_id.as_u32().to_string());
+                    if let Some(authority) = process.authorities().get(authority_id.index()) {
+                        out.push(' ');
+                        out.push_str(authority.debug_name().as_str());
+                    }
+                }
+                None => {
+                    out.push_str(" supervisor=");
+                    push_optional_id(&mut out, site.supervisor().map(|id| id.as_u32()));
+                    out.push_str(" child=");
+                    push_optional_id(&mut out, site.child().map(|id| id.as_u32()));
+                }
             }
             out.push('\n');
+        }
+
+        for (supervisor_index, supervisor) in process.supervisor_plans().iter().enumerate() {
+            out.push_str("  supervisor ");
+            out.push_str(&supervisor_index.to_string());
+            out.push_str(" strategy=");
+            out.push_str(checked_supervisor_strategy_str(supervisor.strategy()));
+            out.push_str(" max_restarts=");
+            out.push_str(&supervisor.intensity().max_restarts().to_string());
+            out.push_str(" within_ms=");
+            out.push_str(&supervisor.intensity().within_ms().to_string());
+            out.push('\n');
+
+            for (child_index, child) in supervisor.children().iter().enumerate() {
+                out.push_str("    child ");
+                out.push_str(&child_index.to_string());
+                out.push(' ');
+                out.push_str(child.debug_name().as_str());
+                out.push_str(" mode=");
+                out.push_str(checked_supervisor_child_mode_str(child.mode()));
+                out.push_str(" target=");
+                out.push_str(checked_process_label(program, child.target()));
+                out.push_str(" spawn_site=");
+                out.push_str(&child.spawn_site().as_u32().to_string());
+                out.push('\n');
+            }
         }
     }
 
@@ -146,12 +185,77 @@ fn render_json(program: &CheckedProgram, source_path: &str) -> String {
                 checked_process_label(program, site.target()),
             );
             out.push_str(",\"authority_id\":");
-            out.push_str(&site.authority().as_u32().to_string());
-            if let Some(authority) = process.authorities().get(site.authority().index()) {
-                out.push(',');
-                push_json_field(&mut out, "authority_name", authority.debug_name().as_str());
+            match site.authority() {
+                Some(authority_id) => {
+                    out.push_str(&authority_id.as_u32().to_string());
+                    if let Some(authority) = process.authorities().get(authority_id.index()) {
+                        out.push(',');
+                        push_json_field(
+                            &mut out,
+                            "authority_name",
+                            authority.debug_name().as_str(),
+                        );
+                    }
+                }
+                None => out.push_str("null"),
+            }
+            if let Some(supervisor) = site.supervisor() {
+                out.push_str(",\"supervisor_id\":");
+                out.push_str(&supervisor.as_u32().to_string());
+            }
+            if let Some(child) = site.child() {
+                out.push_str(",\"supervisor_child_id\":");
+                out.push_str(&child.as_u32().to_string());
             }
             out.push('}');
+        }
+        out.push_str("],\"supervisors\":[");
+        for (supervisor_index, supervisor) in process.supervisor_plans().iter().enumerate() {
+            if supervisor_index > 0 {
+                out.push(',');
+            }
+            out.push('{');
+            out.push_str("\"supervisor_id\":");
+            out.push_str(&supervisor_index.to_string());
+            out.push(',');
+            push_json_field(
+                &mut out,
+                "strategy",
+                checked_supervisor_strategy_str(supervisor.strategy()),
+            );
+            out.push_str(",\"max_restarts\":");
+            out.push_str(&supervisor.intensity().max_restarts().to_string());
+            out.push_str(",\"within_ms\":");
+            out.push_str(&supervisor.intensity().within_ms().to_string());
+            out.push_str(",\"children\":[");
+            for (child_index, child) in supervisor.children().iter().enumerate() {
+                if child_index > 0 {
+                    out.push(',');
+                }
+                out.push('{');
+                out.push_str("\"child_id\":");
+                out.push_str(&child_index.to_string());
+                out.push(',');
+                push_json_field(&mut out, "child", child.debug_name().as_str());
+                out.push(',');
+                push_json_field(
+                    &mut out,
+                    "mode",
+                    checked_supervisor_child_mode_str(child.mode()),
+                );
+                out.push_str(",\"target_process_id\":");
+                out.push_str(&child.target().as_u32().to_string());
+                out.push(',');
+                push_json_field(
+                    &mut out,
+                    "target_process",
+                    checked_process_label(program, child.target()),
+                );
+                out.push_str(",\"spawn_site_id\":");
+                out.push_str(&child.spawn_site().as_u32().to_string());
+                out.push('}');
+            }
+            out.push_str("]}");
         }
         out.push_str("]}");
     }
@@ -206,7 +310,7 @@ fn push_checked_used_spawn_sites(
     };
     let mut needs_separator = false;
     for (site_index, site) in sites.iter().enumerate() {
-        if site.authority() == authority {
+        if site.authority() == Some(authority) {
             if needs_separator {
                 out.push(',');
             }
@@ -228,6 +332,28 @@ fn checked_process_label(program: &CheckedProgram, id: super::checked::CheckedPr
 fn checked_spawn_kind_str(kind: CheckedSpawnKind) -> &'static str {
     match kind {
         CheckedSpawnKind::DynamicLocal => "dynamic_local",
+        CheckedSpawnKind::LexicalSupervisorChild => "lexical_supervisor_child",
+    }
+}
+
+fn checked_supervisor_strategy_str(strategy: CheckedSupervisorStrategy) -> &'static str {
+    match strategy {
+        CheckedSupervisorStrategy::OneForOne => "one_for_one",
+    }
+}
+
+fn checked_supervisor_child_mode_str(mode: CheckedSupervisorChildMode) -> &'static str {
+    match mode {
+        CheckedSupervisorChildMode::Permanent => "permanent",
+        CheckedSupervisorChildMode::Transient => "transient",
+        CheckedSupervisorChildMode::Temporary => "temporary",
+    }
+}
+
+fn push_optional_id(out: &mut String, id: Option<u32>) {
+    match id {
+        Some(id) => out.push_str(&id.to_string()),
+        None => out.push_str("none"),
     }
 }
 
@@ -279,6 +405,9 @@ proc Main mailbox bounded(1) {
     type Msg = MainMsg;
 
     authority spawn_worker: Cap<Spawn<Worker>>;
+    supervise local one_for_one(max_restarts: 2_u32, within_ms: 1000_u64) {
+        child supervised_worker: Worker = spawn Worker as permanent;
+    }
 
     fn init() -> MainState ! [] ~ [] @det {
         return MainState;
@@ -315,9 +444,20 @@ proc Worker mailbox bounded(1) {
         assert!(
             summary
                 .contains("authority 0 spawn_worker: Cap<Spawn<Worker>> used_by_spawn_sites=[0]")
+                || summary.contains(
+                    "authority 0 spawn_worker: Cap<Spawn<Worker>> used_by_spawn_sites=[1]"
+                )
         );
         assert!(
             summary.contains("spawn_site 0 dynamic_local target=Worker authority=0 spawn_worker")
+                || summary
+                    .contains("spawn_site 1 dynamic_local target=Worker authority=0 spawn_worker")
+        );
+        assert!(
+            summary.contains("supervisor 0 strategy=one_for_one max_restarts=2 within_ms=1000")
+        );
+        assert!(
+            summary.contains("child 0 supervised_worker mode=permanent target=Worker spawn_site=")
         );
     }
 
@@ -331,6 +471,15 @@ proc Worker mailbox bounded(1) {
         assert!(summary.contains("\"module\":\"summary\""));
         assert!(summary.contains("\"authority_id\":0"));
         assert!(summary.contains("\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1,\"target_process\":\"Worker\"}"));
-        assert!(summary.contains("\"used_by_spawn_site_ids\":[0]"));
+        assert!(
+            summary.contains("\"used_by_spawn_site_ids\":[0]")
+                || summary.contains("\"used_by_spawn_site_ids\":[1]")
+        );
+        assert!(summary.contains("\"supervisors\":[{\"supervisor_id\":0"));
+        assert!(summary.contains("\"strategy\":\"one_for_one\""));
+        assert!(summary.contains("\"max_restarts\":2"));
+        assert!(summary.contains("\"within_ms\":1000"));
+        assert!(summary.contains("\"child\":\"supervised_worker\""));
+        assert!(summary.contains("\"mode\":\"permanent\""));
     }
 }

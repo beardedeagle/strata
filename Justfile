@@ -63,6 +63,15 @@ lint:
 performance-smoke:
     cargo +{{stable_toolchain}} test -p strata-mantle-acceptance --test performance_smoke -- --ignored --nocapture
 
+performance-smoke-profile profile:
+    STRATA_PERFORMANCE_SMOKE_PROFILE="{{profile}}" cargo +{{stable_toolchain}} test -p strata-mantle-acceptance --test performance_smoke -- --ignored --nocapture
+
+performance-rss-compare base current runs="30" profiles="collection_state.check_lower collection_state.in_memory_runtime":
+    bash tools/performance-rss-compare.sh --runs "{{runs}}" "{{base}}" "{{current}}" {{profiles}}
+
+performance-cli-footprint-compare base current runs="20":
+    bash tools/performance-cli-footprint-compare.sh --runs "{{runs}}" "{{base}}" "{{current}}"
+
 build:
     cargo +{{stable_toolchain}} build
 
@@ -223,6 +232,12 @@ source-to-runtime-success-gates: build
         effect_outcome_mailbox_full
         effect_outcome_stopped_target
         effect_outcome_spawn_denied
+        local_supervision_restart
+        local_supervision_permanent_stop
+        local_supervision_temporary
+        local_supervision_transient_restart
+        local_supervision_transient
+        local_supervision_inactive_send_outcome
     )
 
     cargo_run=(cargo +{{stable_toolchain}} run)
@@ -443,11 +458,16 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p strata checks_source_function_subset_map_patterns
     cargo +{{nightly_toolchain}} miri test -p strata parses_checks_and_lowers_source_function_braced_return_if_else
     cargo +{{nightly_toolchain}} miri test -p strata parses_checks_and_lowers_immutable_source_local_bindings
+    cargo +{{nightly_toolchain}} miri test -p strata accepts_typed_local_one_for_one_supervision
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_uniform_arm_prefix_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_selected_arm_action_block_shapes_lower_as_typed_actions
+    cargo +{{nightly_toolchain}} miri test -p mantle-artifact validate_admits_lexical_supervisor_child_spawn_site
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_rejects_loaded_spawn_site_target_mismatched_with_authority_before_artifact_loaded
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_spawn_outcome_returns_denied_before_acceptance
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime bounded_restart_intensity_denies_second_restart_within_window
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime restarted_supervisor_child_stops_its_old_supervised_subtree
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime loaded_admission_rejects_indirect_supervisor_cycle
 
 miri-ci: miri-setup miri-smoke
 

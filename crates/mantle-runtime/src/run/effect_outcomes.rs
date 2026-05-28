@@ -5,7 +5,7 @@ use mantle_artifact::{
 
 use super::RuntimeRun;
 use super::model::{ActiveStep, RuntimeMessageEnvelope};
-use super::process_refs::LocalProcessRefs;
+use super::process_refs::{LocalProcessRefs, SendOutcomeTarget};
 use super::templates::evaluate_runtime_template;
 use crate::event::RuntimeProcessId;
 use crate::host::RuntimeHost;
@@ -109,7 +109,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         if !self.record_spawn_authority(step, target, spawn_site)? {
             return self.spawn_error_outcome(outcome_ty, "Denied");
         }
-        if self.processes.len() >= self.max_runtime_processes {
+        if !self.spawn_capacity_available(target)? {
             return self.spawn_error_outcome(outcome_ty, "Exhausted");
         }
         let pid = self.spawn_process(target, Some(step.pid))?;
@@ -120,10 +120,18 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &mut self,
         request: SendOutcomeExecution<'_>,
     ) -> Result<RuntimePayload> {
-        let pid =
-            self.resolve_send_target(request.local_process_refs, request.step, request.target)?;
-        let target_process_index = self.process_index_for_pid(pid)?;
-        let target_process_id = self.processes[target_process_index].process_id;
+        let target = self.resolve_send_outcome_target(
+            request.local_process_refs,
+            request.step,
+            request.target,
+        )?;
+        let target_process_id = match target {
+            SendOutcomeTarget::Active(pid) => {
+                let target_process_index = self.process_index_for_pid(pid)?;
+                self.processes[target_process_index].process_id
+            }
+            SendOutcomeTarget::InactiveSupervisorChild { target_process, .. } => target_process,
+        };
         let expected_payload_type = self
             .program
             .message_payload_type(target_process_id, request.message)?;
@@ -161,16 +169,30 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 Some(payload)
             }
         };
-        match self.preflight_delivery_target_outcome(pid)? {
-            Ok(_) => {
-                self.send_message(
-                    pid,
-                    RuntimeMessageEnvelope::new(request.message, prepared_payload),
-                    Some(request.step.pid),
-                )?;
-                self.ok_unit_outcome(request.outcome_ty)
-            }
-            Err(failure) => {
+        match target {
+            SendOutcomeTarget::Active(pid) => match self.preflight_delivery_target_outcome(pid)? {
+                Ok(_) => {
+                    self.send_message(
+                        pid,
+                        RuntimeMessageEnvelope::new(request.message, prepared_payload),
+                        Some(request.step.pid),
+                    )?;
+                    self.ok_unit_outcome(request.outcome_ty)
+                }
+                Err(failure) => {
+                    let original_message = self.runtime_message_payload(
+                        target_process_id,
+                        request.message,
+                        prepared_payload.as_ref(),
+                    )?;
+                    self.send_error_outcome(
+                        request.outcome_ty,
+                        failure.send_error_variant(),
+                        original_message,
+                    )
+                }
+            },
+            SendOutcomeTarget::InactiveSupervisorChild { failure, .. } => {
                 let original_message = self.runtime_message_payload(
                     target_process_id,
                     request.message,

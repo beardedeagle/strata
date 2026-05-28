@@ -1,10 +1,10 @@
 use super::*;
 
-pub(super) fn check_list_payload_pattern_bindings(
-    scope: &mut NestedPatternBindingScope<'_, '_>,
+pub(super) fn check_list_payload_pattern_bindings<'a>(
+    scope: &mut NestedPatternBindingScope<'a, '_>,
     element_type: &TypeRef,
     capacity: usize,
-    pattern: &ListPattern,
+    pattern: &'a ListPattern,
     base_path: &PayloadBindingPath,
 ) -> Result<Vec<PatternPayloadParam>> {
     let mut bindings = Vec::new();
@@ -14,7 +14,7 @@ pub(super) fn check_list_payload_pattern_bindings(
         match binding {
             CollectionPatternBinding::Binding(name) => {
                 let subject = scope.subject();
-                if !scope.seen_bindings.insert(name.to_string()) {
+                if !scope.seen_bindings.insert(name.as_str()) {
                     return Err(Error::new(format!(
                         "{subject} {} list payload pattern binding {name} is declared more than once",
                         scope.context
@@ -49,7 +49,7 @@ pub(super) fn check_list_payload_pattern_bindings(
     }
     if let Some(rest) = &pattern.rest {
         let subject = scope.subject();
-        if !scope.seen_bindings.insert(rest.to_string()) {
+        if !scope.seen_bindings.insert(rest.as_str()) {
             return Err(Error::new(format!(
                 "{subject} {} list payload pattern binding {rest} is declared more than once",
                 scope.context
@@ -104,10 +104,10 @@ pub(super) fn validate_list_payload_pattern_capacity(
     Ok(())
 }
 
-pub(super) fn check_map_payload_pattern_bindings(
-    scope: &mut NestedPatternBindingScope<'_, '_>,
+pub(super) fn check_map_payload_pattern_bindings<'a>(
+    scope: &mut NestedPatternBindingScope<'a, '_>,
     map_type: MapPatternType<'_>,
-    pattern: &MapPattern,
+    pattern: &'a MapPattern,
     base_path: &PayloadBindingPath,
 ) -> Result<Vec<PatternPayloadParam>> {
     let mut seen_keys = BTreeSet::new();
@@ -122,7 +122,7 @@ pub(super) fn check_map_payload_pattern_bindings(
         }
         entry_keys.push(key);
     }
-    let keys = seen_keys.into_iter().collect::<Vec<_>>();
+    let keys = std::sync::Arc::<[ArtifactValue]>::from(seen_keys.into_iter().collect::<Vec<_>>());
     let mut bindings = Vec::new();
     for (entry, key) in pattern.entries.iter().zip(entry_keys) {
         let value_path = base_path.then(PayloadProjectionSegment::map_value(
@@ -134,7 +134,7 @@ pub(super) fn check_map_payload_pattern_bindings(
         match &entry.binding {
             CollectionPatternBinding::Binding(name) => {
                 let subject = scope.subject();
-                if !scope.seen_bindings.insert(name.to_string()) {
+                if !scope.seen_bindings.insert(name.as_str()) {
                     return Err(Error::new(format!(
                         "{subject} {} map payload pattern binding {name} is declared more than once",
                         scope.context
@@ -169,7 +169,7 @@ pub(super) fn check_map_payload_pattern_bindings(
     }
     if let Some(rest) = &pattern.rest {
         let subject = scope.subject();
-        if !scope.seen_bindings.insert(rest.to_string()) {
+        if !scope.seen_bindings.insert(rest.as_str()) {
             return Err(Error::new(format!(
                 "{subject} {} map payload pattern binding {rest} is declared more than once",
                 scope.context

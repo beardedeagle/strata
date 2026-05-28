@@ -1,8 +1,15 @@
 use super::super::*;
 
+mod supervision;
+
+use supervision::{encode_spawn_sites, encode_supervisor_plans};
+
 impl MantleArtifact {
     pub fn encode(&self) -> String {
-        let mut encoded = format!(
+        let mut encoded = String::with_capacity(
+            crate::validation::encoded_artifact_len(self).unwrap_or(ARTIFACT_MAGIC.len() + 1),
+        );
+        encoded.push_str(&format!(
             "{ARTIFACT_MAGIC}\nformat={}\nschema_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\ntype_count={}\noutput_count={}\nprocess_count={}\n",
             self.format,
             self.schema_version,
@@ -13,7 +20,7 @@ impl MantleArtifact {
             self.types.len(),
             self.outputs.len(),
             self.processes.len()
-        );
+        ));
         for (type_index, ty) in self.types.iter().enumerate() {
             encode_type(&mut encoded, type_index, ty);
         }
@@ -73,18 +80,8 @@ impl MantleArtifact {
                     }
                 }
             }
-            encoded.push_str(&format!(
-                "{prefix}.spawn_site_count={}\n",
-                process.spawn_sites.len()
-            ));
-            for (spawn_site_index, spawn_site) in process.spawn_sites.iter().enumerate() {
-                encoded.push_str(&format!(
-                    "{prefix}.spawn_site.{spawn_site_index}.target_process={}\n{prefix}.spawn_site.{spawn_site_index}.authority={}\n{prefix}.spawn_site.{spawn_site_index}.kind={}\n",
-                    spawn_site.target.as_u32(),
-                    spawn_site.authority.as_u32(),
-                    spawn_site.kind.as_str()
-                ));
-            }
+            encode_spawn_sites(&mut encoded, &prefix, process);
+            encode_supervisor_plans(&mut encoded, &prefix, process);
             encoded.push_str(&format!(
                 "{prefix}.process_ref_count={}\n",
                 process.process_refs.len()
@@ -693,6 +690,18 @@ fn encode_send_target(encoded: &mut String, action_prefix: &str, target: &Artifa
             encoded.push_str(&format!(
                 "{action_prefix}.target=process_ref\n{action_prefix}.target_process_ref={}\n",
                 process_ref.as_u32()
+            ));
+        }
+        ArtifactSendTarget::SupervisorChild {
+            supervisor,
+            child,
+            target_process,
+        } => {
+            encoded.push_str(&format!(
+                "{action_prefix}.target=supervisor_child\n{action_prefix}.target_supervisor={}\n{action_prefix}.target_supervisor_child={}\n{action_prefix}.target_process={}\n",
+                supervisor.as_u32(),
+                child.as_u32(),
+                target_process.as_u32()
             ));
         }
         ArtifactSendTarget::ReceivedPayload { ty, target_process } => {

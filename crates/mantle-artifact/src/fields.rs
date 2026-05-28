@@ -8,16 +8,17 @@ use crate::{
     MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId, ProcessRefId,
-    Result, SpawnSiteId, StateId, TypeId,
+    MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR, MAX_SUPERVISORS_PER_PROCESS, MAX_TYPE_COUNT,
+    MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId, ProcessRefId, Result, SpawnSiteId,
+    StateId, SupervisorChildId, SupervisorId, TypeId,
 };
 
-pub(crate) struct ArtifactFields {
-    fields: BTreeMap<String, String>,
+pub(crate) struct ArtifactFields<'a> {
+    fields: BTreeMap<&'a str, &'a str>,
 }
 
-impl ArtifactFields {
-    pub(crate) fn parse(contents: &str) -> Result<Self> {
+impl<'a> ArtifactFields<'a> {
+    pub(crate) fn parse(contents: &'a str) -> Result<Self> {
         if contents.len() > MAX_ARTIFACT_BYTES {
             return Err(Error::new(format!(
                 "artifact is too large; maximum supported size is {MAX_ARTIFACT_BYTES} bytes"
@@ -50,20 +51,24 @@ impl ArtifactFields {
                     "artifact field {key:?} exceeds maximum value length of {MAX_FIELD_VALUE_BYTES} bytes"
                 )));
             }
-            if fields.insert(key.to_string(), value.to_string()).is_some() {
+            if fields.insert(key, value).is_some() {
                 return Err(Error::new(format!("duplicate artifact field {key:?}")));
             }
         }
         Ok(Self { fields })
     }
 
-    pub(crate) fn take_required(&mut self, key: &str) -> Result<String> {
+    pub(crate) fn take_required(&mut self, key: &str) -> Result<&'a str> {
         self.fields
             .remove(key)
             .ok_or_else(|| Error::new(format!("missing artifact field {key}")))
     }
 
-    pub(crate) fn take_optional(&mut self, key: &str) -> Option<String> {
+    pub(crate) fn take_required_string(&mut self, key: &str) -> Result<String> {
+        self.take_required(key).map(str::to_string)
+    }
+
+    pub(crate) fn take_optional(&mut self, key: &str) -> Option<&'a str> {
         self.fields.remove(key)
     }
 
@@ -141,12 +146,57 @@ impl ArtifactFields {
         )?)
     }
 
-    pub(crate) fn take_authority_id(&mut self, key: &str) -> Result<AuthorityId> {
-        AuthorityId::from_index(self.take_bounded_usize(key, 0, MAX_AUTHORITIES_PER_PROCESS - 1)?)
+    pub(crate) fn take_optional_authority_id(&mut self, key: &str) -> Result<Option<AuthorityId>> {
+        self.take_optional_bounded_id(
+            key,
+            0,
+            MAX_AUTHORITIES_PER_PROCESS - 1,
+            AuthorityId::from_index,
+        )
     }
 
     pub(crate) fn take_spawn_site_id(&mut self, key: &str) -> Result<SpawnSiteId> {
         SpawnSiteId::from_index(self.take_bounded_usize(key, 0, MAX_SPAWN_SITES_PER_PROCESS - 1)?)
+    }
+
+    pub(crate) fn take_supervisor_id(&mut self, key: &str) -> Result<SupervisorId> {
+        SupervisorId::from_index(self.take_bounded_usize(
+            key,
+            0,
+            MAX_SUPERVISORS_PER_PROCESS - 1,
+        )?)
+    }
+
+    pub(crate) fn take_optional_supervisor_id(
+        &mut self,
+        key: &str,
+    ) -> Result<Option<SupervisorId>> {
+        self.take_optional_bounded_id(
+            key,
+            0,
+            MAX_SUPERVISORS_PER_PROCESS - 1,
+            SupervisorId::from_index,
+        )
+    }
+
+    pub(crate) fn take_supervisor_child_id(&mut self, key: &str) -> Result<SupervisorChildId> {
+        SupervisorChildId::from_index(self.take_bounded_usize(
+            key,
+            0,
+            MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR - 1,
+        )?)
+    }
+
+    pub(crate) fn take_optional_supervisor_child_id(
+        &mut self,
+        key: &str,
+    ) -> Result<Option<SupervisorChildId>> {
+        self.take_optional_bounded_id(
+            key,
+            0,
+            MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR - 1,
+            SupervisorChildId::from_index,
+        )
     }
 
     pub(crate) fn take_optional_type_id(&mut self, key: &str) -> Result<Option<TypeId>> {
@@ -161,7 +211,7 @@ impl ArtifactFields {
     }
 
     pub(crate) fn take_step_result(&mut self, key: &str) -> Result<StepResult> {
-        StepResult::parse(&self.take_required(key)?)
+        StepResult::parse(self.take_required(key)?)
     }
 
     pub(crate) fn finish(self) -> Result<()> {
@@ -176,5 +226,22 @@ impl ArtifactFields {
         value
             .parse::<usize>()
             .map_err(|_| Error::new(format!("invalid {key} value {value:?}")))
+    }
+
+    fn take_optional_bounded_id<T>(
+        &mut self,
+        key: &str,
+        min: usize,
+        max: usize,
+        make_id: impl FnOnce(usize) -> Result<T>,
+    ) -> Result<Option<T>> {
+        let Some(value) = self.take_optional(key) else {
+            return Ok(None);
+        };
+        let index = value
+            .parse::<usize>()
+            .map_err(|_| Error::new(format!("invalid {key} value {value:?}")))?;
+        validate_count(key, index, min, max)?;
+        make_id(index).map(Some)
     }
 }

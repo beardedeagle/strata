@@ -222,7 +222,7 @@ Current process-reference boundaries:
 | Process references nested inside record, enum, list, map, or next-state payload templates | Rejected. A process reference must be the direct payload of a message that declares `ProcessRef<T>`. |
 | Message enums that carry direct `ProcessRef<T>` payloads as pure source values | Rejected. They are message authority surfaces, not source-local computation values. |
 | Process references in process state values or next-state templates | Rejected. Process states remain immutable source values without embedded runtime authority. |
-| Sending by process definition names, source strings, registries, dynamic worker pools, supervisor child sets, stale-reference semantics, restart semantics | Future actor-topology semantics. They require separate authority, lifetime, failure, and observability rules. |
+| Sending by process definition names, source strings, registries, dynamic worker pools, stale process-reference retargeting, remote supervision | Not supported. Lexical local supervisor child sends use admitted supervisor/child IDs, not strings. |
 
 Patterns are source-level syntax for typed value decomposition. The current
 runnable surface supports constructor patterns, constructor payload bindings,
@@ -312,6 +312,22 @@ declaration such as `authority spawn_worker: Cap<Spawn<Worker>>;`. The
 `! [spawn]` effect proves that the transition uses spawning; it does not prove
 which process may be spawned.
 
+Lexical local supervisor children are a separate authority path. Mantle starts
+static children declared by `supervise local one_for_one(...)` in declaration
+order, stops them in reverse declaration order when the owning process stops,
+and routes `send child_name Message;` through admitted supervisor and child IDs.
+Source checking, artifact validation, and loaded-runtime admission reject cyclic
+local supervisor child graphs before startup.
+Restarted children receive fresh runtime process IDs and rerun `init`; Mantle
+does not replay accepted messages, effects, or previous state after a crash.
+`permanent` children restart after normal stop or panic, `transient` children
+restart after panic only, and `temporary` children are not restarted. Restart
+intensity is enforced per supervisor plan. If restart intensity, runtime process
+capacity, or the default same-monotonic-tick throttle denies a restart, Mantle
+fails the supervisor scope and reports the scope failure in the runtime trace.
+Forced child-tree stops are reported with supervisor-specific stop reasons, not
+as source-level normal termination.
+
 | Effect | Statement |
 | --- | --- |
 | `emit` | `emit "text";` |
@@ -344,9 +360,10 @@ just mantle-inspect-authority target/strata/actor_emit_spawn_send.mta json
 ```
 
 Text output is intended for local review. JSON output is deterministic and uses
-typed process IDs, authority IDs, capability descriptors, and spawn-site IDs so
-CI and audit tooling can compare the source-side and artifact-side authority
-surfaces. Process and authority labels are included only as metadata.
+typed process IDs, authority IDs, capability descriptors, spawn-site IDs,
+supervisor IDs, supervisor child IDs, child modes, and restart-intensity fields
+so CI and audit tooling can compare the source-side and artifact-side authority
+surfaces. Process, authority, and child labels are included only as metadata.
 
 ## Step Patterns
 
@@ -563,10 +580,11 @@ capacity before accepting the message. Accepted sends are committed and return
 `Ok(Unit)`. Pre-acceptance local failures return `Err(Full(message))`,
 `Err(Stopped(message))`, `Err(Crashed(message))`, or
 `Err(MailboxClosed(message))` with the original message value preserved. The
-current local runtime can produce full, stopped, and already-failed crashed
-outcomes; it does not yet expose a distinct source-created closed-mailbox
-lifecycle. If the message carries a direct `ProcessRef<T>` payload, the failure
-outcome preserves the runtime process-reference metadata with the message value;
+current local runtime can produce full, stopped, and crashed outcomes,
+including inactive supervisor-child slots; it does not yet expose a distinct
+source-created closed-mailbox lifecycle. If the message carries a direct
+`ProcessRef<T>` payload, the failure outcome preserves the runtime
+process-reference metadata with the message value;
 it does not turn that authority into storable source state.
 
 For local spawn outcomes, accepted spawns commit the new process and return

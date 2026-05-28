@@ -44,7 +44,6 @@ impl MapKeySetKind {
 pub struct RuntimePayload {
     pub(crate) ty: TypeId,
     pub(crate) value: RuntimeValue,
-    label: String,
     pub(crate) process_ref: Option<ArtifactProcessRefPayload>,
 }
 
@@ -54,18 +53,16 @@ impl RuntimePayload {
         if let Some(process_ref) = payload.process_ref {
             let pid = RuntimeProcessId::from_u64(process_ref.pid)?;
             let value = RuntimeValue::process_ref(payload.ty, pid.as_u64());
-            let expected_label = value.label();
             if payload.value != value {
                 return Err(Error::new(format!(
                     "process reference payload value {} does not match metadata label {}",
                     payload.value.label(),
-                    expected_label
+                    value.label()
                 )));
             }
             return Ok(Self {
                 ty: payload.ty,
                 value,
-                label: expected_label,
                 process_ref: Some(process_ref),
             });
         }
@@ -77,7 +74,6 @@ impl RuntimePayload {
         Ok(Self {
             ty: payload.ty,
             value: payload.value.clone(),
-            label: payload.value.label(),
             process_ref: payload.process_ref,
         })
     }
@@ -109,7 +105,6 @@ impl RuntimePayload {
         }
         Ok(Self {
             ty,
-            label: value.label(),
             value,
             process_ref: None,
         })
@@ -124,7 +119,6 @@ impl RuntimePayload {
         value.validate("process reference payload value")?;
         Ok(Self {
             ty,
-            label: value.label(),
             value,
             process_ref: Some(ArtifactProcessRefPayload {
                 target_process,
@@ -143,7 +137,6 @@ impl RuntimePayload {
         validate_single_embedded_process_ref(&value, pid.as_u64())?;
         Ok(Self {
             ty,
-            label: value.label(),
             value,
             process_ref: Some(ArtifactProcessRefPayload {
                 target_process,
@@ -156,8 +149,16 @@ impl RuntimePayload {
         self.ty
     }
 
-    pub fn label(&self) -> &str {
-        self.label.as_str()
+    pub fn label(&self) -> String {
+        self.value.label()
+    }
+
+    pub(crate) fn write_label(&self, output: &mut String) {
+        self.value.write_label(output);
+    }
+
+    pub(crate) fn label_len(&self) -> Result<usize> {
+        self.value.label_len()
     }
 
     pub fn process_ref(&self) -> Option<ArtifactProcessRefPayload> {
@@ -195,7 +196,7 @@ impl LoadedStateValue {
     }
 
     pub(crate) fn from_payload(payload: RuntimePayload) -> Self {
-        let label = payload.label;
+        let label = payload.label();
         Self {
             ty: payload.ty,
             value: payload.value,

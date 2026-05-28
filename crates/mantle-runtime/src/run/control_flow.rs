@@ -27,7 +27,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         condition: &LoadedValueTemplate,
         local_process_refs: &LocalProcessRefs,
-        loop_elements: &[RuntimeLoopElement],
+        loop_elements: &[RuntimeLoopElement<'_>],
         effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<(ArtifactBranch, RuntimePayload)> {
         let condition_value = evaluate_runtime_template(
@@ -95,7 +95,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         scope: RuntimeBranchScope,
         branch_path: RuntimeBranchPath,
-        loop_elements: &[RuntimeLoopElement],
+        loop_elements: &[RuntimeLoopElement<'_>],
         branch: ArtifactBranch,
         condition: &RuntimePayload,
     ) -> Result<()> {
@@ -114,7 +114,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 index: element.index,
             }),
             condition_type_id: condition.ty,
-            condition: condition.label().to_string(),
+            condition: condition.label(),
         })
     }
 
@@ -169,7 +169,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             element_id,
             index,
             element_type_id: element.ty,
-            element: element.label().to_string(),
+            element: element.label(),
         })
     }
 
@@ -208,7 +208,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             let active = [RuntimeLoopElement {
                 id: element.id,
                 index,
-                payload: payload.clone(),
+                payload,
             }];
             for action in body {
                 self.preflight_loop_action(
@@ -229,7 +229,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         local_process_refs: &LocalProcessRefs,
         step: &ActiveStep,
         action: &LoadedAction,
-        loop_elements: &[RuntimeLoopElement],
+        loop_elements: &[RuntimeLoopElement<'_>],
         effect_outcomes: &[RuntimeEffectOutcome],
         queued_mailbox_messages: &mut Option<Vec<usize>>,
     ) -> Result<()> {

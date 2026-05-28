@@ -2,9 +2,9 @@ pub(super) use super::super::ast::EnumVariant;
 pub(super) use super::super::checked::{
     CheckedAction, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedMessageId,
     CheckedNextState, CheckedOutputId, CheckedProcess, CheckedProcessId, CheckedProcessRefId,
-    CheckedSendTarget, CheckedSpawnSiteId, CheckedStateId, CheckedStepResult, CheckedTransition,
-    CheckedTypeKind, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
-    CheckedValueTemplate,
+    CheckedSendTarget, CheckedSpawnKind, CheckedSpawnSiteId, CheckedStateId, CheckedStepResult,
+    CheckedSupervisorChildMode, CheckedTransition, CheckedTypeKind, CheckedValueBooleanOperator,
+    CheckedValueEqualityOperator, CheckedValueTemplate,
 };
 pub(super) use super::super::lexer::{Lexer, TokenKind};
 pub(super) use super::super::*;
@@ -13,9 +13,9 @@ pub(super) use mantle_artifact::{
     ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
     ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_EFFECT_OUTCOMES_PER_TRANSITION,
     MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState, ProcessId,
-    ProcessRefId, StepResult, TypeId,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_SPAWN_SITES_PER_PROCESS,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact,
+    MessageId, NextState, ProcessId, ProcessRefId, StepResult, TypeId,
 };
 
 pub(super) use super::fixtures::*;
@@ -125,6 +125,7 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
             state_type: state_type.clone(),
             msg_type: TypeRef::Named(ident(msg_name)),
             authorities: Vec::new(),
+            supervisors: Vec::new(),
             init: Function {
                 name: ident("init"),
                 params: Vec::new(),

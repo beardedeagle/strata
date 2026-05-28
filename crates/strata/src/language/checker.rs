@@ -8,14 +8,17 @@ mod source_functions;
 mod state_space;
 mod static_validation;
 mod steps;
+mod supervision;
 mod symbols;
 mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use mantle_artifact::{
     ArtifactValue, MAX_ACTIONS_PER_PROCESS, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_PROCESS_COUNT, MAX_STATE_VALUES_PER_PROCESS, MapProjectionMode,
+    MAX_PROCESS_COUNT, MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
+    MapProjectionMode,
 };
 
 use super::ast::{
@@ -25,6 +28,7 @@ use super::ast::{
     Module, Param, Pattern, Process, Record, RecordPatternField, RecordValue, RecordValueField,
     ReturnExpr, Statement, TypeRef, ValueExpr,
 };
+pub(in crate::language::checker) use super::checked::CheckedCapabilityDescriptor;
 use super::checked::{
     CheckedAction, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,
     CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
@@ -32,9 +36,6 @@ use super::checked::{
     CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedSendTarget, CheckedStateId,
     CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeRef,
     CheckedValueTemplate, checked_action_count,
-};
-pub(in crate::language::checker) use super::checked::{
-    CheckedCapabilityDescriptor, CheckedSpawnSite,
 };
 use super::diagnostic::{Error, Result};
 use super::{LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
@@ -55,6 +56,7 @@ use state_space::{
 };
 use static_validation::validate_action_references;
 use steps::{check_step, pattern_binding_subject, validate_pattern_binding_name};
+use supervision::{SupervisorChildBinding, check_supervisors};
 use symbols::{CollectionType, SemanticIndex};
 use types::CheckedTypeInterner;
 
@@ -89,6 +91,7 @@ struct StepCheckContext<'a> {
     process_id: CheckedProcessId,
     semantic_index: &'a SemanticIndex,
     process_ref_index: &'a BTreeMap<Identifier, ProcessRefBinding>,
+    supervisor_child_index: &'a BTreeMap<Identifier, SupervisorChildBinding>,
     authority_index: &'a BTreeMap<Identifier, AuthorityBinding>,
     message_cases: &'a MessageCaseTable,
 }
@@ -194,11 +197,11 @@ enum PayloadProjectionSegmentKind {
     },
     MapValue {
         key: ArtifactValue,
-        keys: Vec<ArtifactValue>,
+        keys: Arc<[ArtifactValue]>,
         projection: MapProjectionMode,
     },
     MapRest {
-        excluded_keys: Vec<ArtifactValue>,
+        excluded_keys: Arc<[ArtifactValue]>,
     },
 }
 
@@ -241,7 +244,7 @@ impl PayloadProjectionSegment {
     fn map_value(
         ty: TypeRef,
         key: ArtifactValue,
-        keys: Vec<ArtifactValue>,
+        keys: Arc<[ArtifactValue]>,
         projection: MapProjectionMode,
     ) -> Self {
         Self {
@@ -254,7 +257,7 @@ impl PayloadProjectionSegment {
         }
     }
 
-    fn map_rest(ty: TypeRef, excluded_keys: Vec<ArtifactValue>) -> Self {
+    fn map_rest(ty: TypeRef, excluded_keys: Arc<[ArtifactValue]>) -> Self {
         Self {
             ty,
             kind: PayloadProjectionSegmentKind::MapRest { excluded_keys },
@@ -308,7 +311,7 @@ struct NestedPatternBindingScope<'a, 'seen> {
     semantic_index: &'a SemanticIndex,
     binding_context: PatternBindingContext<'a>,
     context: &'a str,
-    seen_bindings: &'seen mut BTreeSet<String>,
+    seen_bindings: &'seen mut BTreeSet<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -605,12 +608,30 @@ fn check_process<'a>(
         semantic_index: context.semantic_index,
         message_cases: context.message_cases,
     };
-    let (process_refs, spawn_sites, transitions) = check_step(
+    let mut spawn_sites = SpawnSiteAllocator::default();
+    let (supervisor_plans, supervisor_child_index) = check_supervisors(
+        context.module,
+        context.semantic_index,
+        process,
+        process_id,
+        context.entry_process,
+        &mut spawn_sites,
+    )?;
+    let (process_refs, transitions) = check_step(
         &process_context,
         &authority_index,
+        &supervisor_child_index,
+        &mut spawn_sites,
         &mut state_space,
         outputs,
         types,
+    )?;
+    let spawn_sites = spawn_sites.into_sites();
+    validate_count(
+        &format!("process {} spawn_site_count", process.name),
+        spawn_sites.len(),
+        0,
+        MAX_SPAWN_SITES_PER_PROCESS,
     )?;
     validate_authority_usage(process, &authorities, &spawn_sites)?;
     let state_values = state_space.into_values()?;
@@ -629,6 +650,7 @@ fn check_process<'a>(
         },
         authorities,
         spawn_sites,
+        supervisor_plans,
     ))
 }
 

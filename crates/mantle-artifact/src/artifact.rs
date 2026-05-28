@@ -31,7 +31,7 @@ use crate::{
     MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
     MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
     MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId,
-    ProcessRefId, Result, SpawnSiteId, StateId, TypeId,
+    ProcessRefId, Result, SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -368,6 +368,7 @@ pub struct ArtifactProcess {
     pub message_variants: Vec<ArtifactMessageVariant>,
     pub authorities: Vec<ArtifactAuthority>,
     pub spawn_sites: Vec<ArtifactSpawnSite>,
+    pub supervisor_plans: Vec<ArtifactSupervisorPlan>,
     pub process_refs: Vec<ArtifactProcessRef>,
     pub mailbox_bound: usize,
     pub init_state: StateId,
@@ -396,18 +397,21 @@ impl ArtifactCapabilityDescriptor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactSpawnKind {
     DynamicLocal,
+    LexicalSupervisorChild,
 }
 
 impl ArtifactSpawnKind {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::DynamicLocal => "dynamic_local",
+            Self::LexicalSupervisorChild => "lexical_supervisor_child",
         }
     }
 
     pub(crate) fn parse(value: &str) -> Result<Self> {
         match value {
             "dynamic_local" => Ok(Self::DynamicLocal),
+            "lexical_supervisor_child" => Ok(Self::LexicalSupervisorChild),
             _ => Err(Error::new(format!("invalid spawn_kind value {value:?}"))),
         }
     }
@@ -416,8 +420,81 @@ impl ArtifactSpawnKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactSpawnSite {
     pub target: ProcessId,
-    pub authority: AuthorityId,
+    pub authority: Option<AuthorityId>,
+    pub supervisor: Option<SupervisorId>,
+    pub child: Option<SupervisorChildId>,
     pub kind: ArtifactSpawnKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactSupervisorPlan {
+    pub strategy: ArtifactSupervisorStrategy,
+    pub intensity: ArtifactSupervisorRestartIntensity,
+    pub children: Vec<ArtifactSupervisorChild>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactSupervisorStrategy {
+    OneForOne,
+}
+
+impl ArtifactSupervisorStrategy {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::OneForOne => "one_for_one",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self> {
+        match value {
+            "one_for_one" => Ok(Self::OneForOne),
+            _ => Err(Error::new(format!(
+                "invalid supervisor strategy value {value:?}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtifactSupervisorRestartIntensity {
+    pub max_restarts: u32,
+    pub within_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactSupervisorChild {
+    pub debug_name: String,
+    pub target: ProcessId,
+    pub mode: ArtifactSupervisorChildMode,
+    pub spawn_site: SpawnSiteId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactSupervisorChildMode {
+    Permanent,
+    Transient,
+    Temporary,
+}
+
+impl ArtifactSupervisorChildMode {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Permanent => "permanent",
+            Self::Transient => "transient",
+            Self::Temporary => "temporary",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self> {
+        match value {
+            "permanent" => Ok(Self::Permanent),
+            "transient" => Ok(Self::Transient),
+            "temporary" => Ok(Self::Temporary),
+            _ => Err(Error::new(format!(
+                "invalid supervisor child mode value {value:?}"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -609,6 +686,11 @@ fn action_count_at_depth(actions: &[ArtifactAction], depth: usize) -> Result<usi
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactSendTarget {
     ProcessRef(ProcessRefId),
+    SupervisorChild {
+        supervisor: SupervisorId,
+        child: SupervisorChildId,
+        target_process: ProcessId,
+    },
     ReceivedPayload {
         ty: TypeId,
         target_process: ProcessId,

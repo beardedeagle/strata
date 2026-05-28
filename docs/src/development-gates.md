@@ -84,10 +84,12 @@ just ci-local
 
 ## Performance Smoke
 
-`just performance-smoke` runs a stable in-memory source-to-runtime resource
-smoke test over `examples/collection_state.str`. It measures repeated Strata
-checking and lowering, then repeated Mantle in-memory execution of the lowered
-artifact.
+`just performance-smoke` runs stable source-to-runtime resource smoke profiles
+over `examples/collection_state.str` and the local supervision restart example.
+It measures repeated Strata checking and lowering, Mantle artifact
+encode/decode, repeated Mantle in-memory execution of the collection-state
+artifact, repeated Mantle JSONL-trace execution of the collection-state
+artifact, and repeated Mantle in-memory execution of the supervision artifact.
 
 The smoke output reports wall time, allocation/deallocation counts, allocated
 and deallocated bytes, interval-relative live-byte metrics, process CPU time
@@ -113,10 +115,45 @@ measurements to their logs; git tracks reviewed baseline changes, not every
 noisy raw run. The baseline file uses strict `key=value` entries with
 nanosecond, KiB, byte, and count units.
 
+For RSS attribution, use the fresh-process comparison harness instead of the
+ordinary smoke run. `just performance-rss-compare <base-worktree>
+<current-worktree>` installs a temporary probe test into both worktrees, runs
+one named profile per test process, repeats each profile, and reports median,
+minimum, maximum, and p90 current-RSS deltas in KiB. This keeps profile-order,
+test-binary, and allocator-retained-page effects separate from the ordinary
+multi-profile smoke gate.
+
+The default RSS comparison profiles cover collection-state checking/lowering
+and in-memory runtime execution. To attribute local-supervision RSS, pass
+`local_supervision_restart.in_memory_runtime` explicitly after the two
+worktrees; both worktrees must contain `examples/local_supervision_restart.str`.
+
+For product-footprint attribution, use `just performance-cli-footprint-compare
+<base-worktree> <current-worktree>`. It builds the release Strata and Mantle CLI
+binaries in both worktrees, compares release binary file sizes, then repeats
+fresh-process product commands for `strata check`, `strata build`, and
+`mantle run` over `examples/collection_state.str` under a minimal environment.
+The reported CLI RSS values come from the operating system process for each
+command; they are closer to product footprint than test-harness RSS, but they
+still are not per-Mantle-actor memory. The harness also writes metadata with the
+compared worktrees, HEADs, platform, run count, and clean-environment policy.
+
 Useful local command:
 
 ```sh
 just performance-smoke
+```
+
+Useful RSS comparison command:
+
+```sh
+just performance-rss-compare /tmp/strata-base .
+```
+
+Useful product CLI footprint command:
+
+```sh
+just performance-cli-footprint-compare /tmp/strata-base .
 ```
 
 ## Fuzzing

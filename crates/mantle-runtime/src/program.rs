@@ -26,16 +26,18 @@ mod values;
 use mantle_artifact::{
     ArtifactAction, ArtifactAuthority, ArtifactCapabilityDescriptor, ArtifactEnumVariant,
     ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactScalarType,
-    ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite, ArtifactTransition, ArtifactType,
-    ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape, AuthorityId, EffectOutcomeId,
-    EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_AUTHORITIES_PER_PROCESS,
+    ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite, ArtifactSupervisorChildMode,
+    ArtifactSupervisorStrategy, ArtifactTransition, ArtifactType, ArtifactTypeField,
+    ArtifactTypeKind, ArtifactValueShape, AuthorityId, EffectOutcomeId, EnumVariantId, Error,
+    LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_AUTHORITIES_PER_PROCESS,
     MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS,
     MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS, MAX_SPAWN_SITES_PER_PROCESS,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR,
+    MAX_SUPERVISORS_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
     MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, Result, SpawnSiteId, StateId, StepResult, TypeId,
-    validate_message_label, validate_state_value_identity_label,
+    OutputId, ProcessId, ProcessRefId, Result, SpawnSiteId, StateId, StepResult, SupervisorChildId,
+    SupervisorId, TypeId, validate_message_label, validate_state_value_identity_label,
 };
 
 #[derive(Debug, Clone)]
@@ -360,6 +362,7 @@ impl LoadedProgram {
         for (process_index, process) in self.processes.iter().enumerate() {
             process.validate_admission(self, ProcessId::from_index(process_index)?)?;
         }
+        self.validate_supervision_graph_acyclic()?;
         Ok(())
     }
 }
@@ -373,6 +376,7 @@ pub(crate) struct LoadedProcess {
     pub(crate) message_variants: Vec<LoadedMessageVariant>,
     pub(crate) authorities: Vec<LoadedAuthority>,
     pub(crate) spawn_sites: Vec<LoadedSpawnSite>,
+    pub(crate) supervisor_plans: Vec<LoadedSupervisorPlan>,
     pub(crate) process_refs: Vec<LoadedProcessRef>,
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
@@ -411,12 +415,15 @@ impl LoadedCapabilityDescriptor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoadedSpawnKind {
     DynamicLocal,
+    LexicalSupervisorChild,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoadedSpawnSite {
     pub(crate) target: ProcessId,
-    pub(crate) authority: AuthorityId,
+    pub(crate) authority: Option<AuthorityId>,
+    pub(crate) supervisor: Option<SupervisorId>,
+    pub(crate) child: Option<SupervisorChildId>,
     pub(crate) kind: LoadedSpawnKind,
 }
 
@@ -425,11 +432,83 @@ impl LoadedSpawnSite {
         Self {
             target: spawn_site.target,
             authority: spawn_site.authority,
+            supervisor: spawn_site.supervisor,
+            child: spawn_site.child,
             kind: match spawn_site.kind {
                 ArtifactSpawnKind::DynamicLocal => LoadedSpawnKind::DynamicLocal,
+                ArtifactSpawnKind::LexicalSupervisorChild => {
+                    LoadedSpawnKind::LexicalSupervisorChild
+                }
             },
         }
     }
+}
+
+impl LoadedSupervisorPlan {
+    fn from_artifact(plan: &mantle_artifact::ArtifactSupervisorPlan) -> Self {
+        Self {
+            strategy: match plan.strategy {
+                ArtifactSupervisorStrategy::OneForOne => LoadedSupervisorStrategy::OneForOne,
+            },
+            intensity: LoadedSupervisorRestartIntensity {
+                max_restarts: plan.intensity.max_restarts,
+                within_ms: plan.intensity.within_ms,
+            },
+            children: plan
+                .children
+                .iter()
+                .map(LoadedSupervisorChild::from_artifact)
+                .collect(),
+        }
+    }
+}
+
+impl LoadedSupervisorChild {
+    fn from_artifact(child: &mantle_artifact::ArtifactSupervisorChild) -> Self {
+        Self {
+            debug_name: child.debug_name.clone(),
+            target: child.target,
+            mode: match child.mode {
+                ArtifactSupervisorChildMode::Permanent => LoadedSupervisorChildMode::Permanent,
+                ArtifactSupervisorChildMode::Transient => LoadedSupervisorChildMode::Transient,
+                ArtifactSupervisorChildMode::Temporary => LoadedSupervisorChildMode::Temporary,
+            },
+            spawn_site: child.spawn_site,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedSupervisorPlan {
+    pub(crate) strategy: LoadedSupervisorStrategy,
+    pub(crate) intensity: LoadedSupervisorRestartIntensity,
+    pub(crate) children: Vec<LoadedSupervisorChild>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoadedSupervisorStrategy {
+    OneForOne,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LoadedSupervisorRestartIntensity {
+    pub(crate) max_restarts: u32,
+    pub(crate) within_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoadedSupervisorChild {
+    pub(crate) debug_name: String,
+    pub(crate) target: ProcessId,
+    pub(crate) mode: LoadedSupervisorChildMode,
+    pub(crate) spawn_site: SpawnSiteId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoadedSupervisorChildMode {
+    Permanent,
+    Transient,
+    Temporary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

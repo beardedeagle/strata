@@ -4,7 +4,7 @@ use std::num::NonZeroU64;
 use mantle_artifact::{
     ArtifactBranch, AuthorityId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
     MAX_VALUE_TEMPLATE_DEPTH, MessageId, OutputId, ProcessId, Result, SpawnSiteId, StateId,
-    StepResult, TypeId,
+    StepResult, SupervisorChildId, SupervisorId, TypeId,
 };
 
 use crate::program::RuntimePayload;
@@ -278,6 +278,37 @@ pub enum RuntimeEvent {
         state: String,
         reason: RuntimeFailureReason,
     },
+    SupervisorChildStarted {
+        supervisor_pid: RuntimeProcessId,
+        supervisor_process_id: ProcessId,
+        supervisor_process: String,
+        supervisor_id: SupervisorId,
+        child_id: SupervisorChildId,
+        child: String,
+        child_pid: RuntimeProcessId,
+        child_process_id: ProcessId,
+        child_process: String,
+        spawn_site_id: SpawnSiteId,
+        spawn_kind: RuntimeSpawnKind,
+    },
+    SupervisorRestartDecision {
+        supervisor_pid: RuntimeProcessId,
+        supervisor_process_id: ProcessId,
+        supervisor_process: String,
+        supervisor_id: SupervisorId,
+        child_id: SupervisorChildId,
+        child: String,
+        child_pid: RuntimeProcessId,
+        child_process_id: ProcessId,
+        child_process: String,
+        reason: RuntimeSupervisorExitReason,
+        decision: RuntimeSupervisorRestartDecision,
+        restart_time_ms: Option<u64>,
+        restart_window_count: usize,
+        restart_window_limit: u32,
+        restart_window_ms: u64,
+        new_child_pid: Option<RuntimeProcessId>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,12 +320,46 @@ pub enum RuntimeBranchScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeSpawnKind {
     DynamicLocal,
+    LexicalSupervisorChild,
 }
 
 impl RuntimeSpawnKind {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::DynamicLocal => "dynamic_local",
+            Self::LexicalSupervisorChild => "lexical_supervisor_child",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeSupervisorExitReason {
+    Normal,
+    Panic,
+}
+
+impl RuntimeSupervisorExitReason {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Panic => "panic",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeSupervisorRestartDecision {
+    Restarted,
+    NotRestarted,
+    Denied,
+}
+
+impl RuntimeSupervisorRestartDecision {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Restarted => "restarted",
+            Self::NotRestarted => "not_restarted",
+            Self::Denied => "denied",
         }
     }
 }
@@ -326,26 +391,32 @@ impl RuntimeBranchScope {
 #[derive(Debug)]
 pub struct RuntimeEventRecord {
     event: RuntimeEvent,
-    jsonl_line: String,
+    jsonl_line_len: usize,
 }
 
 impl RuntimeEventRecord {
-    pub fn new(event: RuntimeEvent) -> Self {
-        let jsonl_line = jsonl::encode_json_line(&event);
-        Self { event, jsonl_line }
+    pub fn new(event: RuntimeEvent) -> Result<Self> {
+        let jsonl_line_len = jsonl::encoded_json_line_len(&event)?;
+        Ok(Self {
+            event,
+            jsonl_line_len,
+        })
     }
 
     pub fn event(&self) -> &RuntimeEvent {
         &self.event
     }
 
-    pub(crate) fn jsonl_line(&self) -> &str {
-        &self.jsonl_line
+    pub(crate) fn into_event(self) -> RuntimeEvent {
+        self.event
+    }
+
+    pub(crate) fn write_jsonl_line(&self, writer: &mut impl std::io::Write) -> Result<()> {
+        jsonl::write_json_line_to_io(&self.event, writer)
     }
 
     pub(crate) fn jsonl_line_bytes_with_newline(&self) -> Result<usize> {
-        self.jsonl_line()
-            .len()
+        self.jsonl_line_len
             .checked_add(1)
             .ok_or_else(|| Error::new("runtime trace event size overflowed"))
     }
@@ -394,12 +465,16 @@ impl From<StepResult> for RuntimeStepResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeStopReason {
     Normal,
+    SupervisorShutdown,
+    SupervisorFailure,
 }
 
 impl RuntimeStopReason {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Normal => "normal",
+            Self::SupervisorShutdown => "supervisor_shutdown",
+            Self::SupervisorFailure => "supervisor_failure",
         }
     }
 }
@@ -407,12 +482,18 @@ impl RuntimeStopReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeFailureReason {
     Panic,
+    SupervisorRestartCapacityExceeded,
+    SupervisorRestartIntensityExceeded,
+    SupervisorRestartThrottled,
 }
 
 impl RuntimeFailureReason {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Panic => "panic",
+            Self::SupervisorRestartCapacityExceeded => "supervisor_restart_capacity_exceeded",
+            Self::SupervisorRestartIntensityExceeded => "supervisor_restart_intensity_exceeded",
+            Self::SupervisorRestartThrottled => "supervisor_restart_throttled",
         }
     }
 }

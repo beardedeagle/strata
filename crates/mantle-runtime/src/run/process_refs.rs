@@ -1,15 +1,26 @@
-use mantle_artifact::{Error, ProcessId, ProcessRefId, Result};
+use mantle_artifact::{Error, ProcessId, ProcessRefId, Result, SupervisorChildId, SupervisorId};
 
 use super::RuntimeRun;
-use super::model::{ActiveStep, RuntimeMessageEnvelope};
+use super::delivery::DeliveryPreflightFailure;
+use super::model::{ActiveStep, RuntimeMessageEnvelope, RuntimeSupervisorRef};
 use crate::event::RuntimeProcessId;
 use crate::host::RuntimeHost;
 use crate::program::LoadedSendTarget;
+use crate::report::ProcessStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LocalProcessRefs {
     process_ref_count: usize,
     pids: Option<Vec<Option<RuntimeProcessId>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SendOutcomeTarget {
+    Active(RuntimeProcessId),
+    InactiveSupervisorChild {
+        target_process: ProcessId,
+        failure: DeliveryPreflightFailure,
+    },
 }
 
 impl LocalProcessRefs {
@@ -70,6 +81,22 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             LoadedSendTarget::ProcessRef(process_ref) => {
                 self.resolve_process_ref(local_process_refs, step, *process_ref)
             }
+            LoadedSendTarget::SupervisorChild {
+                supervisor,
+                child,
+                target_process,
+            } => {
+                let pid = self
+                    .resolve_supervisor_child_pid(step, *supervisor, *child, *target_process)?
+                    .ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} sends to inactive supervisor child id {}",
+                            step.process_name,
+                            child.as_u32()
+                        ))
+                    })?;
+                Ok(pid)
+            }
             LoadedSendTarget::ReceivedPayload { ty, target_process } => {
                 let payload = step.payload.as_ref().ok_or_else(|| {
                     Error::new("received process reference send target requires a payload")
@@ -93,6 +120,139 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 }
                 Ok(RuntimeProcessId::from_u64(process_ref.pid)?)
             }
+        }
+    }
+
+    pub(super) fn resolve_send_outcome_target(
+        &self,
+        local_process_refs: &LocalProcessRefs,
+        step: &ActiveStep,
+        target: &LoadedSendTarget,
+    ) -> Result<SendOutcomeTarget> {
+        match target {
+            LoadedSendTarget::SupervisorChild {
+                supervisor,
+                child,
+                target_process,
+            } => match self.resolve_supervisor_child_pid(
+                step,
+                *supervisor,
+                *child,
+                *target_process,
+            )? {
+                Some(pid) => Ok(SendOutcomeTarget::Active(pid)),
+                None => Ok(SendOutcomeTarget::InactiveSupervisorChild {
+                    target_process: *target_process,
+                    failure: self.inactive_supervisor_child_failure(
+                        step.pid,
+                        RuntimeSupervisorRef {
+                            supervisor: *supervisor,
+                            child: *child,
+                        },
+                        *target_process,
+                    )?,
+                }),
+            },
+            LoadedSendTarget::ProcessRef(_) | LoadedSendTarget::ReceivedPayload { .. } => {
+                Ok(SendOutcomeTarget::Active(self.resolve_send_target(
+                    local_process_refs,
+                    step,
+                    target,
+                )?))
+            }
+        }
+    }
+
+    fn resolve_supervisor_child_pid(
+        &self,
+        step: &ActiveStep,
+        supervisor: SupervisorId,
+        child: SupervisorChildId,
+        target_process: ProcessId,
+    ) -> Result<Option<RuntimeProcessId>> {
+        let owner = self.program.process(step.process_id)?;
+        let child_plan = owner
+            .supervisor_plans
+            .get(supervisor.index())
+            .and_then(|plan| plan.children.get(child.index()))
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} references undefined supervisor child id {}",
+                    step.process_name,
+                    child.as_u32()
+                ))
+            })?;
+        if child_plan.target != target_process {
+            return Err(Error::new(format!(
+                "supervisor child id {} targets process id {}, expected {}",
+                child.as_u32(),
+                child_plan.target.as_u32(),
+                target_process.as_u32()
+            )));
+        }
+
+        let process_index = self.process_index_for_pid(step.pid)?;
+        let child_state = self
+            .processes
+            .get(process_index)
+            .and_then(|process| process.supervisors.get(supervisor.index()))
+            .and_then(|supervisor_state| supervisor_state.children.get(child.index()))
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} runtime supervisor child id {} is not loaded",
+                    step.process_name,
+                    child.as_u32()
+                ))
+            })?;
+        let Some(pid) = child_state.current_pid else {
+            return Ok(None);
+        };
+        let child_index = self.process_index_for_pid(pid)?;
+        let child_process = self
+            .processes
+            .get(child_index)
+            .ok_or_else(|| Error::new("resolved supervisor child disappeared"))?;
+        if child_process.process_id != target_process {
+            return Err(Error::new(format!(
+                "supervisor child id {} targets process id {}, expected {}",
+                child.as_u32(),
+                child_process.process_id.as_u32(),
+                target_process.as_u32()
+            )));
+        }
+        Ok(Some(pid))
+    }
+
+    fn inactive_supervisor_child_failure(
+        &self,
+        supervisor_pid: RuntimeProcessId,
+        child_ref: RuntimeSupervisorRef,
+        target_process: ProcessId,
+    ) -> Result<DeliveryPreflightFailure> {
+        let Some(process) = self
+            .processes
+            .iter()
+            .rev()
+            .find(|process| process.supervisor_parent == Some((supervisor_pid, child_ref)))
+        else {
+            return Ok(DeliveryPreflightFailure::Stopped);
+        };
+        if process.process_id != target_process {
+            return Err(Error::new(format!(
+                "inactive supervisor child id {} targets process id {}, expected {}",
+                child_ref.child.as_u32(),
+                process.process_id.as_u32(),
+                target_process.as_u32()
+            )));
+        }
+        match process.status {
+            ProcessStatus::Running => Err(Error::new(format!(
+                "inactive supervisor child id {} still has running pid {}",
+                child_ref.child.as_u32(),
+                process.pid
+            ))),
+            ProcessStatus::Stopped => Ok(DeliveryPreflightFailure::Stopped),
+            ProcessStatus::Failed => Ok(DeliveryPreflightFailure::Crashed),
         }
     }
 

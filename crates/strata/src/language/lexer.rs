@@ -170,44 +170,43 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_ident(&mut self) -> Result<String> {
-        let mut ident = String::new();
+        let start = self.offset;
         while let Some((_, ch)) = self.peek_char() {
             if is_ident_continue(ch) {
-                ident.push(ch);
                 self.bump_char();
             } else {
                 break;
             }
         }
-        if ident.is_empty() {
+        if self.offset == start {
             Err(Error::new(format!(
                 "expected identifier at byte {}",
                 self.offset
             )))
         } else {
-            Ok(ident)
+            Ok(self.source[start..self.offset].to_string())
         }
     }
 
     fn read_number(&mut self) -> String {
-        let mut number = String::new();
+        let start = self.offset;
         while let Some((_, ch)) = self.peek_char() {
             if ch.is_ascii_digit() {
-                number.push(ch);
                 self.bump_char();
             } else {
                 break;
             }
         }
-        number
+        self.source[start..self.offset].to_string()
     }
 
     fn read_string_literal(&mut self, start: usize) -> Result<String> {
         self.bump_char();
-        let mut literal = String::new();
+        let literal_start = self.offset;
         while let Some((offset, ch)) = self.peek_char() {
             match ch {
                 '"' => {
+                    let literal = self.source[literal_start..offset].to_string();
                     self.bump_char();
                     return Ok(literal);
                 }
@@ -222,7 +221,6 @@ impl<'a> Lexer<'a> {
                     )));
                 }
                 _ => {
-                    literal.push(ch);
                     self.bump_char();
                 }
             }
