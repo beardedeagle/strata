@@ -17,6 +17,7 @@ fn write_artifact_rejects_invalid_artifacts_before_writing() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn write_artifact_accepts_current_directory_output_path() {
     let path = unique_current_dir_artifact_path("artifact-current-dir");
@@ -30,6 +31,7 @@ fn write_artifact_accepts_current_directory_output_path() {
     fs::remove_file(path).expect("test artifact should be removed");
 }
 
+#[cfg(unix)]
 #[test]
 fn write_artifact_rejects_directory_path_before_opening() {
     let path = unique_current_dir_artifact_path("artifact-write-directory");
@@ -105,6 +107,7 @@ fn write_artifact_rejects_symlink_parent_path() {
     fs::remove_dir(real_dir).expect("test real dir should be removed");
 }
 
+#[cfg(unix)]
 #[test]
 fn read_artifact_rejects_oversized_file() {
     let path = unique_current_dir_artifact_path("artifact-too-large");
@@ -118,6 +121,7 @@ fn read_artifact_rejects_oversized_file() {
     fs::remove_file(path).expect("test artifact should be removed");
 }
 
+#[cfg(unix)]
 #[test]
 fn read_artifact_rejects_directory_path_before_opening() {
     let path = unique_current_dir_artifact_path("artifact-directory");
@@ -128,6 +132,35 @@ fn read_artifact_rejects_directory_path_before_opening() {
     assert!(err.to_string().contains("is not a regular file"));
 
     fs::remove_dir(path).expect("test artifact dir should be removed");
+}
+
+#[cfg(not(unix))]
+#[test]
+fn artifact_io_fails_closed_without_secure_file_identity_support() {
+    let output = unique_current_dir_artifact_path("artifact-unsupported-output");
+    let artifact = valid_artifact();
+
+    let write_err =
+        write_artifact(&output, &artifact).expect_err("unsupported artifact write should fail");
+
+    assert!(
+        write_err
+            .to_string()
+            .contains("secure file identity support")
+    );
+    assert!(!output.exists(), "unsupported write must not create output");
+
+    let input = unique_current_dir_artifact_path("artifact-unsupported-input");
+    fs::write(&input, artifact.encode()).expect("test artifact should be written");
+
+    let read_err = read_artifact(&input).expect_err("unsupported artifact read should fail");
+
+    assert!(
+        read_err
+            .to_string()
+            .contains("secure file identity support")
+    );
+    fs::remove_file(input).expect("test artifact should be removed");
 }
 
 #[cfg(unix)]
