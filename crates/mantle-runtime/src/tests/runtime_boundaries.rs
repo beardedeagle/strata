@@ -50,6 +50,7 @@ fn runtime_rejects_blocked_trace_sink_before_returning_run_report() {
     let _ = fs::remove_dir(dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn run_artifact_path_writes_trace_for_current_directory_artifact() {
     let artifact_path = unique_current_dir_artifact_path("runtime-current-dir");
@@ -70,6 +71,26 @@ fn run_artifact_path_writes_trace_for_current_directory_artifact() {
 
     fs::remove_file(artifact_path).expect("test artifact should be removed");
     fs::remove_file(trace_path).expect("test trace should be removed");
+}
+
+#[cfg(not(unix))]
+#[test]
+fn run_artifact_path_fails_closed_without_secure_file_identity_support() {
+    let artifact_path = unique_current_dir_artifact_path("runtime-unsupported-artifact-io");
+    let trace_path = artifact_path.with_extension("observability.jsonl");
+    let artifact = valid_artifact();
+
+    fs::write(&artifact_path, artifact.encode()).expect("test artifact should be written");
+
+    let err = run_artifact_path(&artifact_path).expect_err("unsupported artifact read should fail");
+
+    assert!(
+        err.to_string().contains("secure file identity support"),
+        "unexpected error: {err}"
+    );
+    assert!(!trace_path.exists(), "trace path must not be created");
+
+    fs::remove_file(artifact_path).expect("test artifact should be removed");
 }
 
 #[test]
