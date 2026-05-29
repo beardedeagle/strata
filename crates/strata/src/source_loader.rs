@@ -381,10 +381,22 @@ fn open_source_file(path: &Path) -> Result<(fs::File, fs::Metadata)> {
 
 #[cfg(windows)]
 fn open_source_file(path: &Path) -> Result<(fs::File, fs::Metadata)> {
-    let file = open_source_file_handle(path)?;
-    let metadata = file.metadata()?;
-    validate_source_file_metadata(path, &metadata)?;
-    Ok((file, metadata))
+    match open_source_file_handle(path) {
+        Ok(file) => {
+            let metadata = file.metadata()?;
+            validate_source_file_metadata(path, &metadata)?;
+            Ok((file, metadata))
+        }
+        Err(open_err) => {
+            if fs::symlink_metadata(path)
+                .map(|metadata| validate_source_file_metadata(path, &metadata).is_err())
+                .unwrap_or(false)
+            {
+                return Err(non_regular_source_path_error(path));
+            }
+            Err(open_err.into())
+        }
+    }
 }
 
 #[cfg(all(not(unix), not(windows)))]
