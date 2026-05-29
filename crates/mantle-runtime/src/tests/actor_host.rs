@@ -1,5 +1,6 @@
 use super::support::*;
 
+#[cfg(any(unix, windows))]
 #[test]
 fn actor_artifact_spawns_sends_updates_state_and_stops() {
     let artifact_path = unique_current_dir_artifact_path("runtime-actor");

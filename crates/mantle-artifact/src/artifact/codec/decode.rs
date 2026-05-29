@@ -482,7 +482,7 @@ fn decode_value_template(
         }),
         "record_field" => Ok(ArtifactValueTemplate::RecordField {
             ty: fields.take_type_id(&format!("{prefix}.type_id"))?,
-            field: fields.take_required_string(&format!("{prefix}.field_name"))?,
+            field: fields.take_record_field_id(&format!("{prefix}.field_id"))?,
             record: Box::new(decode_value_template(
                 fields,
                 &format!("{prefix}.record"),
@@ -627,7 +627,7 @@ fn decode_value_template(
             for field_index in 0..field_count {
                 let field_prefix = format!("{prefix}.field.{field_index}");
                 record_fields.push(ArtifactValueTemplateField {
-                    name: fields.take_required_string(&format!("{field_prefix}.name"))?,
+                    field: fields.take_record_field_id(&format!("{field_prefix}.field_id"))?,
                     value: decode_value_template(
                         fields,
                         &format!("{field_prefix}.value"),

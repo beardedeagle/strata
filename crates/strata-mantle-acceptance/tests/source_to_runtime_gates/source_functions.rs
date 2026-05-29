@@ -53,7 +53,7 @@ fn function_match_checks_builds_and_runs_on_mantle() {
         mantle_artifact::NextState::Template(ArtifactValueTemplate::Record {
             ty: value_type_id(&artifact, "WorkerState"),
             fields: vec![ArtifactValueTemplateField {
-                name: "job".to_string(),
+                field: RecordFieldId::new(0),
                 value: ArtifactValueTemplate::ReceivedPayload {
                     ty: value_type_id(&artifact, "Job"),
                 },
@@ -105,7 +105,7 @@ fn function_payload_match_checks_builds_and_runs_on_mantle() {
         mantle_artifact::NextState::Template(ArtifactValueTemplate::Record {
             ty: value_type_id(&artifact, "WorkerState"),
             fields: vec![ArtifactValueTemplateField {
-                name: "work".to_string(),
+                field: RecordFieldId::new(0),
                 value: ArtifactValueTemplate::EnumVariant {
                     ty: value_type_id(&artifact, "Work"),
                     variant: EnumVariantId::new(1),

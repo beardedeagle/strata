@@ -309,8 +309,7 @@ fn assert_template_has_no_source_bindings(template: &ArtifactValueTemplate) {
         | ArtifactValueTemplate::EnumVariant { payload: value, .. } => {
             assert_template_has_no_source_bindings(value);
         }
-        ArtifactValueTemplate::RecordField { record, field, .. } => {
-            assert_no_source_binding_string(field);
+        ArtifactValueTemplate::RecordField { record, .. } => {
             assert_template_has_no_source_bindings(record);
         }
         ArtifactValueTemplate::MapValue { map, key, keys, .. } => {
@@ -332,7 +331,6 @@ fn assert_template_has_no_source_bindings(template: &ArtifactValueTemplate) {
         }
         ArtifactValueTemplate::Record { fields, .. } => {
             for field in fields {
-                assert_no_source_binding_string(&field.name);
                 assert_template_has_no_source_bindings(&field.value);
             }
         }

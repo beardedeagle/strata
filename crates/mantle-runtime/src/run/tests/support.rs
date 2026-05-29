@@ -16,7 +16,7 @@ pub(super) use mantle_artifact::{
     ArtifactValueTemplate, ArtifactValueTemplateField, AuthorityId, EnumVariantId,
     MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_NEXT_STATE_IF_ELSE_DEPTH,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, SpawnSiteId, StateId, StepResult, TypeId,
+    OutputId, ProcessId, ProcessRefId, RecordFieldId, SpawnSiteId, StateId, StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";

@@ -111,6 +111,7 @@ fn is_reserved_identifier(value: &str) -> bool {
             | "for"
             | "if"
             | "in"
+            | "import"
             | "let"
             | "mailbox"
             | "match"
@@ -154,10 +155,16 @@ fn validate_output_literal(value: &str) -> Result<()> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     pub name: Identifier,
+    pub imports: Vec<Import>,
     pub records: Vec<Record>,
     pub enums: Vec<Enum>,
     pub functions: Vec<Function>,
     pub processes: Vec<Process>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    pub module: Identifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

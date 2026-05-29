@@ -161,7 +161,7 @@ fn runtime_loop_element_record_projection_checks_and_lowers() {
                         record,
                         field,
                         ..
-                    } if field == "phase"
+                    } if field.as_u32() == 0
                         && matches!(
                             record.as_ref(),
                             ArtifactValueTemplate::LoopElement {
@@ -189,7 +189,7 @@ fn runtime_loop_element_record_projection_checks_and_lowers() {
                         ..
                     }] if *ty == worker_ref_type
                         && *target_process == worker_process_id
-                        && field == "phase"
+                        && field.as_u32() == 0
                         && matches!(
                             record.as_ref(),
                             ArtifactValueTemplate::LoopElement {

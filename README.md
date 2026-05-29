@@ -106,8 +106,10 @@ accepted and rejected outcomes.
 
 ### Source Units
 
-A Strata file starts with a module declaration and defines records, enums,
-source functions, and processes:
+A Strata source program starts from a root `.str` file. Each source unit starts
+with a module declaration, may import sibling source units with
+`import module_name;`, and defines records, enums, source functions, and
+processes:
 
 ```strata
 module hello;
@@ -132,6 +134,12 @@ proc Main mailbox bounded(1) {
 
 `Main` is the entry process. Mantle starts it and delivers the first message
 variant of its message enum.
+
+Imports are resolved by Strata before lowering. The dependency graph must be
+acyclic and deterministic, each source unit may use only its own declarations
+and direct imports, unqualified callable names must remain deterministic across
+reachable units, and Mantle receives only the lowered `.mta` artifact with typed
+IDs. It does not resolve Strata imports at runtime.
 
 ### Explicit Effects
 

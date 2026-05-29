@@ -191,7 +191,7 @@ proc Main mailbox bounded(1) {
             return false;
         };
         fields.iter().any(|field| {
-            field.name == "selected"
+            field.field.as_u32() == 0
                 && matches!(&field.value, ArtifactValueTemplate::ReceivedPayload { .. })
         })
     });

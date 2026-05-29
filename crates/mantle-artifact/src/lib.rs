@@ -28,9 +28,9 @@ pub use constants::*;
 pub use error::{Error, Result};
 pub use ids::{
     AuthorityId, EffectOutcomeId, EnumVariantId, LoopElementId, MessageId, OutputId, ProcessId,
-    ProcessRefId, SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
+    ProcessRefId, RecordFieldId, SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
 };
-pub use io::{read_artifact, source_hash_fnv1a64, write_artifact};
+pub use io::{SourceHashFnv1a64, read_artifact, source_hash_fnv1a64, write_artifact};
 pub use validation::{
     validate_message_label, validate_payload_value_label, validate_state_value_identity_label,
     validate_state_value_label,

@@ -1,0 +1,24 @@
+module import_unimported_root;
+import import_unimported_worker;
+
+record MainState;
+enum MainMsg {
+    Start,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker Work(Job { phase: Ready });
+        return Stop(state);
+    }
+}

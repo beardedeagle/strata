@@ -120,7 +120,7 @@ impl LoadedTemplateAdmission<'_> {
         &self,
         field: &str,
         record_ty: TypeId,
-        field_name: &str,
+        field_id: RecordFieldId,
         projected_ty: TypeId,
     ) -> Result<()> {
         let record_type = self.program.type_entry(record_ty)?;
@@ -130,15 +130,13 @@ impl LoadedTemplateAdmission<'_> {
                 record_ty.as_u32()
             )));
         };
-        let expected = fields
-            .iter()
-            .find(|expected| expected.name == field_name)
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "{field}.field_name {field_name} is not declared by type id {}",
-                    record_ty.as_u32()
-                ))
-            })?;
+        let expected = fields.get(field_id.index()).ok_or_else(|| {
+            Error::new(format!(
+                "{field}.field_id {} is not declared by type id {}",
+                field_id.as_u32(),
+                record_ty.as_u32()
+            ))
+        })?;
         if expected.ty != projected_ty {
             return Err(Error::new(format!(
                 "{field}.type has type id {}, expected record field type id {}",

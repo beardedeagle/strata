@@ -71,7 +71,7 @@ fn runtime_rejects_loaded_if_else_static_projection_that_is_not_bool_value_befor
                     }],
                 },
             }),
-            field: "flag".to_string(),
+            field: RecordFieldId::new(0),
         },
         then_state: Box::new(LoadedNextState::Current),
         else_state: Box::new(LoadedNextState::Current),

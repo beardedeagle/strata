@@ -46,7 +46,7 @@ fn runtime_payload_projection_if_branches_on_received_record_field() {
                     record,
                     field,
                 } if *ty == phase_type
-                    && field == "phase"
+                    && field.as_u32() == 0
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::ReceivedPayload { ty } if *ty == job_type
@@ -62,7 +62,8 @@ fn runtime_payload_projection_if_branches_on_received_record_field() {
     ));
 
     let encoded = artifact.encode();
-    assert!(encoded.contains("field_name=phase"));
+    assert!(encoded.contains("field_id=0"));
+    assert!(!encoded.contains("field_name="));
     assert!(
         !encoded.contains("assigned_phase"),
         "artifact must not dispatch through the source payload alias"
@@ -115,7 +116,7 @@ fn runtime_payload_projection_if_rejects_unknown_projected_field_before_runtime(
     else {
         panic!("runtime branch condition should project the received payload field");
     };
-    *field = "missing".to_owned();
+    *field = RecordFieldId::new(1);
     gate.write_unvalidated_encoded_artifact(invalid_artifact_path, &artifact.encode());
 
     let run = gate.run_mantle_failure(invalid_artifact_path);
@@ -123,7 +124,7 @@ fn runtime_payload_projection_if_rejects_unknown_projected_field_before_runtime(
     let stdout = String::from_utf8_lossy(&run.stdout);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("field_name missing is not declared by type id"),
+        stderr.contains("field_id 1 is not declared by type id"),
         "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert!(!stdout.contains("mantle: loaded"));

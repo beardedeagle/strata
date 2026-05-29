@@ -422,7 +422,7 @@ fn is_received_ref_job_route_transition(
                     record,
                     field,
                 } if *ty == expected.bool_type
-                    && field == "enabled"
+                    && field.as_u32() == 0
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::CurrentStatePayload { ty }
@@ -448,7 +448,7 @@ fn is_received_ref_job_route_transition(
                     body,
                 }] if element.ty == expected.job_type
                     && is_list_type(artifact, *ty, expected.job_type, 2)
-                    && field == "jobs"
+                    && field.as_u32() == 1
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::CurrentStatePayload { ty }

@@ -80,7 +80,7 @@ pub(super) fn validate_record_field_projection_type(
     artifact: &MantleArtifact,
     field: &str,
     record_ty: TypeId,
-    field_name: &str,
+    field_id: RecordFieldId,
     projected_ty: TypeId,
 ) -> Result<()> {
     let record_type = artifact.type_entry(record_ty)?;
@@ -90,9 +90,10 @@ pub(super) fn validate_record_field_projection_type(
             record_ty.as_u32()
         )));
     };
-    let Some(expected) = fields.iter().find(|expected| expected.name == field_name) else {
+    let Some(expected) = fields.get(field_id.index()) else {
         return Err(Error::new(format!(
-            "{field}.field_name {field_name} is not declared by type id {}",
+            "{field}.field_id {} is not declared by type id {}",
+            field_id.as_u32(),
             record_ty.as_u32()
         )));
     };

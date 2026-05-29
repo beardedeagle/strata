@@ -6,25 +6,40 @@ impl Parser {
         let name = self.expect_identifier()?;
         self.expect_symbol(';')?;
 
+        let mut imports = Vec::new();
         let mut records = Vec::new();
         let mut enums = Vec::new();
         let mut functions = Vec::new();
         let mut processes = Vec::new();
+        let mut declarations_started = false;
 
         while !self.at_eof() {
+            if self.peek_keyword("import") {
+                if declarations_started {
+                    return Err(
+                        self.error_here("imports must appear before top-level declarations")
+                    );
+                }
+                imports.push(self.parse_import()?);
+                continue;
+            }
             if self.peek_keyword("record") {
+                declarations_started = true;
                 records.push(self.parse_record()?);
                 continue;
             }
             if self.peek_keyword("enum") {
+                declarations_started = true;
                 enums.push(self.parse_enum()?);
                 continue;
             }
             if self.peek_keyword("fn") {
+                declarations_started = true;
                 functions.push(self.parse_function()?);
                 continue;
             }
             if self.peek_keyword("proc") {
+                declarations_started = true;
                 processes.push(self.parse_process()?);
                 continue;
             }
@@ -39,11 +54,19 @@ impl Parser {
 
         Ok(Module {
             name,
+            imports,
             records,
             enums,
             functions,
             processes,
         })
+    }
+
+    fn parse_import(&mut self) -> Result<Import> {
+        self.expect_keyword("import")?;
+        let module = self.expect_identifier()?;
+        self.expect_symbol(';')?;
+        Ok(Import { module })
     }
 
     pub(super) fn parse_record(&mut self) -> Result<Record> {

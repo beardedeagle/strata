@@ -6,8 +6,8 @@ mdbook_version := "0.5.2"
 mdbook_mermaid_version := "0.17.0"
 cargo_fuzz_version := "0.13.1"
 cfg_check_targets := "x86_64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc"
-fuzz_targets := "strata_parse_check_lower mantle_artifact_decode mantle_runtime_from_source"
-fuzz_smoke_targets := "strata_parse_check_lower:256 mantle_artifact_decode:256 mantle_runtime_from_source:128"
+fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower mantle_artifact_decode mantle_runtime_from_source"
+fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 mantle_artifact_decode:256 mantle_runtime_from_source:128"
 
 default:
     @just --list
@@ -195,6 +195,7 @@ source-to-runtime-success-gates: build
         function_record_pattern
         function_record_return_match
         function_record_body_match
+        imports_main
         state_payload_enum
         collection_state
         state_payload_match
@@ -311,6 +312,12 @@ source-to-runtime-failure-gates: build
     test ! -f target/strata/scalar_runtime_modulo_by_zero.mta
     expect_check_failure examples/failures/scalar_unsuffixed_literal.str \
         'numeric value literals require an explicit scalar suffix' scalar_unsuffixed_literal
+    expect_check_failure examples/failures/import_missing.str \
+        'missing_import_target.str' import_missing
+    expect_check_failure examples/failures/import_cycle_root.str \
+        'import cycle import_cycle_root -> import_cycle_leaf -> import_cycle_root' import_cycle_root
+    expect_check_failure examples/failures/import_unimported_root.str \
+        'references type Job from module import_unimported_types without importing import_unimported_types' import_unimported_root
 
     rm -f "$trace"
     run_output=""
@@ -458,6 +465,7 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p strata checks_source_function_subset_map_patterns
     cargo +{{nightly_toolchain}} miri test -p strata parses_checks_and_lowers_source_function_braced_return_if_else
     cargo +{{nightly_toolchain}} miri test -p strata parses_checks_and_lowers_immutable_source_local_bindings
+    cargo +{{nightly_toolchain}} miri test -p strata source_program_checks_lowers_cross_unit_records_functions_and_processes
     cargo +{{nightly_toolchain}} miri test -p strata accepts_typed_local_one_for_one_supervision
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_uniform_arm_prefix_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_selected_arm_action_block_shapes_lower_as_typed_actions

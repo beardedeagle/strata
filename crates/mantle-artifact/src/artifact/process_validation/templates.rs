@@ -122,7 +122,7 @@ pub(in crate::artifact) fn validate_template_loop_elements(
                     artifact,
                     &record_field.value,
                     active_loop_elements,
-                    &format!("{field}.{}", record_field.name),
+                    &format!("{field}.{}", record_field.field.as_u32()),
                 )?;
             }
             Ok(())

@@ -62,10 +62,11 @@ pub(super) fn evaluate_runtime_template(
                 loop_elements,
                 effect_outcomes,
             )?;
+            let field_name = program.record_field_name(record.ty, *field)?;
             program.runtime_payload_value(
                 "record field projection value",
                 *ty,
-                record.value.project_record_field(field)?,
+                record.value.project_record_field(field_name)?,
             )
         }
         LoadedValueTemplate::ListElement {
@@ -269,15 +270,16 @@ pub(super) fn evaluate_runtime_template(
                 )?;
                 if fields[..field_index]
                     .iter()
-                    .any(|previous| previous.name == field.name)
+                    .any(|previous| previous.field == field.field)
                 {
                     return Err(Error::new(format!(
-                        "record template duplicates field {}",
-                        field.name
+                        "record template duplicates field id {}",
+                        field.field.as_u32()
                     )));
                 }
+                let field_name = program.record_field_name(*ty, field.field)?;
                 values.push(ArtifactRecordField {
-                    name: field.name.clone(),
+                    name: field_name.to_string(),
                     value: value.value,
                 });
             }

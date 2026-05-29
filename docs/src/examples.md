@@ -111,20 +111,22 @@ Read them in this order:
    payloads.
 54. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-55. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
+55. `imports_main.str`, with `imports_types.str` and `imports_worker.str`, for
+   source-unit imports checked and lowered from one root source path.
+56. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
    commit-or-return state evidence, and the `MailboxClosed` send-error contract
    shape.
-56. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
-57. `effect_outcome_stopped_target.str` for a source-visible `Stopped` send
+57. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
+58. `effect_outcome_stopped_target.str` for a source-visible `Stopped` send
    outcome.
-58. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
+59. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
    source-created `Panic(...)` prevents a later observer from recovering the
    crash as a source-visible send outcome.
-59. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
+60. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
    denial before process acceptance.
-60. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+61. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
-61. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
+62. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
    `local_supervision_temporary.str`, `local_supervision_transient_restart.str`,
    `local_supervision_transient.str`, and
    `local_supervision_inactive_send_outcome.str` for local `one_for_one`

@@ -21,5 +21,7 @@ mod runtime_loop_admission;
 mod runtime_loop_execution;
 #[path = "source_to_runtime_gates/source_functions.rs"]
 mod source_functions;
+#[path = "source_to_runtime_gates/source_units.rs"]
+mod source_units;
 #[path = "source_to_runtime_gates/state_collections.rs"]
 mod state_collections;

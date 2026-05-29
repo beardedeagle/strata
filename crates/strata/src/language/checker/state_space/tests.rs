@@ -89,6 +89,7 @@ fn test_module() -> Module {
     let state_type = TypeRef::Named(ident("MainState"));
     Module {
         name: ident("limit_context"),
+        imports: Vec::new(),
         records: vec![Record {
             name: ident("MainState"),
             fields: Vec::new(),
@@ -116,6 +117,7 @@ fn recursive_state_module() -> Module {
     let state_type = TypeRef::Named(ident("MainState"));
     Module {
         name: ident("recursive_state"),
+        imports: Vec::new(),
         records: vec![Record {
             name: ident("MainState"),
             fields: vec![RecordField {

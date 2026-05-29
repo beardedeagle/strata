@@ -1,6 +1,6 @@
 MTA0
 format=mantle-target-artifact
-schema_version=2
+schema_version=3
 source_language=strata
 module=effect_outcomes
 entry_process=0
@@ -129,7 +129,7 @@ process.0.transition.0.next_state=template
 process.0.transition.0.next_state_template.kind=record
 process.0.transition.0.next_state_template.type_id=0
 process.0.transition.0.next_state_template.field_count=1
-process.0.transition.0.next_state_template.field.0.name=sent
+process.0.transition.0.next_state_template.field.0.field_id=0
 process.0.transition.0.next_state_template.field.0.value.kind=effect_outcome
 process.0.transition.0.next_state_template.field.0.value.type_id=1
 process.0.transition.0.next_state_template.field.0.value.outcome=1

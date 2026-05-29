@@ -13,6 +13,7 @@ use mantle_runtime::{
 const PROFILE_ENV: &str = "STRATA_RSS_PROBE_PROFILE";
 const COLLECTION_STATE_SOURCE: &str = include_str!("../../../examples/collection_state.str");
 const LOCAL_SUPERVISION_SOURCE_PATH: &str = "../../examples/local_supervision_restart.str";
+const IMPORTS_MAIN_SOURCE_PATH: &str = "../../examples/imports_main.str";
 const CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "collection_state.check_lower",
     iterations: 64,
@@ -25,12 +26,17 @@ const LOCAL_SUPERVISION_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "local_supervision_restart.in_memory_runtime",
     iterations: 32,
 };
-const ALL_PROFILES: [BenchmarkProfile; 3] = [
+const IMPORTS_CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "imports_main.check_lower",
+    iterations: 32,
+};
+const ALL_PROFILES: [BenchmarkProfile; 4] = [
     CHECK_LOWER_PROFILE,
     IN_MEMORY_RUNTIME_PROFILE,
     LOCAL_SUPERVISION_RUNTIME_PROFILE,
+    IMPORTS_CHECK_LOWER_PROFILE,
 ];
-const PROFILE_KEY_LIST: &str = "collection_state.check_lower, collection_state.in_memory_runtime, local_supervision_restart.in_memory_runtime";
+const PROFILE_KEY_LIST: &str = "collection_state.check_lower, collection_state.in_memory_runtime, local_supervision_restart.in_memory_runtime, imports_main.check_lower";
 #[cfg(any(
     target_os = "linux",
     target_os = "macos",
@@ -79,6 +85,7 @@ fn rss_probe_runs_selected_profile() {
         "local_supervision_restart.in_memory_runtime" => {
             measure_local_supervision_runtime_profile(profile);
         }
+        "imports_main.check_lower" => measure_imports_check_lower_profile(profile),
         _ => unreachable!("selected profile is validated before dispatch"),
     }
 }
@@ -115,9 +122,7 @@ fn measure_collection_state_runtime_profile(profile: BenchmarkProfile) {
 }
 
 fn measure_local_supervision_runtime_profile(profile: BenchmarkProfile) {
-    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(LOCAL_SUPERVISION_SOURCE_PATH);
-    let source = fs::read_to_string(source_path)
-        .expect("RSS probe local supervision source should be readable");
+    let source = read_workspace_source(LOCAL_SUPERVISION_SOURCE_PATH);
     let artifact = source_artifact(&source);
     run_local_supervision_artifact(&artifact);
     let metrics = measure_for(profile.iterations, || {
@@ -125,6 +130,30 @@ fn measure_local_supervision_runtime_profile(profile: BenchmarkProfile) {
         black_box(report);
     });
     print_metrics(profile, metrics);
+}
+
+fn measure_imports_check_lower_profile(profile: BenchmarkProfile) {
+    let source_path = workspace_source_path(IMPORTS_MAIN_SOURCE_PATH);
+    let metrics = measure_for(profile.iterations, || {
+        let loaded = strata::load_root_source_program(&source_path)
+            .expect("RSS probe imports source should load");
+        let (program, source_hash) = loaded.into_parts();
+        let checked = strata::language::check_source_program(program)
+            .expect("RSS probe imports source should check");
+        let artifact = strata::language::lower_to_artifact_with_source_hash(&checked, source_hash)
+            .expect("RSS probe imports source should lower");
+        black_box(artifact);
+    });
+    print_metrics(profile, metrics);
+}
+
+fn read_workspace_source(path: &str) -> String {
+    fs::read_to_string(workspace_source_path(path))
+        .unwrap_or_else(|err| panic!("RSS probe source {path} should be readable: {err}"))
+}
+
+fn workspace_source_path(path: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
 }
 
 fn collection_state_artifact() -> mantle_artifact::MantleArtifact {

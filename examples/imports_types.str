@@ -1,0 +1,14 @@
+module imports_types;
+
+record Job {
+    phase: Phase,
+}
+
+enum Phase {
+    Ready,
+    Done,
+}
+
+fn complete(job: Job) -> Job ! [] ~ [] @det {
+    return Job { phase: Done };
+}

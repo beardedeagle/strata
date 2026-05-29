@@ -114,6 +114,7 @@ pub(crate) fn prepare_trace_file(path: &Path) -> Result<File> {
     prepare_trace_parent(path)?;
     let file = open_trace_file(path)?;
     validate_trace_file_metadata(path, &file.metadata()?)?;
+    validate_opened_trace_path(path, &file)?;
     Ok(file)
 }
 
@@ -166,6 +167,7 @@ fn open_trace_file(path: &Path) -> std::io::Result<File> {
     fs::OpenOptions::new()
         .create(true)
         .truncate(true)
+        .read(true)
         .write(true)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
@@ -295,7 +297,7 @@ fn nix_to_io_error(err: nix::errno::Errno) -> std::io::Error {
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 
 fn validate_trace_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()> {
-    if metadata.is_file() {
+    if is_regular_trace_file(metadata) {
         Ok(())
     } else {
         Err(Error::new(format!(
@@ -305,12 +307,102 @@ fn validate_trace_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<
     }
 }
 
+#[cfg(not(windows))]
+fn is_regular_trace_file(metadata: &fs::Metadata) -> bool {
+    metadata.is_file()
+}
+
+#[cfg(windows)]
+fn is_regular_trace_file(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    metadata.is_file() && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+}
+
+#[cfg(not(windows))]
+fn validate_opened_trace_path(_path: &Path, _file: &File) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn validate_opened_trace_path(path: &Path, file: &File) -> Result<()> {
+    let canonical_path = canonical_trace_path_for_opened_path(path)?;
+    let canonical_file = open_trace_input_file(&canonical_path)?;
+    validate_trace_file_metadata(&canonical_path, &canonical_file.metadata()?)?;
+    if same_opened_trace_file(file, &canonical_file)? {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "runtime trace path {} changed while opening",
+            path.display()
+        )))
+    }
+}
+
+#[cfg(windows)]
+fn canonical_trace_path_for_opened_path(path: &Path) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        Error::new(format!(
+            "runtime trace path {} has no file name",
+            path.display()
+        ))
+    })?;
+    Ok(fs::canonicalize(parent)?.join(file_name))
+}
+
+#[cfg(windows)]
+fn open_trace_input_file(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(windows)]
+fn same_opened_trace_file(before: &File, after: &File) -> Result<bool> {
+    Ok(windows_file_fingerprint(&before.metadata()?)
+        == windows_file_fingerprint(&after.metadata()?))
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WindowsFileFingerprint {
+    file_attributes: u32,
+    creation_time: u64,
+    last_write_time: u64,
+    file_size: u64,
+}
+
+#[cfg(windows)]
+fn windows_file_fingerprint(metadata: &fs::Metadata) -> WindowsFileFingerprint {
+    use std::os::windows::fs::MetadataExt;
+
+    WindowsFileFingerprint {
+        file_attributes: metadata.file_attributes(),
+        creation_time: metadata.creation_time(),
+        last_write_time: metadata.last_write_time(),
+        file_size: metadata.file_size(),
+    }
+}
+
 fn reject_symlink_path_components(path: &Path) -> Result<()> {
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());
+        match component {
+            std::path::Component::Prefix(_)
+            | std::path::Component::RootDir
+            | std::path::Component::CurDir => continue,
+            std::path::Component::ParentDir | std::path::Component::Normal(_) => {}
+        }
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if is_trace_path_reparse_component(&metadata) => {
                 return Err(Error::new(format!(
                     "runtime trace path {} must not include symbolic link component {}",
                     path.display(),
@@ -324,6 +416,21 @@ fn reject_symlink_path_components(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(not(windows))]
+fn is_trace_path_reparse_component(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn is_trace_path_reparse_component(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
 #[cfg(all(test, unix))]
 mod tests {

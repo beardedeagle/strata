@@ -1,0 +1,9 @@
+module import_unimported_types;
+
+record Job {
+    phase: Phase,
+}
+
+enum Phase {
+    Ready,
+}

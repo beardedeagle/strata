@@ -8,8 +8,8 @@ pub(crate) use mantle_artifact::{
     ArtifactSendTarget, ArtifactSpawnKind, ArtifactTransition, ArtifactTypeKind, ArtifactValue,
     ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
     ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId,
-    EffectOutcomeId, EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId, SpawnSiteId,
-    StateId, TypeId, read_artifact,
+    EffectOutcomeId, EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId, RecordFieldId,
+    SpawnSiteId, StateId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();

@@ -32,6 +32,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "strata_source_program_check_lower"
+path = "fuzz_targets/strata_source_program_check_lower.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "mantle_runtime_from_source"
 path = "fuzz_targets/mantle_runtime_from_source.rs"
 test = false

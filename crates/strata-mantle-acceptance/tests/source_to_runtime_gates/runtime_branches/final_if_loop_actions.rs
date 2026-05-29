@@ -177,7 +177,7 @@ fn assert_final_if_guarded_loop_shape(artifact: &MantleArtifact) {
             condition,
             then_state,
             else_state,
-        } if condition_is_bool_field_check(condition, bool_type, flags_type, "enabled")
+        } if condition_is_bool_field_check(condition, bool_type, flags_type, 0)
             && matches!(then_state.as_ref(), NextState::Current)
             && matches!(else_state.as_ref(), NextState::Current)
     ));
@@ -187,7 +187,7 @@ fn assert_final_if_guarded_loop_shape(artifact: &MantleArtifact) {
             condition,
             then_actions,
             else_actions,
-        }] if condition_is_bool_field_check(condition, bool_type, flags_type, "enabled")
+        }] if condition_is_bool_field_check(condition, bool_type, flags_type, 0)
             && matches!(
                 then_actions.as_slice(),
                 [ArtifactAction::ForEach {
@@ -196,7 +196,7 @@ fn assert_final_if_guarded_loop_shape(artifact: &MantleArtifact) {
                     max_items: 2,
                     body,
                 }] if element.ty == bool_type
-                    && collection_is_flags_field(collection, flags_type, "items")
+                    && collection_is_flags_field(collection, flags_type, 1)
                     && matches!(
                         body.as_slice(),
                         [ArtifactAction::IfElse {
@@ -216,7 +216,7 @@ fn condition_is_bool_field_check(
     condition: &ArtifactValueTemplate,
     bool_type: TypeId,
     flags_type: TypeId,
-    expected_field: &str,
+    expected_field: u32,
 ) -> bool {
     matches!(
         condition,
@@ -235,7 +235,7 @@ fn condition_is_bool_field_check(
                     record,
                     field,
                 } if *ty == bool_type
-                    && field == expected_field
+                    && field.as_u32() == expected_field
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::ReceivedPayload { ty } if *ty == flags_type
@@ -252,12 +252,12 @@ fn condition_is_bool_field_check(
 fn collection_is_flags_field(
     collection: &ArtifactValueTemplate,
     flags_type: TypeId,
-    expected_field: &str,
+    expected_field: u32,
 ) -> bool {
     matches!(
         collection,
         ArtifactValueTemplate::RecordField { record, field, .. }
-            if field == expected_field
+            if field.as_u32() == expected_field
                 && matches!(
                     record.as_ref(),
                     ArtifactValueTemplate::ReceivedPayload { ty } if *ty == flags_type

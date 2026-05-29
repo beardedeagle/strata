@@ -3,8 +3,8 @@ use mantle_artifact::{
     ArtifactScalarOrderingOperator, ArtifactStateValue, ArtifactValue,
     ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueTemplate,
     ArtifactValueTemplateMapEntry, EffectOutcomeId, EnumVariantId, Error, LoopElementId,
-    MAX_VALUE_TEMPLATE_FIELDS, MapProjectionMode, ProcessId, ProcessRefId, Result, TypeId,
-    validate_state_value_identity_label,
+    MAX_VALUE_TEMPLATE_FIELDS, MapProjectionMode, ProcessId, ProcessRefId, RecordFieldId, Result,
+    TypeId, validate_state_value_identity_label,
 };
 
 use crate::event::RuntimeProcessId;
@@ -226,7 +226,7 @@ pub(crate) enum LoadedValueTemplate {
     RecordField {
         ty: TypeId,
         record: Box<LoadedValueTemplate>,
-        field: String,
+        field: RecordFieldId,
     },
     ListElement {
         ty: TypeId,
@@ -356,7 +356,7 @@ impl LoadedValueTemplate {
             ArtifactValueTemplate::RecordField { ty, record, field } => Ok(Self::RecordField {
                 ty: *ty,
                 record: Box::new(Self::from_artifact(record)?),
-                field: field.clone(),
+                field: *field,
             }),
             ArtifactValueTemplate::ListElement {
                 ty,
@@ -692,14 +692,14 @@ fn validate_single_embedded_process_ref(value: &RuntimeValue, pid: u64) -> Resul
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoadedValueTemplateField {
-    pub(crate) name: String,
+    pub(crate) field: RecordFieldId,
     pub(crate) value: LoadedValueTemplate,
 }
 
 impl LoadedValueTemplateField {
     fn from_artifact(field: &mantle_artifact::ArtifactValueTemplateField) -> Result<Self> {
         Ok(Self {
-            name: field.name.clone(),
+            field: field.field,
             value: LoadedValueTemplate::from_artifact(&field.value)?,
         })
     }

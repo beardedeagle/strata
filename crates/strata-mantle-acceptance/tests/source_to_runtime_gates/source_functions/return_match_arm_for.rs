@@ -136,7 +136,7 @@ fn is_selected_arm_for_each_transition(
                 body,
             },
         ] if element.ty == job_type
-            && field == "jobs"
+            && field.as_u32() == 1
             && matches!(
                 record.as_ref(),
                 ArtifactValueTemplate::EnumPayload { value, .. }
@@ -156,7 +156,7 @@ fn is_selected_arm_for_each_transition(
                         ..
                     },
                 ] if *ty == phase_type
-                    && field == "phase"
+                    && field.as_u32() == 0
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::LoopElement {

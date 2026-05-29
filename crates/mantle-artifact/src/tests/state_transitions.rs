@@ -182,7 +182,7 @@ fn validate_rejects_if_else_next_state_static_projection_that_is_not_bool_value(
                 ty: BOX,
                 value: artifact_value("Box{flag:Maybe}"),
             }),
-            field: "flag".to_string(),
+            field: RecordFieldId::new(0),
         },
         then_state: Box::new(NextState::Value(StateId::new(1))),
         else_state: Box::new(NextState::Current),

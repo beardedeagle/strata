@@ -73,6 +73,13 @@ A richer state/payload gate follows the same shape:
 just run-example state_payload_match
 ```
 
+The source-unit import gate starts at a root source file and proves that Strata,
+not Mantle, resolves the reachable dependency graph before lowering:
+
+```sh
+just run-example imports_main
+```
+
 An immutable source computation gate proves sequential source-local bindings are
 resolved before lowering while Mantle executes only typed artifact data:
 

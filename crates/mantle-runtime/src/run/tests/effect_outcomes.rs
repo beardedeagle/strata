@@ -409,7 +409,7 @@ fn loaded_admission_rejects_nested_process_ref_spawn_outcome_in_variant_pattern(
                     payload: Box::new(ArtifactValueTemplate::Record {
                         ty: boxed_outcome,
                         fields: vec![ArtifactValueTemplateField {
-                            name: "outcome".to_string(),
+                            field: RecordFieldId::new(0),
                             value: ArtifactValueTemplate::EffectOutcome {
                                 ty: SPAWN_RESULT,
                                 outcome: EffectOutcomeId::new(0),

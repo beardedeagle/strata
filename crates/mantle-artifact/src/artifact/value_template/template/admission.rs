@@ -115,16 +115,15 @@ impl ArtifactValueTemplate {
             Self::RecordField {
                 ty,
                 record,
-                field: field_name,
+                field: field_id,
             } => {
                 reject_projected_process_ref_type(artifact, field, *ty)?;
                 artifact.validate_value_type(&format!("{field}.type_id"), *ty)?;
-                validate_ident_field(&format!("{field}.field_name"), field_name)?;
                 validate_record_field_projection_type(
                     artifact,
                     field,
                     record.result_type(),
-                    field_name,
+                    *field_id,
                     *ty,
                 )?;
                 record.validate_for_received_payload(
@@ -314,29 +313,25 @@ impl ArtifactValueTemplate {
                     MAX_VALUE_TEMPLATE_FIELDS,
                 )?;
                 for (index, record_field) in fields.iter().enumerate() {
-                    validate_ident_field(&format!("{field}.field"), &record_field.name)?;
                     if fields[..index]
                         .iter()
-                        .any(|previous| previous.name == record_field.name)
+                        .any(|previous| previous.field == record_field.field)
                     {
                         return Err(Error::new(format!(
-                            "{field} duplicates field {}",
-                            record_field.name
+                            "{field} duplicates field id {}",
+                            record_field.field.as_u32()
                         )));
                     }
-                    let Some(expected) = expected_fields
-                        .iter()
-                        .find(|expected| expected.name == record_field.name)
-                    else {
+                    let Some(expected) = expected_fields.get(record_field.field.index()) else {
                         return Err(Error::new(format!(
-                            "{field}.field {} is not declared by type id {}",
-                            record_field.name,
+                            "{field}.field_id {} is not declared by type id {}",
+                            record_field.field.as_u32(),
                             ty.as_u32()
                         )));
                     };
                     record_field.value.validate_for_received_payload(
                         artifact,
-                        &format!("{field}.field.{}", record_field.name),
+                        &format!("{field}.field.{}", expected.name),
                         validation.nested().with_expected_type(Some(expected.ty)),
                         depth + 1,
                     )?;

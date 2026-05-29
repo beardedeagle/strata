@@ -35,6 +35,14 @@ and loaded-runtime admission, acyclic child-graph validation, restart trace
 evidence, no message replay after panic, source-to-runtime gates, fuzz seeds,
 diagnostics, and docs are tracked together.
 
+Source-unit imports are recorded as a Strata-owned composition feature:
+`import module_name;` syntax, root source loading, typed source-unit IDs, an
+acyclic dependency graph, deterministic dependency-first checking, duplicate and
+ambiguous-name rejection, direct-import symbol validation, source-to-runtime
+execution from a multi-file program, fuzz seeds, diagnostics, and docs are
+tracked together. Mantle import resolution is not part of the surface; module
+names in artifacts remain metadata.
+
 Run it with:
 
 ```sh
@@ -80,4 +88,6 @@ flowchart LR
 Runtime-bearing features still need source-to-runtime evidence. Trace labels,
 source names, and documentation text remain metadata and diagnostics surfaces;
 executable behavior must cross the Strata/Mantle boundary as checked IR, typed
-IDs, typed value templates, and admitted Mantle artifacts.
+IDs, typed value templates, and admitted Mantle artifacts. Record field
+projection is represented as admitted record-field IDs; source field names
+remain labels, diagnostics, and trace metadata.

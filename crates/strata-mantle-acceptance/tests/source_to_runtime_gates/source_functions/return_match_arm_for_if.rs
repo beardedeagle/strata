@@ -215,7 +215,7 @@ fn branch_sends_loop_projection(actions: &[ArtifactAction]) -> bool {
                     }),
                 ..
             },
-        ] if field == "phase"
+        ] if field.as_u32() == 0
             && matches!(
                 record.as_ref(),
                 ArtifactValueTemplate::LoopElement { .. }
