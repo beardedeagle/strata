@@ -1,0 +1,4 @@
+module import_cycle_leaf;
+import import_cycle_root;
+
+record LeafState;

@@ -44,7 +44,7 @@ fn effect_outcomes_check_build_run_and_bind_typed_commit_results() {
     assert!(matches!(
         &transition.next_state,
         NextState::Template(ArtifactValueTemplate::Record { fields, .. })
-            if fields.iter().any(|field| field.name == "sent"
+            if fields.iter().any(|field| field.field.as_u32() == 0
                 && matches!(
                     &field.value,
                     ArtifactValueTemplate::EffectOutcome {

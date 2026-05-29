@@ -169,6 +169,7 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
 
     Module {
         name: ident("type_count_overflow"),
+        imports: Vec::new(),
         records,
         enums,
         functions: Vec::new(),

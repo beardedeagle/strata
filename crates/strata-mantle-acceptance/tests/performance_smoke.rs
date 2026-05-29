@@ -14,9 +14,14 @@ const PERFORMANCE_BASELINE: &str = include_str!("../../../benchmarks/performance
 const COLLECTION_STATE_SOURCE: &str = include_str!("../../../examples/collection_state.str");
 const LOCAL_SUPERVISION_SOURCE: &str =
     include_str!("../../../examples/local_supervision_restart.str");
+const IMPORTS_MAIN_SOURCE_PATH: &str = "../../examples/imports_main.str";
 const CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "collection_state.check_lower",
     label: "collection_state check+lower",
+};
+const IMPORTS_CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "imports_main.check_lower",
+    label: "imports_main load+check+lower",
 };
 const IN_MEMORY_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "collection_state.in_memory_runtime",
@@ -35,14 +40,15 @@ const LOCAL_SUPERVISION_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     label: "local_supervision_restart in-memory runtime",
 };
 const PROFILE_SELECTOR_ENV: &str = "STRATA_PERFORMANCE_SMOKE_PROFILE";
-const ALL_PROFILES: [BenchmarkProfile; 5] = [
+const ALL_PROFILES: [BenchmarkProfile; 6] = [
     CHECK_LOWER_PROFILE,
+    IMPORTS_CHECK_LOWER_PROFILE,
     IN_MEMORY_RUNTIME_PROFILE,
     ARTIFACT_CODEC_PROFILE,
     JSONL_RUNTIME_PROFILE,
     LOCAL_SUPERVISION_RUNTIME_PROFILE,
 ];
-const PROFILE_KEY_LIST: &str = "collection_state.check_lower, collection_state.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
+const PROFILE_KEY_LIST: &str = "collection_state.check_lower, imports_main.check_lower, collection_state.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
 const JSONL_RUNTIME_ARTIFACT_PATH: &str = "target/performance-smoke/collection_state.mta";
 #[cfg(any(
     target_os = "linux",
@@ -65,7 +71,6 @@ const PERF_RUN_LIMITS: RunLimits = RunLimits {
     max_emitted_output_bytes: 64 * 1024,
     spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
 };
-
 #[test]
 #[ignore = "run through `just performance-smoke` so timing checks stay explicit"]
 fn collection_state_compilation_and_runtime_performance_smoke() {
@@ -75,6 +80,9 @@ fn collection_state_compilation_and_runtime_performance_smoke() {
 
     if profile_is_selected(selected_profile, CHECK_LOWER_PROFILE) {
         run_check_lower_profile();
+    }
+    if profile_is_selected(selected_profile, IMPORTS_CHECK_LOWER_PROFILE) {
+        run_imports_check_lower_profile();
     }
     if profile_is_selected(selected_profile, IN_MEMORY_RUNTIME_PROFILE) {
         run_in_memory_runtime_profile();
@@ -116,6 +124,22 @@ fn run_check_lower_profile() {
             .expect("performance smoke source should check");
         let artifact = strata::language::lower_to_artifact(&checked, COLLECTION_STATE_SOURCE)
             .expect("performance smoke source should lower");
+        black_box(artifact);
+    });
+    assert_within_budget(budget, metrics);
+}
+
+fn run_imports_check_lower_profile() {
+    let budget = PerformanceBudget::load(IMPORTS_CHECK_LOWER_PROFILE);
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(IMPORTS_MAIN_SOURCE_PATH);
+    let metrics = measure_for(budget.iterations, || {
+        let loaded = strata::load_root_source_program(&source_path)
+            .expect("imports performance smoke source should load");
+        let (program, source_hash) = loaded.into_parts();
+        let checked = strata::language::check_source_program(program)
+            .expect("imports performance smoke source should check");
+        let artifact = strata::language::lower_to_artifact_with_source_hash(&checked, source_hash)
+            .expect("imports performance smoke source should lower");
         black_box(artifact);
     });
     assert_within_budget(budget, metrics);

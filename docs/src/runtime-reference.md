@@ -84,8 +84,8 @@ supported over matching fixed-width integer types. Runtime-bound scalar
 predicates and runtime-bound pure value conditionals lower as typed Mantle
 templates. Mantle admission and runtime evaluation also validate checked scalar
 arithmetic templates and typed value-if templates in admitted value-template
-positions. Unbounded loops, imports, floats, string equality, and a standard
-library remain outside the buildable language surface.
+positions. Unbounded loops, Mantle-side import resolution, floats, string
+equality, and a standard library remain outside the buildable runtime surface.
 
 ## Runtime Iteration
 

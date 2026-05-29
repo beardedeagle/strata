@@ -11,8 +11,8 @@ The complete source is `examples/hello.str`.
 module hello;
 ```
 
-The module declaration names the source unit. It does not import anything and
-does not create a package boundary.
+The module declaration names the source unit. This example does not import
+another source unit and does not create a package boundary.
 
 ## State And Message Types
 

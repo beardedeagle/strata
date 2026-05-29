@@ -66,16 +66,18 @@ artifact body.
 Artifact and trace paths are validated before host IO. On Unix targets, Mantle
 opens artifact and trace paths with descriptor-relative parent traversal and
 `O_NOFOLLOW` so symlink parents and final symlink leaves fail closed at open
-time. On non-Unix targets, Mantle rejects symbolic-link components during
-preflight and uses the strongest standard-library open flags available on that
-platform; this is a fail-closed validation policy, not a claim of Unix-equivalent
-descriptor-relative race resistance.
+time. On non-Unix targets, artifact IO fails closed unless the target has
+equivalent secure file identity support; preflight-only symbolic-link rejection
+is not treated as sufficient race protection.
 
 ## Execution
 
 Mantle loads admitted transitions into indexed runtime tables. Before emitting
 `ArtifactLoaded` or executing runtime side effects, Mantle validates loaded
 entry metadata, state tables, transition state targets and templates, outputs,
+and record field projections. Record field projection and record construction
+templates carry typed record-field IDs into admitted record type shapes; record
+field names remain metadata for value labels, diagnostics, and traces.
 process references, sends, payload templates, and transition effect usage.
 Loaded authority tables and spawn-site tables are validated before any runtime
 side effect. A spawn action references a typed spawn-site ID; that site

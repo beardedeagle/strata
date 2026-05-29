@@ -9,8 +9,8 @@ use crate::{
     MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
     MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR, MAX_SUPERVISORS_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId, ProcessRefId, Result, SpawnSiteId,
-    StateId, SupervisorChildId, SupervisorId, TypeId,
+    MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId, ProcessRefId, RecordFieldId, Result,
+    SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
 };
 
 pub(crate) struct ArtifactFields<'a> {
@@ -132,6 +132,10 @@ impl<'a> ArtifactFields<'a> {
             0,
             MAX_ENUM_VARIANTS_PER_TYPE - 1,
         )?)
+    }
+
+    pub(crate) fn take_record_field_id(&mut self, key: &str) -> Result<RecordFieldId> {
+        RecordFieldId::from_index(self.take_bounded_usize(key, 0, MAX_VALUE_TEMPLATE_FIELDS - 1)?)
     }
 
     pub(crate) fn take_loop_element_id(&mut self, key: &str) -> Result<LoopElementId> {

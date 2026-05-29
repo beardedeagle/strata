@@ -250,7 +250,7 @@ fn runtime_loop_element_projection_rejects_unknown_projected_field_before_runtim
     if let ArtifactValueTemplate::RecordField { field, .. } =
         phase_send_projection_mut(&mut artifact)
     {
-        *field = "missing_phase".to_string();
+        *field = RecordFieldId::new(1);
     } else {
         panic!("send payload should be the phase record-field projection");
     }
@@ -264,7 +264,7 @@ fn runtime_loop_element_projection_rejects_unknown_projected_field_before_runtim
     let stdout = String::from_utf8_lossy(&run.stdout);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("field_name missing_phase is not declared"),
+        stderr.contains("field_id 1 is not declared"),
         "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert!(!stdout.contains("mantle: loaded"));
@@ -339,7 +339,7 @@ fn is_loop_element_projection_route(
                     record,
                     field,
                 } if *ty == expected.bool_type
-                    && field == "enabled"
+                    && field.as_u32() == 0
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::CurrentStatePayload { ty }
@@ -365,7 +365,7 @@ fn is_loop_element_projection_route(
                     body,
                 }] if element.ty == expected.job_type
                     && is_list_type(artifact, *ty, expected.job_type, 2)
-                    && field == "jobs"
+                    && field.as_u32() == 1
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::CurrentStatePayload { ty }
@@ -393,7 +393,7 @@ fn is_loop_element_projection_route(
                                     record,
                                     field,
                                 } if *ty == expected.phase_type
-                                    && field == "phase"
+                                    && field.as_u32() == 0
                                     && matches!(
                                         record.as_ref(),
                                         ArtifactValueTemplate::LoopElement {
@@ -427,7 +427,7 @@ fn is_loop_element_projection_route(
                                     && *target_process == expected.worker_process_id
                                     && *message == MessageId::new(0)
                                     && *payload_ty == expected.phase_type
-                                    && field == "phase"
+                                    && field.as_u32() == 0
                                     && matches!(
                                         record.as_ref(),
                                         ArtifactValueTemplate::LoopElement {

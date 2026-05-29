@@ -37,7 +37,7 @@ impl<'a> Lexer<'a> {
     }
 
     pub(super) fn tokenize(mut self) -> Result<Vec<Token>> {
-        let mut tokens = Vec::new();
+        let mut tokens = Vec::with_capacity(initial_token_capacity(self.source));
         while let Some((offset, ch)) = self.peek_char() {
             if ch.is_whitespace() {
                 self.bump_char();
@@ -246,6 +246,10 @@ fn push_eof_token(tokens: &mut Vec<Token>, offset: usize) {
         kind: TokenKind::Eof,
         offset,
     });
+}
+
+fn initial_token_capacity(source: &str) -> usize {
+    source.len().div_ceil(3).clamp(1, 512)
 }
 
 fn is_ident_start(ch: char) -> bool {

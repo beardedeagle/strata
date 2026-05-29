@@ -67,7 +67,8 @@ impl ArtifactValueTemplate {
                     current_state_payload,
                     type_entry,
                 )?;
-                let value = record.value.project_record_field(field)?;
+                let field_name = record_field_name_for_template(record.ty, type_entry, *field)?;
+                let value = record.value.project_record_field(field_name)?;
                 value.validate_generated_label_len("record field projection value")?;
                 ArtifactStateValue::from_value(*ty, value)
             }
@@ -158,7 +159,17 @@ impl ArtifactValueTemplate {
                 ArtifactStateValue::from_value(*ty, value)
             }
             Self::Record { ty, fields } => {
-                let ty_label = type_entry(*ty)?.label.clone();
+                let record_type = type_entry(*ty)?;
+                let ty_label = record_type.label.clone();
+                let ArtifactValueShape::Record {
+                    fields: expected_fields,
+                } = record_type.value_shape()?
+                else {
+                    return Err(Error::new(format!(
+                        "record template type id {} must be a record type",
+                        ty.as_u32()
+                    )));
+                };
                 let mut values = Vec::with_capacity(fields.len());
                 for (index, field) in fields.iter().enumerate() {
                     let value = field.value.evaluate_state_value(
@@ -168,15 +179,22 @@ impl ArtifactValueTemplate {
                     )?;
                     if fields[..index]
                         .iter()
-                        .any(|previous| previous.name == field.name)
+                        .any(|previous| previous.field == field.field)
                     {
                         return Err(Error::new(format!(
-                            "record template duplicates field {}",
-                            field.name
+                            "record template duplicates field id {}",
+                            field.field.as_u32()
                         )));
                     }
+                    let Some(expected) = expected_fields.get(field.field.index()) else {
+                        return Err(Error::new(format!(
+                            "record template field id {} is not declared by type id {}",
+                            field.field.as_u32(),
+                            ty.as_u32()
+                        )));
+                    };
                     values.push(ArtifactRecordField {
-                        name: field.name.clone(),
+                        name: expected.name.clone(),
                         value: value.value,
                     });
                 }
@@ -425,6 +443,30 @@ impl ArtifactValueTemplate {
             }
         }
     }
+}
+
+fn record_field_name_for_template<'types>(
+    record_ty: TypeId,
+    type_entry: &dyn Fn(TypeId) -> Result<&'types ArtifactType>,
+    field: RecordFieldId,
+) -> Result<&'types str> {
+    let record_type = type_entry(record_ty)?;
+    let ArtifactValueShape::Record { fields } = record_type.value_shape()? else {
+        return Err(Error::new(format!(
+            "record field projection type id {} must be a record type",
+            record_ty.as_u32()
+        )));
+    };
+    fields
+        .get(field.index())
+        .map(|field| field.name.as_str())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "record field projection id {} is not declared by type id {}",
+                field.as_u32(),
+                record_ty.as_u32()
+            ))
+        })
 }
 
 fn bool_atom(value: bool) -> String {

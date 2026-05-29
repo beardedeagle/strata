@@ -55,7 +55,7 @@ fn runtime_guarded_ref_loop_routes_received_ref_inside_guarded_loop() {
                             max_items: 2,
                             body,
                             ..
-                        }] if field == "items"
+                        }] if field.as_u32() == 1
                             && matches!(
                                 record.as_ref(),
                                 ArtifactValueTemplate::CurrentStatePayload { .. }

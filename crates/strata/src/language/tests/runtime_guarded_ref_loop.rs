@@ -120,7 +120,7 @@ fn guarded_runtime_for_each_received_ref_target_checks_and_lowers() {
                             max_items: 2,
                             body,
                             ..
-                        }] if field == "items"
+                        }] if field.as_u32() == 1
                             && matches!(
                                 record.as_ref(),
                                 ArtifactValueTemplate::CurrentStatePayload { .. }

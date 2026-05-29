@@ -238,6 +238,7 @@ pub(crate) mod requirements {
 pub(crate) mod expected {
     pub(crate) const CURRENT_FEATURE_IDS: &[&str] = &[
         "source-unit-top-level-items",
+        "source-unit-imports",
         "records-enums-immutable-values",
         "pure-source-functions-and-calls",
         "source-function-whole-body-match",
@@ -300,6 +301,7 @@ pub(crate) mod expected {
 
     pub(crate) const PROOF_DOMAIN_IDS: &[&str] = &[
         "module-declarations-and-top-level-items",
+        "source-unit-imports-and-dependency-graph",
         "records-enums-fieldless-and-payload-variants",
         "pure-source-functions",
         "source-function-calls",

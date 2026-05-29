@@ -1,0 +1,21 @@
+module imports_worker;
+import imports_types;
+
+record WorkerState;
+enum WorkerMsg {
+    Work(Job),
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work(job: Job)) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "imported worker handled completed job";
+        return Stop(state);
+    }
+}

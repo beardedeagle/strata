@@ -112,23 +112,23 @@ fn runtime_for_each_nested_if_actions_check_and_lower_to_typed_loop_branch_templ
                 condition: ArtifactValueTemplate::Equality { left, .. },
                 then_actions,
                 else_actions,
-            }] if matches_loop_record_field(left, element.id, "outer_flag")
+            }] if matches_loop_record_field(left, element.id, 0)
                 && matches!(
                     then_actions.as_slice(),
                     [ArtifactAction::IfElse {
                         condition: ArtifactValueTemplate::Equality { left, .. },
                         then_actions,
                         else_actions,
-                    }] if matches_loop_record_field(left, element.id, "inner_flag")
+                    }] if matches_loop_record_field(left, element.id, 1)
                         && matches_send_loop_record_field(
                             then_actions.as_slice(),
                             element.id,
-                            "inner_flag"
+                            1
                         )
                         && matches_send_loop_record_field(
                             else_actions.as_slice(),
                             element.id,
-                            "inner_flag"
+                            1
                         )
                 )
                 && matches!(else_actions.as_slice(), [ArtifactAction::Emit { .. }])
@@ -149,12 +149,12 @@ fn runtime_for_each_nested_if_actions_check_and_lower_to_typed_loop_branch_templ
 fn matches_loop_record_field(
     template: &ArtifactValueTemplate,
     element: mantle_artifact::LoopElementId,
-    field_name: &str,
+    field_id: u32,
 ) -> bool {
     matches!(
         template,
         ArtifactValueTemplate::RecordField { record, field, .. }
-            if field == field_name
+            if field.as_u32() == field_id
                 && matches!(
                     record.as_ref(),
                     ArtifactValueTemplate::LoopElement {
@@ -168,7 +168,7 @@ fn matches_loop_record_field(
 fn matches_send_loop_record_field(
     actions: &[ArtifactAction],
     element: mantle_artifact::LoopElementId,
-    field_name: &str,
+    field_id: u32,
 ) -> bool {
     matches!(
         actions,
@@ -178,6 +178,6 @@ fn matches_send_loop_record_field(
                 payload: Some(payload),
                 ..
             },
-        ] if matches_loop_record_field(payload, element, field_name)
+        ] if matches_loop_record_field(payload, element, field_id)
     )
 }

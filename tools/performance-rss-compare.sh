@@ -12,6 +12,7 @@ Profiles default to:
 
 Additional supported profile when both worktrees contain the example:
   local_supervision_restart.in_memory_runtime
+  imports_main.check_lower
 
 Each sample runs one profile in a fresh cargo test process and reports RSS
 median/min/max/p90 deltas in KiB.
@@ -106,11 +107,21 @@ trap cleanup EXIT
 install_probe() {
     local worktree="$1"
     local target="${worktree}/crates/strata-mantle-acceptance/tests/performance_rss_probe.rs"
-    if [[ -e "$target" ]]; then
+    if [[ -e "$target" || -L "$target" ]]; then
         echo "Error: refusing to overwrite existing probe target $target" >&2
         exit 2
     fi
-    cp "$probe_source" "$target"
+    local target_dir
+    local temp_target
+    target_dir="$(dirname "$target")"
+    temp_target="${target_dir}/.performance_rss_probe.$$"
+    install -m 0644 "$probe_source" "$temp_target"
+    mv -n "$temp_target" "$target"
+    if [[ -e "$temp_target" ]]; then
+        rm -f "$temp_target"
+        echo "Error: refusing to overwrite existing probe target $target" >&2
+        exit 2
+    fi
     probe_targets+=("$target")
 }
 

@@ -42,7 +42,8 @@ fn runtime_state_payload_projection_if_branches_on_current_record_field() {
     );
 
     let encoded = artifact.encode();
-    assert!(encoded.contains("field_name=phase"));
+    assert!(encoded.contains("field_id=0"));
+    assert!(!encoded.contains("field_name="));
     assert!(
         !encoded.contains("held_phase"),
         "artifact must not dispatch through the source state-payload alias"
@@ -152,7 +153,7 @@ fn runtime_state_payload_projection_if_rejects_unknown_projected_field_before_ru
     else {
         panic!("runtime branch condition should project the current state payload field");
     };
-    *field = "missing_phase".to_owned();
+    *field = RecordFieldId::new(1);
     gate.write_unvalidated_encoded_artifact(invalid_artifact_path, &artifact.encode());
 
     let run = gate.run_mantle_failure(invalid_artifact_path);
@@ -160,7 +161,7 @@ fn runtime_state_payload_projection_if_rejects_unknown_projected_field_before_ru
     let stdout = String::from_utf8_lossy(&run.stdout);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("field_name missing_phase is not declared by type id"),
+        stderr.contains("field_id 1 is not declared by type id"),
         "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert!(!stdout.contains("mantle: loaded"));
@@ -195,7 +196,7 @@ fn assert_current_payload_phase_action_branch(
                     record,
                     field,
                 } if *ty == expected.phase_type
-                    && field == "phase"
+                    && field.as_u32() == 0
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::CurrentStatePayload { ty }

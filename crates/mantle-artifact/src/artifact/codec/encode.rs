@@ -277,8 +277,9 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
         }
         ArtifactValueTemplate::RecordField { ty, record, field } => {
             encoded.push_str(&format!(
-                "{prefix}.kind=record_field\n{prefix}.type_id={}\n{prefix}.field_name={field}\n",
-                ty.as_u32()
+                "{prefix}.kind=record_field\n{prefix}.type_id={}\n{prefix}.field_id={}\n",
+                ty.as_u32(),
+                field.as_u32()
             ));
             encode_value_template(encoded, &format!("{prefix}.record"), record);
         }
@@ -403,7 +404,10 @@ fn encode_value_template(encoded: &mut String, prefix: &str, template: &Artifact
             ));
             for (field_index, field) in fields.iter().enumerate() {
                 let field_prefix = format!("{prefix}.field.{field_index}");
-                encoded.push_str(&format!("{field_prefix}.name={}\n", field.name));
+                encoded.push_str(&format!(
+                    "{field_prefix}.field_id={}\n",
+                    field.field.as_u32()
+                ));
                 encode_value_template(encoded, &format!("{field_prefix}.value"), &field.value);
             }
         }

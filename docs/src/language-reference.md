@@ -8,13 +8,13 @@ Mantle artifact internals.
 
 | Area | Accepted Surface |
 | --- | --- |
-| Source unit | One `module name;` declaration per file. |
+| Source unit | One `module name;` declaration per file, with optional `import module_name;` declarations immediately after it. |
 | Top-level declarations | `record`, `enum`, `fn`, and `proc`. |
 | Classes | Not available. |
 | Methods | Not available. |
 | Top-level functions | Pure deterministic one-argument source functions with optional immutable source-local bindings. |
 | Process functions | `init`, `step`, and pure deterministic one-argument process-local functions with optional immutable source-local bindings. |
-| Imports | Not available. |
+| Imports | Root-path loading of explicit sibling source-unit imports with deterministic dependency ordering. |
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Local spawn authority | Process-local `authority name: Cap<Spawn<Target>>;` declarations for dynamic local process creation. |
@@ -33,8 +33,10 @@ Mantle artifact internals.
 | Pattern dispatch | Function signature patterns, source function match bodies, function return-match expressions, fieldless enum matches in `init`, step parameter patterns, wildcard step patterns, one whole-body `match msg` step form per process, whole-body `match state` inside message-specific step clauses, and step return-match expressions over concrete enum source bindings. Same-constructor payload-sensitive splits are accepted for source functions, whole-body `match msg`, step parameter patterns, state-match step clauses, and step return-match expressions only when nested typed predicates are provably disjoint. |
 | Transition result | `ProcResult<T>` with `Continue(value)`, `Stop(value)`, and `Panic(value)`. |
 
-The `module` declaration names a source unit. It does not create an import
-namespace, package, library, or visibility boundary.
+The `module` declaration names a source unit. Explicit imports connect source
+units before checking and lowering and define direct cross-unit scope. They do
+not create packages, libraries, re-exports, visibility modifiers, or runtime
+boundaries.
 
 ## Source Unit
 
@@ -44,11 +46,13 @@ A Strata source file starts with a module declaration:
 module hello;
 ```
 
-After the module declaration, the accepted top-level declarations are records,
-enums, source functions, and processes.
+After the module declaration, zero or more imports may appear before top-level
+declarations. The accepted top-level declarations are records, enums, source
+functions, and processes.
 
 ```strata
 module example;
+import shared_types;
 
 record MainState;
 enum MainMsg { Start }
@@ -70,6 +74,19 @@ proc Main mailbox bounded(1) {
     }
 }
 ```
+
+Imports use the narrow form `import module_name;`. The CLI resolves
+`module_name` to a sibling `module_name.str` file from the importing source
+unit, then builds a typed source-unit dependency graph. The graph must be
+acyclic, module identities must be unique, and unqualified top-level type,
+function, and process names must not be ambiguous across reachable source
+units. Cross-unit function names and enum constructor names also share one
+unqualified callable namespace so flattening cannot turn a transitive source
+unit into a later call-site ambiguity. Each source unit may use only its own
+declarations and declarations from its direct imports; transitive imports are
+not re-exported. Declarations from the reachable graph are checked together in a
+deterministic dependency-first order. Mantle receives only the lowered target
+artifact; it does not resolve imports or execute by source-unit names.
 
 Every buildable program must declare a `Main` process. Mantle starts `Main` and
 delivers the first message variant of `Main`'s message enum as the entry
@@ -97,7 +114,7 @@ worker-name
 _
 ```
 
-`_`, `as`, `authority`, `bounded`, `child`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`, `local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`,
+`_`, `as`, `authority`, `bounded`, `child`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `import`, `in`, `let`, `local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`,
 `permanent`, `proc`, `record`, `return`, `security`, `send`, `spawn`, `supervise`, `temporary`, `transient`, `type`, and `var` are reserved everywhere
 identifiers are accepted.
 `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `List`, `Map`, `Unit`, `Option`,
@@ -213,24 +230,20 @@ let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;
 
 Outcome bindings are immutable and scoped to the `step` body. They may feed
 whole-value state transitions when the checker can admit the finite runtime
-outcome values into the process state table. Spawn outcome successes carry
-process references, so they remain step-local authority values rather than
-storable source state. Outcomes may also drive follow-up effects through
-ordinary immutable `if` conditions such as `send_result == Ok(Unit)` or
-`spawn_result != Err(Exhausted(Unit))`. Those branch tests compare the typed
-built-in variant shape, not the preserved message payload or the successful
-process-reference payload. Top-level pre-state effect bindings are declaration
-ordered: an outcome is usable only after its `let` statement, and outcome
-bindings must appear before ordinary non-prefix effect statements that would
-otherwise be reordered around the commit-or-return boundary. A top-level
-process-reference `spawn` may remain in the same pre-state prefix so later
-outcome sends can target it.
-`SendError<M>`
-preserves the original message value for pre-acceptance failures, including the
-runtime metadata for a direct `ProcessRef<T>` message payload. That authority
+outcome values into the process state table. Spawn successes carry process
+references, so they remain step-local authority values rather than storable
+source state. Outcomes may also drive follow-up effects through immutable `if`
+conditions such as `send_result == Ok(Unit)` or
+`spawn_result != Err(Exhausted(Unit))`; those tests compare typed built-in
+variant shape, not process-reference identity. Top-level pre-state effect
+bindings are declaration ordered: an outcome is usable only after its `let`
+statement, and outcome bindings must appear before ordinary non-prefix effects
+that would otherwise cross the commit-or-return boundary.
+`SendError<M>` preserves the original message value for pre-acceptance failures,
+including metadata for a direct `ProcessRef<T>` message payload. That authority
 remains a send/message boundary value and is not admitted into ordinary process
-state. The admitted variants are
-`Full(M)`, `Stopped(M)`, `Crashed(M)`, and `MailboxClosed(M)`. The current
+state. The admitted variants are `Full(M)`, `Stopped(M)`, `Crashed(M)`, and
+`MailboxClosed(M)`. The current
 runtime distinguishes full, stopped, and targets already failed before
 acceptance in direct runtime execution. It does not yet expose a distinct
 source-created closed-mailbox lifecycle, but the typed shape is admitted at
@@ -278,10 +291,11 @@ names remain syntax, diagnostics, and trace metadata.
 ## Local Supervision
 
 `supervise local one_for_one(max_restarts: 2_u32, within_ms: 1000_u64) { child worker: Worker = spawn Worker as permanent; }`
-declares static lexical child processes owned by a process, separate from dynamic `Cap<Spawn<Target>>` authority.
-The current surface supports local `one_for_one` supervisors only. Child names are unique, restart intensity is explicit,
-modes are `permanent`, `transient`, or `temporary`, and local supervisor child graphs must be acyclic.
-`send worker Work;` resolves `worker` to typed supervisor and child IDs, not a source string, dynamic process reference, or general `Cap<Spawn<Worker>>`.
+declares static lexical child processes owned by a process, separate from dynamic
+`Cap<Spawn<Target>>` authority. The current surface supports local `one_for_one`
+supervisors only. Child names are unique, restart intensity is explicit, modes
+are `permanent`, `transient`, or `temporary`, and child graphs must be acyclic.
+`send worker Work;` resolves `worker` to typed supervisor and child IDs.
 
 ## Collections
 
@@ -296,20 +310,19 @@ Map<Phase,Phase,1>[Ready => Done]
 ```
 
 Collection constructors are explicit. Bare `[Ready, Done]` and `{ Ready: Done }`
-forms are not part of the buildable language surface. Map keys are canonical source values; a
-map value or map pattern that repeats a canonical key is rejected. List and map
-patterns are exact by default. List rest patterns are suffix-only:
+forms are not part of the buildable surface. Repeated canonical map keys are
+rejected. List and map patterns are exact by default. List rest patterns are
+suffix-only:
 
 ```strata
 List[first, second] // exact list length
 List[first, ..tail] // first must exist; tail is the unmatched suffix
 ```
 
-`..tail` binds an immutable whole list containing entries after the fixed prefix.
-If the matched value has type `List<T,N>` and the pattern lists `M` fixed prefix
-elements, the tail binding has type `List<T,N-M>`. The actual tail value may
-contain fewer entries because bounded list values may be shorter than capacity.
-Arbitrary prefix/rest/suffix matching remains deferred.
+`..tail` binds an immutable whole list after the fixed prefix. If the matched
+value has type `List<T,N>` and the pattern lists `M` fixed prefix elements, the
+tail binding has type `List<T,N-M>`. The actual tail may contain fewer entries
+because bounded list values may be shorter than capacity.
 
 A trailing `..` marker makes a map pattern a subset pattern over the listed
 static keys:
@@ -320,11 +333,10 @@ Map[Ready => selected, ..] // Ready must exist; extra keys are allowed
 Map[Ready => selected, ..rest] // rest binds a map without Ready
 ```
 
-Map `..rest` binds an immutable whole map containing entries except the listed
-static keys. If the matched value has type `Map<K,V,N>` and the pattern lists
-`M` distinct static keys, the rest binding has type `Map<K,V,N-M>`. The actual
-rest value may contain fewer entries because subset patterns still match maps
-that omit unlisted keys.
+Map `..rest` binds an immutable whole map except the listed static keys. If the
+matched value has type `Map<K,V,N>` and the pattern lists `M` distinct static
+keys, the rest binding has type `Map<K,V,N-M>`. The actual rest may contain fewer
+entries because subset patterns still match maps that omit unlisted keys.
 
 Overlapping exact and subset map patterns are rejected instead of relying on
 source order or specificity. Subset overlap is capacity-aware: two subset
@@ -336,13 +348,11 @@ iteration, order-dependent dispatch, mutation, dynamic keys, or mutable views.
 
 Collection pattern element and map-value positions may contain nested structural
 patterns, such as `List[Job { phase }, ..tail]` or
-`Map[Ready => Job { phase }, ..rest]`. Map nesting still uses only the listed
-static keys; dynamic-key map dispatch is not part of the buildable surface.
+`Map[Ready => Job { phase }, ..rest]`. Map nesting uses only listed static keys.
 
-Record field order and map entry order are preserved in source-authored values,
-emitted artifact values, labels, and traces. Projection still addresses map
-entries by key, and the language does not expose source-level map iteration or
-order-dependent dispatch.
+Record field and map entry order are preserved in authored values, artifact
+values, labels, and traces. Projection still addresses map entries by key, and
+the language exposes no source-level map iteration or order-dependent dispatch.
 
 ## Enums
 
@@ -507,7 +517,6 @@ value:
 fn phase_of(Job { phase }) -> JobPhase ! [] ~ [] @det {
     return phase;
 }
-
 fn renamed_phase(Job { phase: current }) -> JobPhase ! [] ~ [] @det {
     return current;
 }
@@ -520,7 +529,6 @@ shapes:
 fn first(List<Phase,2>[phase, _]) -> Phase ! [] ~ [] @det {
     return phase;
 }
-
 fn lookup(Map<Phase,Phase,1>[Ready => selected]) -> Phase ! [] ~ [] @det {
     return selected;
 }
@@ -533,7 +541,6 @@ element/value projections:
 fn routed_phase(Assign(Job { phase })) -> Phase ! [] ~ [] @det {
     return phase;
 }
-
 fn listed_phase(List<Routed,1>[Assign(Job { phase })]) -> Phase ! [] ~ [] @det {
     return phase;
 }
@@ -556,8 +563,7 @@ fn readiness_body(mode: StartupMode) -> Readiness ! [] ~ [] @det {
 
 Whole-body function matches and function return-match expressions may split one
 top-level constructor when nested typed enum predicates are provably disjoint.
-The split remains checker-time source dispatch; function expansion resolves the
-concrete source value before lowering:
+The split remains checker-time source dispatch before lowering:
 
 ```strata
 fn route(packet: Packet) -> Phase ! [] ~ [] @det {
@@ -585,8 +591,8 @@ fn phase_of(job: Job) -> JobPhase ! [] ~ [] @det {
 ```
 
 Whole-body function matches can destructure exact list patterns, suffix-only list
-rest patterns, exact map patterns, and map subset/rest patterns. A wildcard arm
-may provide a fallback for collection shapes that are not listed:
+rest, exact map patterns, and map subset/rest patterns. A wildcard arm may
+provide fallback:
 
 ```strata
 fn first_or_unknown(items: List<Phase,1>) -> Phase ! [] ~ [] @det {
@@ -644,15 +650,13 @@ fn ready_value(items: Map<Phase,Phase,2>) -> Phase ! [] ~ [] @det {
 ```
 
 Enum matches are exhaustive and immutable. Source function whole-body matches and
-function return-match expressions may repeat a top-level constructor only when the
-nested typed enum predicates are provably disjoint; identical predicates,
-unguarded constructor arms, and unproven overlaps are rejected. Source function
-signature groups still keep one clause per top-level constructor. Record body
-matches and return matches use one record pattern arm for the matched record type.
-Collection patterns match exact list length unless they use the trailing
-`..tail` suffix rest binding. Map patterns match exact key sets unless they use
-the trailing `..` subset or rest marker. `_` remains available as a collection
-fallback in function match bodies and return matches.
+return-match expressions may repeat a top-level constructor only when nested
+typed enum predicates are provably disjoint; identical predicates, unguarded
+constructor arms, and unproven overlaps are rejected. Signature groups still keep
+one clause per top-level constructor. Record body/return matches use one record
+pattern arm for the matched record type. Collection patterns match exact list
+length or exact map keys unless they use `..tail`, `..`, or `..rest`; `_` remains
+available as a collection fallback.
 Payload-bearing source function patterns and record/list/map destructuring
 patterns bind immutable source values. A function call must provide a concrete
 enum constructor value for signature-pattern, whole-body match, or function
@@ -673,19 +677,8 @@ fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
 }
 ```
 
-The equivalent braced pure return form is also supported in source functions:
-
-```strata
-fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
-    if (flag) {
-        return WarmReady;
-    } else {
-        return ColdReady;
-    }
-}
-```
-
-The condition type is exactly the declared fieldless enum
+The equivalent braced pure return form is also supported in source functions. The
+condition type is exactly the declared fieldless enum
 `Bool { False, True }`. Both expression-form branches are source value
 expressions checked against the same expected return, field, state, or payload
 type. Braced source function return-if branches may contain immutable

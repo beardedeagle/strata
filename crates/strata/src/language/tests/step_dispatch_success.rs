@@ -227,7 +227,7 @@ proc BodyWorker mailbox bounded(1) {
         };
         let phase = fields
             .iter()
-            .find(|field| field.name == "phase")
+            .find(|field| field.field.as_u32() == 0)
             .unwrap_or_else(|| panic!("{process_name} should template phase"));
         let ArtifactValueTemplate::MapValue {
             key,

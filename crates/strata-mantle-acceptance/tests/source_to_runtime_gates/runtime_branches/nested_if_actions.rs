@@ -141,14 +141,14 @@ fn assert_nested_action_branch(
             condition,
             then_actions,
             else_actions,
-        }] if condition_is_bool_field_check(condition, bool_type, flags_type, "outer_flag")
+        }] if condition_is_bool_field_check(condition, bool_type, flags_type, 0)
             && matches!(
                 then_actions.as_slice(),
                 [ArtifactAction::IfElse {
                     condition,
                     then_actions,
                     else_actions,
-                }] if condition_is_bool_field_check(condition, bool_type, flags_type, "inner_flag")
+                }] if condition_is_bool_field_check(condition, bool_type, flags_type, 1)
                     && matches!(then_actions.as_slice(), [ArtifactAction::Emit { .. }])
                     && matches!(else_actions.as_slice(), [ArtifactAction::Emit { .. }])
             )
@@ -160,7 +160,7 @@ fn condition_is_bool_field_check(
     condition: &ArtifactValueTemplate,
     bool_type: TypeId,
     flags_type: TypeId,
-    expected_field: &str,
+    expected_field: u32,
 ) -> bool {
     matches!(
         condition,
@@ -179,7 +179,7 @@ fn condition_is_bool_field_check(
                     record,
                     field,
                 } if *ty == bool_type
-                    && field == expected_field
+                    && field.as_u32() == expected_field
                     && matches!(
                         record.as_ref(),
                         ArtifactValueTemplate::ReceivedPayload { ty } if *ty == flags_type

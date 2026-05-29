@@ -134,7 +134,7 @@ fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded()
                     ty: BOX,
                     value: artifact_value("Box{reply_to:ProcessRef_Worker}"),
                 }),
-                field: "reply_to".to_string(),
+                field: RecordFieldId::new(0),
             })),
         },
     ];
@@ -300,7 +300,7 @@ fn runtime_rejects_oversized_record_payload_template_value() {
     let template = ArtifactValueTemplate::Record {
         ty: BOX,
         fields: vec![ArtifactValueTemplateField {
-            name: "item".to_string(),
+            field: RecordFieldId::new(0),
             value: ArtifactValueTemplate::ReceivedPayload { ty: list_ty },
         }],
     };

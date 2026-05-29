@@ -127,7 +127,7 @@ fn assert_nested_artifact_next_state(artifact: &MantleArtifact) {
             condition,
             then_state,
             else_state,
-        } if condition_is_bool_field_check(condition, bool_type, flags_type, "outer_flag")
+        } if condition_is_bool_field_check(condition, bool_type, flags_type, 0)
             && nested_artifact_branch_returns_values(then_state.as_ref(), bool_type, flags_type)
             && nested_artifact_branch_returns_values(else_state.as_ref(), bool_type, flags_type)
     ));
@@ -144,7 +144,7 @@ fn nested_artifact_branch_returns_values(
             condition,
             then_state,
             else_state,
-        } if condition_is_bool_field_check(condition, bool_type, flags_type, "inner_flag")
+        } if condition_is_bool_field_check(condition, bool_type, flags_type, 1)
             && matches!(then_state.as_ref(), NextState::Value(_))
             && matches!(else_state.as_ref(), NextState::Value(_))
     )
@@ -154,7 +154,7 @@ fn condition_is_bool_field_check(
     condition: &ArtifactValueTemplate,
     bool_type: TypeId,
     flags_type: TypeId,
-    expected_field: &str,
+    expected_field: u32,
 ) -> bool {
     matches!(
         condition,
@@ -179,7 +179,7 @@ fn payload_is_bool_field(
     template: &ArtifactValueTemplate,
     bool_type: TypeId,
     flags_type: TypeId,
-    expected_field: &str,
+    expected_field: u32,
 ) -> bool {
     matches!(
         template,
@@ -188,7 +188,7 @@ fn payload_is_bool_field(
             record,
             field,
         } if *ty == bool_type
-            && field == expected_field
+            && field.as_u32() == expected_field
             && matches!(
                 record.as_ref(),
                 ArtifactValueTemplate::ReceivedPayload { ty } if *ty == flags_type

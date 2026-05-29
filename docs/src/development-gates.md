@@ -21,6 +21,9 @@ recipe. This keeps platform-specific and test-only `#[cfg]` paths covered by
 real compiler evidence without changing source visibility or suppressing
 rust-analyzer's weak inactive-code hints. If a target is missing locally,
 install the reported target with `rustup target add --toolchain stable ...`.
+Windows cfg-check coverage is compile-time evidence only for source loading and
+artifact IO; those paths fail closed at runtime until equivalent secure file
+identity support exists.
 
 Run the source-to-runtime gates after changes that affect syntax,
 checking, lowering, artifacts, runtime behavior, diagnostics, examples, or
@@ -85,8 +88,9 @@ just ci-local
 ## Performance Smoke
 
 `just performance-smoke` runs stable source-to-runtime resource smoke profiles
-over `examples/collection_state.str` and the local supervision restart example.
-It measures repeated Strata checking and lowering, Mantle artifact
+over `examples/collection_state.str`, the multi-file source-unit import example,
+and the local supervision restart example. It measures repeated Strata checking
+and lowering, root source loading for the import example, Mantle artifact
 encode/decode, repeated Mantle in-memory execution of the collection-state
 artifact, repeated Mantle JSONL-trace execution of the collection-state
 artifact, and repeated Mantle in-memory execution of the supervision artifact.
@@ -159,9 +163,10 @@ just performance-cli-footprint-compare /tmp/strata-base .
 ## Fuzzing
 
 The fuzz harnesses live under `fuzz/` and run with `cargo-fuzz` on nightly Rust.
-They cover three initial boundaries:
+They cover four boundaries:
 
 - parsing, checking, and lowering arbitrary UTF-8 source;
+- parsing, checking, and lowering delimited multi-source Strata source programs;
 - decoding and re-encoding arbitrary UTF-8 artifact text;
 - running valid lowered artifacts through the in-memory runtime host.
 

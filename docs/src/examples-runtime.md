@@ -140,43 +140,24 @@ Key source ideas:
 
 - `let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;`
   returns the committed process reference on accepted local spawn.
-- `if (spawn_result != Err(Exhausted(Unit)))` branches on the spawn outcome
-  variant without comparing process-reference identities.
 - `let send_result: Result<Unit,SendError<WorkerMsg>> = send worker Work;`
-  returns `Ok(Unit)` after Mantle accepts the message, or a typed
+  returns `Ok(Unit)` after Mantle accepts the message, or typed
   `SendError<WorkerMsg>` before acceptance.
-- `SendError<WorkerMsg>` admits `Full`, `Stopped`, `Crashed`, and
-  `MailboxClosed`; the current local runtime does not yet expose a distinct
-  source-created closed-mailbox lifecycle.
-- `if (send_result == Ok(Unit))` branches over the immutable outcome to choose a
-  follow-up effect.
-- The next state stores `send_result`. `spawn_result` stays step-local because
-  its success branch carries a process reference authority, not ordinary
-  storable source state.
-- The generated artifact uses typed outcome IDs and typed value templates, not
-  the source binding names, for runtime meaning.
-- `examples/effect_outcome_mailbox_full.str` and
-  `examples/effect_outcome_stopped_target.str` cover source-to-runtime
-  pre-acceptance failure outcomes. `examples/effect_outcome_crashed_target.str`
-  checks and builds, then proves the current source-created panic boundary fails
-  closed before a later sender can observe `Err(Crashed(...))`; the direct
-  Mantle runtime outcome test covers already-failed targets, and admission tests
-  cover the required `MailboxClosed` shape.
-- `examples/effect_outcome_spawn_denied.str` covers the typed local spawn
-  authority denial path. It declares `Cap<Spawn<Worker>>`, builds successfully,
-  and the acceptance gate runs Mantle with denied admitted spawn authority so
-  the step observes `Err(Denied(Unit))` before a `Worker` runtime instance is
-  accepted.
-- `examples/local_supervision_restart.str`,
-  `examples/local_supervision_permanent_stop.str`,
-  `examples/local_supervision_temporary.str`,
-  `examples/local_supervision_transient_restart.str`,
-  `examples/local_supervision_transient.str`, and
-  `examples/local_supervision_inactive_send_outcome.str` cover local
-  `one_for_one` supervision. They use lexical child sends, explicit restart
-  intensity, `permanent`, `temporary`, and `transient` child modes, stopped-child
-  send outcomes, and trace restart decisions without replaying consumed
-  messages.
+- Outcome branches such as `spawn_result != Err(Exhausted(Unit))` and
+  `send_result == Ok(Unit)` use immutable typed variants, not process-reference
+  identity comparisons.
+- The next state stores `send_result`; `spawn_result` stays step-local because
+  success carries process-reference authority rather than ordinary source state.
+- The artifact uses typed outcome IDs and value templates, not source binding
+  names, for runtime meaning.
+- `effect_outcome_mailbox_full`, `effect_outcome_stopped_target`, and
+  `effect_outcome_crashed_target` cover pre-acceptance failure, stopped/already
+  failed targets, and the current fail-closed source-created panic boundary.
+- `effect_outcome_spawn_denied` covers denied admitted spawn authority before a
+  `Worker` instance is accepted.
+- The local supervision examples cover lexical child sends, explicit restart
+  intensity, child modes, stopped-child send outcomes, and restart traces without
+  replaying consumed messages.
 
 ## Runtime If Else
 
@@ -732,17 +713,35 @@ Key source ideas:
 - `return Stop(MainState { phase: Done });` preserves immutable whole-state
   transition semantics.
 
+## Source-Unit Imports
+
+`examples/imports_main.str` imports `imports_types.str` and `imports_worker.str`.
+The root owns `Main`, the type unit owns `Job`, `Phase`, and `complete`, and the
+worker unit owns `Worker`. Strata resolves that graph before checking and
+lowering.
+
+```sh
+just run-example imports_main
+```
+
+The imports resolve to sibling `.str` files, the graph is checked in deterministic
+dependency-first order, and each source unit directly imports the declarations it
+uses. `send worker Work(complete(Job { phase: Ready }));` lowers imported record,
+enum, pure-function, and process declarations to typed artifact IDs. Mantle runs
+`target/strata/imports_main.mta`; it does not load `.str` files or resolve import
+names at runtime.
+
 ## Actor Panic No Replay
 
 `examples/actor_panic_no_replay.str` shows an explicit abnormal transition.
 `Main` queues two `Ping` messages to `Worker`; `Worker` dequeues one message,
-returns `Panic(Failed)`, records failure evidence, and the consumed message is
-not replayed.
+returns `Panic(Failed)`, records failure evidence, and does not replay the
+consumed message.
 
 ```sh
 just run-example actor_panic_no_replay
 ```
 
 The final command is expected to return non-zero. The runtime trace should show
-two accepted `Ping` messages, one `message_dequeued` for `Worker`, one
-`process_stepped` event with `result:"Panic"`, and one `process_failed` event.
+two accepted `Ping` messages, one `message_dequeued`, one `process_stepped`
+with `result:"Panic"`, and one `process_failed` event.

@@ -225,7 +225,7 @@ fn assert_nested_loop_branch_shape(artifact: &MantleArtifact) {
                         flags_type,
                         bool_type,
                         element.id,
-                        "outer_flag",
+                        0,
                     )
                     && matches!(
                         then_actions.as_slice(),
@@ -238,21 +238,21 @@ fn assert_nested_loop_branch_shape(artifact: &MantleArtifact) {
                                 flags_type,
                                 bool_type,
                                 element.id,
-                                "inner_flag",
+                                1,
                             )
                             && matches_send_loop_record_field(
                                 then_actions.as_slice(),
                                 flags_type,
                                 bool_type,
                                 element.id,
-                                "inner_flag",
+                                1,
                             )
                             && matches_send_loop_record_field(
                                 else_actions.as_slice(),
                                 flags_type,
                                 bool_type,
                                 element.id,
-                                "inner_flag",
+                                1,
                             )
                     )
                     && matches!(else_actions.as_slice(), [ArtifactAction::Emit { .. }])
@@ -265,7 +265,7 @@ fn matches_loop_record_bool_condition(
     flags_type: TypeId,
     bool_type: TypeId,
     element: mantle_artifact::LoopElementId,
-    field_name: &str,
+    field_id: u32,
 ) -> bool {
     matches!(
         condition,
@@ -277,7 +277,7 @@ fn matches_loop_record_bool_condition(
             right,
         } if *ty == bool_type
             && *operand_ty == bool_type
-            && matches_loop_record_field(left, flags_type, bool_type, element, field_name)
+            && matches_loop_record_field(left, flags_type, bool_type, element, field_id)
             && matches!(
                 right.as_ref(),
                 ArtifactValueTemplate::Literal { ty, value }
@@ -291,7 +291,7 @@ fn matches_send_loop_record_field(
     flags_type: TypeId,
     bool_type: TypeId,
     element: mantle_artifact::LoopElementId,
-    field_name: &str,
+    field_id: u32,
 ) -> bool {
     matches!(
         actions,
@@ -301,7 +301,7 @@ fn matches_send_loop_record_field(
                 payload: Some(payload),
                 ..
             },
-        ] if matches_loop_record_field(payload, flags_type, bool_type, element, field_name)
+        ] if matches_loop_record_field(payload, flags_type, bool_type, element, field_id)
     )
 }
 
@@ -310,13 +310,13 @@ fn matches_loop_record_field(
     flags_type: TypeId,
     bool_type: TypeId,
     element: mantle_artifact::LoopElementId,
-    field_name: &str,
+    field_id: u32,
 ) -> bool {
     matches!(
         template,
         ArtifactValueTemplate::RecordField { ty, record, field }
             if *ty == bool_type
-                && field == field_name
+                && field.as_u32() == field_id
                 && matches!(
                     record.as_ref(),
                     ArtifactValueTemplate::LoopElement {

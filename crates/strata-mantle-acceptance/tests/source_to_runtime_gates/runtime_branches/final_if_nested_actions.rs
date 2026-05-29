@@ -191,7 +191,7 @@ fn assert_final_if_nested_action_shape(artifact: &MantleArtifact) {
             condition,
             then_state,
             else_state,
-        } if condition_is_bool_field_check(condition, bool_type, flags_type, "outer_flag")
+        } if condition_is_bool_field_check(condition, bool_type, flags_type, 0)
             && matches!(then_state.as_ref(), NextState::Current)
             && matches!(else_state.as_ref(), NextState::Current)
     ));
@@ -215,10 +215,7 @@ fn assert_final_if_nested_action_shape(artifact: &MantleArtifact) {
     };
     assert_eq!(*target, reporter_process);
     assert!(condition_is_bool_field_check(
-        condition,
-        bool_type,
-        flags_type,
-        "outer_flag"
+        condition, bool_type, flags_type, 0
     ));
     assert_final_branch_contains_nested_if(then_actions, bool_type, flags_type, *process_ref);
     assert_final_branch_contains_nested_if(else_actions, bool_type, flags_type, *process_ref);
@@ -236,7 +233,7 @@ fn assert_final_branch_contains_nested_if(
             condition,
             then_actions,
             else_actions,
-        }] if condition_is_bool_field_check(condition, bool_type, flags_type, "inner_flag")
+        }] if condition_is_bool_field_check(condition, bool_type, flags_type, 1)
             && selected_inner_branch_actions_use_typed_payload(
                 then_actions,
                 bool_type,
@@ -269,7 +266,7 @@ fn selected_inner_branch_actions_use_typed_payload(
             },
         ] if *target_ref == process_ref
             && *message == MessageId::new(0)
-            && payload_is_bool_field(payload, bool_type, flags_type, "inner_flag")
+            && payload_is_bool_field(payload, bool_type, flags_type, 1)
     )
 }
 
@@ -277,7 +274,7 @@ fn condition_is_bool_field_check(
     condition: &ArtifactValueTemplate,
     bool_type: TypeId,
     flags_type: TypeId,
-    expected_field: &str,
+    expected_field: u32,
 ) -> bool {
     matches!(
         condition,
@@ -302,7 +299,7 @@ fn payload_is_bool_field(
     template: &ArtifactValueTemplate,
     bool_type: TypeId,
     flags_type: TypeId,
-    expected_field: &str,
+    expected_field: u32,
 ) -> bool {
     matches!(
         template,
@@ -311,7 +308,7 @@ fn payload_is_bool_field(
             record,
             field,
         } if *ty == bool_type
-            && field == expected_field
+            && field.as_u32() == expected_field
             && matches!(
                 record.as_ref(),
                 ArtifactValueTemplate::ReceivedPayload { ty } if *ty == flags_type

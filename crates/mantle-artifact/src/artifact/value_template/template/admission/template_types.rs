@@ -21,10 +21,10 @@ pub(super) fn validate_record_template_type<'a>(
         )));
     }
     for actual in actual_fields {
-        if fields.iter().all(|expected| expected.name != actual.name) {
+        if fields.get(actual.field.index()).is_none() {
             return Err(Error::new(format!(
-                "{field}.field {} is not declared by type id {}",
-                actual.name,
+                "{field}.field_id {} is not declared by type id {}",
+                actual.field.as_u32(),
                 ty.as_u32()
             )));
         }

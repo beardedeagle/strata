@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::{Error, MAX_ARTIFACT_BYTES, MantleArtifact, Result};
 
@@ -47,9 +47,37 @@ pub fn read_artifact(path: &Path) -> Result<MantleArtifact> {
     MantleArtifact::decode(&contents)
 }
 
+pub struct SourceHashFnv1a64 {
+    hash: u64,
+}
+
+impl SourceHashFnv1a64 {
+    pub fn new() -> Self {
+        Self {
+            hash: FNV1A64_OFFSET,
+        }
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.hash = fnv1a64_update(self.hash, bytes);
+    }
+
+    pub fn finish_hex(self) -> String {
+        // Diagnostic correlation only; never use FNV as authority or integrity proof.
+        format!("{:016x}", self.hash)
+    }
+}
+
+impl Default for SourceHashFnv1a64 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn source_hash_fnv1a64(source: &str) -> String {
-    // Diagnostic correlation only; never use FNV as authority or integrity proof.
-    format!("{:016x}", fnv1a64(source.as_bytes()))
+    let mut hasher = SourceHashFnv1a64::new();
+    hasher.update(source.as_bytes());
+    hasher.finish_hex()
 }
 
 fn reject_non_regular_artifact_output_path_before_open(path: &Path) -> Result<()> {
@@ -66,14 +94,8 @@ fn prepare_artifact_output_parent(_path: &Path) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn prepare_artifact_output_parent(path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
-            reject_symlink_path_components(parent)?;
-        }
-    }
-    Ok(())
+fn prepare_artifact_output_parent(_path: &Path) -> Result<()> {
+    Err(unsupported_secure_artifact_io().into())
 }
 
 #[cfg(unix)]
@@ -90,19 +112,9 @@ fn open_artifact_input_file(path: &Path) -> std::io::Result<fs::File> {
     Ok(fs::File::from(fd))
 }
 
-#[cfg(all(not(unix), not(windows)))]
+#[cfg(not(unix))]
 fn open_artifact_input_file(_path: &Path) -> std::io::Result<fs::File> {
-    fs::File::open(_path)
-}
-
-#[cfg(windows)]
-fn open_artifact_input_file(path: &Path) -> std::io::Result<fs::File> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
+    Err(unsupported_secure_artifact_io())
 }
 
 #[cfg(unix)]
@@ -114,25 +126,9 @@ fn open_artifact_output_file(path: &Path) -> std::io::Result<fs::File> {
     Ok(fs::File::from(fd))
 }
 
-#[cfg(all(not(unix), not(windows)))]
-fn open_artifact_output_file(path: &Path) -> std::io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(path)
-}
-
-#[cfg(windows)]
-fn open_artifact_output_file(path: &Path) -> std::io::Result<fs::File> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
+#[cfg(not(unix))]
+fn open_artifact_output_file(_path: &Path) -> std::io::Result<fs::File> {
+    Err(unsupported_secure_artifact_io())
 }
 
 #[cfg(unix)]
@@ -263,8 +259,13 @@ fn nix_to_io_error(err: nix::errno::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(err as i32)
 }
 
-#[cfg(windows)]
-const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(not(unix))]
+fn unsupported_secure_artifact_io() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "artifact I/O requires secure file identity support on this target",
+    )
+}
 
 fn validate_artifact_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()> {
     if metadata.is_file() {
@@ -274,8 +275,9 @@ fn validate_artifact_file_metadata(path: &Path, metadata: &fs::Metadata) -> Resu
     }
 }
 
+#[cfg(unix)]
 fn reject_symlink_path_components(path: &Path) -> Result<()> {
-    let mut current = PathBuf::new();
+    let mut current = std::path::PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());
         match fs::symlink_metadata(&current) {
@@ -294,6 +296,11 @@ fn reject_symlink_path_components(path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(unix))]
+fn reject_symlink_path_components(_path: &Path) -> Result<()> {
+    Err(unsupported_secure_artifact_io().into())
+}
+
 fn non_regular_artifact_path_error(path: &Path) -> Error {
     Error::new(format!(
         "artifact path {} is not a regular file",
@@ -301,13 +308,30 @@ fn non_regular_artifact_path_error(path: &Path) -> Error {
     ))
 }
 
-fn fnv1a64(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
+const FNV1A64_OFFSET: u64 = 0xcbf29ce484222325;
+const FNV1A64_PRIME: u64 = 0x100000001b3;
+
+fn fnv1a64_update(mut hash: u64, bytes: &[u8]) -> u64 {
     for byte in bytes {
         hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(FNV1A64_PRIME);
     }
     hash
+}
+
+#[cfg(test)]
+mod hash_tests {
+    use super::*;
+
+    #[test]
+    fn streaming_source_hash_matches_contiguous_source_hash() {
+        let mut hasher = SourceHashFnv1a64::new();
+        hasher.update(b"abc");
+        hasher.update(b"");
+        hasher.update(b"def");
+
+        assert_eq!(hasher.finish_hex(), source_hash_fnv1a64("abcdef"));
+    }
 }
 
 #[cfg(all(test, unix))]

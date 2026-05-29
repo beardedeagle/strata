@@ -299,7 +299,7 @@ proc Main mailbox bounded(1) {
     };
     let selected = fields
         .iter()
-        .find(|field| field.name == "selected")
+        .find(|field| field.field.as_u32() == 0)
         .expect("selected field should lower");
     assert!(matches!(
         &selected.value,

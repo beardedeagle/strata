@@ -1,15 +1,14 @@
 use std::env;
 use std::fmt;
-use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use mantle_artifact::write_artifact;
 
 use crate::language::{
-    AuthoritySummaryFormat, MAX_SOURCE_BYTES, check_source, lower_to_artifact,
-    render_authority_summary,
+    AuthoritySummaryFormat, CheckedProgram, SourceProvenanceHash, check_source_program,
+    lower_to_artifact_with_source_hash, render_authority_summary,
 };
+use crate::source_loader::{LoadedSourceProgram, load_root_source_program};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -17,6 +16,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     Message(String),
     Language(crate::language::Error),
+    SourceLoad(crate::source_loader::Error),
     Artifact(mantle_artifact::Error),
     Io(std::io::Error),
 }
@@ -32,6 +32,7 @@ impl fmt::Display for Error {
         match self {
             Self::Message(message) => f.write_str(message),
             Self::Language(err) => write!(f, "{err}"),
+            Self::SourceLoad(err) => write!(f, "{err}"),
             Self::Artifact(err) => write!(f, "{err}"),
             Self::Io(err) => write!(f, "{err}"),
         }
@@ -43,6 +44,7 @@ impl std::error::Error for Error {
         match self {
             Self::Message(_) => None,
             Self::Language(err) => Some(err),
+            Self::SourceLoad(err) => Some(err),
             Self::Artifact(err) => Some(err),
             Self::Io(err) => Some(err),
         }
@@ -52,6 +54,12 @@ impl std::error::Error for Error {
 impl From<crate::language::Error> for Error {
     fn from(value: crate::language::Error) -> Self {
         Self::Language(value)
+    }
+}
+
+impl From<crate::source_loader::Error> for Error {
+    fn from(value: crate::source_loader::Error) -> Self {
+        Self::SourceLoad(value)
     }
 }
 
@@ -77,9 +85,8 @@ where
         Some("check") => {
             let path = required_path(args.next(), "strata check <path>")?;
             ensure_no_extra_args(args)?;
-            let source = read_source_file(&path)?;
-            let checked = check_source(&source)?;
-            let _artifact = lower_to_artifact(&checked, &source)?;
+            let (checked, source_hash) = check_source_path(&path)?;
+            let _artifact = lower_to_artifact_with_source_hash(&checked, source_hash)?;
             let entry = checked.entry_process_label()?;
             println!(
                 "strata: checked {} (module {}, entry {})",
@@ -106,9 +113,8 @@ where
                     return Err(Error::new(format!("unexpected argument {arg:?}")));
                 }
             }
-            let source = read_source_file(&path)?;
-            let checked = check_source(&source)?;
-            let artifact = lower_to_artifact(&checked, &source)?;
+            let (checked, source_hash) = check_source_path(&path)?;
+            let artifact = lower_to_artifact_with_source_hash(&checked, source_hash)?;
             let artifact_path = output.unwrap_or(default_artifact_path(&path)?);
             write_artifact(&artifact_path, &artifact)?;
             println!(
@@ -127,8 +133,7 @@ where
                 args,
                 "strata authority-summary <path.str> [--format text|json]",
             )?;
-            let source = read_source_file(&path)?;
-            let checked = check_source(&source)?;
+            let (checked, _) = check_source_path(&path)?;
             let summary = render_authority_summary(&checked, &path.display().to_string(), format);
             print_summary(&summary);
             Ok(())
@@ -166,118 +171,17 @@ fn default_artifact_path(source_path: &Path) -> Result<PathBuf> {
         .join(format!("{stem}.mta")))
 }
 
-fn read_source_file(path: &Path) -> Result<String> {
-    let mut file = open_source_file(path)?;
-    let metadata = file.metadata()?;
-    validate_source_file_metadata(path, &metadata)?;
-    if metadata.len() > MAX_SOURCE_BYTES as u64 {
-        return Err(Error::new(format!(
-            "source {} exceeds maximum size of {MAX_SOURCE_BYTES} bytes",
-            path.display()
-        )));
-    }
-
-    let mut bytes = Vec::new();
-    file.by_ref()
-        .take((MAX_SOURCE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_SOURCE_BYTES {
-        return Err(Error::new(format!(
-            "source {} exceeds maximum size of {MAX_SOURCE_BYTES} bytes",
-            path.display()
-        )));
-    }
-
-    String::from_utf8(bytes).map_err(|err| {
-        Error::new(format!(
-            "source {} is not valid UTF-8: {err}",
-            path.display()
-        ))
-    })
+fn check_source_path(path: &Path) -> Result<(CheckedProgram, SourceProvenanceHash)> {
+    let loaded = load_root_source_program(path)?;
+    check_loaded_source(loaded)
 }
 
-fn open_source_file(path: &Path) -> Result<fs::File> {
-    reject_non_regular_source_path_before_open(path)?;
-    match open_source_file_handle(path) {
-        Ok(file) => Ok(file),
-        Err(open_err) => {
-            if fs::metadata(path)
-                .map(|metadata| !metadata.is_file())
-                .unwrap_or(false)
-            {
-                return Err(non_regular_source_path_error(path));
-            }
-            Err(open_err.into())
-        }
-    }
-}
-
-#[cfg(all(
-    unix,
-    any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
-    )
-))]
-fn open_source_file_handle(path: &Path) -> std::io::Result<fs::File> {
-    use nix::fcntl::OFlag;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(OFlag::O_NONBLOCK.bits())
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn open_source_file_handle(path: &Path) -> std::io::Result<fs::File> {
-    fs::File::open(path)
-}
-
-#[cfg(all(
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
-    ))
-))]
-fn open_source_file_handle(_path: &Path) -> std::io::Result<fs::File> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "source file opening requires a nonblocking open flag for this Unix target",
-    ))
-}
-
-fn reject_non_regular_source_path_before_open(path: &Path) -> Result<()> {
-    let metadata = fs::metadata(path)?;
-    validate_source_file_metadata(path, &metadata)
-}
-
-fn validate_source_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()> {
-    if metadata.is_file() {
-        Ok(())
-    } else {
-        Err(non_regular_source_path_error(path))
-    }
-}
-
-fn non_regular_source_path_error(path: &Path) -> Error {
-    Error::new(format!(
-        "source path {} is not a regular file",
-        path.display()
-    ))
+fn check_loaded_source(
+    loaded: LoadedSourceProgram,
+) -> Result<(CheckedProgram, SourceProvenanceHash)> {
+    let (program, source_hash) = loaded.into_parts();
+    let checked = check_source_program(program)?;
+    Ok((checked, source_hash))
 }
 
 fn ensure_no_extra_args(args: impl IntoIterator<Item = String>) -> Result<()> {
@@ -346,91 +250,12 @@ pub fn run_strata_from_env() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::MAX_SOURCE_BYTES;
     use mantle_artifact::{MAX_ACTIONS_PER_PROCESS, MAX_OUTPUT_LITERALS};
+    use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_SOURCE_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    #[test]
-    fn read_source_file_rejects_oversized_source() {
-        let path = unique_source_path("oversized");
-        fs::write(&path, vec![b'a'; MAX_SOURCE_BYTES + 1])
-            .expect("oversized test source should be written");
-
-        let err = read_source_file(&path).expect_err("oversized source should fail");
-
-        assert!(err.to_string().contains("exceeds maximum size"));
-
-        fs::remove_file(path).expect("test source should be removed");
-    }
-
-    #[test]
-    fn read_source_file_rejects_non_utf8_source() {
-        let path = unique_source_path("non-utf8");
-        fs::write(&path, [0xff]).expect("non-UTF-8 test source should be written");
-
-        let err = read_source_file(&path).expect_err("non-UTF-8 source should fail");
-
-        assert!(err.to_string().contains("is not valid UTF-8"));
-
-        fs::remove_file(path).expect("test source should be removed");
-    }
-
-    #[test]
-    fn read_source_file_rejects_directory_source() {
-        let path = unique_source_path("directory");
-        fs::create_dir_all(&path).expect("test source dir should be created");
-
-        let err = read_source_file(&path).expect_err("directory source should fail");
-
-        assert!(err.to_string().contains("is not a regular file"));
-
-        fs::remove_dir(path).expect("test source dir should be removed");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn read_source_file_rejects_fifo_source_before_opening() {
-        let path = unique_source_path("fifo");
-        create_fifo(&path);
-
-        let err = read_source_file(&path).expect_err("fifo source should fail");
-
-        assert!(err.to_string().contains("is not a regular file"));
-
-        fs::remove_file(path).expect("test fifo should be removed");
-    }
-
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
-    ))]
-    #[test]
-    fn open_source_file_handle_does_not_block_on_fifo_source() {
-        let path = unique_source_path("fifo-handle");
-        create_fifo(&path);
-
-        let file = open_source_file_handle(&path).expect("fifo open should not block");
-        let metadata = file.metadata().expect("fifo metadata should be available");
-
-        assert!(!metadata.is_file());
-
-        fs::remove_file(path).expect("test fifo should be removed");
-    }
-
-    #[cfg(unix)]
-    fn create_fifo(path: &Path) {
-        use nix::sys::stat::Mode;
-        use nix::unistd::mkfifo;
-
-        mkfifo(path, Mode::S_IRUSR | Mode::S_IWUSR).expect("test fifo should be created");
-    }
 
     #[test]
     fn strata_build_rejects_duplicate_output_argument() {

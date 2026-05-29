@@ -227,7 +227,7 @@ fn admission_rejects_loop_branch_condition_with_non_unit_bool_shape() {
             condition: ArtifactValueTemplate::Record {
                 ty: bool_type,
                 fields: vec![ArtifactValueTemplateField {
-                    name: "value".to_string(),
+                    field: RecordFieldId::new(0),
                     value: ArtifactValueTemplate::LoopElement {
                         ty: bool_type,
                         element: LoopElementId::new(0),

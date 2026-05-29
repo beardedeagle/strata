@@ -458,7 +458,7 @@ fn branch_has_artifact_loop_send(actions: &[ArtifactAction]) -> bool {
                     payload: Some(ArtifactValueTemplate::RecordField { record, field, .. }),
                     ..
                 },
-            ] if field == "phase"
+            ] if field.as_u32() == 0
                 && matches!(
                     record.as_ref(),
                     ArtifactValueTemplate::LoopElement { .. }

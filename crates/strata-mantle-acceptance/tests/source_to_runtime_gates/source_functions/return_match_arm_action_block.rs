@@ -420,7 +420,7 @@ fn loop_element_phase_payload(payload: &ArtifactValueTemplate) -> bool {
     matches!(
         payload,
         ArtifactValueTemplate::RecordField { record, field, .. }
-            if field == "phase"
+            if field.as_u32() == 0
                 && matches!(record.as_ref(), ArtifactValueTemplate::LoopElement { .. })
     )
 }

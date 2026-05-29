@@ -1,14 +1,13 @@
 use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority,
-    ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement,
-    ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactScalarArithmeticOperator,
+    ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactLoopElement, ArtifactMessageVariant,
+    ArtifactProcess, ArtifactProcessRef, ArtifactScalarArithmeticOperator,
     ArtifactScalarOrderingOperator, ArtifactSendTarget, ArtifactStateValue, ArtifactTransition,
-    ArtifactType, ArtifactTypeField, ArtifactTypeKind, ArtifactValueBooleanOperator,
-    ArtifactValueEqualityOperator, ArtifactValueShape, ArtifactValueTemplate,
-    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId, EffectOutcomeId,
-    EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId, ProcessId,
-    ProcessRefId, SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId, TypeId,
-    source_hash_fnv1a64,
+    ArtifactType, ArtifactTypeKind, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId,
+    EffectOutcomeId, EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId,
+    ProcessId, ProcessRefId, SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId,
+    TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
@@ -20,12 +19,16 @@ use super::checked::{
     CheckedScalarOrderingOperator, CheckedSendTarget, CheckedSpawnSiteId, CheckedStateId,
     CheckedStateValue, CheckedStepResult, CheckedSupervisorId, CheckedTransition, CheckedTypeId,
     CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
-    CheckedValueShape, CheckedValueTemplate,
+    CheckedValueTemplate,
 };
+use super::source_program::SourceProvenanceHash;
 
+mod record_fields;
 mod supervision;
+mod value_shapes;
 
 use supervision::{lower_spawn_site, lower_supervisor_plans};
+use value_shapes::lower_value_shape;
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
 
@@ -87,47 +90,23 @@ impl ArtifactTypeMap {
     }
 }
 
-fn lower_value_shape(shape: &CheckedValueShape) -> ArtifactValueShape {
-    match shape {
-        CheckedValueShape::Atom => ArtifactValueShape::Atom,
-        CheckedValueShape::Scalar(scalar) => ArtifactValueShape::Scalar { scalar: *scalar },
-        CheckedValueShape::Record { fields } => ArtifactValueShape::Record {
-            fields: fields
-                .iter()
-                .map(|field| ArtifactTypeField {
-                    name: field.name.to_string(),
-                    ty: lower_type_id(field.ty),
-                })
-                .collect(),
-        },
-        CheckedValueShape::Enum { variants } => ArtifactValueShape::Enum {
-            variants: variants
-                .iter()
-                .map(|variant| ArtifactEnumVariant {
-                    label: variant.name.to_string(),
-                    payload_type: variant.payload_type.map(lower_type_id),
-                })
-                .collect(),
-        },
-        CheckedValueShape::List { element, capacity } => ArtifactValueShape::List {
-            element: lower_type_id(*element),
-            capacity: *capacity,
-        },
-        CheckedValueShape::Map {
-            key,
-            value,
-            capacity,
-        } => ArtifactValueShape::Map {
-            key: lower_type_id(*key),
-            value: lower_type_id(*value),
-            capacity: *capacity,
-        },
-    }
-}
-
 pub fn lower_to_artifact(
     checked: &CheckedProgram,
     source: &str,
+) -> mantle_artifact::Result<MantleArtifact> {
+    lower_to_artifact_with_source_hash_fnv1a64(checked, source_hash_fnv1a64(source))
+}
+
+pub fn lower_to_artifact_with_source_hash(
+    checked: &CheckedProgram,
+    source_hash: SourceProvenanceHash,
+) -> mantle_artifact::Result<MantleArtifact> {
+    lower_to_artifact_with_source_hash_fnv1a64(checked, source_hash.into_fnv1a64())
+}
+
+fn lower_to_artifact_with_source_hash_fnv1a64(
+    checked: &CheckedProgram,
+    source_hash_fnv1a64: String,
 ) -> mantle_artifact::Result<MantleArtifact> {
     let type_map = ArtifactTypeMap::new(checked)?;
     let processes = checked
@@ -145,7 +124,7 @@ pub fn lower_to_artifact(
         types: type_map.into_artifact_types(),
         outputs: checked.outputs().to_vec(),
         processes,
-        source_hash_fnv1a64: source_hash_fnv1a64(source),
+        source_hash_fnv1a64,
     };
     artifact.validate()?;
     Ok(artifact)
@@ -429,7 +408,7 @@ fn lower_value_template(
             Ok(ArtifactValueTemplate::RecordField {
                 ty: types.artifact_id(ty)?,
                 record: Box::new(lower_value_template(record, types)?),
-                field: field.to_string(),
+                field: types.record_field_id(record.result_type(), field)?,
             })
         }
         CheckedValueTemplate::ListElement {
@@ -515,7 +494,7 @@ fn lower_value_template(
                 .iter()
                 .map(|field| {
                     Ok(ArtifactValueTemplateField {
-                        name: field.name().to_string(),
+                        field: types.record_field_id(ty, field.name())?,
                         value: lower_value_template(field.value(), types)?,
                     })
                 })

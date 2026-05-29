@@ -35,6 +35,7 @@ define_id!(MessageId);
 define_id!(OutputId);
 define_id!(TypeId);
 define_id!(EnumVariantId);
+define_id!(RecordFieldId);
 define_id!(LoopElementId);
 define_id!(EffectOutcomeId);
 define_id!(AuthorityId);

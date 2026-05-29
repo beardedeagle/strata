@@ -10,6 +10,11 @@ This repository uses two first-class file extensions:
 `.str` files are Strata source files. They are the user-authored program
 surface and should be UTF-8 text with LF line endings.
 
+A root `.str` file may import sibling source units with `import module_name;`.
+Those imports are resolved by Strata before checking and lowering. They do not
+make `.mta` files import-aware, and Mantle does not load `.str` files or
+resolve Strata imports at runtime.
+
 Expected MIME type:
 
 ```text
@@ -29,13 +34,13 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=2
+schema_version=3
 source_language=strata
 ```
 
 The schema version identifies the admitted `.mta` encoding shape. It is not a
 Strata language release, a migration counter, or a stability guarantee. In the
-current greenfield implementation, `2` is the single admitted artifact schema
+current greenfield implementation, `3` is the single admitted artifact schema
 baseline. Unsupported schema versions are rejected; artifact producers must emit
 the admitted schema.
 
@@ -67,8 +72,10 @@ the rendering of the typed value, preserving record field and map entry order
 from the admitted value. Mantle admission and runtime next-state resolution use
 the type ID and value identity. State-match payload templates use the admitted
 current state's typed payload metadata. Preserved order is visible in labels and
-traces, but runtime projection is key-based and dispatch uses admitted typed IDs.
-Labels remain trace and diagnostic metadata, not runtime dispatch keys.
+traces, but runtime projection uses admitted typed IDs: record fields use
+record-field IDs into the admitted record shape, and map projections use typed
+static keys. Labels remain trace and diagnostic metadata, not runtime dispatch
+keys.
 
 Process references are encoded as per-process reference tables. A spawn action
 binds a process-reference ID to a runtime process instance for the transition.

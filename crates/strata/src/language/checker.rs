@@ -484,6 +484,9 @@ enum SourceFunctionParamKind {
 }
 
 pub fn check_module(module: Module) -> Result<CheckedProgram> {
+    if !module.imports.is_empty() {
+        return Err(Error::new("imports require checking from a source program"));
+    }
     if module.enums.is_empty() {
         return Err(Error::new("expected at least one enum declaration"));
     }

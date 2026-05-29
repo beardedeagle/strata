@@ -150,7 +150,7 @@ fn runtime_rejects_loaded_invalid_template_field_type_before_artifact_loaded() {
         loaded_next_state(NextState::Template(ArtifactValueTemplate::Record {
             ty: BOX,
             fields: vec![ArtifactValueTemplateField {
-                name: "item".to_string(),
+                field: RecordFieldId::new(0),
                 value: ArtifactValueTemplate::Literal {
                     ty: TypeId::new(99),
                     value: artifact_value("Item"),

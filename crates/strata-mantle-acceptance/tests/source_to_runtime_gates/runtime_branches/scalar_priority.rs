@@ -45,9 +45,9 @@ fn runtime_scalar_priority_branches_on_typed_scalar_template_at_mantle_runtime()
             && matches!(
                 then_state.as_ref(),
                 NextState::Template(ArtifactValueTemplate::Record { fields, .. })
-                    if fields.iter().any(|field| field.name == "level"
+                    if fields.iter().any(|field| field.field.as_u32() == 1
                         && matches!(&field.value, ArtifactValueTemplate::ScalarArithmetic { ty, .. } if *ty == u32_type))
-                    && fields.iter().any(|field| field.name == "selected"
+                    && fields.iter().any(|field| field.field.as_u32() == 0
                         && matches!(
                             &field.value,
                             ArtifactValueTemplate::IfElse {

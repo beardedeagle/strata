@@ -36,8 +36,9 @@ use mantle_artifact::{
     MAX_STATE_VALUES_PER_PROCESS, MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR,
     MAX_SUPERVISORS_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
     MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, Result, SpawnSiteId, StateId, StepResult, SupervisorChildId,
-    SupervisorId, TypeId, validate_message_label, validate_state_value_identity_label,
+    OutputId, ProcessId, ProcessRefId, RecordFieldId, Result, SpawnSiteId, StateId, StepResult,
+    SupervisorChildId, SupervisorId, TypeId, validate_message_label,
+    validate_state_value_identity_label,
 };
 
 #[derive(Debug, Clone)]
@@ -194,6 +195,31 @@ impl LoadedProgram {
                     variant.as_u32()
                 ))
             })
+    }
+
+    pub(crate) fn record_field(
+        &self,
+        ty: TypeId,
+        field: RecordFieldId,
+    ) -> Result<&ArtifactTypeField> {
+        let type_entry = self.type_entry(ty)?;
+        let ArtifactValueShape::Record { fields } = type_entry.value_shape()? else {
+            return Err(Error::new(format!(
+                "loaded type id {} is not a record type",
+                ty.as_u32()
+            )));
+        };
+        fields.get(field.index()).ok_or_else(|| {
+            Error::new(format!(
+                "loaded type id {} has no record field id {}",
+                ty.as_u32(),
+                field.as_u32()
+            ))
+        })
+    }
+
+    pub(crate) fn record_field_name(&self, ty: TypeId, field: RecordFieldId) -> Result<&str> {
+        Ok(self.record_field(ty, field)?.name.as_str())
     }
 
     pub(crate) fn validate_value_type(&self, field: &str, ty: TypeId) -> Result<()> {

@@ -1,4 +1,6 @@
-use crate::{EffectOutcomeId, EnumVariantId, LoopElementId, ProcessId, ProcessRefId, TypeId};
+use crate::{
+    EffectOutcomeId, EnumVariantId, LoopElementId, ProcessId, ProcessRefId, RecordFieldId, TypeId,
+};
 
 use super::scalar::{
     ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactScalarValue,
@@ -62,7 +64,7 @@ pub enum ArtifactValueTemplate {
     RecordField {
         ty: TypeId,
         record: Box<ArtifactValueTemplate>,
-        field: String,
+        field: RecordFieldId,
     },
     ListElement {
         ty: TypeId,
@@ -213,7 +215,7 @@ impl ArtifactValueBooleanOperator {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactValueTemplateField {
-    pub name: String,
+    pub field: RecordFieldId,
     pub value: ArtifactValueTemplate,
 }
 

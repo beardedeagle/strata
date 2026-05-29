@@ -19,8 +19,20 @@ result of the first invalid shape.
 
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
-| `expected record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `record`, `enum`, `fn`, or `proc` after `module`. |
+| `expected record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `record`, `enum`, `fn`, or `proc` after `module` and any imports. |
+| `imports must appear before top-level declarations` | An `import` appears after a record, enum, function, or process declaration. | Move all `import module_name;` declarations immediately after `module name;`. |
+| `imports require checking from a root source path` | A source string with imports was passed to the single-source checker. | Run `strata check <root.str>` or use the source-program API so imports can be resolved. |
+| `source ... could not be resolved` | An imported sibling `.str` file is missing or cannot be read. | Add the imported `module_name.str` file next to the importing source unit or fix the import name. |
+| `source path ... is not a regular file` | A root source or imported source path is a directory, symlink, FIFO, or other non-regular file. | Use a regular `.str` file for each source unit. |
+| `resolved outside source directory` | An import resolved through a symlink or filesystem indirection outside the importing source unit's directory. | Keep imported source units as regular sibling `.str` files. |
+| `source loading is unsupported on Windows` | The current Windows source loader cannot prove file identity against parent-component races. | Build/check source programs on Unix-family targets until Windows secure identity support is implemented. |
+| `artifact I/O requires secure file identity support` | Mantle artifact read/write was requested on a target without secure path identity support. | Use a Unix-family target for artifact IO until the target has equivalent secure open support. |
+| `import cycle ... is not supported` | Source units import each other cyclically. | Break the cycle; this surface only accepts an acyclic dependency graph. |
+| `duplicate module identity ...` | Two reachable source units declare the same `module` name. | Give each reachable source unit a unique module identity. |
+| `ambiguous imported ... name ...` | Reachable source units declare the same unqualified type, function, process, or cross-unit callable name. | Rename one declaration; aliases, re-exports, and qualified references are not part of this surface. |
+| `references ... without importing ...` | A source unit uses a type, enum variant, pure function, or process from another reachable source unit without directly importing that unit. | Add an explicit `import module_name;` to the source unit that uses the declaration. |
 | `entry process Main is not declared` | The program has no `Main` process. | Add `proc Main ...`. |
+| `root source unit ... must declare entry process Main` | The loaded root source unit imports a module that may contain `Main`, but the root itself does not declare the entry process. | Declare `proc Main ...` in the root source file passed to `strata check` or `strata build`. |
 | `type name ... is reserved` | A source record or enum tries to use a built-in transition, capability, collection, outcome, or scalar type name. | Rename the source type. |
 | `uses reserved prefix __strata_checked_` | A source type name collides with internal checked type metadata. | Rename the source type without the reserved prefix. |
 | `checked type_count exceeds Mantle artifact limit` | The checked program needs more distinct artifact types than the Mantle artifact limit allows. | Reduce the number of distinct state, message, payload, and process-reference types. |

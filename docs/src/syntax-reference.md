@@ -15,10 +15,13 @@ The notation is informal:
 
 ```text
 source_file =
-    module_decl top_level_decl*
+    module_decl import_decl* top_level_decl*
 
 module_decl =
     "module" ident ";"
+
+import_decl =
+    "import" ident ";"
 
 top_level_decl =
     record_decl
@@ -40,6 +43,11 @@ record_field =
 
 Fieldless records use the semicolon form. Braced records must declare at least
 one field.
+
+Imports must appear immediately after the module declaration and before any
+top-level declaration. The current import form admits one source-unit module
+identifier and resolves it from the importing source unit's directory; aliases,
+wildcards, re-exports, packages, and path strings are not accepted.
 
 ## Enums
 
@@ -93,22 +101,17 @@ supervisor_child =
 ```
 
 The aliases, authority declarations, supervisor declarations, and functions may appear in any order. `State`, `Msg`, and `init` must each appear exactly once. An authority
-declaration is a process-local typed capability descriptor; the current accepted
-descriptor is exactly `Cap<Spawn<ProcessName>>`. It must target another declared
-non-entry process, must be referenced by at least one local spawn site, and does
-not replace `! [spawn]` effect usage. Non-`init`/`step` functions are process-local source functions.
-A local supervisor declaration declares static lexical children and does not grant dynamic spawn authority.
-Each concrete message case must resolve to exactly one generated transition, either through an explicit
-constructor pattern, through one wildcard pattern, through one `match msg` step
-body, or through a state-match step for a constructor or wildcard message
-pattern. Parameter-pattern, state-match, and whole-body `match msg` dispatch may
-split same top-level message constructor clauses by exact typed payload guard
-when their nested predicates are provably disjoint over discovered concrete
-payload cases. A payload-sensitive state-match wildcard fallback may cover
-discovered concrete payload cases not matched by an explicit same-message
-state-match clause; it lowers exact typed payload guards, not an open runtime
-catch-all. A process cannot mix parameter-pattern/state-match step forms with a
-`match msg` step body. Other process members are rejected.
+declaration is exactly `Cap<Spawn<ProcessName>>`, targets a declared non-entry
+process, must be used by a local spawn site, and does not replace `! [spawn]`.
+Non-`init`/`step` functions are process-local source functions. A local supervisor
+declares static lexical children and does not grant dynamic spawn authority.
+Each concrete message case must resolve to one generated transition through an
+explicit constructor pattern, one wildcard pattern, one `match msg` body, or a
+state-match step for a constructor or wildcard message pattern. Parameter-pattern,
+state-match, and whole-body `match msg` dispatch may split same-constructor
+clauses by exact typed payload guard when nested predicates are disjoint over
+discovered payload cases. A process cannot mix parameter-pattern/state-match
+forms with a `match msg` step body. Other process members are rejected.
 
 ## Functions
 
@@ -228,20 +231,15 @@ match_arm =
 ```
 
 Patterns are source-level binding and decomposition syntax. Strata supports
-constructor patterns, constructor payload bindings, constructor payload
-destructuring, record destructuring patterns, list/map collection patterns, and
-`_` wildcards. Buildable semantic consumers are normal source function
-signatures and match bodies, function return-match expressions, fieldless enum
-`init` whole-body matches and return-match expressions, actor `step` message
-dispatch, message-specific `match state` step bodies, and step return-match
-expressions with optional uniform action prefixes. Record/list/map
-destructuring patterns are accepted
-in normal source function signatures, function match bodies, function return-match
-expressions, message constructor payloads, and current-state enum payloads when
-the payload has the matching type. Function signatures, function match bodies,
-function return-match expressions, whole-body `match msg` arms, step parameter
-patterns, state-match step clauses, and step return-match expressions may split
-a top-level constructor by disjoint exact nested typed payload predicates.
+constructor patterns, constructor payload bindings/destructuring, record
+destructuring patterns, list/map collection patterns, and `_` wildcards.
+Buildable semantic consumers are normal source function signatures and match
+bodies, function return-match expressions, fieldless enum `init` matches,
+actor `step` dispatch, message-specific `match state` step bodies, and step
+return-match expressions with optional uniform action prefixes. Record/list/map
+destructuring patterns are accepted in those payload-capable positions when the
+payload has the matching type. These forms may split a top-level constructor by
+disjoint exact nested typed payload predicates.
 Source function calls still expand before lowering; enum pattern dispatch
 requires a concrete enum constructor value and record/list/map destructuring
 requires a concrete value.
@@ -651,9 +649,8 @@ scalar_suffix =
 
 Parenthesized value expressions group any value expression without changing its
 type.
-`ident(value)` is a function call when `ident` names a visible source function and a
-payload-bearing enum value when `ident` names a constructor of the expected enum
-type.
+`ident(value)` is a function call when `ident` names a visible source function and
+a payload-bearing enum value when it names a constructor of the expected enum type.
 
 List and map constructors are explicit. Optional type and capacity arguments are
 accepted for readability; the checker still validates each value against the
@@ -739,7 +736,7 @@ ident =
 ```
 
 `_`, `as`, `authority`, `bounded`, `child`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`,
-`local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`, `permanent`, `proc`, `record`,
+`import`, `local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`, `permanent`, `proc`, `record`,
 `return`, `security`, `send`, `spawn`, `supervise`, `temporary`, `transient`, `type`, and `var` are reserved everywhere
 identifiers are accepted. The single `_` token is reserved for wildcard
 patterns.

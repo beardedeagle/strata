@@ -8,6 +8,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::SOURCE_ONLY,
     },
     ProofDomain {
+        id: "source-unit-imports-and-dependency-graph",
+        title: "Source-unit imports and dependency graph",
+        feature_ids: &["source-unit-imports"],
+        obligations: proof_obligations::CHECKER_LOWERING_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "records-enums-fieldless-and-payload-variants",
         title: "Records, enums, and fieldless or payload-bearing variants",
         feature_ids: &["records-enums-immutable-values", "typed-message-payloads"],

@@ -34,7 +34,7 @@ pub(super) fn add_value_template_bytes(
         ArtifactValueTemplate::RecordField { ty, record, field } => {
             add_field_bytes(total, prefix.child("kind"), "record_field")?;
             add_field_u32(total, prefix.child("type_id"), ty.as_u32())?;
-            add_field_bytes(total, prefix.child("field_name"), field)?;
+            add_field_u32(total, prefix.child("field_id"), field.as_u32())?;
             add_value_template_bytes(total, prefix.child("record"), record)?;
         }
         ArtifactValueTemplate::ListElement {
@@ -144,7 +144,7 @@ pub(super) fn add_value_template_bytes(
             add_field_usize(total, prefix.child("field_count"), fields.len())?;
             for (field_index, field) in fields.iter().enumerate() {
                 let field_prefix = prefix.indexed_child("field", field_index);
-                add_field_bytes(total, field_prefix.child("name"), &field.name)?;
+                add_field_u32(total, field_prefix.child("field_id"), field.field.as_u32())?;
                 add_value_template_bytes(total, field_prefix.child("value"), &field.value)?;
             }
         }

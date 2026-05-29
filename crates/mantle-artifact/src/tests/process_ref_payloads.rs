@@ -182,7 +182,7 @@ fn validate_rejects_nested_process_ref_payload_template() {
         payload: Some(ArtifactValueTemplate::Record {
             ty: BOX,
             fields: vec![ArtifactValueTemplateField {
-                name: "reply_to".to_string(),
+                field: RecordFieldId::new(0),
                 value: ArtifactValueTemplate::ProcessRef {
                     ty: PROCESS_REF_WORKER,
                     target_process: ProcessId::new(1),
@@ -221,7 +221,7 @@ fn validate_rejects_projected_process_ref_payload_template() {
                 ty: BOX,
                 value: artifact_value("Box{reply_to:ProcessRef_Worker}"),
             }),
-            field: "reply_to".to_string(),
+            field: RecordFieldId::new(0),
         }),
     };
 
