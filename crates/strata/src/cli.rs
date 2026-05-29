@@ -250,10 +250,13 @@ pub fn run_strata_from_env() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language::MAX_SOURCE_BYTES;
-    use mantle_artifact::{MAX_ACTIONS_PER_PROCESS, MAX_OUTPUT_LITERALS};
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[cfg(unix)]
+    use crate::language::MAX_SOURCE_BYTES;
+    #[cfg(unix)]
+    use mantle_artifact::{MAX_ACTIONS_PER_PROCESS, MAX_OUTPUT_LITERALS};
 
     static TEST_SOURCE_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -300,6 +303,33 @@ mod tests {
         assert!(err.to_string().contains("duplicate --format argument"));
     }
 
+    #[cfg(not(unix))]
+    #[test]
+    fn strata_check_fails_closed_without_secure_source_identity_support() {
+        let path = unique_source_path("unsupported-secure-source");
+        fs::write(&path, "module unsupported_secure_source;")
+            .expect("test source should be written");
+
+        let err = strata_main([
+            "strata".to_string(),
+            "check".to_string(),
+            path.display().to_string(),
+        ])
+        .expect_err("check should fail before loading unsupported source path");
+
+        let Error::SourceLoad(source_err) = err else {
+            panic!("expected source loading error, got {err}");
+        };
+        assert!(
+            source_err
+                .to_string()
+                .contains("source file identity cannot be checked securely")
+        );
+
+        fs::remove_file(path).expect("test source should be removed");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn strata_check_rejects_source_that_cannot_lower_to_artifact() {
         let path = unique_source_path("artifact-too-large-check");
@@ -318,6 +348,7 @@ mod tests {
         fs::remove_file(path).expect("test source should be removed");
     }
 
+    #[cfg(unix)]
     #[test]
     fn strata_build_rejects_lowering_failure_before_writing_output() {
         let source_path = unique_source_path("artifact-too-large-build");
@@ -343,6 +374,7 @@ mod tests {
         fs::remove_file(source_path).expect("test source should be removed");
     }
 
+    #[cfg(unix)]
     fn assert_artifact_size_error(err: &Error) {
         let Error::Artifact(artifact_err) = err else {
             panic!("expected artifact lowering error, got {err}");
@@ -354,6 +386,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     fn oversized_artifact_source() -> String {
         let emit_count = MAX_OUTPUT_LITERALS.min(MAX_ACTIONS_PER_PROCESS);
         let output_padding = "x".repeat(190);
@@ -399,6 +432,7 @@ proc Main mailbox bounded(1) {
         ))
     }
 
+    #[cfg(unix)]
     fn unique_artifact_path(name: &str) -> PathBuf {
         let index = TEST_SOURCE_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
