@@ -18,7 +18,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const ROOT_IMPORT_SHARED_SOURCE: &str = r#"module root;
 import shared;
 
@@ -34,7 +34,7 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 #[test]
 fn source_loading_fails_closed_without_secure_file_identity() {
     let path = unique_source_path("unsupported-target");
@@ -47,7 +47,7 @@ fn source_loading_fails_closed_without_secure_file_identity() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn read_source_file_rejects_oversized_source() {
     let path = unique_source_path("oversized");
@@ -61,7 +61,7 @@ fn read_source_file_rejects_oversized_source() {
     fs::remove_file(path).expect("test source should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn read_source_file_rejects_non_utf8_source() {
     let path = unique_source_path("non-utf8");
@@ -74,7 +74,7 @@ fn read_source_file_rejects_non_utf8_source() {
     fs::remove_file(path).expect("test source should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn read_source_file_rejects_directory_source() {
     let path = unique_source_path("directory");
@@ -156,7 +156,7 @@ fn open_source_file_handle_does_not_block_on_fifo_source() {
     fs::remove_file(path).expect("test fifo should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn load_root_source_program_resolves_transitive_sibling_imports() {
     let dir = unique_source_path("imports-dir");
@@ -186,7 +186,7 @@ record SharedValue;
     fs::remove_dir_all(dir).expect("test source dir should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn load_root_source_program_rejects_missing_import_file() {
     let dir = unique_source_path("missing-import-dir");
@@ -202,7 +202,7 @@ fn load_root_source_program_rejects_missing_import_file() {
     fs::remove_dir_all(dir).expect("test source dir should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn load_root_source_program_rejects_duplicate_module_identity() {
     let dir = unique_source_path("duplicate-module-dir");
@@ -298,7 +298,7 @@ record SharedValue;
     fs::remove_dir_all(dir).expect("test source dir should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn write_source(dir: &Path, stem: &str, source: &str) {
     fs::write(dir.join(format!("{stem}.str")), source).expect("test source should be written");
 }

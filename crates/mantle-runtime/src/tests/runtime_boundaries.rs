@@ -50,7 +50,7 @@ fn runtime_rejects_blocked_trace_sink_before_returning_run_report() {
     let _ = fs::remove_dir(dir);
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn run_artifact_path_writes_trace_for_current_directory_artifact() {
     let artifact_path = unique_current_dir_artifact_path("runtime-current-dir");
@@ -73,7 +73,7 @@ fn run_artifact_path_writes_trace_for_current_directory_artifact() {
     fs::remove_file(trace_path).expect("test trace should be removed");
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 #[test]
 fn run_artifact_path_fails_closed_without_secure_file_identity_support() {
     let artifact_path = unique_current_dir_artifact_path("runtime-unsupported-artifact-io");

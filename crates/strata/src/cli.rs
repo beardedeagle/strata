@@ -253,9 +253,9 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     use crate::language::MAX_SOURCE_BYTES;
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     use mantle_artifact::{MAX_ACTIONS_PER_PROCESS, MAX_OUTPUT_LITERALS};
 
     static TEST_SOURCE_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -303,7 +303,7 @@ mod tests {
         assert!(err.to_string().contains("duplicate --format argument"));
     }
 
-    #[cfg(not(unix))]
+    #[cfg(all(not(unix), not(windows)))]
     #[test]
     fn strata_check_fails_closed_without_secure_source_identity_support() {
         let path = unique_source_path("unsupported-secure-source");
@@ -329,7 +329,7 @@ mod tests {
         fs::remove_file(path).expect("test source should be removed");
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn strata_check_rejects_source_that_cannot_lower_to_artifact() {
         let path = unique_source_path("artifact-too-large-check");
@@ -348,7 +348,7 @@ mod tests {
         fs::remove_file(path).expect("test source should be removed");
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn strata_build_rejects_lowering_failure_before_writing_output() {
         let source_path = unique_source_path("artifact-too-large-build");
@@ -374,7 +374,7 @@ mod tests {
         fs::remove_file(source_path).expect("test source should be removed");
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn assert_artifact_size_error(err: &Error) {
         let Error::Artifact(artifact_err) = err else {
             panic!("expected artifact lowering error, got {err}");
@@ -386,7 +386,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn oversized_artifact_source() -> String {
         let emit_count = MAX_OUTPUT_LITERALS.min(MAX_ACTIONS_PER_PROCESS);
         let output_padding = "x".repeat(190);
@@ -432,7 +432,7 @@ proc Main mailbox bounded(1) {
         ))
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn unique_artifact_path(name: &str) -> PathBuf {
         let index = TEST_SOURCE_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(

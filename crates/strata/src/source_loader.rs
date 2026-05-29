@@ -246,7 +246,7 @@ struct OpenedSourceFile {
 fn open_canonical_source_file(path: &Path) -> Result<OpenedSourceFile> {
     let (file, metadata) = open_source_file(path)?;
     let canonical_path = canonical_source_path_for_opened_source(path)?;
-    validate_canonical_source_path(path, &canonical_path, &metadata)?;
+    validate_canonical_source_path(path, &canonical_path, &file, &metadata)?;
     Ok(OpenedSourceFile {
         file,
         metadata,
@@ -263,7 +263,8 @@ fn canonical_source_path_for_opened_source(path: &Path) -> Result<PathBuf> {
 fn canonical_source_path_for_opened_source(path: &Path) -> Result<PathBuf> {
     let parent = path
         .parent()
-        .ok_or_else(|| Error::new(format!("source {} has no parent directory", path.display())))?;
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
         .ok_or_else(|| Error::new(format!("source {} has no file name", path.display())))?;
@@ -279,6 +280,7 @@ fn canonical_source_path_for_opened_source(path: &Path) -> Result<PathBuf> {
 fn validate_canonical_source_path(
     original_path: &Path,
     canonical_path: &Path,
+    _opened_file: &fs::File,
     opened_metadata: &fs::Metadata,
 ) -> Result<()> {
     let canonical_metadata = fs::metadata(canonical_path)?;
@@ -296,19 +298,28 @@ fn validate_canonical_source_path(
 #[cfg(windows)]
 fn validate_canonical_source_path(
     original_path: &Path,
-    _canonical_path: &Path,
+    canonical_path: &Path,
+    opened_file: &fs::File,
     _opened_metadata: &fs::Metadata,
 ) -> Result<()> {
-    Err(Error::new(format!(
-        "source loading is unsupported on Windows because source file identity cannot be checked securely for {}",
-        original_path.display()
-    )))
+    let canonical_file = open_source_file_handle(canonical_path)?;
+    let canonical_metadata = canonical_file.metadata()?;
+    validate_source_file_metadata(canonical_path, &canonical_metadata)?;
+    if same_opened_source_file(opened_file, &canonical_file)? {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "source path {} changed while resolving",
+            original_path.display()
+        )))
+    }
 }
 
 #[cfg(all(not(unix), not(windows)))]
 fn validate_canonical_source_path(
     original_path: &Path,
     _canonical_path: &Path,
+    _opened_file: &fs::File,
     _opened_metadata: &fs::Metadata,
 ) -> Result<()> {
     Err(Error::new(format!(
@@ -370,10 +381,10 @@ fn open_source_file(path: &Path) -> Result<(fs::File, fs::Metadata)> {
 
 #[cfg(windows)]
 fn open_source_file(path: &Path) -> Result<(fs::File, fs::Metadata)> {
-    Err(Error::new(format!(
-        "source loading is unsupported on Windows because source file identity cannot be checked securely for {}",
-        path.display()
-    )))
+    let file = open_source_file_handle(path)?;
+    let metadata = file.metadata()?;
+    validate_source_file_metadata(path, &metadata)?;
+    Ok((file, metadata))
 }
 
 #[cfg(all(not(unix), not(windows)))]
@@ -413,6 +424,16 @@ fn open_source_file_handle(_path: &Path) -> std::io::Result<fs::File> {
         std::io::ErrorKind::Unsupported,
         "source file opening is unsupported on this target",
     ))
+}
+
+#[cfg(windows)]
+fn open_source_file_handle(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
 }
 
 #[cfg(all(
@@ -468,7 +489,26 @@ fn validate_source_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result
     }
 }
 
+#[cfg(windows)]
+fn validate_source_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    use std::os::windows::fs::MetadataExt;
+
+    if metadata.is_file() && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+        Ok(())
+    } else {
+        Err(non_regular_source_path_error(path))
+    }
+}
+
 #[cfg(unix)]
+fn non_regular_source_path_error(path: &Path) -> Error {
+    Error::new(format!(
+        "source path {} is not a regular file",
+        path.display()
+    ))
+}
+
+#[cfg(windows)]
 fn non_regular_source_path_error(path: &Path) -> Error {
     Error::new(format!(
         "source path {} is not a regular file",
@@ -482,6 +522,38 @@ fn same_source_file(before: &fs::Metadata, after: &fs::Metadata) -> bool {
 
     before.dev() == after.dev() && before.ino() == after.ino()
 }
+
+#[cfg(windows)]
+fn same_opened_source_file(before: &fs::File, after: &fs::File) -> Result<bool> {
+    Ok(windows_file_fingerprint(&before.metadata()?)
+        == windows_file_fingerprint(&after.metadata()?))
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WindowsFileFingerprint {
+    file_attributes: u32,
+    creation_time: u64,
+    last_write_time: u64,
+    file_size: u64,
+}
+
+#[cfg(windows)]
+fn windows_file_fingerprint(metadata: &fs::Metadata) -> WindowsFileFingerprint {
+    use std::os::windows::fs::MetadataExt;
+
+    WindowsFileFingerprint {
+        file_attributes: metadata.file_attributes(),
+        creation_time: metadata.creation_time(),
+        last_write_time: metadata.last_write_time(),
+        file_size: metadata.file_size(),
+    }
+}
+
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
 #[cfg(test)]
 mod tests;

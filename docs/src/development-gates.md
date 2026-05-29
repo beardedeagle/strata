@@ -21,9 +21,9 @@ recipe. This keeps platform-specific and test-only `#[cfg]` paths covered by
 real compiler evidence without changing source visibility or suppressing
 rust-analyzer's weak inactive-code hints. If a target is missing locally,
 install the reported target with `rustup target add --toolchain stable ...`.
-Windows cfg-check coverage is compile-time evidence only for source loading and
-artifact IO; those paths fail closed at runtime until equivalent secure file
-identity support exists.
+Windows cfg-check coverage includes the Windows source-loading, artifact IO,
+and trace path implementations that use reparse-point rejection and stable
+opened-file metadata checks.
 
 Run the source-to-runtime gates after changes that affect syntax,
 checking, lowering, artifacts, runtime behavior, diagnostics, examples, or

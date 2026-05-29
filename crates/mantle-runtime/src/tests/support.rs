@@ -2,7 +2,7 @@ pub(crate) use std::fs;
 pub(crate) use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(crate) use mantle_artifact::write_artifact;
 pub(crate) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority,

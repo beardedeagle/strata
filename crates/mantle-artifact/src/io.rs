@@ -11,6 +11,7 @@ pub fn write_artifact(path: &Path, artifact: &MantleArtifact) -> Result<()> {
     prepare_artifact_output_parent(path)?;
     let mut file = open_artifact_output_file(path)?;
     validate_artifact_file_metadata(path, &file.metadata()?)?;
+    validate_opened_artifact_path(path, &file)?;
     file.write_all(artifact.encode().as_bytes())?;
     file.flush()?;
     Ok(())
@@ -28,6 +29,7 @@ pub fn read_artifact(path: &Path) -> Result<MantleArtifact> {
     }
     let mut file = open_artifact_input_file(path)?;
     validate_artifact_file_metadata(path, &file.metadata()?)?;
+    validate_opened_artifact_path(path, &file)?;
     let mut bytes = Vec::new();
     Read::by_ref(&mut file)
         .take((MAX_ARTIFACT_BYTES + 1) as u64)
@@ -93,7 +95,18 @@ fn prepare_artifact_output_parent(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn prepare_artifact_output_parent(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+            reject_symlink_path_components(parent)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn prepare_artifact_output_parent(_path: &Path) -> Result<()> {
     Err(unsupported_secure_artifact_io().into())
 }
@@ -112,7 +125,17 @@ fn open_artifact_input_file(path: &Path) -> std::io::Result<fs::File> {
     Ok(fs::File::from(fd))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_artifact_input_file(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn open_artifact_input_file(_path: &Path) -> std::io::Result<fs::File> {
     Err(unsupported_secure_artifact_io())
 }
@@ -126,7 +149,20 @@ fn open_artifact_output_file(path: &Path) -> std::io::Result<fs::File> {
     Ok(fs::File::from(fd))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_artifact_output_file(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .read(true)
+        .write(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn open_artifact_output_file(_path: &Path) -> std::io::Result<fs::File> {
     Err(unsupported_secure_artifact_io())
 }
@@ -259,7 +295,7 @@ fn nix_to_io_error(err: nix::errno::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(err as i32)
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 fn unsupported_secure_artifact_io() -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -268,10 +304,81 @@ fn unsupported_secure_artifact_io() -> std::io::Error {
 }
 
 fn validate_artifact_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()> {
-    if metadata.is_file() {
+    if is_regular_artifact_file(metadata) {
         Ok(())
     } else {
         Err(non_regular_artifact_path_error(path))
+    }
+}
+
+#[cfg(not(windows))]
+fn is_regular_artifact_file(metadata: &fs::Metadata) -> bool {
+    metadata.is_file()
+}
+
+#[cfg(windows)]
+fn is_regular_artifact_file(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    metadata.is_file() && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+}
+
+#[cfg(not(windows))]
+fn validate_opened_artifact_path(_path: &Path, _file: &fs::File) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn validate_opened_artifact_path(path: &Path, file: &fs::File) -> Result<()> {
+    let canonical_path = canonical_artifact_path_for_opened_path(path)?;
+    let canonical_file = open_artifact_input_file(&canonical_path)?;
+    validate_artifact_file_metadata(&canonical_path, &canonical_file.metadata()?)?;
+    if same_opened_artifact_file(file, &canonical_file)? {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "artifact path {} changed while opening",
+            path.display()
+        )))
+    }
+}
+
+#[cfg(windows)]
+fn canonical_artifact_path_for_opened_path(path: &Path) -> Result<std::path::PathBuf> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| Error::new(format!("artifact path {} has no file name", path.display())))?;
+    Ok(fs::canonicalize(parent)?.join(file_name))
+}
+
+#[cfg(windows)]
+fn same_opened_artifact_file(before: &fs::File, after: &fs::File) -> Result<bool> {
+    Ok(windows_file_fingerprint(&before.metadata()?)
+        == windows_file_fingerprint(&after.metadata()?))
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WindowsFileFingerprint {
+    file_attributes: u32,
+    creation_time: u64,
+    last_write_time: u64,
+    file_size: u64,
+}
+
+#[cfg(windows)]
+fn windows_file_fingerprint(metadata: &fs::Metadata) -> WindowsFileFingerprint {
+    use std::os::windows::fs::MetadataExt;
+
+    WindowsFileFingerprint {
+        file_attributes: metadata.file_attributes(),
+        creation_time: metadata.creation_time(),
+        last_write_time: metadata.last_write_time(),
+        file_size: metadata.file_size(),
     }
 }
 
@@ -296,7 +403,41 @@ fn reject_symlink_path_components(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn reject_symlink_path_components(path: &Path) -> Result<()> {
+    let mut current = std::path::PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match component {
+            std::path::Component::Prefix(_)
+            | std::path::Component::RootDir
+            | std::path::Component::CurDir => continue,
+            std::path::Component::ParentDir | std::path::Component::Normal(_) => {}
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if !is_regular_path_component(&metadata) => {
+                return Err(Error::new(format!(
+                    "artifact path {} must not include symbolic link component {}",
+                    path.display(),
+                    current.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => break,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_regular_path_component(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn reject_symlink_path_components(_path: &Path) -> Result<()> {
     Err(unsupported_secure_artifact_io().into())
 }
@@ -310,6 +451,11 @@ fn non_regular_artifact_path_error(path: &Path) -> Error {
 
 const FNV1A64_OFFSET: u64 = 0xcbf29ce484222325;
 const FNV1A64_PRIME: u64 = 0x100000001b3;
+
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
 fn fnv1a64_update(mut hash: u64, bytes: &[u8]) -> u64 {
     for byte in bytes {

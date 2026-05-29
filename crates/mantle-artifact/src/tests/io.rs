@@ -17,7 +17,7 @@ fn write_artifact_rejects_invalid_artifacts_before_writing() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn write_artifact_accepts_current_directory_output_path() {
     let path = unique_current_dir_artifact_path("artifact-current-dir");
@@ -31,7 +31,7 @@ fn write_artifact_accepts_current_directory_output_path() {
     fs::remove_file(path).expect("test artifact should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn write_artifact_rejects_directory_path_before_opening() {
     let path = unique_current_dir_artifact_path("artifact-write-directory");
@@ -107,7 +107,7 @@ fn write_artifact_rejects_symlink_parent_path() {
     fs::remove_dir(real_dir).expect("test real dir should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn read_artifact_rejects_oversized_file() {
     let path = unique_current_dir_artifact_path("artifact-too-large");
@@ -121,7 +121,7 @@ fn read_artifact_rejects_oversized_file() {
     fs::remove_file(path).expect("test artifact should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn read_artifact_rejects_directory_path_before_opening() {
     let path = unique_current_dir_artifact_path("artifact-directory");
@@ -134,7 +134,7 @@ fn read_artifact_rejects_directory_path_before_opening() {
     fs::remove_dir(path).expect("test artifact dir should be removed");
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 #[test]
 fn artifact_io_fails_closed_without_secure_file_identity_support() {
     let output = unique_current_dir_artifact_path("artifact-unsupported-output");

@@ -25,8 +25,8 @@ result of the first invalid shape.
 | `source ... could not be resolved` | An imported sibling `.str` file is missing or cannot be read. | Add the imported `module_name.str` file next to the importing source unit or fix the import name. |
 | `source path ... is not a regular file` | A root source or imported source path is a directory, symlink, FIFO, or other non-regular file. | Use a regular `.str` file for each source unit. |
 | `resolved outside source directory` | An import resolved through a symlink or filesystem indirection outside the importing source unit's directory. | Keep imported source units as regular sibling `.str` files. |
-| `source loading is unsupported on Windows` | The current Windows source loader cannot prove file identity against parent-component races. | Build/check source programs on Unix-family targets until Windows secure identity support is implemented. |
-| `artifact I/O requires secure file identity support` | Mantle artifact read/write was requested on a target without secure path identity support. | Use a Unix-family target for artifact IO until the target has equivalent secure open support. |
+| `source loading is unsupported on this target` | Source loading was requested on a target without secure source file identity support. | Use a Unix-family target or Windows for source loading. |
+| `artifact I/O requires secure file identity support` | Mantle artifact read/write was requested on a target without secure path identity support. | Use a Unix-family target or Windows for artifact IO. |
 | `import cycle ... is not supported` | Source units import each other cyclically. | Break the cycle; this surface only accepts an acyclic dependency graph. |
 | `duplicate module identity ...` | Two reachable source units declare the same `module` name. | Give each reachable source unit a unique module identity. |
 | `ambiguous imported ... name ...` | Reachable source units declare the same unqualified type, function, process, or cross-unit callable name. | Rename one declaration; aliases, re-exports, and qualified references are not part of this surface. |

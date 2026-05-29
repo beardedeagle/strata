@@ -66,9 +66,11 @@ artifact body.
 Artifact and trace paths are validated before host IO. On Unix targets, Mantle
 opens artifact and trace paths with descriptor-relative parent traversal and
 `O_NOFOLLOW` so symlink parents and final symlink leaves fail closed at open
-time. On non-Unix targets, artifact IO fails closed unless the target has
-equivalent secure file identity support; preflight-only symbolic-link rejection
-is not treated as sufficient race protection.
+time. On Windows targets, Mantle opens final artifact and trace paths with
+reparse-point traversal disabled, rejects reparse-point path components, and
+validates the opened handle against the canonical path with stable Windows file
+metadata. Other targets fail closed unless they provide equivalent secure path
+support.
 
 ## Execution
 
