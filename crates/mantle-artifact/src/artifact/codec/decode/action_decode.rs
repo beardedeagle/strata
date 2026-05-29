@@ -29,10 +29,12 @@ pub(super) fn decode_action(
         }),
         "send" => {
             let target = decode_send_target(fields, action_prefix)?;
+            let port = fields.take_optional_port_id(&format!("{action_prefix}.boundary_port"))?;
             let message = fields.take_message_id(&format!("{action_prefix}.message"))?;
             let payload = decode_optional_payload_template(fields, action_prefix)?;
             Ok(ArtifactAction::Send {
                 target,
+                port,
                 message,
                 payload,
             })
@@ -41,12 +43,14 @@ pub(super) fn decode_action(
             let outcome = fields.take_effect_outcome_id(&format!("{action_prefix}.outcome"))?;
             let outcome_ty = fields.take_type_id(&format!("{action_prefix}.outcome_type_id"))?;
             let target = decode_send_target(fields, action_prefix)?;
+            let port = fields.take_optional_port_id(&format!("{action_prefix}.boundary_port"))?;
             let message = fields.take_message_id(&format!("{action_prefix}.message"))?;
             let payload = decode_optional_payload_template(fields, action_prefix)?;
             Ok(ArtifactAction::SendOutcome {
                 outcome,
                 outcome_ty,
                 target,
+                port,
                 message,
                 payload,
             })

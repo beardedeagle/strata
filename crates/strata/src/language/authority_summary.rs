@@ -1,6 +1,7 @@
 use super::checked::{
-    CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedProgram, CheckedSpawnKind,
-    CheckedSpawnSite, CheckedSupervisorChildMode, CheckedSupervisorStrategy,
+    CheckedAction, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedComponentId,
+    CheckedPortId, CheckedProgram, CheckedProtocolId, CheckedSpawnKind, CheckedSpawnSite,
+    CheckedSupervisorChildMode, CheckedSupervisorStrategy, CheckedTransition,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +44,7 @@ fn render_text(program: &CheckedProgram, source_path: &str) -> String {
             && process.spawn_sites().is_empty()
             && process.supervisor_plans().is_empty()
         {
-            out.push_str("  no local spawn authority\n");
+            out.push_str("  no local authority\n");
             continue;
         }
 
@@ -54,10 +55,11 @@ fn render_text(program: &CheckedProgram, source_path: &str) -> String {
             out.push_str(authority.debug_name().as_str());
             out.push_str(": ");
             push_checked_descriptor_text(&mut out, program, authority.descriptor());
-            out.push_str(" used_by_spawn_sites=");
-            push_checked_used_spawn_sites(
+            push_checked_authority_usage_text(
                 &mut out,
                 process.spawn_sites(),
+                process.transitions(),
+                authority.descriptor(),
                 CheckedAuthorityId::from_index(authority_index).ok(),
             );
             out.push('\n');
@@ -157,10 +159,11 @@ fn render_json(program: &CheckedProgram, source_path: &str) -> String {
             push_json_field(&mut out, "name", authority.debug_name().as_str());
             out.push_str(",\"descriptor\":");
             push_checked_descriptor_json(&mut out, program, authority.descriptor());
-            out.push_str(",\"used_by_spawn_site_ids\":");
-            push_checked_used_spawn_sites(
+            push_checked_authority_usage_json(
                 &mut out,
                 process.spawn_sites(),
+                process.transitions(),
+                authority.descriptor(),
                 CheckedAuthorityId::from_index(authority_index).ok(),
             );
             out.push('}');
@@ -275,6 +278,21 @@ fn push_checked_descriptor_text(
             out.push_str(checked_process_label(program, target));
             out.push_str(">>");
         }
+        CheckedCapabilityDescriptor::ProtocolBoundary { protocol } => {
+            out.push_str("Cap<ProtocolBoundary<");
+            out.push_str(checked_protocol_label(program, protocol));
+            out.push_str(">>");
+        }
+        CheckedCapabilityDescriptor::PortConnect { port } => {
+            out.push_str("Cap<PortConnect<");
+            out.push_str(checked_port_label(program, port));
+            out.push_str(">>");
+        }
+        CheckedCapabilityDescriptor::ComponentExport { component } => {
+            out.push_str("Cap<ComponentExport<");
+            out.push_str(checked_component_label(program, component));
+            out.push_str(">>");
+        }
     }
 }
 
@@ -292,6 +310,31 @@ fn push_checked_descriptor_json(
                 out,
                 "target_process",
                 checked_process_label(program, target),
+            );
+            out.push('}');
+        }
+        CheckedCapabilityDescriptor::ProtocolBoundary { protocol } => {
+            out.push_str("{\"kind\":\"protocol_boundary\",\"protocol_id\":");
+            out.push_str(&protocol.as_u32().to_string());
+            out.push(',');
+            push_json_field(out, "protocol", checked_protocol_label(program, protocol));
+            out.push('}');
+        }
+        CheckedCapabilityDescriptor::PortConnect { port } => {
+            out.push_str("{\"kind\":\"port_connect\",\"port_id\":");
+            out.push_str(&port.as_u32().to_string());
+            out.push(',');
+            push_json_field(out, "port", checked_port_label(program, port));
+            out.push('}');
+        }
+        CheckedCapabilityDescriptor::ComponentExport { component } => {
+            out.push_str("{\"kind\":\"component_export\",\"component_id\":");
+            out.push_str(&component.as_u32().to_string());
+            out.push(',');
+            push_json_field(
+                out,
+                "component",
+                checked_component_label(program, component),
             );
             out.push('}');
         }
@@ -321,11 +364,112 @@ fn push_checked_used_spawn_sites(
     out.push(']');
 }
 
+fn push_checked_authority_usage_text(
+    out: &mut String,
+    sites: &[CheckedSpawnSite],
+    transitions: &[CheckedTransition],
+    descriptor: CheckedCapabilityDescriptor,
+    authority: Option<CheckedAuthorityId>,
+) {
+    match descriptor {
+        CheckedCapabilityDescriptor::Spawn { .. } => {
+            out.push_str(" used_by_spawn_sites=");
+            push_checked_used_spawn_sites(out, sites, authority);
+        }
+        CheckedCapabilityDescriptor::PortConnect { port } => {
+            out.push_str(" used_by_port_ids=");
+            push_checked_used_port_sends(out, transitions, port);
+        }
+        CheckedCapabilityDescriptor::ProtocolBoundary { .. }
+        | CheckedCapabilityDescriptor::ComponentExport { .. } => out.push_str(" used_by=[]"),
+    }
+}
+
+fn push_checked_authority_usage_json(
+    out: &mut String,
+    sites: &[CheckedSpawnSite],
+    transitions: &[CheckedTransition],
+    descriptor: CheckedCapabilityDescriptor,
+    authority: Option<CheckedAuthorityId>,
+) {
+    match descriptor {
+        CheckedCapabilityDescriptor::Spawn { .. } => {
+            out.push_str(",\"used_by_spawn_site_ids\":");
+            push_checked_used_spawn_sites(out, sites, authority);
+        }
+        CheckedCapabilityDescriptor::PortConnect { port } => {
+            out.push_str(",\"used_by_port_ids\":");
+            push_checked_used_port_sends(out, transitions, port);
+        }
+        CheckedCapabilityDescriptor::ProtocolBoundary { .. }
+        | CheckedCapabilityDescriptor::ComponentExport { .. } => out.push_str(",\"used_by\":[]"),
+    }
+}
+
+fn push_checked_used_port_sends(
+    out: &mut String,
+    transitions: &[CheckedTransition],
+    port: CheckedPortId,
+) {
+    out.push('[');
+    if transitions
+        .iter()
+        .any(|transition| checked_actions_use_port(transition.actions(), port))
+    {
+        out.push_str(&port.as_u32().to_string());
+    }
+    out.push(']');
+}
+
+fn checked_actions_use_port(actions: &[CheckedAction], expected: CheckedPortId) -> bool {
+    actions.iter().any(|action| match action {
+        CheckedAction::Send { port, .. } | CheckedAction::SendOutcome { port, .. } => {
+            port.is_some_and(|port| port == expected)
+        }
+        CheckedAction::IfElse {
+            then_actions,
+            else_actions,
+            ..
+        } => {
+            checked_actions_use_port(then_actions, expected)
+                || checked_actions_use_port(else_actions, expected)
+        }
+        CheckedAction::ForEach { body, .. } => checked_actions_use_port(body, expected),
+        CheckedAction::Emit { .. }
+        | CheckedAction::Spawn { .. }
+        | CheckedAction::SpawnOutcome { .. } => false,
+    })
+}
+
 fn checked_process_label(program: &CheckedProgram, id: super::checked::CheckedProcessId) -> &str {
     program
         .processes()
         .get(id.index())
         .map(|process| process.debug_name().as_str())
+        .unwrap_or("<invalid>")
+}
+
+fn checked_protocol_label(program: &CheckedProgram, id: CheckedProtocolId) -> &str {
+    program
+        .protocols()
+        .get(id.index())
+        .map(|protocol| protocol.debug_name().as_str())
+        .unwrap_or("<invalid>")
+}
+
+fn checked_port_label(program: &CheckedProgram, id: CheckedPortId) -> &str {
+    program
+        .ports()
+        .get(id.index())
+        .map(|port| port.debug_name().as_str())
+        .unwrap_or("<invalid>")
+}
+
+fn checked_component_label(program: &CheckedProgram, id: CheckedComponentId) -> &str {
+    program
+        .components()
+        .get(id.index())
+        .map(|component| component.debug_name().as_str())
         .unwrap_or("<invalid>")
 }
 
@@ -400,11 +544,16 @@ enum MainMsg { Start }
 enum WorkerState { Idle }
 enum WorkerMsg { Ping }
 
+protocol WorkerProtocol message WorkerMsg requires Cap<ProtocolBoundary<WorkerProtocol>>;
+port WorkerPort protocol WorkerProtocol target Worker requires Cap<PortConnect<WorkerPort>>;
+component WorkerComponent exports WorkerPort requires Cap<ComponentExport<WorkerComponent>>;
+
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;
 
     authority spawn_worker: Cap<Spawn<Worker>>;
+    authority connect_worker: Cap<PortConnect<WorkerPort>>;
     supervise local one_for_one(max_restarts: 2_u32, within_ms: 1000_u64) {
         child supervised_worker: Worker = spawn Worker as permanent;
     }
@@ -413,8 +562,9 @@ proc Main mailbox bounded(1) {
         return MainState;
     }
 
-    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn] ~ [] @det {
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
         let worker: ProcessRef<Worker> = spawn Worker;
+        send worker via WorkerPort Ping;
         return Stop(state);
     }
 }
@@ -453,6 +603,9 @@ proc Worker mailbox bounded(1) {
                 || summary
                     .contains("spawn_site 1 dynamic_local target=Worker authority=0 spawn_worker")
         );
+        assert!(summary.contains(
+            "authority 1 connect_worker: Cap<PortConnect<WorkerPort>> used_by_port_ids=[0]"
+        ));
         assert!(
             summary.contains("supervisor 0 strategy=one_for_one max_restarts=2 within_ms=1000")
         );
@@ -475,6 +628,10 @@ proc Worker mailbox bounded(1) {
             summary.contains("\"used_by_spawn_site_ids\":[0]")
                 || summary.contains("\"used_by_spawn_site_ids\":[1]")
         );
+        assert!(summary.contains(
+            "\"descriptor\":{\"kind\":\"port_connect\",\"port_id\":0,\"port\":\"WorkerPort\"}"
+        ));
+        assert!(summary.contains("\"used_by_port_ids\":[0]"));
         assert!(summary.contains("\"supervisors\":[{\"supervisor_id\":0"));
         assert!(summary.contains("\"strategy\":\"one_for_one\""));
         assert!(summary.contains("\"max_restarts\":2"));

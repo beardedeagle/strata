@@ -6,8 +6,8 @@ use super::ast::{
 use super::diagnostic::Result;
 use super::import_access::{
     call_arg_type, validate_enum_variant, validate_function_or_variant_call,
-    validate_identifier_value, validate_identifier_value_expected, validate_process_name,
-    validate_type_name, validate_type_ref,
+    validate_identifier_value, validate_identifier_value_expected, validate_port_name,
+    validate_process_name, validate_protocol_name, validate_type_name, validate_type_ref,
 };
 use super::import_symbols::ImportSymbols;
 use super::source_program::{ImportDependency, SourceUnit, SourceUnitId};
@@ -53,6 +53,19 @@ fn validate_unit_scope(
         symbols,
     };
 
+    for protocol in &module.protocols {
+        validate_type_ref(&context, &protocol.message_type)?;
+        validate_type_ref(&context, &protocol.authority)?;
+    }
+    for port in &module.ports {
+        validate_protocol_name(&context, &port.protocol)?;
+        validate_process_name(&context, &port.target)?;
+        validate_type_ref(&context, &port.authority)?;
+    }
+    for component in &module.components {
+        validate_port_name(&context, &component.export)?;
+        validate_type_ref(&context, &component.authority)?;
+    }
     for record in &module.records {
         for field in &record.fields {
             validate_type_ref(&context, &field.ty)?;
@@ -211,15 +224,23 @@ fn validate_statement<'a, 'f>(
             validate_process_name(context, target)
         }
         Statement::Send {
-            message, payload, ..
-        } => validate_send_payload(context, scope, message, payload.as_ref()),
+            port,
+            message,
+            payload,
+            ..
+        } => {
+            validate_send_port(context, port.as_ref())?;
+            validate_send_payload(context, scope, message, payload.as_ref())
+        }
         Statement::LetSendOutcome {
             ty,
+            port,
             message,
             payload,
             ..
         } => {
             validate_type_ref(context, ty)?;
+            validate_send_port(context, port.as_ref())?;
             validate_send_payload(context, scope, message, payload.as_ref())
         }
         Statement::IfElse {
@@ -242,6 +263,13 @@ fn validate_statement<'a, 'f>(
             validate_statement_list(context, body_scope, body)
         }
     }
+}
+
+fn validate_send_port(context: &ImportScopeContext<'_>, port: Option<&Identifier>) -> Result<()> {
+    if let Some(port) = port {
+        validate_port_name(context, port)?;
+    }
+    Ok(())
 }
 
 fn validate_send_payload<'a, 'f>(

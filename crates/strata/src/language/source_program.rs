@@ -203,6 +203,9 @@ impl SourceProgram {
 
     fn into_flattened_module(self) -> Result<Module> {
         let root_name = self.units[self.root.index()].module.name.clone();
+        let mut protocols = Vec::new();
+        let mut ports = Vec::new();
+        let mut components = Vec::new();
         let mut records = Vec::new();
         let mut enums = Vec::new();
         let mut functions = Vec::new();
@@ -216,6 +219,9 @@ impl SourceProgram {
                     id.as_u32()
                 )));
             };
+            protocols.extend(unit.module.protocols);
+            ports.extend(unit.module.ports);
+            components.extend(unit.module.components);
             records.extend(unit.module.records);
             enums.extend(unit.module.enums);
             functions.extend(unit.module.functions);
@@ -225,6 +231,9 @@ impl SourceProgram {
         Ok(Module {
             name: root_name,
             imports: Vec::new(),
+            protocols,
+            ports,
+            components,
             records,
             enums,
             functions,
@@ -341,8 +350,20 @@ fn validate_cross_unit_names(units: &[SourceUnit]) -> Result<()> {
     let mut types = BTreeMap::new();
     let mut functions = BTreeMap::new();
     let mut processes = BTreeMap::new();
+    let mut protocols = BTreeMap::new();
+    let mut ports = BTreeMap::new();
+    let mut components = BTreeMap::new();
     let mut enum_variants = BTreeMap::new();
     for unit in units {
+        for protocol in &unit.module.protocols {
+            insert_cross_unit_name(&mut protocols, "protocol", unit, &protocol.name)?;
+        }
+        for port in &unit.module.ports {
+            insert_cross_unit_name(&mut ports, "port", unit, &port.name)?;
+        }
+        for component in &unit.module.components {
+            insert_cross_unit_name(&mut components, "component", unit, &component.name)?;
+        }
         for record in &unit.module.records {
             insert_cross_unit_name(&mut types, "type", unit, &record.name)?;
         }

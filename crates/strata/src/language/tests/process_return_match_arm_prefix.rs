@@ -631,6 +631,7 @@ proc Sink mailbox bounded(1) {
                 },
                 message,
                 payload: None,
+                ..
             }] if *target == checked_process_id(2) && *message == checked_message_id(0)
         ),
         "arm-local send should target the direct received process ref"

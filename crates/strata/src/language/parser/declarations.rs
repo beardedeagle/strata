@@ -7,6 +7,9 @@ impl Parser {
         self.expect_symbol(';')?;
 
         let mut imports = Vec::new();
+        let mut protocols = Vec::new();
+        let mut ports = Vec::new();
+        let mut components = Vec::new();
         let mut records = Vec::new();
         let mut enums = Vec::new();
         let mut functions = Vec::new();
@@ -21,6 +24,21 @@ impl Parser {
                     );
                 }
                 imports.push(self.parse_import()?);
+                continue;
+            }
+            if self.peek_keyword("protocol") {
+                declarations_started = true;
+                protocols.push(self.parse_protocol()?);
+                continue;
+            }
+            if self.peek_keyword("port") {
+                declarations_started = true;
+                ports.push(self.parse_port()?);
+                continue;
+            }
+            if self.peek_keyword("component") {
+                declarations_started = true;
+                components.push(self.parse_component()?);
                 continue;
             }
             if self.peek_keyword("record") {
@@ -49,12 +67,17 @@ impl Parser {
                 ));
             }
 
-            return Err(self.error_here("expected record, enum, function, or proc declaration"));
+            return Err(self.error_here(
+                "expected protocol, port, component, record, enum, function, or proc declaration",
+            ));
         }
 
         Ok(Module {
             name,
             imports,
+            protocols,
+            ports,
+            components,
             records,
             enums,
             functions,
@@ -67,6 +90,54 @@ impl Parser {
         let module = self.expect_identifier()?;
         self.expect_symbol(';')?;
         Ok(Import { module })
+    }
+
+    fn parse_protocol(&mut self) -> Result<Protocol> {
+        self.expect_keyword("protocol")?;
+        let name = self.expect_identifier()?;
+        self.expect_keyword("message")?;
+        let message_type = TypeRef::Named(self.expect_identifier()?);
+        self.expect_keyword("requires")?;
+        let authority = self.parse_type()?;
+        self.expect_symbol(';')?;
+        Ok(Protocol {
+            name,
+            message_type,
+            authority,
+        })
+    }
+
+    fn parse_port(&mut self) -> Result<Port> {
+        self.expect_keyword("port")?;
+        let name = self.expect_identifier()?;
+        self.expect_keyword("protocol")?;
+        let protocol = self.expect_identifier()?;
+        self.expect_keyword("target")?;
+        let target = self.expect_identifier()?;
+        self.expect_keyword("requires")?;
+        let authority = self.parse_type()?;
+        self.expect_symbol(';')?;
+        Ok(Port {
+            name,
+            protocol,
+            target,
+            authority,
+        })
+    }
+
+    fn parse_component(&mut self) -> Result<Component> {
+        self.expect_keyword("component")?;
+        let name = self.expect_identifier()?;
+        self.expect_keyword("exports")?;
+        let export = self.expect_identifier()?;
+        self.expect_keyword("requires")?;
+        let authority = self.parse_type()?;
+        self.expect_symbol(';')?;
+        Ok(Component {
+            name,
+            export,
+            authority,
+        })
     }
 
     pub(super) fn parse_record(&mut self) -> Result<Record> {

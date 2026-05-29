@@ -57,6 +57,9 @@ pub(super) fn valid_artifact() -> MantleArtifact {
             ArtifactType::process_ref("ProcessRef_Worker", ProcessId::new(1)),
         ],
         outputs: vec!["worker handled Ping".to_string()],
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
@@ -99,6 +102,7 @@ pub(super) fn valid_artifact() -> MantleArtifact {
                         },
                         ArtifactAction::Send {
                             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                            port: None,
                             message: MessageId::new(0),
                             payload: None,
                         },

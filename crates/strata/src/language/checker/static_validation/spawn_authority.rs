@@ -66,5 +66,12 @@ pub(super) fn validate_spawn_site(
             authority_target.as_u32(),
             target.as_u32()
         ))),
+        CheckedCapabilityDescriptor::PortConnect { .. }
+        | CheckedCapabilityDescriptor::ProtocolBoundary { .. }
+        | CheckedCapabilityDescriptor::ComponentExport { .. } => Err(Error::new(format!(
+            "process {} spawn site id {} authority is not a spawn capability",
+            process.debug_name(),
+            spawn_site.as_u32()
+        ))),
     }
 }

@@ -43,6 +43,17 @@ execution from a multi-file program, fuzz seeds, diagnostics, and docs are
 tracked together. Mantle import resolution is not part of the surface; module
 names in artifacts remain metadata.
 
+Typed protocol, port, and component boundaries are recorded as a
+runtime-bearing boundary feature: source declarations, optional `send ... via
+Port` syntax, process-local `Cap<PortConnect<Port>>` authority, checked
+protocol/port/component IDs, direct-import validation, deterministic lowering
+into Mantle boundary tables, artifact and loaded-runtime admission,
+accepted `boundary_send_checked` trace evidence, fail-closed admission
+diagnostics for denied boundary shapes, source-to-runtime execution, fuzz seeds,
+bounded deterministic lowering evidence, diagnostics, and docs are tracked
+together. Mantle does not resolve protocol, port, component, or import names at
+runtime; those names remain metadata.
+
 Run it with:
 
 ```sh

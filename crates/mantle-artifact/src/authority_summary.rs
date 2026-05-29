@@ -1,5 +1,6 @@
 use crate::{
-    ArtifactCapabilityDescriptor, ArtifactSpawnKind, AuthorityId, MantleArtifact, ProcessId, Result,
+    ArtifactAction, ArtifactCapabilityDescriptor, ArtifactSpawnKind, ArtifactTransition,
+    AuthorityId, ComponentId, MantleArtifact, PortId, ProcessId, ProtocolId, Result,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +53,7 @@ fn render_text(artifact: &MantleArtifact, artifact_path: &str) -> String {
             && process.spawn_sites.is_empty()
             && process.supervisor_plans.is_empty()
         {
-            out.push_str("  no local spawn authority\n");
+            out.push_str("  no local authority\n");
             continue;
         }
 
@@ -63,10 +64,11 @@ fn render_text(artifact: &MantleArtifact, artifact_path: &str) -> String {
             out.push_str(&authority.debug_name);
             out.push_str(": ");
             push_artifact_descriptor_text(&mut out, artifact, authority.descriptor);
-            out.push_str(" used_by_spawn_sites=");
-            push_artifact_used_spawn_sites(
+            push_artifact_authority_usage_text(
                 &mut out,
                 &process.spawn_sites,
+                &process.transitions,
+                authority.descriptor,
                 AuthorityId::from_index(authority_index).ok(),
             );
             out.push('\n');
@@ -176,10 +178,11 @@ fn render_json(artifact: &MantleArtifact, artifact_path: &str) -> String {
             push_json_field(&mut out, "name", &authority.debug_name);
             out.push_str(",\"descriptor\":");
             push_artifact_descriptor_json(&mut out, artifact, authority.descriptor);
-            out.push_str(",\"used_by_spawn_site_ids\":");
-            push_artifact_used_spawn_sites(
+            push_artifact_authority_usage_json(
                 &mut out,
                 &process.spawn_sites,
+                &process.transitions,
+                authority.descriptor,
                 AuthorityId::from_index(authority_index).ok(),
             );
             out.push('}');
@@ -282,6 +285,21 @@ fn push_artifact_descriptor_text(
             out.push_str(artifact_process_label(artifact, target));
             out.push_str(">>");
         }
+        ArtifactCapabilityDescriptor::ProtocolBoundary { protocol } => {
+            out.push_str("Cap<ProtocolBoundary<");
+            out.push_str(artifact_protocol_label(artifact, protocol));
+            out.push_str(">>");
+        }
+        ArtifactCapabilityDescriptor::PortConnect { port } => {
+            out.push_str("Cap<PortConnect<");
+            out.push_str(artifact_port_label(artifact, port));
+            out.push_str(">>");
+        }
+        ArtifactCapabilityDescriptor::ComponentExport { component } => {
+            out.push_str("Cap<ComponentExport<");
+            out.push_str(artifact_component_label(artifact, component));
+            out.push_str(">>");
+        }
     }
 }
 
@@ -299,6 +317,31 @@ fn push_artifact_descriptor_json(
                 out,
                 "target_process",
                 artifact_process_label(artifact, target),
+            );
+            out.push('}');
+        }
+        ArtifactCapabilityDescriptor::ProtocolBoundary { protocol } => {
+            out.push_str("{\"kind\":\"protocol_boundary\",\"protocol_id\":");
+            out.push_str(&protocol.as_u32().to_string());
+            out.push(',');
+            push_json_field(out, "protocol", artifact_protocol_label(artifact, protocol));
+            out.push('}');
+        }
+        ArtifactCapabilityDescriptor::PortConnect { port } => {
+            out.push_str("{\"kind\":\"port_connect\",\"port_id\":");
+            out.push_str(&port.as_u32().to_string());
+            out.push(',');
+            push_json_field(out, "port", artifact_port_label(artifact, port));
+            out.push('}');
+        }
+        ArtifactCapabilityDescriptor::ComponentExport { component } => {
+            out.push_str("{\"kind\":\"component_export\",\"component_id\":");
+            out.push_str(&component.as_u32().to_string());
+            out.push(',');
+            push_json_field(
+                out,
+                "component",
+                artifact_component_label(artifact, component),
             );
             out.push('}');
         }
@@ -328,11 +371,112 @@ fn push_artifact_used_spawn_sites(
     out.push(']');
 }
 
+fn push_artifact_authority_usage_text(
+    out: &mut String,
+    sites: &[crate::ArtifactSpawnSite],
+    transitions: &[ArtifactTransition],
+    descriptor: ArtifactCapabilityDescriptor,
+    authority: Option<AuthorityId>,
+) {
+    match descriptor {
+        ArtifactCapabilityDescriptor::Spawn { .. } => {
+            out.push_str(" used_by_spawn_sites=");
+            push_artifact_used_spawn_sites(out, sites, authority);
+        }
+        ArtifactCapabilityDescriptor::PortConnect { port } => {
+            out.push_str(" used_by_port_ids=");
+            push_artifact_used_port_sends(out, transitions, port);
+        }
+        ArtifactCapabilityDescriptor::ProtocolBoundary { .. }
+        | ArtifactCapabilityDescriptor::ComponentExport { .. } => out.push_str(" used_by=[]"),
+    }
+}
+
+fn push_artifact_authority_usage_json(
+    out: &mut String,
+    sites: &[crate::ArtifactSpawnSite],
+    transitions: &[ArtifactTransition],
+    descriptor: ArtifactCapabilityDescriptor,
+    authority: Option<AuthorityId>,
+) {
+    match descriptor {
+        ArtifactCapabilityDescriptor::Spawn { .. } => {
+            out.push_str(",\"used_by_spawn_site_ids\":");
+            push_artifact_used_spawn_sites(out, sites, authority);
+        }
+        ArtifactCapabilityDescriptor::PortConnect { port } => {
+            out.push_str(",\"used_by_port_ids\":");
+            push_artifact_used_port_sends(out, transitions, port);
+        }
+        ArtifactCapabilityDescriptor::ProtocolBoundary { .. }
+        | ArtifactCapabilityDescriptor::ComponentExport { .. } => out.push_str(",\"used_by\":[]"),
+    }
+}
+
+fn push_artifact_used_port_sends(
+    out: &mut String,
+    transitions: &[ArtifactTransition],
+    port: PortId,
+) {
+    out.push('[');
+    if transitions
+        .iter()
+        .any(|transition| artifact_actions_use_port(&transition.actions, port))
+    {
+        out.push_str(&port.as_u32().to_string());
+    }
+    out.push(']');
+}
+
+fn artifact_actions_use_port(actions: &[ArtifactAction], expected: PortId) -> bool {
+    actions.iter().any(|action| match action {
+        ArtifactAction::Send { port, .. } | ArtifactAction::SendOutcome { port, .. } => {
+            port.is_some_and(|port| port == expected)
+        }
+        ArtifactAction::IfElse {
+            then_actions,
+            else_actions,
+            ..
+        } => {
+            artifact_actions_use_port(then_actions, expected)
+                || artifact_actions_use_port(else_actions, expected)
+        }
+        ArtifactAction::ForEach { body, .. } => artifact_actions_use_port(body, expected),
+        ArtifactAction::Emit { .. }
+        | ArtifactAction::Spawn { .. }
+        | ArtifactAction::SpawnOutcome { .. } => false,
+    })
+}
+
 fn artifact_process_label(artifact: &MantleArtifact, id: ProcessId) -> &str {
     artifact
         .processes
         .get(id.index())
         .map(|process| process.debug_name.as_str())
+        .unwrap_or("<invalid>")
+}
+
+fn artifact_protocol_label(artifact: &MantleArtifact, id: ProtocolId) -> &str {
+    artifact
+        .protocols
+        .get(id.index())
+        .map(|protocol| protocol.debug_name.as_str())
+        .unwrap_or("<invalid>")
+}
+
+fn artifact_port_label(artifact: &MantleArtifact, id: PortId) -> &str {
+    artifact
+        .ports
+        .get(id.index())
+        .map(|port| port.debug_name.as_str())
+        .unwrap_or("<invalid>")
+}
+
+fn artifact_component_label(artifact: &MantleArtifact, id: ComponentId) -> &str {
+    artifact
+        .components
+        .get(id.index())
+        .map(|component| component.debug_name.as_str())
         .unwrap_or("<invalid>")
 }
 
@@ -381,206 +525,4 @@ fn push_json_string(out: &mut String, value: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority,
-        ArtifactEffect, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
-        ArtifactSendTarget, ArtifactSpawnSite, ArtifactStateValue, ArtifactSupervisorChild,
-        ArtifactSupervisorChildMode, ArtifactSupervisorPlan, ArtifactSupervisorRestartIntensity,
-        ArtifactSupervisorStrategy, ArtifactTransition, ArtifactType, MessageId, NextState,
-        ProcessRefId, SpawnSiteId, StateId, StepResult, TypeId,
-    };
-
-    #[test]
-    fn text_summary_reports_artifact_authority_and_spawn_site_ids() {
-        let artifact = artifact();
-
-        let summary = render_artifact_authority_summary(
-            &artifact,
-            "summary.mta",
-            AuthoritySummaryFormat::Text,
-        )
-        .expect("valid artifact authority summary should render");
-
-        assert!(summary.contains("mantle authority summary summary.mta"));
-        assert!(
-            summary
-                .contains("authority 0 spawn_worker: Cap<Spawn<Worker>> used_by_spawn_sites=[0]")
-        );
-        assert!(summary.contains(
-            "spawn_site 0 dynamic_local target_process_id=1 target=Worker authority=0 spawn_worker"
-        ));
-        assert!(
-            summary.contains("supervisor 0 strategy=one_for_one max_restarts=2 within_ms=1000")
-        );
-        assert!(summary.contains(
-            "child 0 supervised_worker mode=permanent target_process_id=1 target=Worker spawn_site=1"
-        ));
-    }
-
-    #[test]
-    fn json_summary_reports_artifact_authority_and_spawn_site_ids() {
-        let artifact = artifact();
-
-        let summary = render_artifact_authority_summary(
-            &artifact,
-            "summary.mta",
-            AuthoritySummaryFormat::Json,
-        )
-        .expect("valid artifact authority summary should render");
-
-        assert!(summary.contains("\"artifact\":\"summary.mta\""));
-        assert!(summary.contains("\"authority_id\":0"));
-        assert!(summary.contains("\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1,\"target_process\":\"Worker\"}"));
-        assert!(summary.contains("\"used_by_spawn_site_ids\":[0]"));
-        assert!(summary.contains("\"supervisors\":[{\"supervisor_id\":0"));
-        assert!(summary.contains("\"strategy\":\"one_for_one\""));
-        assert!(summary.contains("\"max_restarts\":2"));
-        assert!(summary.contains("\"within_ms\":1000"));
-        assert!(summary.contains("\"child\":\"supervised_worker\""));
-        assert!(summary.contains("\"mode\":\"permanent\""));
-    }
-
-    #[test]
-    fn summary_rejects_invalid_artifact_before_rendering() {
-        let mut artifact = artifact();
-        artifact.processes[0].spawn_sites[0].target = ProcessId::new(99);
-
-        let err = render_artifact_authority_summary(
-            &artifact,
-            "summary.mta",
-            AuthoritySummaryFormat::Text,
-        )
-        .expect_err("invalid artifact authority summary should fail closed");
-
-        assert!(
-            err.to_string()
-                .contains("spawn site 0 targets undefined process id 99"),
-            "{err}"
-        );
-    }
-
-    fn artifact() -> MantleArtifact {
-        MantleArtifact {
-            format: ARTIFACT_FORMAT.to_string(),
-            schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-            source_language: "example_lang".to_string(),
-            module: "summary".to_string(),
-            entry_process: ProcessId::new(0),
-            entry_message: MessageId::new(0),
-            types: vec![
-                ArtifactType::value("MainState"),
-                ArtifactType::enum_value("MainMsg", vec!["Start".to_string()]),
-                ArtifactType::enum_value("WorkerState", vec!["Idle".to_string()]),
-                ArtifactType::enum_value("WorkerMsg", vec!["Ping".to_string()]),
-            ],
-            outputs: Vec::new(),
-            processes: vec![
-                ArtifactProcess {
-                    debug_name: "Main".to_string(),
-                    state_type: TypeId::new(0),
-                    state_values: vec![
-                        ArtifactStateValue::new(
-                            TypeId::new(0),
-                            crate::ArtifactValue::Atom("MainState".to_string()),
-                        )
-                        .expect("state value should be valid"),
-                    ],
-                    message_type: TypeId::new(1),
-                    message_variants: vec![ArtifactMessageVariant::unit("Start")],
-                    authorities: vec![ArtifactAuthority {
-                        debug_name: "spawn_worker".to_string(),
-                        descriptor: ArtifactCapabilityDescriptor::Spawn {
-                            target: ProcessId::new(1),
-                        },
-                    }],
-                    spawn_sites: vec![
-                        ArtifactSpawnSite {
-                            target: ProcessId::new(1),
-                            authority: Some(AuthorityId::new(0)),
-                            supervisor: None,
-                            child: None,
-                            kind: ArtifactSpawnKind::DynamicLocal,
-                        },
-                        ArtifactSpawnSite {
-                            target: ProcessId::new(1),
-                            authority: None,
-                            supervisor: Some(crate::SupervisorId::new(0)),
-                            child: Some(crate::SupervisorChildId::new(0)),
-                            kind: ArtifactSpawnKind::LexicalSupervisorChild,
-                        },
-                    ],
-                    supervisor_plans: vec![ArtifactSupervisorPlan {
-                        strategy: ArtifactSupervisorStrategy::OneForOne,
-                        intensity: ArtifactSupervisorRestartIntensity {
-                            max_restarts: 2,
-                            within_ms: 1000,
-                        },
-                        children: vec![ArtifactSupervisorChild {
-                            debug_name: "supervised_worker".to_string(),
-                            target: ProcessId::new(1),
-                            mode: ArtifactSupervisorChildMode::Permanent,
-                            spawn_site: SpawnSiteId::new(1),
-                        }],
-                    }],
-                    process_refs: vec![ArtifactProcessRef {
-                        debug_name: "worker".to_string(),
-                        target: ProcessId::new(1),
-                    }],
-                    mailbox_bound: 1,
-                    init_state: StateId::new(0),
-                    transitions: vec![ArtifactTransition {
-                        current_state: None,
-                        message: MessageId::new(0),
-                        payload_guard: None,
-                        step_result: StepResult::Stop,
-                        next_state: NextState::Current,
-                        effects: vec![ArtifactEffect::Spawn, ArtifactEffect::Send],
-                        actions: vec![
-                            ArtifactAction::Spawn {
-                                target: ProcessId::new(1),
-                                process_ref: ProcessRefId::new(0),
-                                spawn_site: SpawnSiteId::new(0),
-                            },
-                            ArtifactAction::Send {
-                                target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
-                                message: MessageId::new(0),
-                                payload: None,
-                            },
-                        ],
-                    }],
-                },
-                ArtifactProcess {
-                    debug_name: "Worker".to_string(),
-                    state_type: TypeId::new(2),
-                    state_values: vec![
-                        ArtifactStateValue::new(
-                            TypeId::new(2),
-                            crate::ArtifactValue::Atom("Idle".to_string()),
-                        )
-                        .expect("state value should be valid"),
-                    ],
-                    message_type: TypeId::new(3),
-                    message_variants: vec![ArtifactMessageVariant::unit("Ping")],
-                    authorities: Vec::new(),
-                    spawn_sites: Vec::new(),
-                    supervisor_plans: Vec::new(),
-                    process_refs: Vec::new(),
-                    mailbox_bound: 1,
-                    init_state: StateId::new(0),
-                    transitions: vec![ArtifactTransition {
-                        current_state: None,
-                        message: MessageId::new(0),
-                        payload_guard: None,
-                        step_result: StepResult::Stop,
-                        next_state: NextState::Current,
-                        effects: Vec::new(),
-                        actions: Vec::new(),
-                    }],
-                },
-            ],
-            source_hash_fnv1a64: "0000000000000000".to_string(),
-        }
-    }
-}
+mod tests;

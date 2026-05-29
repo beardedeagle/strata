@@ -5,6 +5,7 @@
 - [Getting Started](getting-started.md)
 - [Language Concepts](language-concepts.md)
 - [Language Reference](language-reference.md)
+- [Boundary Contracts](boundary-contracts.md)
 - [Runtime Reference](runtime-reference.md)
 - [Syntax Reference](syntax-reference.md)
 - [Tutorial: Hello](tutorial-hello.md)

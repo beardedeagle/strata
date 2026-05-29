@@ -25,6 +25,7 @@ impl MantleArtifact {
                 )));
             }
         }
+        self.validate_boundaries()?;
         self.validate_supervision_graph_acyclic()?;
 
         let Some(entry_process) = self.processes.get(self.entry_process.index()) else {

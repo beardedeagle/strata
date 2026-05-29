@@ -245,6 +245,7 @@ fn static_runtime_resolves_next_state_before_actions() {
             effects: Vec::new(),
             actions: vec![CheckedAction::Send {
                 target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                port: None,
                 message: checked_message_id(0),
                 payload: None,
             }],

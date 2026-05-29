@@ -6,8 +6,9 @@ use super::import_scope::{ImportScopeContext, ValueScope};
 use super::import_symbols::{NamedOwner, owner_of};
 use super::source_program::SourceUnitId;
 use super::{
-    CAP_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE, PROC_RESULT_TYPE, PROCESS_REF_TYPE, RESULT_TYPE,
-    SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
+    CAP_TYPE, COMPONENT_EXPORT_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE, PORT_CONNECT_TYPE,
+    PROC_RESULT_TYPE, PROCESS_REF_TYPE, PROTOCOL_BOUNDARY_TYPE, RESULT_TYPE, SEND_ERROR_TYPE,
+    SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
 };
 
 pub(super) fn validate_identifier_value(
@@ -192,12 +193,7 @@ pub(super) fn validate_type_ref(context: &ImportScopeContext<'_>, ty: &TypeRef) 
                 }
                 Ok(())
             }
-            CAP_TYPE => {
-                for arg in args {
-                    validate_type_ref(context, arg)?;
-                }
-                Ok(())
-            }
+            CAP_TYPE => validate_capability_type_ref(context, args),
             _ if is_builtin_type_constructor(constructor.as_str()) => {
                 for arg in args {
                     validate_type_ref(context, arg)?;
@@ -230,6 +226,27 @@ pub(super) fn validate_process_name(
     name: &Identifier,
 ) -> Result<()> {
     validate_imported_symbol(context, "process", name, &context.symbols.processes)
+}
+
+pub(super) fn validate_protocol_name(
+    context: &ImportScopeContext<'_>,
+    name: &Identifier,
+) -> Result<()> {
+    validate_imported_symbol(context, "protocol", name, &context.symbols.protocols)
+}
+
+pub(super) fn validate_port_name(
+    context: &ImportScopeContext<'_>,
+    name: &Identifier,
+) -> Result<()> {
+    validate_imported_symbol(context, "port", name, &context.symbols.ports)
+}
+
+pub(super) fn validate_component_name(
+    context: &ImportScopeContext<'_>,
+    name: &Identifier,
+) -> Result<()> {
+    validate_imported_symbol(context, "component", name, &context.symbols.components)
 }
 
 pub(super) fn validate_enum_variant(
@@ -275,6 +292,55 @@ fn validate_imported_symbol(
         Ok(())
     } else {
         Err(unimported_symbol_error(context, kind, name, owner))
+    }
+}
+
+fn validate_capability_type_ref(context: &ImportScopeContext<'_>, args: &[TypeRef]) -> Result<()> {
+    match args {
+        [
+            TypeRef::Applied {
+                constructor,
+                args,
+                const_args,
+            },
+        ] if const_args.is_empty() && args.len() == 1 => match constructor.as_str() {
+            SPAWN_TYPE => {
+                if let [TypeRef::Named(target)] = args.as_slice() {
+                    validate_process_name(context, target)?;
+                }
+                Ok(())
+            }
+            PROTOCOL_BOUNDARY_TYPE => {
+                if let [TypeRef::Named(target)] = args.as_slice() {
+                    validate_protocol_name(context, target)?;
+                }
+                Ok(())
+            }
+            PORT_CONNECT_TYPE => {
+                if let [TypeRef::Named(target)] = args.as_slice() {
+                    validate_port_name(context, target)?;
+                }
+                Ok(())
+            }
+            COMPONENT_EXPORT_TYPE => {
+                if let [TypeRef::Named(target)] = args.as_slice() {
+                    validate_component_name(context, target)?;
+                }
+                Ok(())
+            }
+            _ => {
+                for arg in args {
+                    validate_type_ref(context, arg)?;
+                }
+                Ok(())
+            }
+        },
+        _ => {
+            for arg in args {
+                validate_type_ref(context, arg)?;
+            }
+            Ok(())
+        }
     }
 }
 

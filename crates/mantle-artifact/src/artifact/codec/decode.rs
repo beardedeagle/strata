@@ -6,10 +6,14 @@ use crate::{
 };
 
 mod action_decode;
+mod boundaries;
+mod capabilities;
 mod scalar_decode;
 mod value_template_decode;
 
 use action_decode::decode_action;
+use boundaries::decode_boundaries;
+use capabilities::decode_capability_descriptor;
 
 impl MantleArtifact {
     pub fn decode(contents: &str) -> Result<Self> {
@@ -29,6 +33,7 @@ impl MantleArtifact {
         for output_index in 0..output_count {
             outputs.push(fields.take_required_string(&format!("output.{output_index}"))?);
         }
+        let (protocols, ports, components) = decode_boundaries(&mut fields)?;
 
         let mut processes = Vec::with_capacity(process_count);
         for process_index in 0..process_count {
@@ -72,18 +77,7 @@ impl MantleArtifact {
                 let authority_prefix = format!("{prefix}.authority.{authority_index}");
                 let debug_name =
                     fields.take_required_string(&format!("{authority_prefix}.debug_name"))?;
-                let kind = fields.take_required(&format!("{authority_prefix}.kind"))?;
-                let descriptor = match kind {
-                    "spawn" => ArtifactCapabilityDescriptor::Spawn {
-                        target: fields
-                            .take_process_id(&format!("{authority_prefix}.target_process"))?,
-                    },
-                    _ => {
-                        return Err(Error::new(format!(
-                            "invalid {authority_prefix}.kind value {kind:?}"
-                        )));
-                    }
-                };
+                let descriptor = decode_capability_descriptor(&mut fields, &authority_prefix)?;
                 authorities.push(ArtifactAuthority {
                     debug_name,
                     descriptor,
@@ -260,6 +254,9 @@ impl MantleArtifact {
             entry_message: fields.take_message_id("entry_message")?,
             types,
             outputs,
+            protocols,
+            ports,
+            components,
             processes,
             source_hash_fnv1a64: fields.take_required_string("source_hash_fnv1a64")?,
         };

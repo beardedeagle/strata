@@ -144,12 +144,14 @@ impl LoadedAction {
             }
             Self::Send {
                 target,
+                port,
                 message: sent_message,
                 payload,
             }
             | Self::SendOutcome {
                 outcome_ty: _,
                 target,
+                port,
                 message: sent_message,
                 payload,
                 ..
@@ -175,6 +177,14 @@ impl LoadedAction {
                         program,
                         *outcome_ty,
                         target_process.message_type,
+                    )?;
+                }
+                if let Some(port) = port {
+                    program.validate_boundary_send(
+                        process.debug_name.as_str(),
+                        *port,
+                        target_process_id,
+                        *sent_message,
                     )?;
                 }
                 match (target_message.payload_type, payload) {
@@ -493,6 +503,7 @@ impl LoadedAction {
             ),
             Self::Send {
                 target,
+                port,
                 message: sent_message,
                 payload,
             } => {
@@ -512,6 +523,14 @@ impl LoadedAction {
                                 target_process_id.as_u32()
                             ))
                         })?;
+                if let Some(port) = port {
+                    program.validate_boundary_send(
+                        process.debug_name.as_str(),
+                        *port,
+                        target_process_id,
+                        *sent_message,
+                    )?;
+                }
                 match (target_message.payload_type, payload) {
                     (None, None) => Ok(()),
                     (Some(payload_type), Some(payload)) => LoadedTemplateAdmission {

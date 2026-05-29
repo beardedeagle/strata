@@ -2,6 +2,30 @@ use crate::model::{Feature, requirements::*};
 
 pub(crate) const FEATURES: &[Feature] = &[
     feature!(
+        "typed-component-protocol-port-boundaries",
+        "Typed component, protocol, and port communication boundaries",
+        Current,
+        RuntimeBehavior,
+        RUNTIME_FUZZ_BOUNDED_REQUIREMENTS,
+        [
+            ParserCoverage => ("crates/strata/src/language/tests/boundary_contracts.rs", "parser_accepts_protocol_port_component_and_send_via"),
+            CheckerValidation => ("crates/strata/src/language/tests/boundary_contracts.rs", "checker_rejects_send_port_without_process_authority"),
+            CheckedIrLowering => ("crates/strata/src/language/tests/boundary_contracts.rs", "checker_builds_typed_boundary_ids_and_lowering_tables"),
+            ArtifactAdmission => ("crates/mantle-artifact/src/tests/boundary_tables.rs", "validate_accepts_declared_boundary_tables"),
+            RuntimeExecution => ("crates/mantle-runtime/src/tests/boundary_runtime.rs", "runtime_traces_declared_boundary_send"),
+            Diagnostics => ("docs/src/diagnostics.md", "port ... is not declared"),
+            RunnableExample => ("examples/boundary_contracts_main.str", "send worker via WorkerPort Work"),
+            PositiveTest => ("crates/strata-mantle-acceptance/tests/source_to_runtime_gates/boundary_contracts.rs", "boundary_contracts_check_build_run_and_trace_typed_port"),
+            NegativeTest => ("crates/mantle-artifact/src/tests/boundary_tables.rs", "validate_rejects_send_port_without_process_authority"),
+            SourceToRuntimeGate => ("Justfile", "examples/boundary_contracts_main.str"),
+            FuzzSeed => ("fuzz/seeds/strata_source_program_check_lower/boundary_contracts.strpack", "send worker via WorkerPort Work"),
+            FuzzSeed => ("fuzz/seeds/mantle_artifact_decode/boundary_contracts.mta", "protocol.0.required_authority.kind=protocol_boundary"),
+            FuzzSeed => ("fuzz/seeds/mantle_runtime_from_source/boundary_contracts.str", "send worker via WorkerPort Work"),
+            BoundedOrProperty => ("crates/strata/src/language/tests/boundary_contracts.rs", "bounded_boundary_sets_lower_deterministically"),
+            Documentation => ("docs/src/language-surface-assurance.md", "Typed protocol, port, and component boundaries are recorded"),
+        ],
+    ),
+    feature!(
         "checked-ir-and-typed-id-boundary",
         "Checked IR and lowering preserve typed IDs across the boundary",
         Current,

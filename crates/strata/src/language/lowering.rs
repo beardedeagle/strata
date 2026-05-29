@@ -1,38 +1,42 @@
 use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority,
-    ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactLoopElement, ArtifactMessageVariant,
-    ArtifactProcess, ArtifactProcessRef, ArtifactScalarArithmeticOperator,
-    ArtifactScalarOrderingOperator, ArtifactSendTarget, ArtifactStateValue, ArtifactTransition,
-    ArtifactType, ArtifactTypeKind, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
-    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority, ArtifactEffect,
+    ArtifactLoopElement, ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef,
+    ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactSendTarget,
+    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind,
+    ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueTemplate,
+    ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId, ComponentId,
     EffectOutcomeId, EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId,
-    ProcessId, ProcessRefId, SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId,
-    TypeId, source_hash_fnv1a64,
+    PortId, ProcessId, ProcessRefId, ProtocolId, SpawnSiteId, StateId, StepResult,
+    SupervisorChildId, SupervisorId, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
 use super::checked::{
-    CheckedAction, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedEffectOutcomeId,
+    CheckedAction, CheckedAuthorityId, CheckedComponentId, CheckedEffectOutcomeId,
     CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageCase, CheckedMessageId,
-    CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedProcess, CheckedProcessId,
-    CheckedProcessRefId, CheckedProgram, CheckedScalarArithmeticOperator,
-    CheckedScalarOrderingOperator, CheckedSendTarget, CheckedSpawnSiteId, CheckedStateId,
-    CheckedStateValue, CheckedStepResult, CheckedSupervisorId, CheckedTransition, CheckedTypeId,
-    CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator, CheckedValueEqualityOperator,
-    CheckedValueTemplate,
+    CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedPortId, CheckedProcess,
+    CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedProtocolId,
+    CheckedScalarArithmeticOperator, CheckedScalarOrderingOperator, CheckedSendTarget,
+    CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedSupervisorId,
+    CheckedTransition, CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator,
+    CheckedValueEqualityOperator, CheckedValueTemplate,
 };
 use super::source_program::SourceProvenanceHash;
 
+mod boundaries;
+mod capabilities;
 mod record_fields;
 mod supervision;
 mod value_shapes;
 
+use boundaries::{lower_components, lower_ports, lower_protocols};
+use capabilities::lower_capability_descriptor;
 use supervision::{lower_spawn_site, lower_supervisor_plans};
 use value_shapes::lower_value_shape;
 
 const STRATA_SOURCE_LANGUAGE: &str = "strata";
 
-struct ArtifactTypeMap {
+pub(super) struct ArtifactTypeMap {
     artifacts: Vec<ArtifactType>,
 }
 
@@ -75,7 +79,7 @@ impl ArtifactTypeMap {
         Ok(Self { artifacts })
     }
 
-    fn artifact_id(&self, ty: &CheckedTypeRef) -> mantle_artifact::Result<TypeId> {
+    pub(super) fn artifact_id(&self, ty: &CheckedTypeRef) -> mantle_artifact::Result<TypeId> {
         self.artifacts.get(ty.id().index()).ok_or_else(|| {
             mantle_artifact::Error::new(format!(
                 "checked type id {} is not in the checked type table",
@@ -114,6 +118,9 @@ fn lower_to_artifact_with_source_hash_fnv1a64(
         .iter()
         .map(|process| lower_process(process, &type_map))
         .collect::<mantle_artifact::Result<Vec<_>>>()?;
+    let protocols = lower_protocols(checked, &type_map)?;
+    let ports = lower_ports(checked)?;
+    let components = lower_components(checked)?;
     let artifact = MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
         schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
@@ -123,6 +130,9 @@ fn lower_to_artifact_with_source_hash_fnv1a64(
         entry_message: lower_message_id(checked.entry_message()),
         types: type_map.into_artifact_types(),
         outputs: checked.outputs().to_vec(),
+        protocols,
+        ports,
+        components,
         processes,
         source_hash_fnv1a64,
     };
@@ -253,10 +263,12 @@ fn lower_action(
         }),
         CheckedAction::Send {
             target,
+            port,
             message,
             payload,
         } => Ok(ArtifactAction::Send {
             target: lower_send_target(target, types)?,
+            port: port.map(lower_port_id),
             message: lower_message_id(*message),
             payload: payload
                 .as_ref()
@@ -267,12 +279,14 @@ fn lower_action(
             outcome,
             outcome_ty,
             target,
+            port,
             message,
             payload,
         } => Ok(ArtifactAction::SendOutcome {
             outcome: lower_effect_outcome_id(*outcome),
             outcome_ty: types.artifact_id(outcome_ty)?,
             target: lower_send_target(target, types)?,
+            port: port.map(lower_port_id),
             message: lower_message_id(*message),
             payload: payload
                 .as_ref()
@@ -660,18 +674,20 @@ fn lower_step_result(step_result: CheckedStepResult) -> StepResult {
     }
 }
 
-fn lower_process_id(id: CheckedProcessId) -> ProcessId {
+pub(super) fn lower_process_id(id: CheckedProcessId) -> ProcessId {
     ProcessId::new(id.as_u32())
 }
 
-fn lower_capability_descriptor(
-    descriptor: CheckedCapabilityDescriptor,
-) -> ArtifactCapabilityDescriptor {
-    match descriptor {
-        CheckedCapabilityDescriptor::Spawn { target } => ArtifactCapabilityDescriptor::Spawn {
-            target: lower_process_id(target),
-        },
-    }
+pub(super) fn lower_protocol_id(id: CheckedProtocolId) -> ProtocolId {
+    ProtocolId::new(id.as_u32())
+}
+
+pub(super) fn lower_port_id(id: CheckedPortId) -> PortId {
+    PortId::new(id.as_u32())
+}
+
+pub(super) fn lower_component_id(id: CheckedComponentId) -> ComponentId {
+    ComponentId::new(id.as_u32())
 }
 
 fn lower_type_id(id: CheckedTypeId) -> TypeId {

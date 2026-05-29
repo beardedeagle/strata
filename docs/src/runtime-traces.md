@@ -52,6 +52,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 | `artifact_loaded` | Mantle admits an artifact and loads its entry metadata. |
 | `process_spawned` | Mantle creates a runtime process instance. |
 | `spawn_authority_checked` | Mantle checked an admitted spawn-site authority before spawn acceptance. |
+| `boundary_send_checked` | Mantle accepted a typed-port boundary send on the mailbox acceptance path. |
 | `message_accepted` | Mantle accepts a message into a process mailbox. |
 | `message_dequeued` | A process dequeued a message for handling. |
 | `branch_selected` | Mantle selected a typed runtime control-flow branch. |
@@ -71,7 +72,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 Example shape:
 
 ```json
-{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"3","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"4","source_language":"strata","module":"actor_sequence","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2}
 ```
 
 Important fields:
@@ -103,6 +104,22 @@ Example shape:
 currently records `dynamic_local`. `authority_result` is `accepted` or
 `denied`; a denied spawn outcome returns `Err(Denied(Unit))` before the target
 process is accepted.
+
+## Boundary Send Checked
+
+Example shape:
+
+```json
+{"event":"boundary_send_checked","pid":1,"process_id":0,"process":"Main","port_id":0,"port":"WorkerPort","protocol_id":0,"protocol":"WorkerProtocol","target_process_id":1,"target_process":"Worker","message_id":0,"message":"Ping","boundary_result":"accepted"}
+```
+
+`port_id`, `protocol_id`, `target_process_id`, and `message_id` are admitted
+typed IDs. Labels are diagnostics and trace metadata only. A
+`boundary_result` of `accepted` is emitted only for typed-port sends that proceed
+on the same runtime path as mailbox acceptance. A typed send outcome that returns
+`Full`, `Stopped`, or `Crashed` before mailbox acceptance does not emit an
+accepted boundary event. Invalid or denied boundary shapes fail artifact or
+loaded-program admission before runtime dispatch.
 
 ## Message Accepted And Dequeued
 

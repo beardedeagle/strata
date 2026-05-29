@@ -567,6 +567,7 @@ fn bool_payload(value: bool) -> RuntimePayload {
 fn failing_current_state_payload_send() -> LoadedAction {
     LoadedAction::Send {
         target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: PING_MESSAGE,
         payload: Some(loaded_template(
             ArtifactValueTemplate::CurrentStatePayload { ty: JOB },

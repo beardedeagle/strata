@@ -2,6 +2,8 @@ use super::support::*;
 use crate::{ProcessStatus, RuntimeProcessId};
 use mantle_artifact::{ArtifactAction, ArtifactSendTarget, EffectOutcomeId};
 
+mod boundary;
+
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
 const WORKER_PROCESS: ProcessId = ProcessId::new(1);
 const ENTRY_PROCESS: ProcessId = ProcessId::new(2);
@@ -60,6 +62,7 @@ fn runtime_send_outcome_returns_full_and_preserves_process_ref_message_payload()
         outcome: EffectOutcomeId::new(0),
         outcome_ty: SEND_RESULT,
         target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: PING_MESSAGE,
         payload: Some(LoadedValueTemplate::ProcessRef {
             ty: PROCESS_REF_WORKER,
@@ -470,6 +473,7 @@ fn assert_direct_send_outcome_failure(status: ProcessStatus, expected: &str) {
         outcome: EffectOutcomeId::new(0),
         outcome_ty: SEND_RESULT,
         target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: PING_MESSAGE,
         payload: None,
     };
@@ -513,6 +517,7 @@ fn assert_direct_send_outcome_full(expected: &str) {
         outcome: EffectOutcomeId::new(0),
         outcome_ty: SEND_RESULT,
         target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: PING_MESSAGE,
         payload: None,
     };
@@ -564,6 +569,7 @@ fn send_outcome_artifact() -> MantleArtifact {
             outcome: EffectOutcomeId::new(0),
             outcome_ty: SEND_RESULT,
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: PING_MESSAGE,
             payload: None,
         },
@@ -600,6 +606,7 @@ fn send_outcome_process_ref_payload_artifact() -> MantleArtifact {
             outcome: EffectOutcomeId::new(0),
             outcome_ty: SEND_RESULT,
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: PING_MESSAGE,
             payload: Some(ArtifactValueTemplate::ProcessRef {
                 ty: PROCESS_REF_WORKER,

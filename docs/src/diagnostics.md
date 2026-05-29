@@ -19,7 +19,7 @@ result of the first invalid shape.
 
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
-| `expected record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `record`, `enum`, `fn`, or `proc` after `module` and any imports. |
+| `expected protocol, port, component, record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `protocol`, `port`, `component`, `record`, `enum`, `fn`, or `proc` after `module` and any imports. |
 | `imports must appear before top-level declarations` | An `import` appears after a record, enum, function, or process declaration. | Move all `import module_name;` declarations immediately after `module name;`. |
 | `imports require checking from a root source path` | A source string with imports was passed to the single-source checker. | Run `strata check <root.str>` or use the source-program API so imports can be resolved. |
 | `source ... could not be resolved` | An imported sibling `.str` file is missing or cannot be read. | Add the imported `module_name.str` file next to the importing source unit or fix the import name. |
@@ -29,8 +29,8 @@ result of the first invalid shape.
 | `artifact I/O requires secure file identity support` | Mantle artifact read/write was requested on a target without secure path identity support. | Use a Unix-family target or Windows for artifact IO. |
 | `import cycle ... is not supported` | Source units import each other cyclically. | Break the cycle; this surface only accepts an acyclic dependency graph. |
 | `duplicate module identity ...` | Two reachable source units declare the same `module` name. | Give each reachable source unit a unique module identity. |
-| `ambiguous imported ... name ...` | Reachable source units declare the same unqualified type, function, process, or cross-unit callable name. | Rename one declaration; aliases, re-exports, and qualified references are not part of this surface. |
-| `references ... without importing ...` | A source unit uses a type, enum variant, pure function, or process from another reachable source unit without directly importing that unit. | Add an explicit `import module_name;` to the source unit that uses the declaration. |
+| `ambiguous imported ... name ...` | Reachable source units declare the same unqualified type, function, process, protocol, port, component, or cross-unit callable name. | Rename one declaration; aliases, re-exports, and qualified references are not part of this surface. |
+| `references ... without importing ...` | A source unit uses a type, enum variant, pure function, process, protocol, port, or component from another reachable source unit without directly importing that unit. | Add an explicit `import module_name;` to the source unit that uses the declaration. |
 | `entry process Main is not declared` | The program has no `Main` process. | Add `proc Main ...`. |
 | `root source unit ... must declare entry process Main` | The loaded root source unit imports a module that may contain `Main`, but the root itself does not declare the entry process. | Declare `proc Main ...` in the root source file passed to `strata check` or `strata build`. |
 | `type name ... is reserved` | A source record or enum tries to use a built-in transition, capability, collection, outcome, or scalar type name. | Rename the source type. |
@@ -228,13 +228,18 @@ result of the first invalid shape.
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
 | `spawns itself` | A process tries to spawn itself. | Spawn another declared process. |
-| `authority type must be Cap<Spawn<ProcessName>>` | A process authority declaration uses a malformed capability wrapper. | Declare local spawn authority as `authority name: Cap<Spawn<TargetProcess>>;`. |
-| `authority descriptor must be Spawn<ProcessName>` | A `Cap<...>` authority declaration does not contain the supported spawn descriptor. | Use `Cap<Spawn<TargetProcess>>`; other capability algebra is not admitted in this slice. |
+| `authority type must be Cap<Spawn<ProcessName>> or Cap<PortConnect<PortName>>` | A process authority declaration uses a malformed capability wrapper. | Declare local spawn authority as `authority name: Cap<Spawn<TargetProcess>>;` or local port-send authority as `authority name: Cap<PortConnect<PortName>>;`. |
+| `authority descriptor must be Spawn<ProcessName> or PortConnect<PortName>` | A `Cap<...>` process authority declaration does not contain a supported process-local descriptor. | Use `Cap<Spawn<TargetProcess>>` for dynamic local spawn or `Cap<PortConnect<PortName>>` for typed boundary sends. |
+| `protocol ... authority must be Cap<ProtocolBoundary<...>>` / `port ... authority must be Cap<PortConnect<...>>` / `component ... authority must be Cap<ComponentExport<...>>` | A boundary declaration has the wrong capability descriptor or target name. | Use the exact authority shape for the declaration being defined. |
+| `port ... targets process ... with message type ..., expected protocol ... message type ...` | A port binds a protocol to a process whose `Msg` enum does not match. | Point the port at a process with the protocol message enum or declare a protocol for that target process. |
+| `port ... is not declared` | A `send ... via ...` names an undeclared port. | Declare the port before checking the send, or remove the `via` contract. |
+| `send via port ... requires authority Cap<PortConnect<...>>` / `send through port id ... requires authority port_connect` | A typed boundary send lacks the exact process-local port authority. | Add a used `authority name: Cap<PortConnect<PortName>>;` declaration, or remove the typed-port send. |
+| `sends through port id ... targeting process id ..., expected ...` | A Mantle artifact send references a port table ID whose admitted target process does not match the send target. | Fix the frontend lowering or the artifact table; Mantle will not reinterpret source names at runtime. |
 | `spawn authority target must be a process name` | The spawn descriptor target is not a bare process name. | Target a declared process directly, for example `Cap<Spawn<Worker>>`. |
 | `spawn authority targets entry process` | A process authority declaration tries to create the already-started entry process. | Target a non-entry worker process. |
 | `spawn target ... requires authority Cap<Spawn<...>>` | A step uses local dynamic `spawn` without exact authority for that target process. | Add a process-local `authority` declaration for the exact target, or remove the spawn. |
 | `duplicates spawn authority descriptor` | A process declares the same spawn capability more than once. | Keep one declaration per exact target process. |
-| `declares unused spawn authority` | A process declares spawn authority that no local spawn site uses. | Remove the unused declaration or add the corresponding local spawn. |
+| `declares unused spawn authority` / `declares unused port authority` | A process declares authority that no local spawn site or typed-port send uses. | Remove the unused declaration or add the corresponding checked use. |
 | `declares duplicate supervisor child` | A local supervisor declares the same lexical child name more than once in one owner process. | Give each child a unique name. |
 | `local supervisor graph contains cycle` | Static lexical supervisor declarations contain an indirect child cycle. | Make each local supervisor child tree acyclic. |
 | `restart intensity ... must be greater than zero` | A supervisor plan omits a positive restart count or restart window. | Use explicit positive `max_restarts: N_u32` and `within_ms: N_u64` values. |

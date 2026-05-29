@@ -1,3 +1,4 @@
+mod boundary_contracts;
 mod builtin_value_shapes;
 mod effect_outcomes;
 mod effects;

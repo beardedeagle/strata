@@ -724,24 +724,26 @@ lowering.
 just run-example imports_main
 ```
 
-The imports resolve to sibling `.str` files, the graph is checked in deterministic
-dependency-first order, and each source unit directly imports the declarations it
-uses. `send worker Work(complete(Job { phase: Ready }));` lowers imported record,
-enum, pure-function, and process declarations to typed artifact IDs. Mantle runs
-`target/strata/imports_main.mta`; it does not load `.str` files or resolve import
-names at runtime.
+The graph is checked in deterministic dependency-first order, direct imports
+authorize visible declarations, and Mantle runs `target/strata/imports_main.mta`
+without loading `.str` files or resolving import names at runtime.
+
+## Boundary Contracts
+
+`examples/boundary_contracts_main.str` runs the checked boundary surface in
+[Boundary Contracts](boundary-contracts.md):
+
+Run it with `just run-example boundary_contracts_main`.
 
 ## Actor Panic No Replay
 
-`examples/actor_panic_no_replay.str` shows an explicit abnormal transition.
-`Main` queues two `Ping` messages to `Worker`; `Worker` dequeues one message,
-returns `Panic(Failed)`, records failure evidence, and does not replay the
-consumed message.
+`examples/actor_panic_no_replay.str` shows an abnormal transition that consumes
+one queued `Ping`, returns `Panic(Failed)`, records failure evidence, and does
+not replay the consumed message.
 
 ```sh
 just run-example actor_panic_no_replay
 ```
-
-The final command is expected to return non-zero. The runtime trace should show
-two accepted `Ping` messages, one `message_dequeued`, one `process_stepped`
-with `result:"Panic"`, and one `process_failed` event.
+The final command is expected to return non-zero. The trace should show two
+accepted `Ping` messages, one `message_dequeued`, one `process_stepped` with
+`result:"Panic"`, and one `process_failed` event.

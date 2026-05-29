@@ -3,8 +3,8 @@ use std::num::NonZeroU64;
 
 use mantle_artifact::{
     ArtifactBranch, AuthorityId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
-    MAX_VALUE_TEMPLATE_DEPTH, MessageId, OutputId, ProcessId, Result, SpawnSiteId, StateId,
-    StepResult, SupervisorChildId, SupervisorId, TypeId,
+    MAX_VALUE_TEMPLATE_DEPTH, MessageId, OutputId, PortId, ProcessId, ProtocolId, Result,
+    SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId, TypeId,
 };
 
 use crate::program::RuntimePayload;
@@ -199,6 +199,20 @@ pub enum RuntimeEvent {
         authority_id: AuthorityId,
         spawn_kind: RuntimeSpawnKind,
         authority_result: RuntimeAuthorityResult,
+    },
+    BoundarySendChecked {
+        pid: RuntimeProcessId,
+        process_id: ProcessId,
+        process: String,
+        port_id: PortId,
+        port: String,
+        protocol_id: ProtocolId,
+        protocol: String,
+        target_process_id: ProcessId,
+        target_process: String,
+        message_id: MessageId,
+        message: String,
+        boundary_result: RuntimeAuthorityResult,
     },
     BranchSelected {
         pid: RuntimeProcessId,

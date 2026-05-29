@@ -20,6 +20,7 @@ fn runtime_rejects_loaded_dynamic_for_each_non_list_collection_before_artifact_l
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: Some(loaded_template(ArtifactValueTemplate::Literal {
                 ty: JOB,
@@ -66,6 +67,7 @@ fn runtime_rejects_loaded_dynamic_for_each_collection_element_mismatch_before_ar
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: Some(LoadedValueTemplate::List {
                 ty: box_list,

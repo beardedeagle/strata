@@ -247,6 +247,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             ))),
             LoadedAction::Send {
                 target,
+                port,
                 message,
                 payload,
             } => {
@@ -258,6 +259,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 let target_process_id = self.processes[target_process_index].process_id;
                 self.program
                     .message_payload_type(target_process_id, *message)?;
+                if let Some(port) = port {
+                    self.program.validate_boundary_send(
+                        step.process_name.as_str(),
+                        *port,
+                        target_process_id,
+                        *message,
+                    )?;
+                }
                 if let Some(payload) = payload {
                     evaluate_runtime_template(
                         self.program,

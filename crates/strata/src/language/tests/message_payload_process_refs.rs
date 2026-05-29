@@ -94,6 +94,7 @@ proc Sink mailbox bounded(1) {
         artifact.processes[0].transitions[0].actions[2],
         ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: mantle_artifact::MessageId::new(0),
             payload: Some(ArtifactValueTemplate::ProcessRef {
                 ty: sink_ref,
@@ -109,6 +110,7 @@ proc Sink mailbox bounded(1) {
                 ty: sink_ref,
                 target_process: ProcessId::new(2),
             },
+            port: None,
             message: mantle_artifact::MessageId::new(0),
             payload: None,
         }

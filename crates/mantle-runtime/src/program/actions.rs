@@ -25,6 +25,7 @@ pub(crate) enum LoadedAction {
     },
     Send {
         target: LoadedSendTarget,
+        port: Option<PortId>,
         message: MessageId,
         payload: Option<LoadedValueTemplate>,
     },
@@ -32,6 +33,7 @@ pub(crate) enum LoadedAction {
         outcome: EffectOutcomeId,
         outcome_ty: TypeId,
         target: LoadedSendTarget,
+        port: Option<PortId>,
         message: MessageId,
         payload: Option<LoadedValueTemplate>,
     },
@@ -155,10 +157,12 @@ impl LoadedAction {
             }),
             ArtifactAction::Send {
                 target,
+                port,
                 message,
                 payload,
             } => Ok(Self::Send {
                 target: LoadedSendTarget::from_artifact(target),
+                port: *port,
                 message: *message,
                 payload: payload
                     .as_ref()
@@ -169,12 +173,14 @@ impl LoadedAction {
                 outcome,
                 outcome_ty,
                 target,
+                port,
                 message,
                 payload,
             } => Ok(Self::SendOutcome {
                 outcome: *outcome,
                 outcome_ty: *outcome_ty,
                 target: LoadedSendTarget::from_artifact(target),
+                port: *port,
                 message: *message,
                 payload: payload
                     .as_ref()

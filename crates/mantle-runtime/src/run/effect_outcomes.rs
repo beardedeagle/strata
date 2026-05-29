@@ -1,9 +1,10 @@
 use mantle_artifact::{
     ArtifactProcessRefPayload, ArtifactValue, ArtifactValueShape, EffectOutcomeId, Error,
-    MessageId, ProcessId, Result, TypeId,
+    MessageId, PortId, ProcessId, Result, TypeId,
 };
 
 use super::RuntimeRun;
+use super::boundaries::BoundarySendContext;
 use super::model::{ActiveStep, RuntimeMessageEnvelope};
 use super::process_refs::{LocalProcessRefs, SendOutcomeTarget};
 use super::templates::evaluate_runtime_template;
@@ -22,6 +23,7 @@ struct SendOutcomeExecution<'a> {
     step: &'a ActiveStep,
     outcome_ty: TypeId,
     target: &'a LoadedSendTarget,
+    port: Option<PortId>,
     message: MessageId,
     payload: Option<&'a LoadedValueTemplate>,
     effect_outcomes: &'a [RuntimeEffectOutcome],
@@ -78,6 +80,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 outcome,
                 outcome_ty,
                 target,
+                port,
                 message,
                 payload,
             } => {
@@ -86,6 +89,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     step,
                     outcome_ty: *outcome_ty,
                     target,
+                    port: *port,
                     message: *message,
                     payload: payload.as_ref(),
                     effect_outcomes,
@@ -135,6 +139,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         let expected_payload_type = self
             .program
             .message_payload_type(target_process_id, request.message)?;
+        if let Some(port) = request.port {
+            self.program.validate_boundary_send(
+                request.step.process_name.as_str(),
+                port,
+                target_process_id,
+                request.message,
+            )?;
+        }
         let prepared_payload = match (expected_payload_type, request.payload) {
             (None, None) => None,
             (None, Some(_)) => {
@@ -172,11 +184,19 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         match target {
             SendOutcomeTarget::Active(pid) => match self.preflight_delivery_target_outcome(pid)? {
                 Ok(_) => {
-                    self.send_message(
-                        pid,
-                        RuntimeMessageEnvelope::new(request.message, prepared_payload),
-                        Some(request.step.pid),
-                    )?;
+                    let envelope = RuntimeMessageEnvelope::new(request.message, prepared_payload);
+                    match request.port {
+                        Some(port) => self.send_message_with_boundary(
+                            pid,
+                            envelope,
+                            Some(request.step.pid),
+                            BoundarySendContext {
+                                step: request.step,
+                                port_id: port,
+                            },
+                        )?,
+                        None => self.send_message(pid, envelope, Some(request.step.pid))?,
+                    }
                     self.ok_unit_outcome(request.outcome_ty)
                 }
                 Err(failure) => {

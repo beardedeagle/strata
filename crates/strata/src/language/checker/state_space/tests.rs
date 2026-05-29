@@ -90,6 +90,9 @@ fn test_module() -> Module {
     Module {
         name: ident("limit_context"),
         imports: Vec::new(),
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         records: vec![Record {
             name: ident("MainState"),
             fields: Vec::new(),
@@ -118,6 +121,9 @@ fn recursive_state_module() -> Module {
     Module {
         name: ident("recursive_state"),
         imports: Vec::new(),
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         records: vec![Record {
             name: ident("MainState"),
             fields: vec![RecordField {

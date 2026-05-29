@@ -43,11 +43,13 @@ fn discover_send_statement(
     match statement {
         Statement::Send {
             target,
+            port: _,
             message,
             payload,
         }
         | Statement::LetSendOutcome {
             target,
+            port: _,
             message,
             payload,
             ..

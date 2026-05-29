@@ -60,6 +60,7 @@ proc Main mailbox bounded(1) {
             },
             CheckedAction::Send {
                 target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                port: None,
                 message: checked_message_id(0),
                 payload: None
             }

@@ -352,6 +352,7 @@ fn validate_action_reference(
             target,
             message,
             payload,
+            ..
         }
         | CheckedAction::SendOutcome {
             target,

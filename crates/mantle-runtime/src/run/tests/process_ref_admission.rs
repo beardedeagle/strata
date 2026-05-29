@@ -30,6 +30,7 @@ fn runtime_rejects_loaded_send_before_spawn_before_artifact_loaded() {
         .actions
         .push(LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: None,
         });
@@ -60,6 +61,7 @@ fn runtime_rejects_loaded_send_missing_payload_before_artifact_loaded() {
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: None,
         },
@@ -91,6 +93,7 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: Some(loaded_template(ArtifactValueTemplate::ProcessRef {
                 ty: PROCESS_REF_WORKER,
@@ -127,6 +130,7 @@ fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded()
         },
         LoadedAction::Send {
             target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: Some(loaded_template(ArtifactValueTemplate::RecordField {
                 ty: PROCESS_REF_WORKER,
@@ -158,6 +162,7 @@ fn runtime_rejects_loaded_received_process_ref_send_without_payload_before_artif
                 ty: PROCESS_REF_WORKER,
                 target_process: ProcessId::new(1),
             },
+            port: None,
             message: MessageId::new(0),
             payload: None,
         });

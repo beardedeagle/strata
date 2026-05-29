@@ -203,6 +203,7 @@ fn static_validation_rejects_received_payload_send_target_with_non_process_ref_t
                     ty: value_type("Job"),
                     target: checked_process_id(1),
                 },
+                port: None,
                 message: checked_message_id(0),
                 payload: None,
             }],
@@ -282,6 +283,7 @@ fn static_validation_rejects_process_ref_template_with_non_process_ref_type() {
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                    port: None,
                     message: checked_message_id(0),
                     payload: Some(Box::new(CheckedValueTemplate::ProcessRef {
                         ty: value_type("Job"),
@@ -366,6 +368,7 @@ fn static_validation_formats_process_ref_type_diagnostics_without_internal_label
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                    port: None,
                     message: checked_message_id(0),
                     payload: Some(Box::new(CheckedValueTemplate::ProcessRef {
                         ty: process_ref_type("Worker"),
@@ -451,6 +454,7 @@ fn static_validation_rejects_nested_process_ref_payload_template() {
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                    port: None,
                     message: checked_message_id(0),
                     payload: Some(Box::new(CheckedValueTemplate::Record {
                         ty: value_type("Box"),
@@ -543,6 +547,7 @@ fn static_validation_rejects_projected_process_ref_payload_template() {
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                    port: None,
                     message: checked_message_id(0),
                     payload: Some(Box::new(CheckedValueTemplate::EnumPayload {
                         ty: process_ref_type("Worker"),
@@ -629,6 +634,7 @@ fn static_validation_rejects_received_process_ref_nested_in_enum_payload_templat
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                    port: None,
                     message: checked_message_id(0),
                     payload: Some(Box::new(CheckedValueTemplate::EnumVariant {
                         ty: route.clone(),

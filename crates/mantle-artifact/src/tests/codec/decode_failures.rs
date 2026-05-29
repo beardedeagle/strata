@@ -133,6 +133,19 @@ fn decode_rejects_unknown_spawn_authority_kind() {
 }
 
 #[test]
+fn decode_rejects_missing_boundary_table_counts() {
+    let encoded = valid_artifact().encode().replace("protocol_count=0\n", "");
+
+    let err = MantleArtifact::decode(&encoded).expect_err("missing protocol count should fail");
+
+    assert!(
+        err.to_string()
+            .contains("missing artifact field protocol_count"),
+        "{err}"
+    );
+}
+
+#[test]
 fn decode_rejects_unknown_spawn_site_kind() {
     let encoded = valid_artifact().encode().replace(
         "process.0.spawn_site.0.kind=dynamic_local",

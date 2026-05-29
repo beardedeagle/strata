@@ -6,11 +6,13 @@ use crate::validation::{
     validate_source_hash, validate_state_value_identity_label,
     validate_unique_message_variant_list, validate_unique_state_value_list,
 };
+mod boundaries;
 mod codec;
 mod process_validation;
 mod validation;
 mod value_template;
 
+pub use boundaries::{ArtifactComponent, ArtifactPort, ArtifactProtocol};
 pub use validation::validate_value_enum_membership;
 pub(in crate::artifact) use validation::{
     validate_artifact_identity, validate_unique_process_ref_list,
@@ -25,13 +27,14 @@ pub use value_template::{
 };
 
 use crate::{
-    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, AuthorityId, EffectOutcomeId,
-    EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_EFFECTS_PER_TRANSITION,
-    MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId,
-    ProcessRefId, Result, SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
+    ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, AuthorityId, ComponentId,
+    EffectOutcomeId, EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
+    MAX_COMPONENT_COUNT, MAX_EFFECTS_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PORT_COUNT, MAX_PROCESS_COUNT,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_PROTOCOL_COUNT, MAX_STATE_VALUES_PER_PROCESS,
+    MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH,
+    MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, PortId, ProcessId, ProcessRefId, ProtocolId,
+    Result, SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,6 +295,9 @@ pub struct MantleArtifact {
     pub entry_message: MessageId,
     pub types: Vec<ArtifactType>,
     pub outputs: Vec<String>,
+    pub protocols: Vec<ArtifactProtocol>,
+    pub ports: Vec<ArtifactPort>,
+    pub components: Vec<ArtifactComponent>,
     pub processes: Vec<ArtifactProcess>,
     pub source_hash_fnv1a64: String,
 }
@@ -384,12 +390,18 @@ pub struct ArtifactAuthority {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ArtifactCapabilityDescriptor {
     Spawn { target: ProcessId },
+    ProtocolBoundary { protocol: ProtocolId },
+    PortConnect { port: PortId },
+    ComponentExport { component: ComponentId },
 }
 
 impl ArtifactCapabilityDescriptor {
     pub(crate) const fn kind_str(self) -> &'static str {
         match self {
             Self::Spawn { .. } => "spawn",
+            Self::ProtocolBoundary { .. } => "protocol_boundary",
+            Self::PortConnect { .. } => "port_connect",
+            Self::ComponentExport { .. } => "component_export",
         }
     }
 }
@@ -585,6 +597,7 @@ pub enum ArtifactAction {
     },
     Send {
         target: ArtifactSendTarget,
+        port: Option<PortId>,
         message: MessageId,
         payload: Option<ArtifactValueTemplate>,
     },
@@ -592,6 +605,7 @@ pub enum ArtifactAction {
         outcome: EffectOutcomeId,
         outcome_ty: TypeId,
         target: ArtifactSendTarget,
+        port: Option<PortId>,
         message: MessageId,
         payload: Option<ArtifactValueTemplate>,
     },

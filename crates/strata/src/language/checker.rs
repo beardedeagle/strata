@@ -1,4 +1,5 @@
 mod authority;
+mod boundaries;
 mod init;
 mod message_cases;
 mod outputs;
@@ -32,15 +33,16 @@ pub(in crate::language::checker) use super::checked::CheckedCapabilityDescriptor
 use super::checked::{
     CheckedAction, CheckedEnumVariantId, CheckedLoopElement, CheckedLoopElementId,
     CheckedMessageCase, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
-    CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessParts, CheckedProcessRef,
-    CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedSendTarget, CheckedStateId,
-    CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeRef,
+    CheckedPayloadValue, CheckedPortId, CheckedProcess, CheckedProcessId, CheckedProcessParts,
+    CheckedProcessRef, CheckedProcessRefId, CheckedProgram, CheckedProgramParts, CheckedSendTarget,
+    CheckedStateId, CheckedStepResult, CheckedTransition, CheckedTransitionParts, CheckedTypeRef,
     CheckedValueTemplate, checked_action_count,
 };
 use super::diagnostic::{Error, Result};
 use super::{LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
 pub(in crate::language::checker) use authority::{AuthorityBinding, SpawnSiteAllocator};
 use authority::{collect_authorities, validate_authority_usage};
+use boundaries::{check_boundaries, validate_boundary_counts};
 use init::check_init;
 use message_cases::{DiscoveredMessageCase, MessageCaseTable};
 use outputs::OutputPool;
@@ -499,6 +501,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         1,
         MAX_PROCESS_COUNT,
     )?;
+    validate_boundary_counts(&module)?;
 
     let semantic_index = SemanticIndex::build(&module)?;
     validate_enum_variant_counts(&module)?;
@@ -510,6 +513,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     validate_process_declarations_before_message_cases(&module, &semantic_index, entry_process)?;
     let message_cases =
         MessageCaseTable::build(&module, entry_process, &semantic_index, &mut types)?;
+    let checked_boundaries = check_boundaries(&module, &semantic_index, &mut types)?;
     let mut outputs = OutputPool::new();
     let check_context = ModuleCheckContext {
         module: &module,
@@ -549,6 +553,9 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         entry_message,
         types: checked_types,
         outputs: outputs.into_values(),
+        protocols: checked_boundaries.protocols,
+        ports: checked_boundaries.ports,
+        components: checked_boundaries.components,
         processes: checked_processes,
     }))
 }
@@ -636,7 +643,7 @@ fn check_process<'a>(
         0,
         MAX_SPAWN_SITES_PER_PROCESS,
     )?;
-    validate_authority_usage(process, &authorities, &spawn_sites)?;
+    validate_authority_usage(process, &authorities, &spawn_sites, &transitions)?;
     let state_values = state_space.into_values()?;
 
     Ok(CheckedProcess::with_authority(

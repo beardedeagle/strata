@@ -22,6 +22,7 @@ use crate::program::{
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
 mod accounting;
+mod boundaries;
 mod control_flow;
 mod delivery;
 mod effect_outcomes;
@@ -31,6 +32,7 @@ mod process_refs;
 mod supervision;
 mod templates;
 
+use boundaries::BoundarySendContext;
 use effect_outcomes::RuntimeEffectOutcome;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,6 +336,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             }
             LoadedAction::Send {
                 target,
+                port,
                 message,
                 payload,
             } => {
@@ -342,6 +345,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 let target_process_id = self.processes[target_process_index].process_id;
                 self.program
                     .message_payload_type(target_process_id, *message)?;
+                if let Some(port) = port {
+                    self.program.validate_boundary_send(
+                        step.process_name.as_str(),
+                        *port,
+                        target_process_id,
+                        *message,
+                    )?;
+                }
                 let prepared_payload = match payload {
                     Some(payload) => Some(evaluate_runtime_template(
                         self.program,
@@ -354,11 +365,19 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     )?),
                     None => None,
                 };
-                self.send_message(
-                    pid,
-                    RuntimeMessageEnvelope::new(*message, prepared_payload),
-                    Some(step.pid),
-                )
+                let envelope = RuntimeMessageEnvelope::new(*message, prepared_payload);
+                match port {
+                    Some(port) => self.send_message_with_boundary(
+                        pid,
+                        envelope,
+                        Some(step.pid),
+                        BoundarySendContext {
+                            step,
+                            port_id: *port,
+                        },
+                    ),
+                    None => self.send_message(pid, envelope, Some(step.pid)),
+                }
             }
             LoadedAction::IfElse {
                 condition,

@@ -15,6 +15,7 @@ pub(crate) use values::{
 
 mod actions;
 mod admission;
+mod boundaries;
 mod effects;
 mod processes;
 mod templates;
@@ -24,20 +25,21 @@ mod type_validation;
 mod values;
 
 use mantle_artifact::{
-    ArtifactAction, ArtifactAuthority, ArtifactCapabilityDescriptor, ArtifactEnumVariant,
-    ArtifactMessageVariant, ArtifactProcess, ArtifactProcessRef, ArtifactScalarType,
-    ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite, ArtifactSupervisorChildMode,
-    ArtifactSupervisorStrategy, ArtifactTransition, ArtifactType, ArtifactTypeField,
-    ArtifactTypeKind, ArtifactValueShape, AuthorityId, EffectOutcomeId, EnumVariantId, Error,
-    LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_AUTHORITIES_PER_PROCESS,
-    MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS,
-    MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS, MAX_SPAWN_SITES_PER_PROCESS,
+    ArtifactAction, ArtifactAuthority, ArtifactCapabilityDescriptor, ArtifactComponent,
+    ArtifactEnumVariant, ArtifactMessageVariant, ArtifactPort, ArtifactProcess, ArtifactProcessRef,
+    ArtifactProtocol, ArtifactScalarType, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
+    ArtifactSupervisorChildMode, ArtifactSupervisorStrategy, ArtifactTransition, ArtifactType,
+    ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape, AuthorityId, ComponentId,
+    EffectOutcomeId, EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
+    MAX_AUTHORITIES_PER_PROCESS, MAX_COMPONENT_COUNT, MAX_EFFECT_OUTCOMES_PER_TRANSITION,
+    MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
+    MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS, MAX_PORT_COUNT, MAX_PROCESS_COUNT,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_PROTOCOL_COUNT, MAX_SPAWN_SITES_PER_PROCESS,
     MAX_STATE_VALUES_PER_PROCESS, MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR,
     MAX_SUPERVISORS_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
     MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, RecordFieldId, Result, SpawnSiteId, StateId, StepResult,
-    SupervisorChildId, SupervisorId, TypeId, validate_message_label,
+    OutputId, PortId, ProcessId, ProcessRefId, ProtocolId, RecordFieldId, Result, SpawnSiteId,
+    StateId, StepResult, SupervisorChildId, SupervisorId, TypeId, validate_message_label,
     validate_state_value_identity_label,
 };
 
@@ -51,6 +53,9 @@ pub(crate) struct LoadedProgram {
     pub(crate) entry_message: MessageId,
     pub(crate) types: Vec<ArtifactType>,
     pub(crate) outputs: Vec<String>,
+    pub(crate) protocols: Vec<ArtifactProtocol>,
+    pub(crate) ports: Vec<ArtifactPort>,
+    pub(crate) components: Vec<ArtifactComponent>,
     pub(crate) processes: Vec<LoadedProcess>,
 }
 
@@ -72,6 +77,9 @@ impl LoadedProgram {
             entry_message: artifact.entry_message,
             types: artifact.types.clone(),
             outputs: artifact.outputs.clone(),
+            protocols: artifact.protocols.clone(),
+            ports: artifact.ports.clone(),
+            components: artifact.components.clone(),
             processes,
         })
     }
@@ -351,6 +359,7 @@ impl LoadedProgram {
         for output in &self.outputs {
             validate_loaded_output_text(output)?;
         }
+        self.validate_boundaries()?;
         for (type_index, ty) in self.types.iter().enumerate() {
             validate_loaded_ident_field(&format!("type.{type_index}.label"), &ty.label)?;
             self.validate_type_shape(type_index, ty)?;
@@ -419,6 +428,9 @@ pub(crate) struct LoadedAuthority {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum LoadedCapabilityDescriptor {
     Spawn { target: ProcessId },
+    ProtocolBoundary { protocol: ProtocolId },
+    PortConnect { port: PortId },
+    ComponentExport { component: ComponentId },
 }
 
 impl LoadedAuthority {
@@ -434,6 +446,13 @@ impl LoadedCapabilityDescriptor {
     fn from_artifact(descriptor: ArtifactCapabilityDescriptor) -> Self {
         match descriptor {
             ArtifactCapabilityDescriptor::Spawn { target } => Self::Spawn { target },
+            ArtifactCapabilityDescriptor::ProtocolBoundary { protocol } => {
+                Self::ProtocolBoundary { protocol }
+            }
+            ArtifactCapabilityDescriptor::PortConnect { port } => Self::PortConnect { port },
+            ArtifactCapabilityDescriptor::ComponentExport { component } => {
+                Self::ComponentExport { component }
+            }
         }
     }
 }

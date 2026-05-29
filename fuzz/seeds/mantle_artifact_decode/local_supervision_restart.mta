@@ -1,12 +1,15 @@
 MTA0
 format=mantle-target-artifact
-schema_version=3
+schema_version=4
 source_language=strata
 module=local_supervision_restart
 entry_process=0
 entry_message=0
 type_count=4
 output_count=0
+protocol_count=0
+port_count=0
+component_count=0
 process_count=2
 type.0.label=MainState
 type.0.kind=value

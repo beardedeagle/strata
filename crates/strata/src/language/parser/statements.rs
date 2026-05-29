@@ -89,20 +89,13 @@ impl Parser {
             }
             if self.peek_keyword("send") {
                 self.expect_keyword("send")?;
-                let target = self.expect_identifier()?;
-                let message = self.expect_identifier()?;
-                let payload = if self.consume_symbol('(') {
-                    let value = self.parse_value_expr()?;
-                    self.expect_symbol(')')?;
-                    Some(value)
-                } else {
-                    None
-                };
+                let (target, port, message, payload) = self.parse_send_parts()?;
                 self.expect_symbol(';')?;
                 return Ok(Statement::LetSendOutcome {
                     name,
                     ty,
                     target,
+                    port,
                     message,
                     payload,
                 });
@@ -113,18 +106,11 @@ impl Parser {
         }
         if self.peek_keyword("send") {
             self.expect_keyword("send")?;
-            let target = self.expect_identifier()?;
-            let message = self.expect_identifier()?;
-            let payload = if self.consume_symbol('(') {
-                let value = self.parse_value_expr()?;
-                self.expect_symbol(')')?;
-                Some(value)
-            } else {
-                None
-            };
+            let (target, port, message, payload) = self.parse_send_parts()?;
             self.expect_symbol(';')?;
             return Ok(Statement::Send {
                 target,
+                port,
                 message,
                 payload,
             });
@@ -135,6 +121,32 @@ impl Parser {
             ));
         }
         Err(self.error_here("expected emit, for, if, let, send, or return statement"))
+    }
+
+    fn parse_send_parts(
+        &mut self,
+    ) -> Result<(
+        Identifier,
+        Option<Identifier>,
+        Identifier,
+        Option<ValueExpr>,
+    )> {
+        let target = self.expect_identifier()?;
+        let port = if self.peek_keyword("via") {
+            self.expect_keyword("via")?;
+            Some(self.expect_identifier()?)
+        } else {
+            None
+        };
+        let message = self.expect_identifier()?;
+        let payload = if self.consume_symbol('(') {
+            let value = self.parse_value_expr()?;
+            self.expect_symbol(')')?;
+            Some(value)
+        } else {
+            None
+        };
+        Ok((target, port, message, payload))
     }
 
     pub(super) fn parse_if_else_statement(&mut self) -> Result<Statement> {

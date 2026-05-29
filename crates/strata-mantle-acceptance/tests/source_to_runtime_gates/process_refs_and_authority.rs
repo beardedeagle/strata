@@ -16,6 +16,7 @@ fn actor_reply_checks_builds_and_runs_on_mantle() {
                 ty: sink_ref_type,
                 target_process: ProcessId::new(2),
             },
+            port: None,
             message: MessageId::new(0),
             payload: None,
         }

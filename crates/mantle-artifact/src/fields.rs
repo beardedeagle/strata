@@ -3,14 +3,15 @@ use std::collections::BTreeMap;
 use crate::artifact::StepResult;
 use crate::validation::validate_count;
 use crate::{
-    ARTIFACT_MAGIC, AuthorityId, EffectOutcomeId, EnumVariantId, Error, LoopElementId,
-    MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FIELDS, MAX_AUTHORITIES_PER_PROCESS,
+    ARTIFACT_MAGIC, AuthorityId, ComponentId, EffectOutcomeId, EnumVariantId, Error, LoopElementId,
+    MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FIELDS, MAX_AUTHORITIES_PER_PROCESS, MAX_COMPONENT_COUNT,
     MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR, MAX_SUPERVISORS_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, ProcessId, ProcessRefId, RecordFieldId, Result,
-    SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PORT_COUNT, MAX_PROCESS_COUNT,
+    MAX_PROCESS_REFS_PER_PROCESS, MAX_PROTOCOL_COUNT, MAX_SPAWN_SITES_PER_PROCESS,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR,
+    MAX_SUPERVISORS_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId,
+    PortId, ProcessId, ProcessRefId, ProtocolId, RecordFieldId, Result, SpawnSiteId, StateId,
+    SupervisorChildId, SupervisorId, TypeId,
 };
 
 pub(crate) struct ArtifactFields<'a> {
@@ -157,6 +158,22 @@ impl<'a> ArtifactFields<'a> {
             MAX_AUTHORITIES_PER_PROCESS - 1,
             AuthorityId::from_index,
         )
+    }
+
+    pub(crate) fn take_protocol_id(&mut self, key: &str) -> Result<ProtocolId> {
+        ProtocolId::from_index(self.take_bounded_usize(key, 0, MAX_PROTOCOL_COUNT - 1)?)
+    }
+
+    pub(crate) fn take_port_id(&mut self, key: &str) -> Result<PortId> {
+        PortId::from_index(self.take_bounded_usize(key, 0, MAX_PORT_COUNT - 1)?)
+    }
+
+    pub(crate) fn take_component_id(&mut self, key: &str) -> Result<ComponentId> {
+        ComponentId::from_index(self.take_bounded_usize(key, 0, MAX_COMPONENT_COUNT - 1)?)
+    }
+
+    pub(crate) fn take_optional_port_id(&mut self, key: &str) -> Result<Option<PortId>> {
+        self.take_optional_bounded_id(key, 0, MAX_PORT_COUNT - 1, PortId::from_index)
     }
 
     pub(crate) fn take_spawn_site_id(&mut self, key: &str) -> Result<SpawnSiteId> {

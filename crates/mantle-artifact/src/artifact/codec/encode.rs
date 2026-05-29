@@ -1,7 +1,11 @@
 use super::super::*;
 
+mod boundaries;
+mod capabilities;
 mod supervision;
 
+use boundaries::encode_boundaries;
+use capabilities::encode_capability_descriptor;
 use supervision::{encode_spawn_sites, encode_supervisor_plans};
 
 impl MantleArtifact {
@@ -10,7 +14,7 @@ impl MantleArtifact {
             crate::validation::encoded_artifact_len(self).unwrap_or(ARTIFACT_MAGIC.len() + 1),
         );
         encoded.push_str(&format!(
-            "{ARTIFACT_MAGIC}\nformat={}\nschema_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\ntype_count={}\noutput_count={}\nprocess_count={}\n",
+            "{ARTIFACT_MAGIC}\nformat={}\nschema_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\ntype_count={}\noutput_count={}\nprotocol_count={}\nport_count={}\ncomponent_count={}\nprocess_count={}\n",
             self.format,
             self.schema_version,
             self.source_language,
@@ -19,6 +23,9 @@ impl MantleArtifact {
             self.entry_message.as_u32(),
             self.types.len(),
             self.outputs.len(),
+            self.protocols.len(),
+            self.ports.len(),
+            self.components.len(),
             self.processes.len()
         ));
         for (type_index, ty) in self.types.iter().enumerate() {
@@ -27,6 +34,7 @@ impl MantleArtifact {
         for (output_index, output) in self.outputs.iter().enumerate() {
             encoded.push_str(&format!("output.{output_index}={output}\n"));
         }
+        encode_boundaries(&mut encoded, self);
 
         for (process_index, process) in self.processes.iter().enumerate() {
             let prefix = format!("process.{process_index}");
@@ -67,18 +75,10 @@ impl MantleArtifact {
             for (authority_index, authority) in process.authorities.iter().enumerate() {
                 let authority_prefix = format!("{prefix}.authority.{authority_index}");
                 encoded.push_str(&format!(
-                    "{authority_prefix}.debug_name={}\n{authority_prefix}.kind={}\n",
-                    authority.debug_name,
-                    authority.descriptor.kind_str()
+                    "{authority_prefix}.debug_name={}\n",
+                    authority.debug_name
                 ));
-                match authority.descriptor {
-                    ArtifactCapabilityDescriptor::Spawn { target } => {
-                        encoded.push_str(&format!(
-                            "{authority_prefix}.target_process={}\n",
-                            target.as_u32()
-                        ));
-                    }
-                }
+                encode_capability_descriptor(&mut encoded, &authority_prefix, authority.descriptor);
             }
             encode_spawn_sites(&mut encoded, &prefix, process);
             encode_supervisor_plans(&mut encoded, &prefix, process);
@@ -579,11 +579,18 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
         }
         ArtifactAction::Send {
             target,
+            port,
             message,
             payload,
         } => {
             encoded.push_str(&format!("{action_prefix}.kind=send\n"));
             encode_send_target(encoded, action_prefix, target);
+            if let Some(port) = port {
+                encoded.push_str(&format!(
+                    "{action_prefix}.boundary_port={}\n",
+                    port.as_u32()
+                ));
+            }
             encoded.push_str(&format!(
                 "{action_prefix}.message={}\n{action_prefix}.payload={}\n",
                 message.as_u32(),
@@ -605,6 +612,7 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
             outcome,
             outcome_ty,
             target,
+            port,
             message,
             payload,
         } => {
@@ -614,6 +622,12 @@ fn encode_action(encoded: &mut String, action_prefix: &str, action: &ArtifactAct
                 outcome_ty.as_u32()
             ));
             encode_send_target(encoded, action_prefix, target);
+            if let Some(port) = port {
+                encoded.push_str(&format!(
+                    "{action_prefix}.boundary_port={}\n",
+                    port.as_u32()
+                ));
+            }
             encoded.push_str(&format!(
                 "{action_prefix}.message={}\n{action_prefix}.payload={}\n",
                 message.as_u32(),

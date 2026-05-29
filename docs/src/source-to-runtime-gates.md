@@ -80,6 +80,14 @@ not Mantle, resolves the reachable dependency graph before lowering:
 just run-example imports_main
 ```
 
+The typed boundary contract gate proves protocol, port, component, and
+process-local `PortConnect` declarations check before lowering and run through
+Mantle-admitted typed IDs:
+
+```sh
+just run-example boundary_contracts_main
+```
+
 An immutable source computation gate proves sequential source-local bindings are
 resolved before lowering while Mantle executes only typed artifact data:
 

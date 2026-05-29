@@ -34,6 +34,9 @@ define_checked_id!(CheckedAuthorityId);
 define_checked_id!(CheckedSpawnSiteId);
 define_checked_id!(CheckedSupervisorId);
 define_checked_id!(CheckedSupervisorChildId);
+define_checked_id!(CheckedProtocolId);
+define_checked_id!(CheckedPortId);
+define_checked_id!(CheckedComponentId);
 
 impl CheckedProcessId {
     pub(in crate::language) fn index(self) -> usize {
@@ -101,6 +104,24 @@ impl CheckedSupervisorId {
 }
 
 impl CheckedSupervisorChildId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl CheckedProtocolId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl CheckedPortId {
+    pub(in crate::language) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl CheckedComponentId {
     pub(in crate::language) fn index(self) -> usize {
         self.0 as usize
     }

@@ -1,0 +1,20 @@
+module boundary_contracts_worker;
+
+record WorkerState;
+enum WorkerMsg {
+    Work,
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "boundary worker handled Work";
+        return Stop(state);
+    }
+}

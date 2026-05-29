@@ -468,6 +468,7 @@ fn is_received_ref_job_route_transition(
                                     ty: payload_ty,
                                     element: payload_element,
                                 }),
+                            ..
                         }] if *ty == expected.worker_ref_type
                             && *target_process == expected.worker_process_id
                             && *message == MessageId::new(0)
