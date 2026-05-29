@@ -190,6 +190,7 @@ fn selected_inner_branch_actions_use_typed_payload(
                 target: ArtifactSendTarget::ProcessRef(target_ref),
                 message,
                 payload: Some(payload),
+                ..
             },
         ] if *target_ref == process_ref
             && *message == MessageId::new(0)

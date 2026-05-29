@@ -1,4 +1,5 @@
 mod action_effects;
+mod boundary_tables;
 mod codec;
 mod effect_outcomes;
 mod identity_and_labels;

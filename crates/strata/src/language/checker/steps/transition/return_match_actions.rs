@@ -1,13 +1,13 @@
-use crate::language::ast::{ListValue, MapValue, MapValueEntry, RecordValue, RecordValueField};
-
-use super::send::checked_send_payload_template;
+use super::send::{checked_send_payload_template, resolve_checked_send_port};
 use super::*;
 
 mod for_each;
 mod static_arm;
+mod substitution;
 
 use for_each::validate_step_return_match_arm_for_each_statement;
 use static_arm::static_step_return_match_arm_substitutions;
+use substitution::substitute_static_arm_bindings;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StaticArmSubstitution<'a> {
@@ -68,6 +68,7 @@ struct ArmRuntimeIf<'a> {
 #[derive(Clone, Copy)]
 struct ArmSend<'a> {
     target: &'a Identifier,
+    port: Option<&'a Identifier>,
     message: &'a Identifier,
     payload: Option<&'a ValueExpr>,
 }
@@ -237,6 +238,7 @@ fn validate_step_return_match_arm_action_statement(
         Statement::Emit(_) => validate_step_return_match_arm_effect(state.input, Effect::Emit),
         Statement::Send {
             target,
+            port,
             message,
             payload,
         } => {
@@ -250,6 +252,7 @@ fn validate_step_return_match_arm_action_statement(
                 validation.template,
                 ArmSend {
                     target,
+                    port: port.as_ref(),
                     message,
                     payload: payload.as_ref(),
                 },
@@ -440,6 +443,15 @@ fn validate_step_return_match_arm_send(
 ) -> Result<()> {
     let target_process =
         validate_step_return_match_arm_send_target(context, input.payload_bindings, send.target)?;
+    if send.port.is_some() {
+        let target_msg_type = &context
+            .module
+            .processes
+            .get(target_process.index())
+            .ok_or_else(|| Error::new("target process table is inconsistent"))?
+            .msg_type;
+        resolve_checked_send_port(context, send.port, target_process, target_msg_type)?;
+    }
     let variant = context.semantic_index.message_id_for_process(
         context.module,
         context.process.name.as_str(),
@@ -625,112 +637,4 @@ fn source_value_uses_template_binding(
     template_bindings
         .iter()
         .any(|binding| source_value_uses_binding(value, binding.name))
-}
-
-fn substitute_static_arm_bindings(
-    value: ValueExpr,
-    bindings: &[StaticArmSubstitution<'_>],
-) -> ValueExpr {
-    if bindings.is_empty() {
-        return value;
-    }
-    match value {
-        ValueExpr::Identifier(name) => bindings
-            .iter()
-            .find_map(|binding| (binding.name == &name).then(|| binding.value.clone()))
-            .unwrap_or(ValueExpr::Identifier(name)),
-        ValueExpr::ScalarLiteral(_) => value,
-        ValueExpr::Call { name, arg } => ValueExpr::Call {
-            name,
-            arg: Box::new(substitute_static_arm_bindings(*arg, bindings)),
-        },
-        ValueExpr::EnumVariant { name, payload } => ValueExpr::EnumVariant {
-            name,
-            payload: Box::new(substitute_static_arm_bindings(*payload, bindings)),
-        },
-        ValueExpr::Record(record) => ValueExpr::Record(RecordValue {
-            name: record.name,
-            fields: record
-                .fields
-                .into_iter()
-                .map(|field| RecordValueField {
-                    name: field.name,
-                    value: substitute_static_arm_bindings(field.value, bindings),
-                })
-                .collect(),
-        }),
-        ValueExpr::List(list) => ValueExpr::List(ListValue {
-            element_type: list.element_type,
-            capacity: list.capacity,
-            items: list
-                .items
-                .into_iter()
-                .map(|item| substitute_static_arm_bindings(item, bindings))
-                .collect(),
-        }),
-        ValueExpr::Map(map) => ValueExpr::Map(MapValue {
-            key_type: map.key_type,
-            value_type: map.value_type,
-            capacity: map.capacity,
-            entries: map
-                .entries
-                .into_iter()
-                .map(|entry| MapValueEntry {
-                    key: substitute_static_arm_bindings(entry.key, bindings),
-                    value: substitute_static_arm_bindings(entry.value, bindings),
-                })
-                .collect(),
-        }),
-        ValueExpr::IfElse {
-            condition,
-            then_branch,
-            else_branch,
-        } => ValueExpr::IfElse {
-            condition: Box::new(substitute_static_arm_bindings(*condition, bindings)),
-            then_branch: Box::new(substitute_static_arm_bindings(*then_branch, bindings)),
-            else_branch: Box::new(substitute_static_arm_bindings(*else_branch, bindings)),
-        },
-        ValueExpr::Equality {
-            operator,
-            left,
-            right,
-        } => ValueExpr::Equality {
-            operator,
-            left: Box::new(substitute_static_arm_bindings(*left, bindings)),
-            right: Box::new(substitute_static_arm_bindings(*right, bindings)),
-        },
-        ValueExpr::ScalarArithmetic {
-            operator,
-            left,
-            right,
-        } => ValueExpr::ScalarArithmetic {
-            operator,
-            left: Box::new(substitute_static_arm_bindings(*left, bindings)),
-            right: Box::new(substitute_static_arm_bindings(*right, bindings)),
-        },
-        ValueExpr::ScalarOrdering {
-            operator,
-            left,
-            right,
-        } => ValueExpr::ScalarOrdering {
-            operator,
-            left: Box::new(substitute_static_arm_bindings(*left, bindings)),
-            right: Box::new(substitute_static_arm_bindings(*right, bindings)),
-        },
-        ValueExpr::BooleanNot { operand } => ValueExpr::BooleanNot {
-            operand: Box::new(substitute_static_arm_bindings(*operand, bindings)),
-        },
-        ValueExpr::BooleanBinary {
-            operator,
-            left,
-            right,
-        } => ValueExpr::BooleanBinary {
-            operator,
-            left: Box::new(substitute_static_arm_bindings(*left, bindings)),
-            right: Box::new(substitute_static_arm_bindings(*right, bindings)),
-        },
-        ValueExpr::Grouped { value } => ValueExpr::Grouped {
-            value: Box::new(substitute_static_arm_bindings(*value, bindings)),
-        },
-    }
 }

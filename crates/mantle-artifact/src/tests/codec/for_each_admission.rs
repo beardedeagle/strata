@@ -24,6 +24,7 @@ fn artifact_round_trips_for_each_control_flow() {
             max_items: 2,
             body: vec![ArtifactAction::Send {
                 target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                port: None,
                 message: MessageId::new(0),
                 payload: Some(ArtifactValueTemplate::LoopElement {
                     ty: JOB,
@@ -60,6 +61,7 @@ fn admission_rejects_direct_process_ref_payload_inside_for_each_loop_body() {
         },
         ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: Some(ArtifactValueTemplate::ProcessRef {
                 ty: PROCESS_REF_WORKER,
@@ -84,6 +86,7 @@ fn admission_rejects_direct_process_ref_payload_inside_for_each_loop_body() {
                 ty: PROCESS_REF_WORKER,
                 target_process: ProcessId::new(1),
             },
+            port: None,
             message: MessageId::new(0),
             payload: Some(ArtifactValueTemplate::ReceivedPayload {
                 ty: PROCESS_REF_WORKER,
@@ -139,6 +142,7 @@ fn admission_accepts_if_else_inside_for_each_loop_body() {
                     },
                     ArtifactAction::Send {
                         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                        port: None,
                         message: MessageId::new(0),
                         payload: Some(ArtifactValueTemplate::LoopElement {
                             ty: bool_type,
@@ -148,6 +152,7 @@ fn admission_accepts_if_else_inside_for_each_loop_body() {
                 ],
                 else_actions: vec![ArtifactAction::Send {
                     target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                    port: None,
                     message: MessageId::new(0),
                     payload: Some(ArtifactValueTemplate::LoopElement {
                         ty: bool_type,
@@ -391,6 +396,7 @@ fn decode_rejects_missing_for_each_body_action() {
         max_items: 1,
         body: vec![ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: Some(ArtifactValueTemplate::LoopElement {
                 ty: JOB,
@@ -435,6 +441,7 @@ fn admission_rejects_inactive_for_each_loop_element_payload() {
             max_items: 1,
             body: vec![ArtifactAction::Send {
                 target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                port: None,
                 message: MessageId::new(0),
                 payload: Some(ArtifactValueTemplate::LoopElement {
                     ty: JOB,
@@ -490,6 +497,7 @@ fn admission_rejects_dynamic_for_each_non_list_collection() {
     align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -526,6 +534,7 @@ fn admission_rejects_dynamic_for_each_collection_element_type_mismatch() {
     align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: other_job_list,

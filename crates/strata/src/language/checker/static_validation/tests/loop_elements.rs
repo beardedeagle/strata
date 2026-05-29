@@ -37,6 +37,7 @@ fn static_validation_rejects_inactive_loop_element_payload() {
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                    port: None,
                     message: checked_message_id(0),
                     payload: Some(Box::new(CheckedValueTemplate::LoopElement {
                         ty: job.clone(),

@@ -1,3 +1,4 @@
+use super::boundaries::BoundarySendContext;
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,26 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         envelope: RuntimeMessageEnvelope,
         sender_pid: Option<RuntimeProcessId>,
     ) -> Result<()> {
+        self.send_message_inner(target, envelope, sender_pid, None)
+    }
+
+    pub(super) fn send_message_with_boundary(
+        &mut self,
+        target: RuntimeProcessId,
+        envelope: RuntimeMessageEnvelope,
+        sender_pid: Option<RuntimeProcessId>,
+        boundary: BoundarySendContext<'_>,
+    ) -> Result<()> {
+        self.send_message_inner(target, envelope, sender_pid, Some(boundary))
+    }
+
+    fn send_message_inner(
+        &mut self,
+        target: RuntimeProcessId,
+        envelope: RuntimeMessageEnvelope,
+        sender_pid: Option<RuntimeProcessId>,
+        boundary: Option<BoundarySendContext<'_>>,
+    ) -> Result<()> {
         let process_index = self.preflight_delivery_target(target)?;
         let process = &self.processes[process_index];
         let process_id = process.process_id;
@@ -43,6 +64,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
             .to_string();
         let process_label = process_label.to_string();
 
+        if let Some(boundary) = boundary {
+            self.record_boundary_send_checked(
+                boundary.step,
+                boundary.port_id,
+                process_id,
+                envelope.message,
+            )?;
+        }
         self.record_event(RuntimeEvent::MessageAccepted {
             pid,
             process_id,

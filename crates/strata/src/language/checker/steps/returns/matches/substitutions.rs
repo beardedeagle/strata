@@ -161,10 +161,12 @@ fn substitute_step_return_statement(
         },
         Statement::Send {
             target,
+            port,
             message,
             payload,
         } => Statement::Send {
             target,
+            port,
             message,
             payload: payload.map(|payload| substitute_step_return_bindings(payload, bindings)),
         },
@@ -172,12 +174,14 @@ fn substitute_step_return_statement(
             name,
             ty,
             target,
+            port,
             message,
             payload,
         } => Statement::LetSendOutcome {
             name,
             ty,
             target,
+            port,
             message,
             payload: payload.map(|payload| substitute_step_return_bindings(payload, bindings)),
         },

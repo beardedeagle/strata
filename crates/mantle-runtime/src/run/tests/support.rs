@@ -85,6 +85,9 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
             ArtifactType::process_ref("ProcessRef_Main", ProcessId::new(0)),
         ],
         outputs: Vec::new(),
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),

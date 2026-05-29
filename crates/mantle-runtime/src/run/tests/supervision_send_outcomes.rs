@@ -59,6 +59,7 @@ fn assert_inactive_supervisor_child_send_outcome(exit: StepResult, expected: &st
             child: SupervisorChildId::new(0),
             target_process: WORKER_PROCESS,
         },
+        port: None,
         message: CRASH_MESSAGE,
         payload: None,
     };
@@ -92,6 +93,9 @@ fn supervisor_send_outcome_artifact(exit: StepResult) -> MantleArtifact {
             result_type(),
         ],
         outputs: Vec::new(),
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         processes: vec![main_process(), worker_process(exit)],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }

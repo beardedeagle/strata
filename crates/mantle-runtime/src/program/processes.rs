@@ -1,79 +1,10 @@
 use std::collections::BTreeSet;
 
 use super::*;
+use authority_usage::LoadedAuthorityUsage;
 
+mod authority_usage;
 mod supervision;
-
-const AUTHORITY_REFERENCE_WORD_BITS: usize = u64::BITS as usize;
-const AUTHORITY_REFERENCE_WORDS: usize =
-    MAX_AUTHORITIES_PER_PROCESS.div_ceil(AUTHORITY_REFERENCE_WORD_BITS);
-const SPAWN_SITE_REFERENCE_WORDS: usize =
-    MAX_SPAWN_SITES_PER_PROCESS.div_ceil(AUTHORITY_REFERENCE_WORD_BITS);
-
-struct LoadedSpawnAuthorityUsage {
-    referenced_spawn_sites: [u64; SPAWN_SITE_REFERENCE_WORDS],
-    referenced_authorities: [u64; AUTHORITY_REFERENCE_WORDS],
-}
-
-impl LoadedSpawnAuthorityUsage {
-    const fn new() -> Self {
-        Self {
-            referenced_spawn_sites: [0_u64; SPAWN_SITE_REFERENCE_WORDS],
-            referenced_authorities: [0_u64; AUTHORITY_REFERENCE_WORDS],
-        }
-    }
-
-    fn mark_spawn_site(&mut self, process_name: &str, spawn_site_index: usize) -> Result<()> {
-        mark_reference(
-            &mut self.referenced_spawn_sites,
-            process_name,
-            "loaded spawn site",
-            spawn_site_index,
-        )
-    }
-
-    fn mark_authority(&mut self, process_name: &str, authority_index: usize) -> Result<()> {
-        mark_reference(
-            &mut self.referenced_authorities,
-            process_name,
-            "loaded authority",
-            authority_index,
-        )
-    }
-
-    fn spawn_site_referenced(&self, spawn_site_index: usize) -> bool {
-        reference_marked(&self.referenced_spawn_sites, spawn_site_index)
-    }
-
-    fn authority_referenced(&self, authority_index: usize) -> bool {
-        reference_marked(&self.referenced_authorities, authority_index)
-    }
-}
-
-fn mark_reference<const N: usize>(
-    references: &mut [u64; N],
-    process_name: &str,
-    reference_name: &str,
-    reference_index: usize,
-) -> Result<()> {
-    let word_index = reference_index / AUTHORITY_REFERENCE_WORD_BITS;
-    let bit_index = reference_index % AUTHORITY_REFERENCE_WORD_BITS;
-    let Some(word) = references.get_mut(word_index) else {
-        return Err(Error::new(format!(
-            "process {process_name} {reference_name} id {reference_index} exceeds reference capacity"
-        )));
-    };
-    *word |= 1_u64 << bit_index;
-    Ok(())
-}
-
-fn reference_marked<const N: usize>(references: &[u64; N], reference_index: usize) -> bool {
-    let word_index = reference_index / AUTHORITY_REFERENCE_WORD_BITS;
-    let bit_index = reference_index % AUTHORITY_REFERENCE_WORD_BITS;
-    references
-        .get(word_index)
-        .is_some_and(|word| (word & (1_u64 << bit_index)) != 0)
-}
 
 impl LoadedProcess {
     pub(in crate::program) fn from_artifact(process: &ArtifactProcess) -> Result<Self> {
@@ -232,18 +163,18 @@ impl LoadedProcess {
         }
 
         validate_loaded_transition_coverage(self)?;
-        let mut spawn_authority_usage = LoadedSpawnAuthorityUsage::new();
+        let mut authority_usage = LoadedAuthorityUsage::new();
         for transition in &self.transitions {
             let message = transition.message;
             transition.validate_admission(program, self, process_id, message)?;
-            self.collect_spawn_authority_usage(&transition.actions, &mut spawn_authority_usage)?;
+            self.collect_authority_usage(&transition.actions, &mut authority_usage)?;
             transition.effect_authority.validate_actions(
                 &self.debug_name,
                 message,
                 &transition.actions,
             )?;
         }
-        self.validate_spawn_authority_usage(&spawn_authority_usage)?;
+        self.validate_authority_usage(&authority_usage)?;
         self.validate_message_type_shape(program)?;
         Ok(())
     }
@@ -283,21 +214,41 @@ impl LoadedProcess {
                     self.debug_name
                 )));
             }
-            let LoadedCapabilityDescriptor::Spawn { target } = authority.descriptor;
-            program.process(target)?;
-            if target == program.entry_process {
-                return Err(Error::new(format!(
-                    "process {} loaded authority {} targets entry process id {}",
-                    self.debug_name,
-                    authority.debug_name,
-                    target.as_u32()
-                )));
-            }
-            if target == process_id {
-                return Err(Error::new(format!(
-                    "process {} loaded authority {} targets itself, which is not supported",
-                    self.debug_name, authority.debug_name
-                )));
+            match authority.descriptor {
+                LoadedCapabilityDescriptor::Spawn { target } => {
+                    program.process(target)?;
+                    if target == program.entry_process {
+                        return Err(Error::new(format!(
+                            "process {} loaded authority {} targets entry process id {}",
+                            self.debug_name,
+                            authority.debug_name,
+                            target.as_u32()
+                        )));
+                    }
+                    if target == process_id {
+                        return Err(Error::new(format!(
+                            "process {} loaded authority {} targets itself, which is not supported",
+                            self.debug_name, authority.debug_name
+                        )));
+                    }
+                }
+                LoadedCapabilityDescriptor::PortConnect { port } => {
+                    program.ports.get(port.index()).ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} loaded authority {} targets unloaded port id {}",
+                            self.debug_name,
+                            authority.debug_name,
+                            port.as_u32()
+                        ))
+                    })?;
+                }
+                LoadedCapabilityDescriptor::ProtocolBoundary { .. }
+                | LoadedCapabilityDescriptor::ComponentExport { .. } => {
+                    return Err(Error::new(format!(
+                        "process {} loaded authority {} uses a boundary-table-only capability",
+                        self.debug_name, authority.debug_name
+                    )));
+                }
             }
         }
         for (index, spawn_site) in self.spawn_sites.iter().enumerate() {
@@ -324,15 +275,25 @@ impl LoadedProcess {
                             authority_id.as_u32()
                         ))
                     })?;
-                    let LoadedCapabilityDescriptor::Spawn { target } = authority.descriptor;
-                    if target != spawn_site.target {
-                        return Err(Error::new(format!(
-                            "process {} loaded spawn site {index} targets process id {}, but authority id {} targets {}",
-                            self.debug_name,
-                            spawn_site.target.as_u32(),
-                            authority_id.as_u32(),
-                            target.as_u32()
-                        )));
+                    match authority.descriptor {
+                        LoadedCapabilityDescriptor::Spawn { target }
+                            if target == spawn_site.target => {}
+                        LoadedCapabilityDescriptor::Spawn { target } => {
+                            return Err(Error::new(format!(
+                                "process {} loaded spawn site {index} targets process id {}, but authority id {} targets {}",
+                                self.debug_name,
+                                spawn_site.target.as_u32(),
+                                authority_id.as_u32(),
+                                target.as_u32()
+                            )));
+                        }
+                        _ => {
+                            return Err(Error::new(format!(
+                                "process {} loaded spawn site {index} authority id {} is not a spawn capability",
+                                self.debug_name,
+                                authority_id.as_u32()
+                            )));
+                        }
                     }
                 }
                 LoadedSpawnKind::LexicalSupervisorChild => {
@@ -355,7 +316,7 @@ impl LoadedProcess {
         Ok(())
     }
 
-    fn validate_spawn_authority_usage(&self, usage: &LoadedSpawnAuthorityUsage) -> Result<()> {
+    fn validate_authority_usage(&self, usage: &LoadedAuthorityUsage) -> Result<()> {
         for (spawn_site_index, spawn_site) in self.spawn_sites.iter().enumerate() {
             match spawn_site.kind {
                 LoadedSpawnKind::DynamicLocal if !usage.spawn_site_referenced(spawn_site_index) => {
@@ -394,10 +355,10 @@ impl LoadedProcess {
         })
     }
 
-    fn collect_spawn_authority_usage(
+    fn collect_authority_usage(
         &self,
         actions: &[LoadedAction],
-        usage: &mut LoadedSpawnAuthorityUsage,
+        usage: &mut LoadedAuthorityUsage,
     ) -> Result<()> {
         for action in actions {
             match action {
@@ -409,20 +370,28 @@ impl LoadedProcess {
                 } => {
                     self.record_spawn_site_usage(usage, *spawn_site, *target)?;
                 }
+                LoadedAction::Send {
+                    port: Some(port), ..
+                }
+                | LoadedAction::SendOutcome {
+                    port: Some(port), ..
+                } => {
+                    self.record_port_authority_usage(usage, *port)?;
+                }
                 LoadedAction::IfElse {
                     then_actions,
                     else_actions,
                     ..
                 } => {
-                    self.collect_spawn_authority_usage(then_actions, usage)?;
-                    self.collect_spawn_authority_usage(else_actions, usage)?;
+                    self.collect_authority_usage(then_actions, usage)?;
+                    self.collect_authority_usage(else_actions, usage)?;
                 }
                 LoadedAction::ForEach { body, .. } => {
-                    self.collect_spawn_authority_usage(body, usage)?;
+                    self.collect_authority_usage(body, usage)?;
                 }
                 LoadedAction::Emit { .. }
-                | LoadedAction::Send { .. }
-                | LoadedAction::SendOutcome { .. } => {}
+                | LoadedAction::Send { port: None, .. }
+                | LoadedAction::SendOutcome { port: None, .. } => {}
             }
         }
         Ok(())
@@ -430,7 +399,7 @@ impl LoadedProcess {
 
     fn record_spawn_site_usage(
         &self,
-        usage: &mut LoadedSpawnAuthorityUsage,
+        usage: &mut LoadedAuthorityUsage,
         spawn_site: SpawnSiteId,
         target: ProcessId,
     ) -> Result<()> {
@@ -444,6 +413,31 @@ impl LoadedProcess {
             ))
         })?;
         usage.mark_authority(&self.debug_name, authority.index())
+    }
+
+    fn record_port_authority_usage(
+        &self,
+        usage: &mut LoadedAuthorityUsage,
+        port: PortId,
+    ) -> Result<()> {
+        let authority_index = self
+            .authorities
+            .iter()
+            .position(|authority| {
+                matches!(
+                    authority.descriptor,
+                    LoadedCapabilityDescriptor::PortConnect { port: authority_port }
+                        if authority_port == port
+                )
+            })
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} loaded send through port id {} requires authority port_connect for the same port id",
+                    self.debug_name,
+                    port.as_u32()
+                ))
+            })?;
+        usage.mark_authority(&self.debug_name, authority_index)
     }
 
     fn validate_state_table(&self, program: &LoadedProgram) -> Result<()> {
@@ -685,18 +679,30 @@ impl LoadedProcess {
                 authority_id.as_u32()
             ))
         })?;
-        let LoadedCapabilityDescriptor::Spawn {
-            target: authority_target,
-        } = authority.descriptor;
-        if authority_target != target {
-            return Err(Error::new(format!(
-                "process {} spawn site id {} authority id {} targets process id {}, expected {}",
-                self.debug_name,
-                spawn_site.as_u32(),
-                authority_id.as_u32(),
-                authority_target.as_u32(),
-                target.as_u32()
-            )));
+        match authority.descriptor {
+            LoadedCapabilityDescriptor::Spawn {
+                target: authority_target,
+            } if authority_target == target => {}
+            LoadedCapabilityDescriptor::Spawn {
+                target: authority_target,
+            } => {
+                return Err(Error::new(format!(
+                    "process {} spawn site id {} authority id {} targets process id {}, expected {}",
+                    self.debug_name,
+                    spawn_site.as_u32(),
+                    authority_id.as_u32(),
+                    authority_target.as_u32(),
+                    target.as_u32()
+                )));
+            }
+            _ => {
+                return Err(Error::new(format!(
+                    "process {} spawn site id {} authority id {} is not a spawn capability",
+                    self.debug_name,
+                    spawn_site.as_u32(),
+                    authority_id.as_u32()
+                )));
+            }
         }
         Ok(site)
     }

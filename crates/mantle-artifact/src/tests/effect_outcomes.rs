@@ -428,6 +428,7 @@ fn outcome_artifact() -> MantleArtifact {
             outcome: EffectOutcomeId::new(0),
             outcome_ty: types.send_result,
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: None,
         },

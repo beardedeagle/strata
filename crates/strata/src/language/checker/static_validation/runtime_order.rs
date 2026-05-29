@@ -409,6 +409,7 @@ fn execute_static_action(
             target,
             message,
             payload,
+            ..
         } => execute_static_send(
             context,
             state,
@@ -422,6 +423,7 @@ fn execute_static_action(
             target,
             message,
             payload,
+            ..
         } => execute_static_send_outcome(
             context,
             state,

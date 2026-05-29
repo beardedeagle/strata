@@ -9,12 +9,12 @@ const AUTHORITY_REFERENCE_WORDS: usize =
 const SPAWN_SITE_REFERENCE_WORDS: usize =
     MAX_SPAWN_SITES_PER_PROCESS.div_ceil(AUTHORITY_REFERENCE_WORD_BITS);
 
-pub(in crate::artifact::process_validation) struct SpawnAuthorityUsage {
+pub(in crate::artifact::process_validation) struct AuthorityUsage {
     referenced_spawn_sites: [u64; SPAWN_SITE_REFERENCE_WORDS],
     referenced_authorities: [u64; AUTHORITY_REFERENCE_WORDS],
 }
 
-impl SpawnAuthorityUsage {
+impl AuthorityUsage {
     pub(in crate::artifact::process_validation) const fn new() -> Self {
         Self {
             referenced_spawn_sites: [0_u64; SPAWN_SITE_REFERENCE_WORDS],
@@ -81,32 +81,53 @@ impl ArtifactProcess {
             }
             if !authority_descriptors.insert(authority.descriptor) {
                 return Err(Error::new(format!(
-                    "process {} duplicates spawn authority descriptor",
-                    self.debug_name
+                    "process {} duplicates {}",
+                    self.debug_name,
+                    authority_descriptor_label(authority.descriptor)
                 )));
             }
-            let ArtifactCapabilityDescriptor::Spawn { target } = authority.descriptor;
-            artifact.processes.get(target.index()).ok_or_else(|| {
-                Error::new(format!(
-                    "process {} authority {} targets undefined process id {}",
-                    self.debug_name,
-                    authority.debug_name,
-                    target.as_u32()
-                ))
-            })?;
-            if target == artifact.entry_process {
-                return Err(Error::new(format!(
-                    "process {} authority {} targets entry process id {}",
-                    self.debug_name,
-                    authority.debug_name,
-                    target.as_u32()
-                )));
-            }
-            if target == process_id {
-                return Err(Error::new(format!(
-                    "process {} authority {} targets itself, which is not supported",
-                    self.debug_name, authority.debug_name
-                )));
+            match authority.descriptor {
+                ArtifactCapabilityDescriptor::Spawn { target } => {
+                    artifact.processes.get(target.index()).ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} authority {} targets undefined process id {}",
+                            self.debug_name,
+                            authority.debug_name,
+                            target.as_u32()
+                        ))
+                    })?;
+                    if target == artifact.entry_process {
+                        return Err(Error::new(format!(
+                            "process {} authority {} targets entry process id {}",
+                            self.debug_name,
+                            authority.debug_name,
+                            target.as_u32()
+                        )));
+                    }
+                    if target == process_id {
+                        return Err(Error::new(format!(
+                            "process {} authority {} targets itself, which is not supported",
+                            self.debug_name, authority.debug_name
+                        )));
+                    }
+                }
+                ArtifactCapabilityDescriptor::PortConnect { port } => {
+                    artifact.ports.get(port.index()).ok_or_else(|| {
+                        Error::new(format!(
+                            "process {} authority {} targets undefined port id {}",
+                            self.debug_name,
+                            authority.debug_name,
+                            port.as_u32()
+                        ))
+                    })?;
+                }
+                ArtifactCapabilityDescriptor::ProtocolBoundary { .. }
+                | ArtifactCapabilityDescriptor::ComponentExport { .. } => {
+                    return Err(Error::new(format!(
+                        "process {} authority {} uses a boundary-table-only capability",
+                        self.debug_name, authority.debug_name
+                    )));
+                }
             }
         }
 
@@ -143,15 +164,25 @@ impl ArtifactProcess {
                             authority_id.as_u32()
                         ))
                     })?;
-                    let ArtifactCapabilityDescriptor::Spawn { target } = authority.descriptor;
-                    if target != spawn_site.target {
-                        return Err(Error::new(format!(
-                            "process {} spawn site {spawn_site_index} targets process id {}, but authority id {} targets {}",
-                            self.debug_name,
-                            spawn_site.target.as_u32(),
-                            authority_id.as_u32(),
-                            target.as_u32()
-                        )));
+                    match authority.descriptor {
+                        ArtifactCapabilityDescriptor::Spawn { target }
+                            if target == spawn_site.target => {}
+                        ArtifactCapabilityDescriptor::Spawn { target } => {
+                            return Err(Error::new(format!(
+                                "process {} spawn site {spawn_site_index} targets process id {}, but authority id {} targets {}",
+                                self.debug_name,
+                                spawn_site.target.as_u32(),
+                                authority_id.as_u32(),
+                                target.as_u32()
+                            )));
+                        }
+                        _ => {
+                            return Err(Error::new(format!(
+                                "process {} spawn site {spawn_site_index} authority id {} is not a spawn capability",
+                                self.debug_name,
+                                authority_id.as_u32()
+                            )));
+                        }
                     }
                 }
                 ArtifactSpawnKind::LexicalSupervisorChild => {
@@ -173,7 +204,7 @@ impl ArtifactProcess {
         Ok(())
     }
 
-    pub(super) fn validate_spawn_authority_usage(&self, usage: &SpawnAuthorityUsage) -> Result<()> {
+    pub(super) fn validate_authority_usage(&self, usage: &AuthorityUsage) -> Result<()> {
         for (spawn_site_index, spawn_site) in self.spawn_sites.iter().enumerate() {
             match spawn_site.kind {
                 ArtifactSpawnKind::DynamicLocal
@@ -213,6 +244,15 @@ impl ArtifactProcess {
                 .iter()
                 .any(|child| child.spawn_site.index() == spawn_site_index)
         })
+    }
+}
+
+fn authority_descriptor_label(descriptor: ArtifactCapabilityDescriptor) -> &'static str {
+    match descriptor {
+        ArtifactCapabilityDescriptor::Spawn { .. } => "spawn authority descriptor",
+        ArtifactCapabilityDescriptor::PortConnect { .. } => "port authority descriptor",
+        ArtifactCapabilityDescriptor::ProtocolBoundary { .. }
+        | ArtifactCapabilityDescriptor::ComponentExport { .. } => "authority descriptor",
     }
 }
 

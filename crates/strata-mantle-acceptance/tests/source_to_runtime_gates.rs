@@ -5,6 +5,8 @@ mod support;
 
 #[path = "source_to_runtime_gates/basic_runtime.rs"]
 mod basic_runtime;
+#[path = "source_to_runtime_gates/boundary_contracts.rs"]
+mod boundary_contracts;
 #[path = "source_to_runtime_gates/local_supervision.rs"]
 mod local_supervision;
 #[path = "source_to_runtime_gates/payload_dispatch.rs"]

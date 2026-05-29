@@ -52,6 +52,8 @@ execution, the artifact decoder and validator check:
 - unique process reference names per process;
 - unique typed authority descriptors, referenced authority IDs, and spawn-site
   table entries per process;
+- typed protocol, port, and component boundary tables, including exact
+  required-authority descriptors and port target process/message compatibility;
 - either one unguarded transition per accepted message or one state-specific
   transition for each admitted state value;
 - exact transition effect usage for emitted, spawned, and sent actions;
@@ -79,18 +81,30 @@ Mantle loads admitted transitions into indexed runtime tables. Before emitting
 entry metadata, state tables, transition state targets and templates, outputs,
 and record field projections. Record field projection and record construction
 templates carry typed record-field IDs into admitted record type shapes; record
-field names remain metadata for value labels, diagnostics, and traces.
-process references, sends, payload templates, and transition effect usage.
+field names remain metadata for value labels, diagnostics, and traces. Process
+references, sends, payload templates, and transition effect usage are validated
+as typed IDs or admitted templates before execution.
 Loaded authority tables and spawn-site tables are validated before any runtime
 side effect. A spawn action references a typed spawn-site ID; that site
 references a typed authority ID whose descriptor must be an exact local
-`Spawn` capability for the same target process. Loaded authorities that are not
-referenced by any spawn site are rejected as overbroad. Authority debug names and
-source labels are metadata, not dispatch inputs.
+`Spawn` capability for the same target process. A typed boundary send through a
+loaded `PortId` requires an exact process-local `PortConnect` authority for that
+same port. Loaded authorities that are not referenced by any spawn site or
+typed-port send are rejected as overbroad. Authority debug names and source
+labels are metadata, not dispatch inputs.
 A dequeued message selects the transition by typed message ID, and by admitted
 current state ID when the transition table is state-specific. Dynamic next-state
 templates resolve to an admitted state ID by typed state value identity, not by
 display label text.
+
+Typed boundary sends carry an optional admitted `PortId`. Mantle validates that
+the port targets the same process as the send, that the port protocol message
+type matches the target process message enum, and that the process authority
+table admits the same port ID. Runtime dispatch still uses the loaded process
+and message IDs; protocol, port, and component names are trace metadata only.
+Invalid or denied boundary shapes fail artifact or loaded-program admission
+before `ArtifactLoaded`; accepted typed boundary sends emit
+`boundary_send_checked` during runtime dispatch.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect usage, and must exactly match the action effects that execute.

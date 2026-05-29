@@ -330,6 +330,7 @@ fn static_validation_rejects_payload_template_next_state_outside_state_table() {
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                    port: None,
                     message: checked_message_id(0),
                     payload: Some(Box::new(CheckedValueTemplate::Literal(
                         CheckedPayloadValue::new(
@@ -422,6 +423,7 @@ fn static_validation_rejects_payload_enum_template_next_state_outside_state_tabl
                 },
                 CheckedAction::Send {
                     target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                    port: None,
                     message: checked_message_id(0),
                     payload: Some(Box::new(CheckedValueTemplate::Literal(
                         CheckedPayloadValue::new(

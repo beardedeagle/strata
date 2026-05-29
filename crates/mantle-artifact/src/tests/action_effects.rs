@@ -149,6 +149,7 @@ fn validate_rejects_process_ref_spawned_in_runtime_if_branch() {
         },
         ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: None,
         },
@@ -188,6 +189,7 @@ fn validate_rejects_process_ref_spawned_in_both_runtime_if_branches() {
         },
         ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: None,
         },
@@ -243,6 +245,7 @@ fn validate_rejects_unknown_send_message() {
         .actions
         .push(ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(1),
             payload: None,
         });
@@ -264,6 +267,7 @@ fn validate_rejects_unknown_send_process_ref() {
         .actions
         .push(ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(99)),
+            port: None,
             message: MessageId::new(0),
             payload: None,
         });

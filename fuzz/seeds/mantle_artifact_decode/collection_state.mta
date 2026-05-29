@@ -1,12 +1,15 @@
 MTA0
 format=mantle-target-artifact
-schema_version=3
+schema_version=4
 source_language=strata
 module=collection_state
 entry_process=0
 entry_message=0
 type_count=8
 output_count=2
+protocol_count=0
+port_count=0
+component_count=0
 process_count=3
 type.0.label=__strata_checked_4_List_1_1_5_Phase_2
 type.0.kind=value

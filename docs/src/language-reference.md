@@ -9,17 +9,19 @@ Mantle artifact internals.
 | Area | Accepted Surface |
 | --- | --- |
 | Source unit | One `module name;` declaration per file, with optional `import module_name;` declarations immediately after it. |
-| Top-level declarations | `record`, `enum`, `fn`, and `proc`. |
+| Top-level declarations | `protocol`, `port`, `component`, `record`, `enum`, `fn`, and `proc`. |
 | Classes | Not available. |
 | Methods | Not available. |
 | Top-level functions | Pure deterministic one-argument source functions with optional immutable source-local bindings. |
 | Process functions | `init`, `step`, and pure deterministic one-argument process-local functions with optional immutable source-local bindings. |
 | Imports | Root-path loading of explicit sibling source-unit imports with deterministic dependency ordering. |
+| Boundary declarations | `protocol`, `port`, and `component` declarations for checked communication contracts. |
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Local spawn authority | Process-local `authority name: Cap<Spawn<Target>>;` declarations for dynamic local process creation. |
+| Local port authority | Process-local `authority name: Cap<PortConnect<Port>>;` declarations for typed boundary sends. |
 | Local supervision | Process-local `supervise local one_for_one(max_restarts: N_u32, within_ms: N_u64) { child name: Process = spawn Process as permanent|transient|temporary; }` declarations for static lexical local children. |
-| Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, and `send reply_to Done;` for received typed references. |
+| Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, `send worker via WorkerPort Ping;`, and `send reply_to Done;` for received typed references. |
 | Effect outcomes | Immutable step-local `Result` bindings for local `send` and the current local `spawn` success shape. |
 | Scalar values | Fixed-width integer source values `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` with explicit literal suffixes. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
@@ -46,34 +48,9 @@ A Strata source file starts with a module declaration:
 module hello;
 ```
 
-After the module declaration, zero or more imports may appear before top-level
-declarations. The accepted top-level declarations are records, enums, source
-functions, and processes.
-
-```strata
-module example;
-import shared_types;
-
-record MainState;
-enum MainMsg { Start }
-
-fn identity_state(state: MainState) -> MainState ! [] ~ [] @det {
-    return state;
-}
-
-proc Main mailbox bounded(1) {
-    type State = MainState;
-    type Msg = MainMsg;
-
-    fn init() -> MainState ! [] ~ [] @det {
-        return MainState;
-    }
-
-    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
-        return Stop(state);
-    }
-}
-```
+After the module declaration, zero or more imports may appear before protocols,
+ports, components, records, enums, source functions, and processes. See
+[Tutorial: Hello](tutorial-hello.md) for the minimal complete source shape.
 
 Imports use the narrow form `import module_name;`. The CLI resolves
 `module_name` to a sibling `module_name.str` file from the importing source
@@ -87,6 +64,14 @@ declarations and declarations from its direct imports; transitive imports are
 not re-exported. Declarations from the reachable graph are checked together in a
 deterministic dependency-first order. Mantle receives only the lowered target
 artifact; it does not resolve imports or execute by source-unit names.
+
+## Protocol, Port, And Component Boundaries
+
+The current boundary form declares typed protocols, ports, and component exports
+before lowering. `send target via Port Message;` proves the target process,
+protocol message enum, and process-local `Cap<PortConnect<Port>>` authority, then
+lowers typed boundary IDs into Mantle. Details are in
+[Boundary Contracts](boundary-contracts.md).
 
 Every buildable program must declare a `Main` process. Mantle starts `Main` and
 delivers the first message variant of `Main`'s message enum as the entry
@@ -114,14 +99,17 @@ worker-name
 _
 ```
 
-`_`, `as`, `authority`, `bounded`, `child`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `import`, `in`, `let`, `local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`,
-`permanent`, `proc`, `record`, `return`, `security`, `send`, `spawn`, `supervise`, `temporary`, `transient`, `type`, and `var` are reserved everywhere
+`_`, `as`, `authority`, `bounded`, `child`, `component`, `else`, `emit`, `enum`,
+`exports`, `fn`, `for`, `if`, `import`, `in`, `let`, `local`, `mailbox`, `match`,
+`module`, `mut`, `one_for_one`, `permanent`, `port`, `proc`, `protocol`,
+`record`, `requires`, `return`, `security`, `send`, `spawn`, `supervise`,
+`target`, `temporary`, `transient`, `type`, `var`, and `via` are reserved everywhere
 identifiers are accepted.
-`ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `List`, `Map`, `Unit`, `Option`,
-`Result`, `SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`,
-`I32`, and `I64` are reserved type names because they name built-in transition,
-process-reference, capability descriptor, collection, effect outcome, and
-scalar value types.
+`ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`, `PortConnect`,
+`ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`, `SendError`,
+`SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` are
+reserved type names because they name built-in transition, process-reference,
+capability descriptor, collection, effect outcome, and scalar value types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
 artifact metadata. Checked process-reference artifact labels under that prefix
 are keyed by resolved process IDs, not source process names.
@@ -287,6 +275,12 @@ process is rejected. The `! [spawn]` effect remains exact effect usage; it does
 not prove spawn authority by itself. After checking,
 authority declarations lower to typed authority IDs and spawn-site IDs. Source
 names remain syntax, diagnostics, and trace metadata.
+
+## Local Port Authority
+
+`authority connect_worker: Cap<PortConnect<WorkerPort>>;` authorizes only
+`send ... via WorkerPort` from that process. Mismatched, duplicate, or unused
+port authorities are rejected; `! [send]` is effect usage, not authority proof.
 
 ## Local Supervision
 

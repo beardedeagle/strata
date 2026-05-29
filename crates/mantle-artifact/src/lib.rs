@@ -11,24 +11,25 @@ mod validation;
 
 pub use artifact::{
     ArtifactAction, ArtifactAuthority, ArtifactBranch, ArtifactCapabilityDescriptor,
-    ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement, ArtifactMapEntry,
-    ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
-    ArtifactProcessRefPayload, ArtifactRecordField, ArtifactScalarArithmeticOperator,
-    ArtifactScalarOrderingOperator, ArtifactScalarType, ArtifactScalarValue, ArtifactSendTarget,
-    ArtifactSpawnKind, ArtifactSpawnSite, ArtifactStateValue, ArtifactSupervisorChild,
-    ArtifactSupervisorChildMode, ArtifactSupervisorPlan, ArtifactSupervisorRestartIntensity,
-    ArtifactSupervisorStrategy, ArtifactTransition, ArtifactType, ArtifactTypeField,
-    ArtifactTypeKind, ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
-    ArtifactValueShape, ArtifactValueTemplate, ArtifactValueTemplateField,
-    ArtifactValueTemplateMapEntry, MantleArtifact, MapProjectionMode, NextState, StepResult,
-    validate_value_enum_membership,
+    ArtifactComponent, ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement, ArtifactMapEntry,
+    ArtifactMessageVariant, ArtifactPayload, ArtifactPort, ArtifactProcess, ArtifactProcessRef,
+    ArtifactProcessRefPayload, ArtifactProtocol, ArtifactRecordField,
+    ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactScalarType,
+    ArtifactScalarValue, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
+    ArtifactStateValue, ArtifactSupervisorChild, ArtifactSupervisorChildMode,
+    ArtifactSupervisorPlan, ArtifactSupervisorRestartIntensity, ArtifactSupervisorStrategy,
+    ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind, ArtifactValue,
+    ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
+    ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry,
+    MantleArtifact, MapProjectionMode, NextState, StepResult, validate_value_enum_membership,
 };
 pub use authority_summary::{AuthoritySummaryFormat, render_artifact_authority_summary};
 pub use constants::*;
 pub use error::{Error, Result};
 pub use ids::{
-    AuthorityId, EffectOutcomeId, EnumVariantId, LoopElementId, MessageId, OutputId, ProcessId,
-    ProcessRefId, RecordFieldId, SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
+    AuthorityId, ComponentId, EffectOutcomeId, EnumVariantId, LoopElementId, MessageId, OutputId,
+    PortId, ProcessId, ProcessRefId, ProtocolId, RecordFieldId, SpawnSiteId, StateId,
+    SupervisorChildId, SupervisorId, TypeId,
 };
 pub use io::{SourceHashFnv1a64, read_artifact, source_hash_fnv1a64, write_artifact};
 pub use validation::{

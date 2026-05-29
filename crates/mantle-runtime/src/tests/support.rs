@@ -6,12 +6,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) use mantle_artifact::write_artifact;
 pub(crate) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAction, ArtifactAuthority,
-    ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement,
-    ArtifactMessageVariant, ArtifactPayload, ArtifactProcess, ArtifactProcessRef,
-    ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite, ArtifactStateValue,
-    ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactValue, ArtifactValueTemplate,
-    AuthorityId, EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId,
-    ProcessId, ProcessRefId, SpawnSiteId, StateId, StepResult, TypeId,
+    ArtifactCapabilityDescriptor, ArtifactComponent, ArtifactEffect, ArtifactEnumVariant,
+    ArtifactLoopElement, ArtifactMessageVariant, ArtifactPayload, ArtifactPort, ArtifactProcess,
+    ArtifactProcessRef, ArtifactProtocol, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
+    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactValue,
+    ArtifactValueTemplate, AuthorityId, ComponentId, EnumVariantId, LoopElementId, MantleArtifact,
+    MessageId, NextState, OutputId, PortId, ProcessId, ProcessRefId, ProtocolId, SpawnSiteId,
+    StateId, StepResult, TypeId,
 };
 
 pub(crate) use super::super::program::{LoadedProgram, RuntimePayload};
@@ -39,6 +40,9 @@ pub(crate) fn valid_artifact() -> MantleArtifact {
         entry_message: MessageId::new(0),
         types: base_types(),
         outputs: vec!["worker handled Ping".to_string()],
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
@@ -70,6 +74,7 @@ pub(crate) fn valid_artifact() -> MantleArtifact {
                         },
                         ArtifactAction::Send {
                             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                            port: None,
                             message: MessageId::new(0),
                             payload: None,
                         },
@@ -113,6 +118,7 @@ pub(crate) fn panic_artifact() -> MantleArtifact {
         .actions
         .push(ArtifactAction::Send {
             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
             message: MessageId::new(0),
             payload: None,
         });
@@ -145,6 +151,7 @@ pub(crate) fn payload_artifact() -> MantleArtifact {
     artifact.outputs = vec!["worker assigned job".to_string()];
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -202,6 +209,7 @@ pub(crate) fn for_each_artifact(items: &str, max_items: usize) -> MantleArtifact
             max_items,
             body: vec![ArtifactAction::Send {
                 target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                port: None,
                 message: MessageId::new(0),
                 payload: Some(ArtifactValueTemplate::LoopElement {
                     ty: JOB,
@@ -240,6 +248,9 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
         entry_message: MessageId::new(0),
         types: base_types(),
         outputs: Vec::new(),
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
@@ -271,6 +282,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
                         },
                         ArtifactAction::Send {
                             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                            port: None,
                             message: MessageId::new(0),
                             payload: None,
                         },
@@ -307,6 +319,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
                         },
                         ArtifactAction::Send {
                             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                            port: None,
                             message: MessageId::new(0),
                             payload: None,
                         },
@@ -343,6 +356,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
                         },
                         ArtifactAction::Send {
                             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                            port: None,
                             message: MessageId::new(0),
                             payload: None,
                         },
@@ -367,6 +381,9 @@ pub(crate) fn sequence_artifact() -> MantleArtifact {
             "worker handled First".to_string(),
             "worker handled Second".to_string(),
         ],
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
@@ -398,11 +415,13 @@ pub(crate) fn sequence_artifact() -> MantleArtifact {
                         },
                         ArtifactAction::Send {
                             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                            port: None,
                             message: MessageId::new(0),
                             payload: None,
                         },
                         ArtifactAction::Send {
                             target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+                            port: None,
                             message: MessageId::new(1),
                             payload: None,
                         },

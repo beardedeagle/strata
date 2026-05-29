@@ -1,4 +1,6 @@
-use super::send::{resolve_checked_send_target, resolve_send_message_case};
+use super::send::{
+    resolve_checked_send_port, resolve_checked_send_target, resolve_send_message_case,
+};
 use super::*;
 use crate::language::{
     PROCESS_REF_TYPE, RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, UNIT_TYPE,
@@ -121,11 +123,18 @@ pub(super) fn checked_actions_for_statements(
             }
             Statement::Send {
                 target,
+                port,
                 message,
                 payload,
             } => {
                 let send_target =
                     resolve_checked_send_target(context, input.payload_bindings, target)?;
+                let boundary_port = resolve_checked_send_port(
+                    context,
+                    port.as_ref(),
+                    send_target.target_process,
+                    target_process_message_type(context.module, send_target.target_process)?,
+                )?;
                 let message_id = resolve_send_message_case(
                     context,
                     types,
@@ -137,6 +146,7 @@ pub(super) fn checked_actions_for_statements(
                 )?;
                 actions.push(CheckedAction::Send {
                     target: send_target.target,
+                    port: boundary_port,
                     message: message_id.message,
                     payload: message_id.payload.map(Box::new),
                 });
@@ -145,6 +155,7 @@ pub(super) fn checked_actions_for_statements(
                 name,
                 ty: _,
                 target,
+                port,
                 message,
                 payload,
             } => {
@@ -170,6 +181,12 @@ pub(super) fn checked_actions_for_statements(
                 }
                 let send_target =
                     resolve_checked_send_target(context, input.payload_bindings, target)?;
+                let boundary_port = resolve_checked_send_port(
+                    context,
+                    port.as_ref(),
+                    send_target.target_process,
+                    target_process_message_type(context.module, send_target.target_process)?,
+                )?;
                 let message_id = resolve_send_message_case(
                     context,
                     types,
@@ -185,6 +202,7 @@ pub(super) fn checked_actions_for_statements(
                     outcome: binding.id,
                     outcome_ty: binding.checked_ty.clone(),
                     target: send_target.target,
+                    port: boundary_port,
                     message: message_id.message,
                     payload: message_id.payload.map(Box::new),
                 });
@@ -266,6 +284,22 @@ fn spawn_authority_for_target(
             Error::new(format!(
                 "process {} spawn target {target_name} requires authority Cap<Spawn<{target_name}>>",
                 context.process.name
+            ))
+        })
+}
+
+fn target_process_message_type(
+    module: &Module,
+    target_process: CheckedProcessId,
+) -> Result<&TypeRef> {
+    module
+        .processes
+        .get(target_process.index())
+        .map(|process| &process.msg_type)
+        .ok_or_else(|| {
+            Error::new(format!(
+                "process id {} is not declared",
+                target_process.as_u32()
             ))
         })
 }

@@ -7,6 +7,9 @@ pub(super) struct ImportSymbols<'a> {
     pub(super) types: Vec<NamedOwner<'a>>,
     pub(super) functions: Vec<FunctionOwner<'a>>,
     pub(super) processes: Vec<NamedOwner<'a>>,
+    pub(super) protocols: Vec<NamedOwner<'a>>,
+    pub(super) ports: Vec<NamedOwner<'a>>,
+    pub(super) components: Vec<NamedOwner<'a>>,
     pub(super) enum_variants: Vec<EnumVariantOwner<'a>>,
     pub(super) fieldless_record_constructors: Vec<NamedOwner<'a>>,
 }
@@ -33,6 +36,9 @@ impl<'a> ImportSymbols<'a> {
         let mut counts = SymbolCounts::default();
         for unit in units {
             let module = unit.module();
+            counts.protocols += module.protocols.len();
+            counts.ports += module.ports.len();
+            counts.components += module.components.len();
             counts.types += module.records.len() + module.enums.len();
             counts.functions += module.functions.len();
             counts.processes += module.processes.len();
@@ -50,6 +56,9 @@ impl<'a> ImportSymbols<'a> {
         let mut types = Vec::with_capacity(counts.types);
         let mut functions = Vec::with_capacity(counts.functions);
         let mut processes = Vec::with_capacity(counts.processes);
+        let mut protocols = Vec::with_capacity(counts.protocols);
+        let mut ports = Vec::with_capacity(counts.ports);
+        let mut components = Vec::with_capacity(counts.components);
         let mut enum_variants = Vec::with_capacity(counts.enum_variants);
         let mut fieldless_record_constructors =
             Vec::with_capacity(counts.fieldless_record_constructors);
@@ -57,6 +66,24 @@ impl<'a> ImportSymbols<'a> {
         for unit in units {
             let module = unit.module();
             module_names.push(module.name.as_str());
+            for protocol in &module.protocols {
+                protocols.push(NamedOwner {
+                    name: protocol.name.as_str(),
+                    owner: unit.id(),
+                });
+            }
+            for port in &module.ports {
+                ports.push(NamedOwner {
+                    name: port.name.as_str(),
+                    owner: unit.id(),
+                });
+            }
+            for component in &module.components {
+                components.push(NamedOwner {
+                    name: component.name.as_str(),
+                    owner: unit.id(),
+                });
+            }
             for record in &module.records {
                 types.push(NamedOwner {
                     name: record.name.as_str(),
@@ -100,6 +127,9 @@ impl<'a> ImportSymbols<'a> {
             types,
             functions,
             processes,
+            protocols,
+            ports,
+            components,
             enum_variants,
             fieldless_record_constructors,
         }
@@ -203,6 +233,9 @@ struct SymbolCounts {
     types: usize,
     functions: usize,
     processes: usize,
+    protocols: usize,
+    ports: usize,
+    components: usize,
     enum_variants: usize,
     fieldless_record_constructors: usize,
 }

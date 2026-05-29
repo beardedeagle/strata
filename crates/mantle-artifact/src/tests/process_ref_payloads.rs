@@ -13,6 +13,7 @@ fn validate_accepts_process_ref_type_id_at_boundary() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
             ty: PROCESS_REF_WORKER,
@@ -36,6 +37,7 @@ fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -47,6 +49,7 @@ fn validate_rejects_received_payload_send_target_with_non_process_ref_type() {
             ty: JOB,
             target_process: ProcessId::new(1),
         },
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -74,6 +77,7 @@ fn validate_rejects_process_ref_template_with_non_process_ref_type() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
             ty: JOB,
@@ -101,6 +105,7 @@ fn validate_rejects_process_ref_template_target_type_mismatch() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
             ty: PROCESS_REF_MAIN,
@@ -131,6 +136,7 @@ fn validate_rejects_received_payload_send_target_type_mismatch() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
             ty: PROCESS_REF_WORKER,
@@ -143,6 +149,7 @@ fn validate_rejects_received_payload_send_target_type_mismatch() {
             ty: PROCESS_REF_WORKER,
             target_process: ProcessId::new(0),
         },
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ProcessRef {
             ty: PROCESS_REF_WORKER,
@@ -178,6 +185,7 @@ fn validate_rejects_nested_process_ref_payload_template() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Record {
             ty: BOX,
@@ -214,6 +222,7 @@ fn validate_rejects_projected_process_ref_payload_template() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::RecordField {
             ty: PROCESS_REF_WORKER,
@@ -244,6 +253,7 @@ fn validate_rejects_received_payload_template_without_payload_message() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::ReceivedPayload { ty: JOB }),
     };

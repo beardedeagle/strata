@@ -37,6 +37,40 @@ proc {name} mailbox bounded(1) {{
 }
 
 #[test]
+fn rejects_boundary_table_counts_above_artifact_limits_during_checking() {
+    let cases = [
+        (
+            "protocol_count",
+            MAX_PROTOCOL_COUNT,
+            boundary_limit_source(MAX_PROTOCOL_COUNT + 1, 0, 0),
+        ),
+        (
+            "port_count",
+            MAX_PORT_COUNT,
+            boundary_limit_source(1, MAX_PORT_COUNT + 1, 0),
+        ),
+        (
+            "component_count",
+            MAX_COMPONENT_COUNT,
+            boundary_limit_source(1, 1, MAX_COMPONENT_COUNT + 1),
+        ),
+    ];
+
+    for (field, max, source) in cases {
+        let module = parse_source(&source).expect("oversized boundary source should parse");
+
+        let err =
+            check_module(module).expect_err("boundary count above artifact limit should fail");
+
+        assert!(
+            err.to_string()
+                .contains(&format!("{field} must be no greater than {max}")),
+            "unexpected diagnostic for {field}: {err}"
+        );
+    }
+}
+
+#[test]
 fn rejects_mailbox_bound_above_artifact_limit_during_checking() {
     let source = HELLO.replace(
         "mailbox bounded(1)",
@@ -49,6 +83,49 @@ fn rejects_mailbox_bound_above_artifact_limit_during_checking() {
     assert!(err.to_string().contains(&format!(
         "process Main mailbox_bound must be no greater than {MAX_MAILBOX_BOUND}"
     )));
+}
+
+fn boundary_limit_source(
+    protocol_count: usize,
+    port_count: usize,
+    component_count: usize,
+) -> String {
+    let mut source = String::from(
+        r#"
+module too_many_boundaries;
+record MainState;
+enum MainMsg { Start }
+"#,
+    );
+    for index in 0..protocol_count {
+        source.push_str(&format!(
+            "protocol BoundaryProtocol{index} message MainMsg requires Cap<ProtocolBoundary<BoundaryProtocol{index}>>;\n"
+        ));
+    }
+    for index in 0..port_count {
+        source.push_str(&format!(
+            "port BoundaryPort{index} protocol BoundaryProtocol0 target Main requires Cap<PortConnect<BoundaryPort{index}>>;\n"
+        ));
+    }
+    for index in 0..component_count {
+        source.push_str(&format!(
+            "component BoundaryComponent{index} exports BoundaryPort0 requires Cap<ComponentExport<BoundaryComponent{index}>>;\n"
+        ));
+    }
+    source.push_str(
+        r#"
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det { return MainState; }
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#,
+    );
+    source
 }
 
 #[test]

@@ -196,6 +196,7 @@ source-to-runtime-success-gates: build
         function_record_return_match
         function_record_body_match
         imports_main
+        boundary_contracts_main
         state_payload_enum
         collection_state
         state_payload_match

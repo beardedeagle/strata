@@ -124,14 +124,21 @@ fn is_reserved_identifier(value: &str) -> bool {
             | "send"
             | "spawn"
             | "child"
+            | "component"
+            | "exports"
             | "local"
             | "one_for_one"
             | "permanent"
+            | "port"
+            | "protocol"
+            | "requires"
             | "supervise"
+            | "target"
             | "temporary"
             | "transient"
             | "type"
             | "var"
+            | "via"
     )
 }
 
@@ -156,6 +163,9 @@ fn validate_output_literal(value: &str) -> Result<()> {
 pub struct Module {
     pub name: Identifier,
     pub imports: Vec<Import>,
+    pub protocols: Vec<Protocol>,
+    pub ports: Vec<Port>,
+    pub components: Vec<Component>,
     pub records: Vec<Record>,
     pub enums: Vec<Enum>,
     pub functions: Vec<Function>,
@@ -165,6 +175,28 @@ pub struct Module {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Import {
     pub module: Identifier,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Protocol {
+    pub name: Identifier,
+    pub message_type: TypeRef,
+    pub authority: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Port {
+    pub name: Identifier,
+    pub protocol: Identifier,
+    pub target: Identifier,
+    pub authority: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Component {
+    pub name: Identifier,
+    pub export: Identifier,
+    pub authority: TypeRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,6 +395,7 @@ pub enum Statement {
     },
     Send {
         target: Identifier,
+        port: Option<Identifier>,
         message: Identifier,
         payload: Option<ValueExpr>,
     },
@@ -370,6 +403,7 @@ pub enum Statement {
         name: Identifier,
         ty: TypeRef,
         target: Identifier,
+        port: Option<Identifier>,
         message: Identifier,
         payload: Option<ValueExpr>,
     },

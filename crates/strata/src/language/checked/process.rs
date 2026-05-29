@@ -6,8 +6,9 @@ use crate::language::ast::{Effect, Identifier, Module};
 use crate::language::diagnostic::{Error, Result};
 
 use super::{
-    CheckedAuthorityId, CheckedMessageId, CheckedMessageVariantId, CheckedNextState,
-    CheckedOutputId, CheckedPayloadValue, CheckedProcessId, CheckedProcessRefId,
+    CheckedAuthorityId, CheckedComponent, CheckedComponentId, CheckedMessageId,
+    CheckedMessageVariantId, CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedPort,
+    CheckedPortId, CheckedProcessId, CheckedProcessRefId, CheckedProtocol, CheckedProtocolId,
     CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedSupervisorChildId,
     CheckedSupervisorId, CheckedTypeRef, CheckedValueTemplate,
 };
@@ -76,6 +77,9 @@ impl CheckedProcessRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::language) enum CheckedCapabilityDescriptor {
     Spawn { target: CheckedProcessId },
+    ProtocolBoundary { protocol: CheckedProtocolId },
+    PortConnect { port: CheckedPortId },
+    ComponentExport { component: CheckedComponentId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,6 +313,7 @@ pub(in crate::language) enum CheckedAction {
     },
     Send {
         target: CheckedSendTarget,
+        port: Option<CheckedPortId>,
         message: CheckedMessageId,
         payload: Option<Box<CheckedValueTemplate>>,
     },
@@ -316,6 +321,7 @@ pub(in crate::language) enum CheckedAction {
         outcome: super::CheckedEffectOutcomeId,
         outcome_ty: CheckedTypeRef,
         target: CheckedSendTarget,
+        port: Option<CheckedPortId>,
         message: CheckedMessageId,
         payload: Option<Box<CheckedValueTemplate>>,
     },
@@ -616,6 +622,9 @@ pub struct CheckedProgram {
     entry_message: CheckedMessageId,
     types: Vec<CheckedTypeRef>,
     outputs: Vec<String>,
+    protocols: Vec<CheckedProtocol>,
+    ports: Vec<CheckedPort>,
+    components: Vec<CheckedComponent>,
     processes: Vec<CheckedProcess>,
 }
 
@@ -627,6 +636,9 @@ impl CheckedProgram {
             entry_message: parts.entry_message,
             types: parts.types,
             outputs: parts.outputs,
+            protocols: parts.protocols,
+            ports: parts.ports,
+            components: parts.components,
             processes: parts.processes,
         }
     }
@@ -662,6 +674,18 @@ impl CheckedProgram {
         &self.outputs
     }
 
+    pub(in crate::language) fn protocols(&self) -> &[CheckedProtocol] {
+        &self.protocols
+    }
+
+    pub(in crate::language) fn ports(&self) -> &[CheckedPort] {
+        &self.ports
+    }
+
+    pub(in crate::language) fn components(&self) -> &[CheckedComponent] {
+        &self.components
+    }
+
     pub(in crate::language) fn processes(&self) -> &[CheckedProcess] {
         &self.processes
     }
@@ -673,5 +697,8 @@ pub(in crate::language) struct CheckedProgramParts {
     pub entry_message: CheckedMessageId,
     pub types: Vec<CheckedTypeRef>,
     pub outputs: Vec<String>,
+    pub protocols: Vec<CheckedProtocol>,
+    pub ports: Vec<CheckedPort>,
+    pub components: Vec<CheckedComponent>,
     pub processes: Vec<CheckedProcess>,
 }

@@ -270,6 +270,7 @@ fn artifact_with_supervisor_child_send_target() -> MantleArtifact {
             child: SupervisorChildId::new(0),
             target_process: ProcessId::new(1),
         },
+        port: None,
         message: MessageId::new(0),
         payload: None,
     }];

@@ -15,13 +15,13 @@ mod source_program;
 mod tests;
 
 pub use ast::{
-    AuthorityDeclaration, CollectionPatternBinding, ConstructorPayloadPattern, Determinism, Effect,
-    Enum, ForEachItem, Function, FunctionBlock, FunctionBody, FunctionParam, Identifier, Import,
-    ListPattern, ListValue, MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue,
-    MapValueEntry, Match, MatchArm, Module, OutputLiteral, Param, Pattern, Process, Record,
-    RecordField, RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef,
-    ValueBooleanOperator, ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator,
-    ValueScalarOrderingOperator,
+    AuthorityDeclaration, CollectionPatternBinding, Component, ConstructorPayloadPattern,
+    Determinism, Effect, Enum, ForEachItem, Function, FunctionBlock, FunctionBody, FunctionParam,
+    Identifier, Import, ListPattern, ListValue, MapPattern, MapPatternCompleteness,
+    MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module, OutputLiteral, Param,
+    Pattern, Port, Process, Protocol, Record, RecordField, RecordValue, RecordValueField,
+    ReturnExpr, Statement, TypeRef, ValueBooleanOperator, ValueEqualityOperator, ValueExpr,
+    ValueScalarArithmeticOperator, ValueScalarOrderingOperator,
 };
 pub use authority_summary::{AuthoritySummaryFormat, render_authority_summary};
 pub use checked::CheckedProgram;
@@ -46,6 +46,9 @@ const PROC_RESULT_TYPE: &str = "ProcResult";
 const PROCESS_REF_TYPE: &str = "ProcessRef";
 const CAP_TYPE: &str = "Cap";
 const SPAWN_TYPE: &str = "Spawn";
+const PROTOCOL_BOUNDARY_TYPE: &str = "ProtocolBoundary";
+const PORT_CONNECT_TYPE: &str = "PortConnect";
+const COMPONENT_EXPORT_TYPE: &str = "ComponentExport";
 const LIST_TYPE: &str = "List";
 const MAP_TYPE: &str = "Map";
 const UNIT_TYPE: &str = "Unit";

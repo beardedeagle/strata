@@ -42,3 +42,6 @@ define_id!(AuthorityId);
 define_id!(SpawnSiteId);
 define_id!(SupervisorId);
 define_id!(SupervisorChildId);
+define_id!(ProtocolId);
+define_id!(PortId);
+define_id!(ComponentId);

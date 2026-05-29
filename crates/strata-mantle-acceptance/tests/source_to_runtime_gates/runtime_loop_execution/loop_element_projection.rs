@@ -423,6 +423,7 @@ fn is_loop_element_projection_route(
                                             record,
                                             field,
                                         }),
+                                    ..
                                 }] if *ty == expected.worker_ref_type
                                     && *target_process == expected.worker_process_id
                                     && *message == MessageId::new(0)

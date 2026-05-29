@@ -53,6 +53,50 @@ pub(super) fn resolve_checked_send_target(
     )))
 }
 
+pub(super) fn resolve_checked_send_port(
+    context: &StepCheckContext<'_>,
+    port: Option<&Identifier>,
+    target_process: CheckedProcessId,
+    message_ty: &TypeRef,
+) -> Result<Option<CheckedPortId>> {
+    let Some(port) = port else {
+        return Ok(None);
+    };
+    let port_id = context.semantic_index.port_id(port)?;
+    let contract = context.semantic_index.port_contract(port_id)?;
+    if contract.target_process != target_process {
+        return Err(Error::new(format!(
+            "process {} sends through port {} targeting process id {}, expected {}",
+            context.process.name,
+            port,
+            target_process.as_u32(),
+            contract.target_process.as_u32()
+        )));
+    }
+    if !context
+        .semantic_index
+        .same_type(&contract.message_type, message_ty)
+    {
+        return Err(Error::new(format!(
+            "process {} sends through port {} with message type {}, expected {}",
+            context.process.name, port, message_ty, contract.message_type
+        )));
+    }
+    if !context.authority_index.values().any(|authority| {
+        matches!(
+            authority.descriptor,
+            CheckedCapabilityDescriptor::PortConnect { port: authority_port }
+                if authority_port == port_id
+        )
+    }) {
+        return Err(Error::new(format!(
+            "process {} send via port {} requires authority Cap<PortConnect<{}>>",
+            context.process.name, port, port
+        )));
+    }
+    Ok(Some(port_id))
+}
+
 pub(super) struct CheckedSendMessage {
     pub(super) message: CheckedMessageId,
     pub(super) payload: Option<CheckedValueTemplate>,

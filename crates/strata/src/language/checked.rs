@@ -1,13 +1,15 @@
+mod boundaries;
 mod ids;
 mod process;
 mod templates;
 mod types;
 
+pub(in crate::language) use boundaries::{CheckedComponent, CheckedPort, CheckedProtocol};
 pub(in crate::language) use ids::{
-    CheckedAuthorityId, CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId,
-    CheckedMessageId, CheckedMessageVariantId, CheckedOutputId, CheckedProcessId,
-    CheckedProcessRefId, CheckedSpawnSiteId, CheckedStateId, CheckedSupervisorChildId,
-    CheckedSupervisorId, CheckedTypeId,
+    CheckedAuthorityId, CheckedComponentId, CheckedEffectOutcomeId, CheckedEnumVariantId,
+    CheckedLoopElementId, CheckedMessageId, CheckedMessageVariantId, CheckedOutputId,
+    CheckedPortId, CheckedProcessId, CheckedProcessRefId, CheckedProtocolId, CheckedSpawnSiteId,
+    CheckedStateId, CheckedSupervisorChildId, CheckedSupervisorId, CheckedTypeId,
 };
 pub(in crate::language) use process::{
     CheckedAction, CheckedAuthority, CheckedCapabilityDescriptor, CheckedLoopElement,

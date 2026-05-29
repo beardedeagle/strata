@@ -1,12 +1,15 @@
 use crate::{
-    ARTIFACT_MAGIC, ArtifactAction, ArtifactCapabilityDescriptor, ArtifactSendTarget,
-    ArtifactTypeKind, ArtifactValueShape, Error, MAX_ARTIFACT_BYTES, MantleArtifact, NextState,
-    Result,
+    ARTIFACT_MAGIC, ArtifactAction, ArtifactSendTarget, ArtifactTypeKind, ArtifactValueShape,
+    Error, MAX_ARTIFACT_BYTES, MantleArtifact, NextState, Result,
 };
 
+mod boundaries;
+mod capabilities;
 mod supervision;
 mod templates;
 
+use boundaries::add_boundary_bytes;
+use capabilities::add_capability_descriptor_bytes;
 use supervision::{add_spawn_site_bytes, add_supervisor_plan_bytes};
 use templates::add_value_template_bytes;
 
@@ -107,6 +110,7 @@ pub(crate) fn encoded_artifact_len(artifact: &MantleArtifact) -> Result<usize> {
             output,
         )?;
     }
+    add_boundary_bytes(&mut encoded_len, artifact)?;
     add_field_usize(
         &mut encoded_len,
         KeyLen::new("process_count".len()),
@@ -185,16 +189,11 @@ pub(crate) fn encoded_artifact_len(artifact: &MantleArtifact) -> Result<usize> {
                 authority_prefix.child("debug_name"),
                 &authority.debug_name,
             )?;
-            match authority.descriptor {
-                ArtifactCapabilityDescriptor::Spawn { target } => {
-                    add_field_bytes(&mut encoded_len, authority_prefix.child("kind"), "spawn")?;
-                    add_field_u32(
-                        &mut encoded_len,
-                        authority_prefix.child("target_process"),
-                        target.as_u32(),
-                    )?;
-                }
-            }
+            add_capability_descriptor_bytes(
+                &mut encoded_len,
+                authority_prefix,
+                authority.descriptor,
+            )?;
         }
         add_spawn_site_bytes(&mut encoded_len, prefix, process)?;
         add_supervisor_plan_bytes(&mut encoded_len, prefix, process)?;
@@ -494,11 +493,15 @@ fn add_action_bytes(
         }
         ArtifactAction::Send {
             target,
+            port,
             message,
             payload,
         } => {
             add_field_bytes(total, action_prefix.child("kind"), "send")?;
             add_send_target_bytes(total, action_prefix, target)?;
+            if let Some(port) = port {
+                add_field_u32(total, action_prefix.child("boundary_port"), port.as_u32())?;
+            }
             add_field_u32(total, action_prefix.child("message"), message.as_u32())?;
             add_field_bytes(
                 total,
@@ -518,6 +521,7 @@ fn add_action_bytes(
             outcome,
             outcome_ty,
             target,
+            port,
             message,
             payload,
         } => {
@@ -529,6 +533,9 @@ fn add_action_bytes(
                 outcome_ty.as_u32(),
             )?;
             add_send_target_bytes(total, action_prefix, target)?;
+            if let Some(port) = port {
+                add_field_u32(total, action_prefix.child("boundary_port"), port.as_u32())?;
+            }
             add_field_u32(total, action_prefix.child("message"), message.as_u32())?;
             add_field_bytes(
                 total,

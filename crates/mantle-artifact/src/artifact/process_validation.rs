@@ -12,7 +12,7 @@ mod effect_outcomes;
 mod supervision;
 mod templates;
 
-use authorities::SpawnAuthorityUsage;
+use authorities::AuthorityUsage;
 use templates::{
     transition_payload_guard_key, transition_payload_guard_label, validate_bool_condition_template,
     validate_template_loop_elements,
@@ -587,7 +587,7 @@ impl ArtifactProcess {
         artifact: &MantleArtifact,
         process_id: ProcessId,
     ) -> Result<()> {
-        let mut spawn_authority_usage = SpawnAuthorityUsage::new();
+        let mut authority_usage = AuthorityUsage::new();
         for process_ref in &self.process_refs {
             if process_ref.target.index() >= artifact.processes.len() {
                 return Err(Error::new(format!(
@@ -638,7 +638,7 @@ impl ArtifactProcess {
                     ActionReferenceScope::root(),
                 )?;
             }
-            self.collect_spawn_authority_usage(&transition.actions, &mut spawn_authority_usage)?;
+            self.collect_authority_usage(&transition.actions, &mut authority_usage)?;
             self.validate_effect_outcome_templates(transition)?;
             for declared_effect in &declared_effects {
                 if !used_effects.contains(declared_effect) {
@@ -650,7 +650,7 @@ impl ArtifactProcess {
                 }
             }
         }
-        self.validate_spawn_authority_usage(&spawn_authority_usage)?;
+        self.validate_authority_usage(&authority_usage)?;
         Ok(())
     }
 }

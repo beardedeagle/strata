@@ -11,6 +11,7 @@ fn validate_accepts_payload_message_metadata() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -41,6 +42,7 @@ fn validate_accepts_payload_guarded_transitions_as_typed_artifact_metadata() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -117,6 +119,7 @@ fn validate_rejects_payload_guard_type_mismatch() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -146,6 +149,7 @@ fn validate_rejects_process_ref_payload_guard_sidecar() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -181,6 +185,7 @@ fn validate_rejects_mixed_payload_guarded_and_unguarded_transitions_for_same_bas
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -231,6 +236,7 @@ fn validate_rejects_payload_for_unit_message_variant() {
     declare_job_record_types(&mut artifact);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -258,6 +264,7 @@ fn validate_rejects_send_payload_type_mismatch() {
     );
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: OTHER_JOB,

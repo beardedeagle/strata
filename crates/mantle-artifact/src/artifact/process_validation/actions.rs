@@ -1,4 +1,4 @@
-use super::authorities::SpawnAuthorityUsage;
+use super::authorities::AuthorityUsage;
 use super::templates::{
     validate_bool_condition_template, validate_for_each_collection_type,
     validate_template_loop_elements,
@@ -112,11 +112,13 @@ impl ArtifactProcess {
             }
             ArtifactAction::Send {
                 target,
+                port,
                 message,
                 payload,
             }
             | ArtifactAction::SendOutcome {
                 target,
+                port,
                 message,
                 payload,
                 ..
@@ -137,6 +139,14 @@ impl ArtifactProcess {
                             target_process_id.as_u32()
                         ))
                     })?;
+                if let Some(port) = port {
+                    artifact.validate_send_port(
+                        self.debug_name.as_str(),
+                        *port,
+                        target_process_id,
+                        *message,
+                    )?;
+                }
                 if let ArtifactAction::SendOutcome { outcome_ty, .. } = action {
                     if scope.is_inside_runtime_if_branch() {
                         return Err(Error::new(format!(
@@ -397,10 +407,10 @@ impl ArtifactProcess {
         Ok(())
     }
 
-    pub(in crate::artifact::process_validation) fn collect_spawn_authority_usage(
+    pub(in crate::artifact::process_validation) fn collect_authority_usage(
         &self,
         actions: &[ArtifactAction],
-        usage: &mut SpawnAuthorityUsage,
+        usage: &mut AuthorityUsage,
     ) -> Result<()> {
         for action in actions {
             match action {
@@ -412,20 +422,28 @@ impl ArtifactProcess {
                 } => {
                     self.record_spawn_site_usage(usage, *spawn_site, *target)?;
                 }
+                ArtifactAction::Send {
+                    port: Some(port), ..
+                }
+                | ArtifactAction::SendOutcome {
+                    port: Some(port), ..
+                } => {
+                    self.record_port_authority_usage(usage, *port)?;
+                }
                 ArtifactAction::IfElse {
                     then_actions,
                     else_actions,
                     ..
                 } => {
-                    self.collect_spawn_authority_usage(then_actions, usage)?;
-                    self.collect_spawn_authority_usage(else_actions, usage)?;
+                    self.collect_authority_usage(then_actions, usage)?;
+                    self.collect_authority_usage(else_actions, usage)?;
                 }
                 ArtifactAction::ForEach { body, .. } => {
-                    self.collect_spawn_authority_usage(body, usage)?;
+                    self.collect_authority_usage(body, usage)?;
                 }
                 ArtifactAction::Emit { .. }
-                | ArtifactAction::Send { .. }
-                | ArtifactAction::SendOutcome { .. } => {}
+                | ArtifactAction::Send { port: None, .. }
+                | ArtifactAction::SendOutcome { port: None, .. } => {}
             }
         }
         Ok(())
@@ -640,7 +658,7 @@ impl ArtifactProcess {
 
     fn record_spawn_site_usage(
         &self,
-        usage: &mut SpawnAuthorityUsage,
+        usage: &mut AuthorityUsage,
         spawn_site: SpawnSiteId,
         target: ProcessId,
     ) -> Result<()> {
@@ -654,6 +672,27 @@ impl ArtifactProcess {
             ))
         })?;
         usage.mark_authority(&self.debug_name, authority.index())
+    }
+
+    fn record_port_authority_usage(&self, usage: &mut AuthorityUsage, port: PortId) -> Result<()> {
+        let authority_index = self
+            .authorities
+            .iter()
+            .position(|authority| {
+                matches!(
+                    authority.descriptor,
+                    ArtifactCapabilityDescriptor::PortConnect { port: authority_port }
+                        if authority_port == port
+                )
+            })
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "process {} send through port id {} requires authority port_connect for the same port id",
+                    self.debug_name,
+                    port.as_u32()
+                ))
+            })?;
+        usage.mark_authority(&self.debug_name, authority_index)
     }
 
     fn validate_spawn_site(

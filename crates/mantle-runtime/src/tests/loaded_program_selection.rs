@@ -33,6 +33,7 @@ fn loaded_program_selects_payload_guarded_transitions_by_exact_payload_identity(
     artifact.types[WORKER_STATE.index()] = worker_state_type(&["Idle", "Ready", "Done"]);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,
@@ -115,6 +116,7 @@ fn loaded_program_selects_state_specific_payload_guarded_transitions_by_exact_pa
     let mut artifact = valid_artifact();
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: JOB,

@@ -3,12 +3,13 @@ use std::collections::BTreeMap;
 use mantle_artifact::ArtifactScalarType;
 
 use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, TypeRef};
-use super::super::checked::{CheckedMessageVariantId, CheckedProcessId};
-use super::super::diagnostic::{Error, Result};
-use super::super::{
-    BOOL_FALSE, BOOL_TRUE, BOOL_TYPE, CAP_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE, PROC_RESULT_TYPE,
-    PROCESS_REF_TYPE, RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
+use super::super::checked::{
+    CheckedComponentId, CheckedMessageVariantId, CheckedPortId, CheckedProcessId, CheckedProtocolId,
 };
+use super::super::diagnostic::{Error, Result};
+use super::super::{BOOL_FALSE, BOOL_TRUE, BOOL_TYPE};
+mod boundaries;
+mod build;
 mod builtins;
 mod collection_type;
 mod type_decls;
@@ -19,10 +20,7 @@ pub(super) use builtins::{BuiltinValueShape, ValueEnumVariant, ValueEnumVariantI
 pub(super) use collection_type::CollectionType;
 use type_decls::{TypeDecl, TypeDeclMap};
 use type_validation::{
-    BuiltinTypeSymbols, MessagePayloadTypeContext, SourceValueTypeContext,
-    reject_internal_type_label_prefix, reject_reserved_type_name,
-    reject_reserved_type_name_literal, validate_collection_capacity, validate_message_payload_type,
-    validate_record_fields, validate_source_value_type,
+    SourceValueTypeContext, validate_collection_capacity, validate_source_value_type,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -95,194 +93,21 @@ pub(super) struct SemanticIndex {
     spawn_error_type: Symbol,
     types: TypeDeclMap,
     processes: BTreeMap<Symbol, CheckedProcessId>,
+    protocols: BTreeMap<Symbol, CheckedProtocolId>,
+    ports: BTreeMap<Symbol, CheckedPortId>,
+    components: BTreeMap<Symbol, CheckedComponentId>,
+    port_contracts: Vec<PortContract>,
     enum_variants: Vec<BTreeMap<Symbol, usize>>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct PortContract {
+    pub(super) protocol: CheckedProtocolId,
+    pub(super) target_process: CheckedProcessId,
+    pub(super) message_type: TypeRef,
+}
+
 impl SemanticIndex {
-    pub(super) fn build(module: &Module) -> Result<Self> {
-        let mut symbols = SymbolTable::default();
-        let mut types = TypeDeclMap::default();
-        let mut records = BTreeMap::new();
-        let mut enums = BTreeMap::new();
-        let mut enum_variants = Vec::with_capacity(module.enums.len());
-        let mut processes = BTreeMap::new();
-
-        let _module_symbol = symbols.intern(&module.name)?;
-        let proc_result_type = symbols.intern_str(PROC_RESULT_TYPE)?;
-        let process_ref_type = symbols.intern_str(PROCESS_REF_TYPE)?;
-        let list_type = symbols.intern_str(LIST_TYPE)?;
-        let map_type = symbols.intern_str(MAP_TYPE)?;
-        let unit_type = symbols.intern_str(UNIT_TYPE)?;
-        let option_type = symbols.intern_str(OPTION_TYPE)?;
-        let result_type = symbols.intern_str(RESULT_TYPE)?;
-        let send_error_type = symbols.intern_str(SEND_ERROR_TYPE)?;
-        let spawn_error_type = symbols.intern_str(SPAWN_ERROR_TYPE)?;
-        types.insert(unit_type, TypeDecl::Unit);
-        let mut scalar_type_symbols = Vec::with_capacity(ArtifactScalarType::ALL.len());
-        for scalar in ArtifactScalarType::ALL {
-            let symbol = symbols.intern_str(scalar.source_name())?;
-            types.insert(symbol, TypeDecl::Scalar(scalar));
-            scalar_type_symbols.push(symbol);
-        }
-        let builtin_types = BuiltinTypeSymbols {
-            option: option_type,
-            result: result_type,
-            send_error: send_error_type,
-            spawn_error: spawn_error_type,
-        };
-
-        for (index, record) in module.records.iter().enumerate() {
-            let symbol = symbols.intern(&record.name)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, proc_result_type)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, process_ref_type)?;
-            reject_reserved_type_name_literal(record.name.as_str(), CAP_TYPE)?;
-            reject_reserved_type_name_literal(record.name.as_str(), SPAWN_TYPE)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, list_type)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, map_type)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, unit_type)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, option_type)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, result_type)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, send_error_type)?;
-            reject_reserved_type_name(record.name.as_str(), symbol, spawn_error_type)?;
-            for scalar_symbol in &scalar_type_symbols {
-                reject_reserved_type_name(record.name.as_str(), symbol, *scalar_symbol)?;
-            }
-            reject_internal_type_label_prefix(record.name.as_str())?;
-            if records.insert(symbol, index).is_some() {
-                return Err(Error::new(format!(
-                    "duplicate record declaration {}",
-                    record.name
-                )));
-            }
-            if let Some(previous) = types.insert(symbol, TypeDecl::Record(index)) {
-                return Err(Error::new(format!(
-                    "duplicate type declaration {} used by {} and record",
-                    record.name,
-                    previous.kind()
-                )));
-            }
-            for field in &record.fields {
-                symbols.intern(&field.name)?;
-            }
-        }
-
-        for (index, item) in module.enums.iter().enumerate() {
-            let symbol = symbols.intern(&item.name)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, proc_result_type)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, process_ref_type)?;
-            reject_reserved_type_name_literal(item.name.as_str(), CAP_TYPE)?;
-            reject_reserved_type_name_literal(item.name.as_str(), SPAWN_TYPE)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, list_type)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, map_type)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, unit_type)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, option_type)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, result_type)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, send_error_type)?;
-            reject_reserved_type_name(item.name.as_str(), symbol, spawn_error_type)?;
-            for scalar_symbol in &scalar_type_symbols {
-                reject_reserved_type_name(item.name.as_str(), symbol, *scalar_symbol)?;
-            }
-            reject_internal_type_label_prefix(item.name.as_str())?;
-            if enums.insert(symbol, index).is_some() {
-                return Err(Error::new(format!(
-                    "duplicate enum declaration {}",
-                    item.name
-                )));
-            }
-            if let Some(previous) = types.insert(symbol, TypeDecl::Enum(index)) {
-                return Err(Error::new(format!(
-                    "duplicate type declaration {} used by {} and enum",
-                    item.name,
-                    previous.kind()
-                )));
-            }
-
-            let mut variants = BTreeMap::new();
-            for (variant_index, variant) in item.variants.iter().enumerate() {
-                if is_builtin_value_constructor_name(variant.name.as_str()) {
-                    return Err(Error::new(format!(
-                        "enum {} variant {} uses reserved builtin value constructor name",
-                        item.name, variant.name
-                    )));
-                }
-                let variant_symbol = symbols.intern(&variant.name)?;
-                if variants.insert(variant_symbol, variant_index).is_some() {
-                    return Err(Error::new(format!(
-                        "duplicate variant in enum {} declaration {}",
-                        item.name, variant.name
-                    )));
-                }
-            }
-            enum_variants.push(variants);
-        }
-
-        for (index, process) in module.processes.iter().enumerate() {
-            let symbol = symbols.intern(&process.name)?;
-            if processes
-                .insert(symbol, CheckedProcessId::from_index(index)?)
-                .is_some()
-            {
-                return Err(Error::new(format!(
-                    "duplicate process declaration {}",
-                    process.name
-                )));
-            }
-        }
-
-        for item in &module.enums {
-            for variant in &item.variants {
-                if let Some(payload_type) = &variant.payload_type {
-                    validate_message_payload_type(
-                        MessagePayloadTypeContext {
-                            module,
-                            symbols: &symbols,
-                            types: &types,
-                            processes: &processes,
-                            process_ref_type,
-                            list_type,
-                            map_type,
-                            builtin_types,
-                        },
-                        item,
-                        variant,
-                        payload_type,
-                    )?;
-                }
-            }
-        }
-
-        for record in &module.records {
-            validate_record_fields(
-                SourceValueTypeContext {
-                    module,
-                    symbols: &symbols,
-                    types: &types,
-                    process_ref_type,
-                    list_type,
-                    map_type,
-                    builtin_types,
-                },
-                record,
-            )?;
-        }
-
-        Ok(Self {
-            symbols,
-            proc_result_type,
-            process_ref_type,
-            list_type,
-            map_type,
-            unit_type,
-            option_type,
-            result_type,
-            send_error_type,
-            spawn_error_type,
-            types,
-            processes,
-            enum_variants,
-        })
-    }
-
     pub(super) fn process_id(&self, name: &Identifier) -> Result<CheckedProcessId> {
         self.process_id_by_name(name.as_str())
     }
@@ -296,6 +121,45 @@ impl SemanticIndex {
             .get(&symbol)
             .copied()
             .ok_or_else(|| Error::new(format!("process {name} is not declared")))
+    }
+
+    pub(super) fn protocol_id(&self, name: &Identifier) -> Result<CheckedProtocolId> {
+        let symbol = self
+            .symbols
+            .resolve(name.as_str())
+            .ok_or_else(|| Error::new(format!("protocol {name} is not declared")))?;
+        self.protocols
+            .get(&symbol)
+            .copied()
+            .ok_or_else(|| Error::new(format!("protocol {name} is not declared")))
+    }
+
+    pub(super) fn port_id(&self, name: &Identifier) -> Result<CheckedPortId> {
+        let symbol = self
+            .symbols
+            .resolve(name.as_str())
+            .ok_or_else(|| Error::new(format!("port {name} is not declared")))?;
+        self.ports
+            .get(&symbol)
+            .copied()
+            .ok_or_else(|| Error::new(format!("port {name} is not declared")))
+    }
+
+    pub(super) fn component_id(&self, name: &Identifier) -> Result<CheckedComponentId> {
+        let symbol = self
+            .symbols
+            .resolve(name.as_str())
+            .ok_or_else(|| Error::new(format!("component {name} is not declared")))?;
+        self.components
+            .get(&symbol)
+            .copied()
+            .ok_or_else(|| Error::new(format!("component {name} is not declared")))
+    }
+
+    pub(super) fn port_contract(&self, port: CheckedPortId) -> Result<&PortContract> {
+        self.port_contracts
+            .get(port.index())
+            .ok_or_else(|| Error::new(format!("port id {} is not declared", port.as_u32())))
     }
 
     fn same_identifier(&self, left: &Identifier, right: &Identifier) -> bool {

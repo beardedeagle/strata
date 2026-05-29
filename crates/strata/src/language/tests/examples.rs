@@ -94,6 +94,7 @@ fn parses_and_checks_actor_ping() {
             },
             CheckedAction::Send {
                 target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                port: None,
                 message: checked_message_id(0),
                 payload: None
             }
@@ -235,11 +236,13 @@ fn parses_and_checks_actor_instances_with_distinct_process_refs() {
             },
             CheckedAction::Send {
                 target: CheckedSendTarget::ProcessRef(checked_process_ref_id(0)),
+                port: None,
                 message: checked_message_id(0),
                 payload: None
             },
             CheckedAction::Send {
                 target: CheckedSendTarget::ProcessRef(checked_process_ref_id(1)),
+                port: None,
                 message: checked_message_id(0),
                 payload: None
             }

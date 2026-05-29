@@ -44,6 +44,7 @@ fn validate_rejects_literal_payload_outside_declared_enum_variants() {
     align_process_message_type(&mut artifact, 1);
     artifact.processes[0].transitions[0].actions[1] = ArtifactAction::Send {
         target: ArtifactSendTarget::ProcessRef(ProcessRefId::new(0)),
+        port: None,
         message: MessageId::new(0),
         payload: Some(ArtifactValueTemplate::Literal {
             ty: WORKER_STATE,

@@ -11,9 +11,10 @@ pub(super) use super::super::*;
 pub(super) use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget, ArtifactTypeKind,
     ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
-    ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_EFFECT_OUTCOMES_PER_TRANSITION,
-    MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PROCESS_COUNT, MAX_SPAWN_SITES_PER_PROCESS,
+    ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_COMPONENT_COUNT,
+    MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES,
+    MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PORT_COUNT,
+    MAX_PROCESS_COUNT, MAX_PROTOCOL_COUNT, MAX_SPAWN_SITES_PER_PROCESS,
     MAX_STATE_VALUES_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact,
     MessageId, NextState, ProcessId, ProcessRefId, StepResult, TypeId,
 };
@@ -170,6 +171,9 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
     Module {
         name: ident("type_count_overflow"),
         imports: Vec::new(),
+        protocols: Vec::new(),
+        ports: Vec::new(),
+        components: Vec::new(),
         records,
         enums,
         functions: Vec::new(),

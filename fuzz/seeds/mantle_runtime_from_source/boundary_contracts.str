@@ -1,0 +1,46 @@
+module boundary_contracts_runtime_seed;
+
+protocol WorkerProtocol message WorkerMsg requires Cap<ProtocolBoundary<WorkerProtocol>>;
+port WorkerPort protocol WorkerProtocol target Worker requires Cap<PortConnect<WorkerPort>>;
+component WorkerComponent exports WorkerPort requires Cap<ComponentExport<WorkerComponent>>;
+
+record MainState;
+enum MainMsg {
+    Start,
+}
+
+record WorkerState;
+enum WorkerMsg {
+    Work,
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+    authority connect_worker: Cap<PortConnect<WorkerPort>>;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker via WorkerPort Work;
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

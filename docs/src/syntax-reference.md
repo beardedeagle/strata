@@ -26,6 +26,9 @@ import_decl =
 top_level_decl =
     record_decl
   | enum_decl
+  | protocol_decl
+  | port_decl
+  | component_decl
   | function
   | process_decl
 ```
@@ -48,6 +51,21 @@ Imports must appear immediately after the module declaration and before any
 top-level declaration. The current import form admits one source-unit module
 identifier and resolves it from the importing source unit's directory; aliases,
 wildcards, re-exports, packages, and path strings are not accepted.
+
+## Protocols, Ports, And Components
+
+```text
+protocol_decl = "protocol" ident "message" ident "requires" type_ref ";"
+port_decl = "port" ident "protocol" ident "target" ident "requires" type_ref ";"
+component_decl = "component" ident "exports" ident "requires" type_ref ";"
+```
+
+A protocol names one enum message type, a port binds that protocol to one
+target process, and a component exports one port. The required authority
+annotations must be exact: `Cap<ProtocolBoundary<ProtocolName>>`,
+`Cap<PortConnect<PortName>>`, and `Cap<ComponentExport<ComponentName>>`.
+See [Boundary Contracts](boundary-contracts.md) for the checked and lowered
+contract.
 
 ## Enums
 
@@ -91,7 +109,11 @@ message_alias =
     "type" "Msg" "=" type_ref ";"
 
 authority_decl =
-    "authority" ident ":" "Cap" "<" "Spawn" "<" ident ">" ">" ";"
+    "authority" ident ":" process_authority_type ";"
+
+process_authority_type =
+    "Cap" "<" "Spawn" "<" ident ">" ">"
+  | "Cap" "<" "PortConnect" "<" ident ">" ">"
 
 supervisor_decl =
     "supervise" "local" "one_for_one" "(" "max_restarts" ":" number "_u32" "," "within_ms" ":" number "_u64" ")" "{" supervisor_child+ "}"
@@ -100,11 +122,12 @@ supervisor_child =
     "child" ident ":" ident "=" "spawn" ident "as" ("permanent" | "transient" | "temporary") ";"
 ```
 
-The aliases, authority declarations, supervisor declarations, and functions may appear in any order. `State`, `Msg`, and `init` must each appear exactly once. An authority
-declaration is exactly `Cap<Spawn<ProcessName>>`, targets a declared non-entry
-process, must be used by a local spawn site, and does not replace `! [spawn]`.
-Non-`init`/`step` functions are process-local source functions. A local supervisor
-declares static lexical children and does not grant dynamic spawn authority.
+The aliases, authority declarations, supervisor declarations, and functions may
+appear in any order. `State`, `Msg`, and `init` must each appear exactly once.
+`Cap<Spawn<ProcessName>>` and `Cap<PortConnect<PortName>>` authorities must
+target declared objects and be used by matching local actions. Non-`init`/`step`
+functions are process-local source functions. A local supervisor declares static
+lexical children and does not grant dynamic spawn authority.
 Each concrete message case must resolve to one generated transition through an
 explicit constructor pattern, one wildcard pattern, one `match msg` body, or a
 state-match step for a constructor or wildcard message pattern. Parameter-pattern,
@@ -257,23 +280,12 @@ parameter_pattern_step_function =
     "{" block_body "}"
 ```
 
-The first `type_ref` must name the process state type. An `ident` after the
-comma is a message constructor accepted by the process message type. A payload
-pattern such as `Assign(job: Job)` binds the received payload as an immutable
-transition-local value. A constructor payload pattern such as
-`Assign(Job { phase })`, `Envelope(Assign(Job { phase }))`,
-`Assign(Ready)`, `Assign(List[Job { phase }, ..tail])`, or
-`Assign(Map[Ready => Job { phase }])` destructures an immutable concrete payload
-and binds only the selected values. A fieldless nested enum constructor such as
-`Ready` is a typed shape predicate and does not introduce a binding. List rest
-patterns are suffix-only:
-`..tail` must follow at least one fixed-position element and binds an immutable
-whole list containing the unmatched suffix. Map payload patterns are exact unless
-they end with `..`, as in `Assign(Map[Ready => selected, ..])`; the subset marker
-permits additional static keys while requiring the listed keys. `..rest`
-additionally binds an immutable map containing entries except the listed static
-keys. `_` is a wildcard pattern that covers accepted variants without explicit
-clauses.
+The first `type_ref` names the process state type. The message pattern is a
+constructor, payload constructor, or `_`. Patterns bind immutable transition
+locals, may destructure concrete records/lists/maps and nested constructors, and
+use fieldless nested enum constructors as typed shape predicates. List rest is
+suffix-only after at least one fixed element. Map patterns are exact unless they
+end in `..` or `..rest`; `..rest` binds the remaining immutable map.
 
 Multiple parameter-pattern `step` clauses may share one top-level message
 constructor only when exact nested typed payload predicates are provably
@@ -315,19 +327,12 @@ state_match_step_function =
 ```
 
 State-match arms resolve against the declared process state enum. Payload
-variants may bind their whole payload with an explicit type, such as
-`Working(job: Job)`, or destructure a concrete record/list/map payload, such as
-`Working(Job { phase })`. Nested constructor payloads use the same structural
-pattern rules. Fieldless variants must not bind or destructure a
-payload. Bindings are immutable and transition-local. Each generated transition
-is keyed by the message ID and the checked current state ID. State-match clauses
-may share one top-level message constructor by exact disjoint nested typed
-payload predicates; each generated transition is additionally keyed by the exact
-typed payload guard. A wildcard state-match step may cover discovered concrete
-payload cases for the same message that no explicit state-match clause handles;
-each fallback case still expands across checked current-state cases and lowers
-with an exact typed payload guard. State changes still occur only by returning a
-whole state value through `Continue(...)`, `Stop(...)`, or `Panic(...)`.
+variants may bind the whole payload or destructure concrete record/list/map and
+nested constructor payloads. Bindings are immutable and transition-local. Each
+generated transition is keyed by message ID and checked current state ID, with an
+exact typed payload guard when payload-sensitive clauses split. State changes
+still occur only by returning a whole value through `Continue(...)`, `Stop(...)`,
+or `Panic(...)`.
 
 In a block-bodied `step`, the return expression may be a match over a
 transition-local enum source binding whose concrete value is already proven by
@@ -339,17 +344,13 @@ step_return_match =
     "return" "match" ident "{" match_arm+ "}" ";"
 ```
 
-Every arm body may use the same statement-level action prefix forms as
-a `step` body before the terminal result: local `emit`, in-scope direct `send`,
-statement-level runtime `if`, and bounded runtime `for` over a checked runtime
-`List<T,N>` binding. The checker still validates every arm template
-fail-closed, selects the concrete arm before lowering, appends only that arm's
-typed action prefix after any uniform prefix actions, and emits the same typed
-transition metadata as a direct step return. Arm-local `spawn`,
-process-reference binding, nested runtime `for` statements, final-position
-runtime `if`, nested return matches, dynamic payload catch-all dispatch,
-source-string selectors, and source-function or `init` return-match arm statements
-remain rejected.
+Every arm body may use local `emit`, in-scope direct `send`, statement-level
+runtime `if`, and bounded runtime `for` before the terminal result. The checker
+validates each arm fail-closed, selects the concrete arm before lowering, and
+emits the same typed transition metadata as a direct step return. Arm-local
+`spawn`, process-reference binding, nested runtime `for`, final-position runtime
+`if`, nested return matches, catch-all dispatch, source-string selectors, and
+source-function or `init` arm statements remain rejected.
 
 In a pure block-bodied `init`, the return expression may be a match over one
 fieldless enum constructor:
@@ -455,11 +456,11 @@ spawn_outcome_statement =
     "=" "spawn" ident ";"
 
 send_statement =
-    "send" ident ident payload_arg? ";"
+    "send" ident ("via" ident)? ident payload_arg? ";"
 
 send_outcome_statement =
     "let" ident ":" "Result" "<" "Unit" "," "SendError" "<" type_ref ">" ">"
-    "=" "send" ident ident payload_arg? ";"
+    "=" "send" ident ("via" ident)? ident payload_arg? ";"
 
 payload_arg =
     "(" value_expr ")"
@@ -518,10 +519,11 @@ value. The `Ok` branch carries the committed process reference; it is authority
 data and is not valid source state. A top-level outcome binding is visible only
 to later statements and return values.
 
-The first identifier in `send` is a local process reference or a received
-payload binding whose type is `ProcessRef<T>`. The second identifier is the
-message variant to send. Payload variants require one payload value. Unit
-variants reject payload values.
+The first `send` identifier is a local process reference or direct
+`ProcessRef<T>` payload binding. Optional `via PortName` must name a declared
+port matching the target process and message type, with a used local
+`Cap<PortConnect<PortName>>` authority. Payload variants require one payload
+value; unit variants reject payload values.
 
 `send_outcome_statement` binds a typed local send result. The annotation must be
 `Result<Unit,SendError<TargetMessageType>>` so pre-acceptance failure variants
@@ -530,14 +532,11 @@ bindings must precede ordinary non-prefix effect statements in the same step
 body. A top-level process-reference `spawn` can remain in that pre-state prefix
 so later outcome sends can target the spawned process reference.
 
-The `for` collection source is an identifier binding, not an arbitrary
-expression. Checking requires it to be a runtime-bound `List<T,N>` value. The
-element item is either an immutable element binding or a record pattern over the
-element type. Record-pattern fields bind immutable projected values in the loop
-body. Loop bodies support statement-level runtime `if`, but still reject nested
-loops, `return`, `spawn`, branch-local source value or process-reference
-binding, and runtime branch nesting beyond the single direct nested branch
-layer.
+The `for` collection source is an identifier binding with runtime-bound
+`List<T,N>` type. The element item is an immutable element binding or record
+pattern over the element type. Loop bodies support statement-level runtime `if`,
+but reject nested loops, `return`, `spawn`, branch-local source or process
+reference bindings, and branch nesting beyond one direct nested layer.
 
 ## Types
 
@@ -551,13 +550,10 @@ type_arg =
   | number
 ```
 
-The built-in generic types accepted by checking are
-`ProcResult<StateType>` as a `step` return type and
-`ProcessRef<ProcessName>` in spawn bindings, message payload declarations, and
-payload-binding step patterns. `Cap<Spawn<ProcessName>>` is accepted only in
-process authority declarations. `List<T,N>` and `Map<K,V,N>` are accepted source
-value types when their element, key, and value arguments are source value types
-and `N` is a numeric capacity. `Unit`, `Option<T>`, `Result<T,E>`,
+Checking accepts `ProcResult<StateType>` for `step`, `ProcessRef<ProcessName>`
+for direct process authority surfaces, `Cap<Spawn<ProcessName>>` and
+`Cap<PortConnect<PortName>>` in process authorities, and `List<T,N>` /
+`Map<K,V,N>` over source value types. `Unit`, `Option<T>`, `Result<T,E>`,
 `SendError<M>`, and `SpawnError<A>` are built-in value shapes for explicit
 domain failure and typed effect outcomes.
 
@@ -735,13 +731,15 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`_`, `as`, `authority`, `bounded`, `child`, `else`, `emit`, `enum`, `fn`, `for`, `if`, `in`, `let`,
-`import`, `local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`, `permanent`, `proc`, `record`,
-`return`, `security`, `send`, `spawn`, `supervise`, `temporary`, `transient`, `type`, and `var` are reserved everywhere
+`_`, `as`, `authority`, `bounded`, `child`, `component`, `else`, `emit`, `enum`,
+`exports`, `fn`, `for`, `if`, `in`, `let`, `import`, `local`, `mailbox`, `match`,
+`module`, `mut`, `one_for_one`, `permanent`, `port`, `proc`, `protocol`, `record`,
+`requires`, `return`, `security`, `send`, `spawn`, `supervise`, `target`,
+`temporary`, `transient`, `type`, `var`, and `via` are reserved everywhere
 identifiers are accepted. The single `_` token is reserved for wildcard
 patterns.
-`ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `List`, `Map`, `Unit`, `Option`,
-`Result`, `SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`,
-`I32`, and `I64` are reserved type names because they name built-in transition,
-process-reference, capability descriptor, collection, effect outcome, and
-scalar value types.
+`ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`, `PortConnect`,
+`ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`, `SendError`,
+`SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` are
+reserved type names because they name built-in transition, process-reference,
+capability descriptor, collection, effect outcome, and scalar value types.
