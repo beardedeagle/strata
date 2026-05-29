@@ -110,7 +110,7 @@ process is accepted.
 Example shape:
 
 ```json
-{"event":"boundary_send_checked","pid":1,"process_id":0,"process":"Main","port_id":0,"port":"WorkerPort","protocol_id":0,"protocol":"WorkerProtocol","target_process_id":1,"target_process":"Worker","message_id":0,"message":"Ping","boundary_result":"accepted"}
+{"event":"boundary_send_checked","pid":1,"process_id":1,"process":"Main","port_id":0,"port":"WorkerPort","protocol_id":0,"protocol":"WorkerProtocol","target_process_id":0,"target_process":"Worker","message_id":0,"message":"Work","boundary_result":"accepted"}
 ```
 
 `port_id`, `protocol_id`, `target_process_id`, and `message_id` are admitted

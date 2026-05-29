@@ -18,12 +18,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         target_process_id: ProcessId,
         message_id: MessageId,
     ) -> Result<()> {
-        let boundary = self.program.validate_boundary_send(
-            step.process_name.as_str(),
-            port_id,
-            target_process_id,
-            message_id,
-        )?;
+        let boundary = self.program.boundary_for_port(port_id)?;
         self.record_event(RuntimeEvent::BoundarySendChecked {
             pid: step.pid,
             process_id: step.process_id,
