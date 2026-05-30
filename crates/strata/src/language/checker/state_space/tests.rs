@@ -93,6 +93,7 @@ fn test_module() -> Module {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         records: vec![Record {
             name: ident("MainState"),
             fields: Vec::new(),
@@ -124,6 +125,7 @@ fn recursive_state_module() -> Module {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         records: vec![Record {
             name: ident("MainState"),
             fields: vec![RecordField {

@@ -1,6 +1,6 @@
 use crate::{
     ARTIFACT_MAGIC, ArtifactAction, ArtifactSendTarget, ArtifactTypeKind, ArtifactValueShape,
-    Error, MAX_ARTIFACT_BYTES, MantleArtifact, NextState, Result,
+    Error, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FIELDS, MantleArtifact, NextState, Result,
 };
 
 mod boundaries;
@@ -34,52 +34,62 @@ impl KeyLen {
     }
 }
 
-pub(crate) fn validate_encoded_artifact_size(artifact: &MantleArtifact) -> Result<()> {
-    encoded_artifact_len(artifact).map(|_| ())
+pub(crate) fn validate_encoded_artifact_shape(artifact: &MantleArtifact) -> Result<()> {
+    encoded_artifact_shape(artifact).map(|_| ())
 }
 
 pub(crate) fn encoded_artifact_len(artifact: &MantleArtifact) -> Result<usize> {
-    let mut encoded_len = 0usize;
-    add_encoded_bytes(&mut encoded_len, ARTIFACT_MAGIC.len() + 1)?;
+    encoded_artifact_shape(artifact).map(|shape| shape.bytes)
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct EncodedArtifactShape {
+    bytes: usize,
+    fields: usize,
+}
+
+fn encoded_artifact_shape(artifact: &MantleArtifact) -> Result<EncodedArtifactShape> {
+    let mut encoded_shape = EncodedArtifactShape::default();
+    add_encoded_bytes(&mut encoded_shape, ARTIFACT_MAGIC.len() + 1)?;
     add_field_bytes(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("format".len()),
         &artifact.format,
     )?;
     add_field_bytes(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("schema_version".len()),
         &artifact.schema_version,
     )?;
     add_field_bytes(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("source_language".len()),
         &artifact.source_language,
     )?;
     add_field_bytes(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("module".len()),
         &artifact.module,
     )?;
     add_field_u32(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("entry_process".len()),
         artifact.entry_process.as_u32(),
     )?;
     add_field_u32(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("entry_message".len()),
         artifact.entry_message.as_u32(),
     )?;
     add_field_usize(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("type_count".len()),
         artifact.types.len(),
     )?;
     for (type_index, ty) in artifact.types.iter().enumerate() {
         let prefix = KeyLen::root_indexed("type", type_index);
-        add_field_bytes(&mut encoded_len, prefix.child("label"), &ty.label)?;
-        add_field_bytes(&mut encoded_len, prefix.child("kind"), ty.kind.as_str())?;
+        add_field_bytes(&mut encoded_shape, prefix.child("label"), &ty.label)?;
+        add_field_bytes(&mut encoded_shape, prefix.child("kind"), ty.kind.as_str())?;
         match ty.kind {
             ArtifactTypeKind::Value => {
                 let shape = ty.shape.as_ref().ok_or_else(|| {
@@ -87,11 +97,11 @@ pub(crate) fn encoded_artifact_len(artifact: &MantleArtifact) -> Result<usize> {
                         "type.{type_index} value type must declare a value shape"
                     ))
                 })?;
-                add_type_shape_bytes(&mut encoded_len, &prefix, shape)?;
+                add_type_shape_bytes(&mut encoded_shape, &prefix, shape)?;
             }
             ArtifactTypeKind::ProcessRef { target } => {
                 add_field_u32(
-                    &mut encoded_len,
+                    &mut encoded_shape,
                     prefix.child("target_process"),
                     target.as_u32(),
                 )?;
@@ -99,20 +109,20 @@ pub(crate) fn encoded_artifact_len(artifact: &MantleArtifact) -> Result<usize> {
         }
     }
     add_field_usize(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("output_count".len()),
         artifact.outputs.len(),
     )?;
     for (output_index, output) in artifact.outputs.iter().enumerate() {
         add_field_bytes(
-            &mut encoded_len,
+            &mut encoded_shape,
             KeyLen::root_indexed("output", output_index),
             output,
         )?;
     }
-    add_boundary_bytes(&mut encoded_len, artifact)?;
+    add_boundary_bytes(&mut encoded_shape, artifact)?;
     add_field_usize(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("process_count".len()),
         artifact.processes.len(),
     )?;
@@ -120,187 +130,199 @@ pub(crate) fn encoded_artifact_len(artifact: &MantleArtifact) -> Result<usize> {
     for (process_index, process) in artifact.processes.iter().enumerate() {
         let prefix = KeyLen::root_indexed("process", process_index);
         add_field_bytes(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("debug_name"),
             &process.debug_name,
         )?;
         add_field_u32(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("state_type_id"),
             process.state_type.as_u32(),
         )?;
         add_field_usize(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("state_value_count"),
             process.state_values.len(),
         )?;
         for (value_index, value) in process.state_values.iter().enumerate() {
             let value_prefix = prefix.indexed_child("state_value", value_index);
             add_field_u32(
-                &mut encoded_len,
+                &mut encoded_shape,
                 value_prefix.child("type_id"),
                 value.ty.as_u32(),
             )?;
-            add_field_value_label_len(&mut encoded_len, value_prefix.child("value"), &value.value)?;
-            add_field_bytes(&mut encoded_len, value_prefix.child("label"), &value.label)?;
+            add_field_value_label_len(
+                &mut encoded_shape,
+                value_prefix.child("value"),
+                &value.value,
+            )?;
+            add_field_bytes(
+                &mut encoded_shape,
+                value_prefix.child("label"),
+                &value.label,
+            )?;
             if let Some(payload) = &value.payload {
                 add_field_u32(
-                    &mut encoded_len,
+                    &mut encoded_shape,
                     value_prefix.child("payload_type_id"),
                     payload.ty.as_u32(),
                 )?;
                 add_field_value_label_len(
-                    &mut encoded_len,
+                    &mut encoded_shape,
                     value_prefix.child("payload_value"),
                     &payload.value,
                 )?;
             }
         }
         add_field_u32(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("message_type_id"),
             process.message_type.as_u32(),
         )?;
         add_field_usize(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("message_count"),
             process.message_variants.len(),
         )?;
         for (message_index, message) in process.message_variants.iter().enumerate() {
             let message_prefix = prefix.indexed_child("message", message_index);
-            add_field_bytes(&mut encoded_len, message_prefix, &message.label)?;
+            add_field_bytes(&mut encoded_shape, message_prefix, &message.label)?;
             if let Some(payload_type) = message.payload_type {
                 add_field_u32(
-                    &mut encoded_len,
+                    &mut encoded_shape,
                     message_prefix.child("payload_type_id"),
                     payload_type.as_u32(),
                 )?;
             }
         }
         add_field_usize(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("authority_count"),
             process.authorities.len(),
         )?;
         for (authority_index, authority) in process.authorities.iter().enumerate() {
             let authority_prefix = prefix.indexed_child("authority", authority_index);
             add_field_bytes(
-                &mut encoded_len,
+                &mut encoded_shape,
                 authority_prefix.child("debug_name"),
                 &authority.debug_name,
             )?;
             add_capability_descriptor_bytes(
-                &mut encoded_len,
+                &mut encoded_shape,
                 authority_prefix,
                 authority.descriptor,
             )?;
         }
-        add_spawn_site_bytes(&mut encoded_len, prefix, process)?;
-        add_supervisor_plan_bytes(&mut encoded_len, prefix, process)?;
+        add_spawn_site_bytes(&mut encoded_shape, prefix, process)?;
+        add_supervisor_plan_bytes(&mut encoded_shape, prefix, process)?;
         add_field_usize(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("process_ref_count"),
             process.process_refs.len(),
         )?;
         for (process_ref_index, process_ref) in process.process_refs.iter().enumerate() {
             let process_ref_prefix = prefix.indexed_child("process_ref", process_ref_index);
             add_field_bytes(
-                &mut encoded_len,
+                &mut encoded_shape,
                 process_ref_prefix.child("debug_name"),
                 &process_ref.debug_name,
             )?;
             add_field_u32(
-                &mut encoded_len,
+                &mut encoded_shape,
                 process_ref_prefix.child("target_process"),
                 process_ref.target.as_u32(),
             )?;
         }
         add_field_usize(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("mailbox_bound"),
             process.mailbox_bound,
         )?;
         add_field_u32(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("init_state"),
             process.init_state.as_u32(),
         )?;
         add_field_usize(
-            &mut encoded_len,
+            &mut encoded_shape,
             prefix.child("transition_count"),
             process.transitions.len(),
         )?;
         for (transition_index, transition) in process.transitions.iter().enumerate() {
             let transition_prefix = prefix.indexed_child("transition", transition_index);
             add_field_u32(
-                &mut encoded_len,
+                &mut encoded_shape,
                 transition_prefix.child("message"),
                 transition.message.as_u32(),
             )?;
             if let Some(current_state) = transition.current_state {
                 add_field_u32(
-                    &mut encoded_len,
+                    &mut encoded_shape,
                     transition_prefix.child("current_state"),
                     current_state.as_u32(),
                 )?;
             }
             if let Some(payload_guard) = &transition.payload_guard {
                 add_field_u32(
-                    &mut encoded_len,
+                    &mut encoded_shape,
                     transition_prefix.child("payload_guard_type_id"),
                     payload_guard.ty.as_u32(),
                 )?;
                 add_field_value_label_len(
-                    &mut encoded_len,
+                    &mut encoded_shape,
                     transition_prefix.child("payload_guard_value"),
                     &payload_guard.value,
                 )?;
             }
             add_field_bytes(
-                &mut encoded_len,
+                &mut encoded_shape,
                 transition_prefix.child("step_result"),
                 transition.step_result.as_str(),
             )?;
             add_field_bytes(
-                &mut encoded_len,
+                &mut encoded_shape,
                 transition_prefix.child("next_state"),
                 transition.next_state.kind_str(),
             )?;
-            add_next_state_bytes(&mut encoded_len, &transition_prefix, &transition.next_state)?;
+            add_next_state_bytes(
+                &mut encoded_shape,
+                &transition_prefix,
+                &transition.next_state,
+            )?;
             add_field_usize(
-                &mut encoded_len,
+                &mut encoded_shape,
                 transition_prefix.child("effect_count"),
                 transition.effects.len(),
             )?;
             for (effect_index, effect) in transition.effects.iter().enumerate() {
                 add_field_bytes(
-                    &mut encoded_len,
+                    &mut encoded_shape,
                     transition_prefix.indexed_child("effect", effect_index),
                     effect.as_str(),
                 )?;
             }
             add_field_usize(
-                &mut encoded_len,
+                &mut encoded_shape,
                 transition_prefix.child("action_count"),
                 transition.actions.len(),
             )?;
             for (action_index, action) in transition.actions.iter().enumerate() {
                 let action_prefix = transition_prefix.indexed_child("action", action_index);
-                add_action_bytes(&mut encoded_len, &action_prefix, action)?;
+                add_action_bytes(&mut encoded_shape, &action_prefix, action)?;
             }
         }
     }
 
     add_field_bytes(
-        &mut encoded_len,
+        &mut encoded_shape,
         KeyLen::new("source_hash_fnv1a64".len()),
         &artifact.source_hash_fnv1a64,
     )?;
-    Ok(encoded_len)
+    Ok(encoded_shape)
 }
 
 fn add_type_shape_bytes(
-    total: &mut usize,
+    total: &mut EncodedArtifactShape,
     prefix: &KeyLen,
     shape: &ArtifactValueShape,
 ) -> Result<()> {
@@ -354,31 +376,60 @@ fn add_type_shape_bytes(
     }
 }
 
-pub(super) fn add_field_bytes(total: &mut usize, key: KeyLen, value: &str) -> Result<()> {
+pub(super) fn add_field_bytes(
+    total: &mut EncodedArtifactShape,
+    key: KeyLen,
+    value: &str,
+) -> Result<()> {
     add_field_value_len(total, key, value.len())
 }
 
 pub(super) fn add_field_value_label_len(
-    total: &mut usize,
+    total: &mut EncodedArtifactShape,
     key: KeyLen,
     value: &crate::ArtifactValue,
 ) -> Result<()> {
     add_field_value_len(total, key, value.label_len()?)
 }
 
-pub(super) fn add_field_u32(total: &mut usize, key: KeyLen, value: u32) -> Result<()> {
+pub(super) fn add_field_u32(
+    total: &mut EncodedArtifactShape,
+    key: KeyLen,
+    value: u32,
+) -> Result<()> {
     add_field_value_len(total, key, decimal_len_u32(value))
 }
 
-pub(super) fn add_field_u64(total: &mut usize, key: KeyLen, value: u64) -> Result<()> {
+pub(super) fn add_field_u64(
+    total: &mut EncodedArtifactShape,
+    key: KeyLen,
+    value: u64,
+) -> Result<()> {
     add_field_value_len(total, key, decimal_len_u64(value))
 }
 
-pub(super) fn add_field_usize(total: &mut usize, key: KeyLen, value: usize) -> Result<()> {
+pub(super) fn add_field_usize(
+    total: &mut EncodedArtifactShape,
+    key: KeyLen,
+    value: usize,
+) -> Result<()> {
     add_field_value_len(total, key, decimal_len_usize(value))
 }
 
-fn add_field_value_len(total: &mut usize, key: KeyLen, value_len: usize) -> Result<()> {
+fn add_field_value_len(
+    total: &mut EncodedArtifactShape,
+    key: KeyLen,
+    value_len: usize,
+) -> Result<()> {
+    total.fields = total
+        .fields
+        .checked_add(1)
+        .ok_or_else(|| Error::new("encoded artifact field count overflowed"))?;
+    if total.fields > MAX_ARTIFACT_FIELDS {
+        return Err(Error::new(format!(
+            "artifact declares too many fields; maximum supported count is {MAX_ARTIFACT_FIELDS}"
+        )));
+    }
     add_encoded_bytes(total, key.0)?;
     add_encoded_bytes(total, 1)?;
     add_encoded_bytes(total, value_len)?;
@@ -402,7 +453,11 @@ const fn decimal_len_u64(mut value: u64) -> usize {
     len
 }
 
-fn add_next_state_bytes(total: &mut usize, prefix: &KeyLen, next_state: &NextState) -> Result<()> {
+fn add_next_state_bytes(
+    total: &mut EncodedArtifactShape,
+    prefix: &KeyLen,
+    next_state: &NextState,
+) -> Result<()> {
     match next_state {
         NextState::Current => Ok(()),
         NextState::Value(state) => {
@@ -436,7 +491,7 @@ fn add_next_state_bytes(total: &mut usize, prefix: &KeyLen, next_state: &NextSta
 }
 
 fn add_action_bytes(
-    total: &mut usize,
+    total: &mut EncodedArtifactShape,
     action_prefix: &KeyLen,
     action: &ArtifactAction,
 ) -> Result<()> {
@@ -617,7 +672,7 @@ fn add_action_bytes(
 }
 
 fn add_send_target_bytes(
-    total: &mut usize,
+    total: &mut EncodedArtifactShape,
     action_prefix: &KeyLen,
     target: &ArtifactSendTarget,
 ) -> Result<()> {
@@ -669,11 +724,12 @@ fn add_send_target_bytes(
     Ok(())
 }
 
-fn add_encoded_bytes(total: &mut usize, count: usize) -> Result<()> {
-    *total = total
+fn add_encoded_bytes(total: &mut EncodedArtifactShape, count: usize) -> Result<()> {
+    total.bytes = total
+        .bytes
         .checked_add(count)
         .ok_or_else(|| Error::new("encoded artifact size overflowed"))?;
-    if *total > MAX_ARTIFACT_BYTES {
+    if total.bytes > MAX_ARTIFACT_BYTES {
         return Err(Error::new(format!(
             "encoded artifact exceeds maximum size of {MAX_ARTIFACT_BYTES} bytes"
         )));

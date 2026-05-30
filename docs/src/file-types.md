@@ -34,13 +34,13 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=4
+schema_version=5
 source_language=strata
 ```
 
 The schema version identifies the admitted `.mta` encoding shape. It is not a
 Strata language release, a migration counter, or a stability guarantee. In the
-current greenfield implementation, `4` is the single admitted artifact schema
+current greenfield implementation, `5` is the single admitted artifact schema
 baseline. Unsupported schema versions are rejected; artifact producers must emit
 the admitted schema.
 
@@ -87,6 +87,13 @@ Local spawn authority is encoded as per-process authority tables and spawn-site
 tables. A spawn action references a spawn-site ID, which references an authority
 ID with a typed `Spawn` descriptor for the same target process. Authority names
 remain metadata; admission and runtime checks use typed IDs and descriptors.
+
+Protocol, port, component, and composition boundary data is encoded as typed
+tables. Component imports and composition bindings use port and
+component-instance IDs; names remain metadata for diagnostics and traces.
+Mantle validates complete composition binding and protocol compatibility before
+runtime execution, but it does not resolve Strata component names, import names,
+or source strings at runtime.
 
 Local supervisor children are encoded as per-process supervisor plans with typed
 supervisor IDs, child IDs, child modes, restart intensity, and lexical

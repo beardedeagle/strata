@@ -10,7 +10,7 @@ pub(crate) const FEATURES: &[Feature] = &[
         [
             ParserCoverage => ("crates/strata/src/language/tests/examples.rs", "fn parses_and_checks_hello()"),
             CheckerValidation => ("crates/strata/src/language/tests/examples.rs", "checked.module().name.as_str()"),
-            Diagnostics => ("docs/src/diagnostics.md", "expected protocol, port, component, record, enum, function, or proc declaration"),
+            Diagnostics => ("docs/src/diagnostics.md", "expected protocol, port, component, composition, record, enum, function, or proc declaration"),
             RunnableExample => ("examples/hello.str", "module hello;"),
             PositiveTest => ("crates/strata/src/language/tests/examples.rs", "parses_and_checks_hello"),
             NegativeTest => ("crates/strata/src/language/tests/syntax.rs", "rejects_duplicate_process_members"),

@@ -174,6 +174,7 @@ pub(super) fn checked_type_count_overflow_module() -> Module {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         records,
         enums,
         functions: Vec::new(),

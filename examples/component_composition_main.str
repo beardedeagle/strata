@@ -1,0 +1,31 @@
+module component_composition_main;
+import component_composition_worker;
+
+record MainState;
+enum MainMsg { Start }
+protocol MainProtocol message MainMsg requires Cap<ProtocolBoundary<MainProtocol>>;
+port MainPort protocol MainProtocol target Main requires Cap<PortConnect<MainPort>>;
+component MainComponent exports MainPort imports WorkerPort requires Cap<ComponentExport<MainComponent>>;
+composition AppComposition {
+    instance main component MainComponent;
+    instance worker component WorkerComponent;
+    bind main imports WorkerPort -> worker exports WorkerPort;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+    authority connect_worker: Cap<PortConnect<WorkerPort>>;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker via WorkerPort Work;
+        return Stop(state);
+    }
+}

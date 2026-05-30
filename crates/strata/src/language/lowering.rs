@@ -5,17 +5,17 @@ use mantle_artifact::{
     ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeKind,
     ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueTemplate,
     ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId, ComponentId,
-    EffectOutcomeId, EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId,
-    PortId, ProcessId, ProcessRefId, ProtocolId, SpawnSiteId, StateId, StepResult,
-    SupervisorChildId, SupervisorId, TypeId, source_hash_fnv1a64,
+    ComponentInstanceId, EffectOutcomeId, EnumVariantId, LoopElementId, MantleArtifact, MessageId,
+    NextState, OutputId, PortId, ProcessId, ProcessRefId, ProtocolId, SpawnSiteId, StateId,
+    StepResult, SupervisorChildId, SupervisorId, TypeId, source_hash_fnv1a64,
 };
 
 use super::Effect;
 use super::checked::{
-    CheckedAction, CheckedAuthorityId, CheckedComponentId, CheckedEffectOutcomeId,
-    CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageCase, CheckedMessageId,
-    CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedPortId, CheckedProcess,
-    CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedProtocolId,
+    CheckedAction, CheckedAuthorityId, CheckedComponentId, CheckedComponentInstanceId,
+    CheckedEffectOutcomeId, CheckedEnumVariantId, CheckedLoopElementId, CheckedMessageCase,
+    CheckedMessageId, CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedPortId,
+    CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedProgram, CheckedProtocolId,
     CheckedScalarArithmeticOperator, CheckedScalarOrderingOperator, CheckedSendTarget,
     CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedStepResult, CheckedSupervisorId,
     CheckedTransition, CheckedTypeId, CheckedTypeKind, CheckedTypeRef, CheckedValueBooleanOperator,
@@ -29,7 +29,7 @@ mod record_fields;
 mod supervision;
 mod value_shapes;
 
-use boundaries::{lower_components, lower_ports, lower_protocols};
+use boundaries::{lower_components, lower_compositions, lower_ports, lower_protocols};
 use capabilities::lower_capability_descriptor;
 use supervision::{lower_spawn_site, lower_supervisor_plans};
 use value_shapes::lower_value_shape;
@@ -121,6 +121,7 @@ fn lower_to_artifact_with_source_hash_fnv1a64(
     let protocols = lower_protocols(checked, &type_map)?;
     let ports = lower_ports(checked)?;
     let components = lower_components(checked)?;
+    let compositions = lower_compositions(checked)?;
     let artifact = MantleArtifact {
         format: ARTIFACT_FORMAT.to_string(),
         schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
@@ -133,6 +134,7 @@ fn lower_to_artifact_with_source_hash_fnv1a64(
         protocols,
         ports,
         components,
+        compositions,
         processes,
         source_hash_fnv1a64,
     };
@@ -688,6 +690,10 @@ pub(super) fn lower_port_id(id: CheckedPortId) -> PortId {
 
 pub(super) fn lower_component_id(id: CheckedComponentId) -> ComponentId {
     ComponentId::new(id.as_u32())
+}
+
+pub(super) fn lower_component_instance_id(id: CheckedComponentInstanceId) -> ComponentInstanceId {
+    ComponentInstanceId::new(id.as_u32())
 }
 
 fn lower_type_id(id: CheckedTypeId) -> TypeId {

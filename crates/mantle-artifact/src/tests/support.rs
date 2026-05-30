@@ -60,6 +60,7 @@ pub(super) fn valid_artifact() -> MantleArtifact {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),

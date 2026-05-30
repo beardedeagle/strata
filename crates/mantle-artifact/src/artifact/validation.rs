@@ -54,7 +54,7 @@ impl MantleArtifact {
         for (process_index, process) in self.processes.iter().enumerate() {
             process.validate_references(self, ProcessId::from_index(process_index)?)?;
         }
-        validate_encoded_artifact_size(self)?;
+        validate_encoded_artifact_shape(self)?;
 
         Ok(())
     }

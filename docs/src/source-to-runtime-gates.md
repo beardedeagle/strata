@@ -88,6 +88,14 @@ Mantle-admitted typed IDs:
 just run-example boundary_contracts_main
 ```
 
+The component composition gate proves source-unit reachability plus typed
+component import binding before lowering, then runs the admitted artifact without
+runtime source-name resolution:
+
+```sh
+just run-example component_composition_main
+```
+
 An immutable source computation gate proves sequential source-local bindings are
 resolved before lowering while Mantle executes only typed artifact data:
 

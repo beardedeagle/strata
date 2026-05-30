@@ -459,6 +459,7 @@ fn supervisor_artifact(max_restarts: u32, within_ms: u64) -> MantleArtifact {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         processes: vec![main_process(max_restarts, within_ms), worker_process()],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }

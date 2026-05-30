@@ -1,6 +1,6 @@
 pub const ARTIFACT_MAGIC: &str = "MTA0";
 pub const ARTIFACT_FORMAT: &str = "mantle-target-artifact";
-pub const ARTIFACT_SCHEMA_VERSION: &str = "4";
+pub const ARTIFACT_SCHEMA_VERSION: &str = "5";
 pub const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 pub const MAX_ARTIFACT_FIELDS: usize = 16_384;
 pub const MAX_FIELD_VALUE_BYTES: usize = 16 * 1024;
@@ -25,6 +25,9 @@ pub const MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR: usize = 128;
 pub const MAX_PROTOCOL_COUNT: usize = 256;
 pub const MAX_PORT_COUNT: usize = 256;
 pub const MAX_COMPONENT_COUNT: usize = 256;
+pub const MAX_COMPOSITION_COUNT: usize = 64;
+pub const MAX_COMPONENT_INSTANCE_COUNT: usize = 256;
+pub const MAX_PORT_BINDING_COUNT: usize = 256;
 pub const MAX_MAILBOX_BOUND: usize = 65_536;
 pub const MAX_VALUE_TEMPLATE_DEPTH: usize = 64;
 pub const MAX_VALUE_TEMPLATE_FIELDS: usize = 256;

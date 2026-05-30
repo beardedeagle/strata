@@ -22,6 +22,7 @@ fn runtime_traces_declared_boundary_send() {
     artifact.components = vec![ArtifactComponent {
         debug_name: "WorkerComponent".to_string(),
         export_port: PortId::new(0),
+        import_ports: Vec::new(),
         required_authority: ArtifactCapabilityDescriptor::ComponentExport {
             component: ComponentId::new(0),
         },
@@ -133,4 +134,122 @@ fn runtime_rejects_boundary_send_without_process_authority() {
             .contains("send through port id 0 requires authority port_connect")
     );
     assert!(host.events().is_empty());
+}
+
+#[test]
+fn loaded_runtime_rejects_component_import_to_unloaded_port() {
+    let mut program = loaded_program_with_component_import();
+    program.components[0].import_ports = vec![PortId::new(2)];
+
+    let err = program
+        .validate_admission()
+        .expect_err("loaded component import should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("loaded component WorkerComponent imports undefined port id 2"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn loaded_runtime_rejects_component_importing_exported_port() {
+    let mut program = loaded_program_with_component_import();
+    program.components[0].import_ports = vec![PortId::new(0)];
+
+    let err = program
+        .validate_admission()
+        .expect_err("loaded component self-import should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("loaded component WorkerComponent cannot import its exported port id 0"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn loaded_runtime_rejects_duplicate_component_import_ports() {
+    let mut program = loaded_program_with_component_import();
+    program.components[0].import_ports.push(PortId::new(1));
+
+    let err = program
+        .validate_admission()
+        .expect_err("loaded component duplicate import should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("loaded component WorkerComponent imports port id 1 more than once"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn loaded_runtime_rejects_component_import_count_above_bounds() {
+    let mut program = loaded_program_with_component_import();
+    program.components[0].import_ports = vec![PortId::new(1); mantle_artifact::MAX_PORT_COUNT + 1];
+
+    let err = program
+        .validate_admission()
+        .expect_err("loaded component import count should fail closed");
+
+    assert!(
+        err.to_string().contains(&format!(
+            "loaded component.0.import_count must be no greater than {}",
+            mantle_artifact::MAX_PORT_COUNT
+        )),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+fn loaded_program_with_component_import() -> LoadedProgram {
+    LoadedProgram::from_artifact(&artifact_with_component_import())
+        .expect("component import artifact should load")
+}
+
+fn artifact_with_component_import() -> MantleArtifact {
+    let mut artifact = valid_artifact();
+    artifact.protocols = vec![
+        ArtifactProtocol {
+            debug_name: "WorkerProtocol".to_string(),
+            message_type: WORKER_MSG,
+            required_authority: ArtifactCapabilityDescriptor::ProtocolBoundary {
+                protocol: ProtocolId::new(0),
+            },
+        },
+        ArtifactProtocol {
+            debug_name: "MainProtocol".to_string(),
+            message_type: MAIN_MSG,
+            required_authority: ArtifactCapabilityDescriptor::ProtocolBoundary {
+                protocol: ProtocolId::new(1),
+            },
+        },
+    ];
+    artifact.ports = vec![
+        ArtifactPort {
+            debug_name: "WorkerPort".to_string(),
+            protocol: ProtocolId::new(0),
+            target_process: ProcessId::new(1),
+            required_authority: ArtifactCapabilityDescriptor::PortConnect {
+                port: PortId::new(0),
+            },
+        },
+        ArtifactPort {
+            debug_name: "MainPort".to_string(),
+            protocol: ProtocolId::new(1),
+            target_process: ProcessId::new(0),
+            required_authority: ArtifactCapabilityDescriptor::PortConnect {
+                port: PortId::new(1),
+            },
+        },
+    ];
+    artifact.components = vec![ArtifactComponent {
+        debug_name: "WorkerComponent".to_string(),
+        export_port: PortId::new(0),
+        import_ports: vec![PortId::new(1)],
+        required_authority: ArtifactCapabilityDescriptor::ComponentExport {
+            component: ComponentId::new(0),
+        },
+    }];
+    artifact
 }

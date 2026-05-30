@@ -14,7 +14,7 @@ impl MantleArtifact {
             crate::validation::encoded_artifact_len(self).unwrap_or(ARTIFACT_MAGIC.len() + 1),
         );
         encoded.push_str(&format!(
-            "{ARTIFACT_MAGIC}\nformat={}\nschema_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\ntype_count={}\noutput_count={}\nprotocol_count={}\nport_count={}\ncomponent_count={}\nprocess_count={}\n",
+            "{ARTIFACT_MAGIC}\nformat={}\nschema_version={}\nsource_language={}\nmodule={}\nentry_process={}\nentry_message={}\ntype_count={}\noutput_count={}\nprotocol_count={}\nport_count={}\ncomponent_count={}\ncomposition_count={}\nprocess_count={}\n",
             self.format,
             self.schema_version,
             self.source_language,
@@ -26,6 +26,7 @@ impl MantleArtifact {
             self.protocols.len(),
             self.ports.len(),
             self.components.len(),
+            self.compositions.len(),
             self.processes.len()
         ));
         for (type_index, ty) in self.types.iter().enumerate() {

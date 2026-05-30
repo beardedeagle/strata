@@ -14,6 +14,27 @@ whose `type Msg` is `WorkerMsg`. `WorkerComponent` exports that port. The
 required capability descriptors must point back to the declaration being defined;
 mismatched descriptors are rejected.
 
+Components can also declare imported ports and a local composition can bind
+component instances through typed port edges:
+
+```strata
+component MainComponent exports MainPort imports WorkerPort requires Cap<ComponentExport<MainComponent>>;
+
+composition AppComposition {
+    instance main component MainComponent;
+    instance worker component WorkerComponent;
+    bind main imports WorkerPort -> worker exports WorkerPort;
+}
+```
+
+The checker builds typed component-instance IDs and typed port-binding edges
+before lowering. A composition is admitted only when every component import is
+bound exactly once, both instances are declared, the importing component actually
+imports the port, the exporting component actually exports the port, and the two
+ports share one protocol. Direct source-unit imports still control which
+components and ports are visible; transitive-only component or port access is
+rejected.
+
 A typed boundary send uses the optional `via` clause:
 
 ```strata
@@ -36,16 +57,20 @@ Checking proves all of these facts before lowering:
   `Cap<PortConnect<WorkerPort>>` authority.
 
 After checking, boundary references are typed IDs. Lowering emits Mantle
-protocol, port, component, authority, and action tables with those IDs. Mantle
-admits the tables before `ArtifactLoaded` and runtime dispatch uses admitted
-process, message, and port IDs. Protocol, port, component, process, and message
-names are metadata for diagnostics and traces only.
+protocol, port, component, composition, authority, and action tables with those
+IDs. Mantle admits the tables before `ArtifactLoaded` and runtime dispatch uses
+admitted process, message, and port IDs. Protocol, port, component, component
+instance, process, and message names are metadata for diagnostics and traces
+only.
 
 Invalid boundary shapes fail closed at the earliest layer that can see them. A
 source program with an undeclared port, mismatched protocol message type, missing
-port authority, duplicate boundary name, ambiguous direct import, or reserved
-descriptor type name fails checking. A hand-authored artifact with mismatched
-boundary table IDs or missing port authority fails admission before runtime
+port authority, duplicate boundary name, ambiguous direct import, unbound
+component import, duplicate component import binding, unimported-port binding,
+protocol-mismatched composition edge, or reserved descriptor type name fails
+checking. A hand-authored artifact with mismatched boundary table IDs,
+unimported-port composition binding, missing port authority, malformed
+composition edge, or unbound component import fails admission before runtime
 events begin.
 
 Accepted typed boundary sends emit `boundary_send_checked` runtime trace events.
@@ -56,4 +81,11 @@ Run the source-to-runtime example with:
 
 ```sh
 just run-example boundary_contracts_main
+just run-example component_composition_main
 ```
+
+Current implementation limits: the source `composition` form is a local typed
+graph admission input for component instances and port bindings. It is not the
+canonical `strata.component_composition` build/deployment artifact, and it does
+not add remote send, distributed transport, capability binding syntax,
+deployment manifests, package resolution, hot upgrade, or generated port stubs.

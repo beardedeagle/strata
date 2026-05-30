@@ -45,3 +45,5 @@ define_id!(SupervisorChildId);
 define_id!(ProtocolId);
 define_id!(PortId);
 define_id!(ComponentId);
+define_id!(ComponentInstanceId);
+define_id!(PortBindingId);

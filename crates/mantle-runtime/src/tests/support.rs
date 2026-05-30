@@ -43,6 +43,7 @@ pub(crate) fn valid_artifact() -> MantleArtifact {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
@@ -251,6 +252,7 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),
@@ -384,6 +386,7 @@ pub(crate) fn sequence_artifact() -> MantleArtifact {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         processes: vec![
             ArtifactProcess {
                 debug_name: "Main".to_string(),

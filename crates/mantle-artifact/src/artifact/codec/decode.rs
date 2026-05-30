@@ -33,7 +33,7 @@ impl MantleArtifact {
         for output_index in 0..output_count {
             outputs.push(fields.take_required_string(&format!("output.{output_index}"))?);
         }
-        let (protocols, ports, components) = decode_boundaries(&mut fields)?;
+        let (protocols, ports, components, compositions) = decode_boundaries(&mut fields)?;
 
         let mut processes = Vec::with_capacity(process_count);
         for process_index in 0..process_count {
@@ -257,6 +257,7 @@ impl MantleArtifact {
             protocols,
             ports,
             components,
+            compositions,
             processes,
             source_hash_fnv1a64: fields.take_required_string("source_hash_fnv1a64")?,
         };

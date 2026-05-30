@@ -110,10 +110,12 @@ fn artifact() -> MantleArtifact {
         components: vec![ArtifactComponent {
             debug_name: "WorkerComponent".to_string(),
             export_port: PortId::new(0),
+            import_ports: Vec::new(),
             required_authority: ArtifactCapabilityDescriptor::ComponentExport {
                 component: ComponentId::new(0),
             },
         }],
+        compositions: Vec::new(),
         processes: vec![main_process(), worker_process()],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }

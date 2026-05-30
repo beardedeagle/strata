@@ -236,6 +236,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
     },
     ProofDomain {
+        id: "checked-component-composition-admission",
+        title: "Checked local component port-binding composition admission",
+        feature_ids: &["checked-component-composition-admission"],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "checked-ir-action-templates",
         title: "Checked IR action templates and typed lowering",
         feature_ids: &[

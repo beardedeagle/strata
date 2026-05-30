@@ -2,7 +2,7 @@ use super::*;
 use crate::ArtifactValueTemplate;
 
 pub(super) fn add_value_template_bytes(
-    total: &mut usize,
+    total: &mut EncodedArtifactShape,
     prefix: KeyLen,
     template: &ArtifactValueTemplate,
 ) -> Result<()> {

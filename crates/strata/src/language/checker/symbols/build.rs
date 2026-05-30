@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::ArtifactScalarType;
+use mantle_artifact::{ArtifactScalarType, MAX_PORT_COUNT};
 
 use super::boundaries::{
     port_id_from_map, process_id_from_map, protocol_id_from_map, reject_boundary_name_conflict,
@@ -14,7 +14,7 @@ use super::type_validation::{
     reject_internal_type_label_prefix, reject_reserved_type_name,
     reject_reserved_type_name_literal, validate_message_payload_type, validate_record_fields,
 };
-use super::{PortContract, SemanticIndex, SymbolTable};
+use super::{ComponentContract, PortContract, SemanticIndex, SymbolTable};
 use crate::language::ast::Module;
 use crate::language::checked::{
     CheckedComponentId, CheckedPortId, CheckedProcessId, CheckedProtocolId,
@@ -40,6 +40,7 @@ impl SemanticIndex {
         let mut boundary_names = BTreeSet::new();
         let mut protocol_message_types = Vec::with_capacity(module.protocols.len());
         let mut port_contracts = Vec::with_capacity(module.ports.len());
+        let mut component_contracts = Vec::with_capacity(module.components.len());
 
         let _module_symbol = symbols.intern(&module.name)?;
         let proc_result_type = symbols.intern_str(PROC_RESULT_TYPE)?;
@@ -242,13 +243,41 @@ impl SemanticIndex {
                     component.name
                 )));
             }
-            port_id_from_map(&symbols, &ports, &component.export)?;
+            let export_port = port_id_from_map(&symbols, &ports, &component.export)?;
+            super::super::validate_count(
+                "component_import_count",
+                component.imports.len(),
+                0,
+                MAX_PORT_COUNT,
+            )?;
+            let mut import_ports = Vec::with_capacity(component.imports.len());
+            let mut seen_import_ports = BTreeSet::new();
+            for imported_port in &component.imports {
+                let imported_port_id = port_id_from_map(&symbols, &ports, imported_port)?;
+                if imported_port_id == export_port {
+                    return Err(Error::new(format!(
+                        "component {} cannot import its exported port {}",
+                        component.name, imported_port
+                    )));
+                }
+                if !seen_import_ports.insert(imported_port_id) {
+                    return Err(Error::new(format!(
+                        "component {} imports port {} more than once",
+                        component.name, imported_port
+                    )));
+                }
+                import_ports.push(imported_port_id);
+            }
             validate_boundary_authority(
                 &component.authority,
                 COMPONENT_EXPORT_TYPE,
                 &component.name,
                 "component",
             )?;
+            component_contracts.push(ComponentContract {
+                export_port,
+                import_ports,
+            });
         }
 
         for item in &module.enums {
@@ -305,6 +334,7 @@ impl SemanticIndex {
             ports,
             components,
             port_contracts,
+            component_contracts,
             enum_variants,
         })
     }

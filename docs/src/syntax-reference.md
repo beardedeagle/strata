@@ -16,19 +16,17 @@ The notation is informal:
 ```text
 source_file =
     module_decl import_decl* top_level_decl*
-
 module_decl =
     "module" ident ";"
-
 import_decl =
     "import" ident ";"
-
 top_level_decl =
     record_decl
   | enum_decl
   | protocol_decl
   | port_decl
   | component_decl
+  | composition_decl
   | function
   | process_decl
 ```
@@ -39,7 +37,6 @@ top_level_decl =
 record_decl =
     "record" ident ";"
   | "record" ident "{" record_field ("," record_field)* ","? "}"
-
 record_field =
     ident ":" type_ref
 ```
@@ -55,27 +52,45 @@ wildcards, re-exports, packages, and path strings are not accepted.
 ## Protocols, Ports, And Components
 
 ```text
-protocol_decl = "protocol" ident "message" ident "requires" type_ref ";"
-port_decl = "port" ident "protocol" ident "target" ident "requires" type_ref ";"
-component_decl = "component" ident "exports" ident "requires" type_ref ";"
+protocol_decl =
+    "protocol" ident "message" ident "requires" type_ref ";"
+port_decl =
+    "port" ident "protocol" ident "target" ident "requires" type_ref ";"
+component_decl =
+    "component" ident "exports" ident component_imports? "requires" type_ref ";"
+component_imports =
+    "imports" ident ("," ident)*
+composition_decl =
+    "composition" ident "{" composition_item* "}"
+composition_item =
+    component_instance
+  | port_binding
+component_instance =
+    "instance" ident "component" ident ";"
+port_binding =
+    "bind" ident "imports" ident "->" ident "exports" ident ";"
 ```
 
 A protocol names one enum message type, a port binds that protocol to one
-target process, and a component exports one port. The required authority
-annotations must be exact: `Cap<ProtocolBoundary<ProtocolName>>`,
-`Cap<PortConnect<PortName>>`, and `Cap<ComponentExport<ComponentName>>`.
-See [Boundary Contracts](boundary-contracts.md) for the checked and lowered
-contract.
+target process, and a component exports one port with zero or more imported
+ports. A composition declares local component instances and port binding edges
+from an imported port on one instance to an exported port on another instance.
+This is the current implementation's local source admission input, not the
+canonical `strata.component_composition` build/deployment artifact.
+The required authority annotations must be exact:
+`Cap<ProtocolBoundary<ProtocolName>>`, `Cap<PortConnect<PortName>>`, and
+`Cap<ComponentExport<ComponentName>>`. See
+[Boundary Contracts](boundary-contracts.md) for the checked and lowered
+contract. Capability bindings, remote bindings, package manifests, and port
+stubs are not part of this implementation surface.
 
 ## Enums
 
 ```text
 enum_decl =
     "enum" ident "{" enum_variant_list? "}"
-
 enum_variant_list =
     enum_variant ("," enum_variant)* ","?
-
 enum_variant =
     ident
   | ident "(" type_ref ")"
@@ -92,7 +107,6 @@ process_decl =
     "proc" ident "mailbox" "bounded" "(" number ")" "{"
         process_member*
     "}"
-
 process_member =
     state_alias
   | message_alias
@@ -101,23 +115,17 @@ process_member =
   | init_function
   | step_function
   | source_function
-
 state_alias =
     "type" "State" "=" type_ref ";"
-
 message_alias =
     "type" "Msg" "=" type_ref ";"
-
 authority_decl =
     "authority" ident ":" process_authority_type ";"
-
 process_authority_type =
     "Cap" "<" "Spawn" "<" ident ">" ">"
   | "Cap" "<" "PortConnect" "<" ident ">" ">"
-
 supervisor_decl =
     "supervise" "local" "one_for_one" "(" "max_restarts" ":" number "_u32" "," "within_ms" ":" number "_u64" ")" "{" supervisor_child+ "}"
-
 supervisor_child =
     "child" ident ":" ident "=" "spawn" ident "as" ("permanent" | "transient" | "temporary") ";"
 ```
@@ -145,17 +153,13 @@ function =
     "~" ident_list
     determinism
     function_body
-
 params =
     function_param ("," function_param)* ","?
-
 function_param =
     param_binding
   | pattern
-
 param_binding =
     ident ":" type_ref
-
 pattern =
     ident
   | ident "(" constructor_payload_pattern ")"
@@ -163,7 +167,6 @@ pattern =
   | "List" list_type_args? "[" list_pattern_items? "]"
   | "Map" map_type_args? "[" map_pattern_entries? "]"
   | "_"
-
 constructor_payload_pattern =
     ident ":" type_ref
   | ident
@@ -172,17 +175,13 @@ constructor_payload_pattern =
   | "List" list_type_args? "[" list_pattern_items? "]"
   | "Map" map_type_args? "[" map_pattern_entries? "]"
   | "_"
-
 record_pattern_fields =
     record_pattern_field ("," record_pattern_field)* ","?
-
 record_pattern_field =
     ident
   | ident ":" ident
-
 list_type_args =
     "<" type_ref "," number ">"
-
 map_type_args =
     "<" type_ref "," type_ref "," number ">"
 
@@ -731,13 +730,13 @@ ident =
     (ASCII letter | "_") (ASCII letter | ASCII digit | "_")*
 ```
 
-`_`, `as`, `authority`, `bounded`, `child`, `component`, `else`, `emit`, `enum`,
-`exports`, `fn`, `for`, `if`, `in`, `let`, `import`, `local`, `mailbox`, `match`,
-`module`, `mut`, `one_for_one`, `permanent`, `port`, `proc`, `protocol`, `record`,
-`requires`, `return`, `security`, `send`, `spawn`, `supervise`, `target`,
-`temporary`, `transient`, `type`, `var`, and `via` are reserved everywhere
-identifiers are accepted. The single `_` token is reserved for wildcard
-patterns.
+`_`, `as`, `authority`, `bind`, `bounded`, `child`, `component`, `composition`,
+`else`, `emit`, `enum`, `exports`, `fn`, `for`, `if`, `import`, `imports`, `in`,
+`instance`, `let`, `local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`,
+`permanent`, `port`, `proc`, `protocol`, `record`, `requires`, `return`,
+`security`, `send`, `spawn`, `supervise`, `target`, `temporary`, `transient`,
+`type`, `var`, and `via` are reserved everywhere identifiers are accepted. The
+single `_` token is reserved for wildcard patterns.
 `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`, `PortConnect`,
 `ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`, `SendError`,
 `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` are

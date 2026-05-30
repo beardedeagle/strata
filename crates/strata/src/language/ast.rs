@@ -103,7 +103,9 @@ fn is_reserved_identifier(value: &str) -> bool {
         value,
         "_" | "as"
             | "authority"
+            | "bind"
             | "bounded"
+            | "composition"
             | "else"
             | "emit"
             | "enum"
@@ -112,6 +114,8 @@ fn is_reserved_identifier(value: &str) -> bool {
             | "if"
             | "in"
             | "import"
+            | "imports"
+            | "instance"
             | "let"
             | "mailbox"
             | "match"
@@ -166,6 +170,7 @@ pub struct Module {
     pub protocols: Vec<Protocol>,
     pub ports: Vec<Port>,
     pub components: Vec<Component>,
+    pub compositions: Vec<Composition>,
     pub records: Vec<Record>,
     pub enums: Vec<Enum>,
     pub functions: Vec<Function>,
@@ -196,7 +201,29 @@ pub struct Port {
 pub struct Component {
     pub name: Identifier,
     pub export: Identifier,
+    pub imports: Vec<Identifier>,
     pub authority: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Composition {
+    pub name: Identifier,
+    pub instances: Vec<ComponentInstance>,
+    pub port_bindings: Vec<PortBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentInstance {
+    pub name: Identifier,
+    pub component: Identifier,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortBinding {
+    pub importer: Identifier,
+    pub imported_port: Identifier,
+    pub exporter: Identifier,
+    pub exported_port: Identifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -7,6 +7,8 @@ mod support;
 mod basic_runtime;
 #[path = "source_to_runtime_gates/boundary_contracts.rs"]
 mod boundary_contracts;
+#[path = "source_to_runtime_gates/component_composition.rs"]
+mod component_composition;
 #[path = "source_to_runtime_gates/local_supervision.rs"]
 mod local_supervision;
 #[path = "source_to_runtime_gates/payload_dispatch.rs"]

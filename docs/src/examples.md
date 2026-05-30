@@ -115,20 +115,22 @@ Read them in this order:
    source-unit imports checked and lowered from one root source path.
 56. `boundary_contracts_main.str`, with `boundary_contracts_worker.str`, for
    typed protocol, port, and component boundary contracts.
-57. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
+57. `component_composition_main.str`, with `component_composition_worker.str`,
+   for checked local component-instance and port-binding composition admission.
+58. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
    commit-or-return state evidence, and the `MailboxClosed` send-error contract
    shape.
-58. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
-59. `effect_outcome_stopped_target.str` for a source-visible `Stopped` send
+59. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
+60. `effect_outcome_stopped_target.str` for a source-visible `Stopped` send
    outcome.
-60. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
+61. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
    source-created `Panic(...)` prevents a later observer from recovering the
    crash as a source-visible send outcome.
-61. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
+62. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
    denial before process acceptance.
-62. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+63. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
-63. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
+64. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
    `local_supervision_temporary.str`, `local_supervision_transient_restart.str`,
    `local_supervision_transient.str`, and
    `local_supervision_inactive_send_outcome.str` for local `one_for_one`
@@ -140,3 +142,4 @@ Detailed notes are grouped by topic:
 - [Basic examples](examples-basic.md)
 - [Function and return-match examples](examples-functions.md)
 - [Runtime and actor examples](examples-runtime.md)
+- [Import, boundary, and failure examples](examples-boundary-failure.md)

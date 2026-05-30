@@ -5,9 +5,10 @@ use super::ast::{
 };
 use super::diagnostic::Result;
 use super::import_access::{
-    call_arg_type, validate_enum_variant, validate_function_or_variant_call,
-    validate_identifier_value, validate_identifier_value_expected, validate_port_name,
-    validate_process_name, validate_protocol_name, validate_type_name, validate_type_ref,
+    call_arg_type, validate_component_name, validate_enum_variant,
+    validate_function_or_variant_call, validate_identifier_value,
+    validate_identifier_value_expected, validate_port_name, validate_process_name,
+    validate_protocol_name, validate_type_name, validate_type_ref,
 };
 use super::import_symbols::ImportSymbols;
 use super::source_program::{ImportDependency, SourceUnit, SourceUnitId};
@@ -64,7 +65,19 @@ fn validate_unit_scope(
     }
     for component in &module.components {
         validate_port_name(&context, &component.export)?;
+        for imported_port in &component.imports {
+            validate_port_name(&context, imported_port)?;
+        }
         validate_type_ref(&context, &component.authority)?;
+    }
+    for composition in &module.compositions {
+        for instance in &composition.instances {
+            validate_component_name(&context, &instance.component)?;
+        }
+        for binding in &composition.port_bindings {
+            validate_port_name(&context, &binding.imported_port)?;
+            validate_port_name(&context, &binding.exported_port)?;
+        }
     }
     for record in &module.records {
         for field in &record.fields {

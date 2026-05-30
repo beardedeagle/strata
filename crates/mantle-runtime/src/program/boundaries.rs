@@ -131,6 +131,7 @@ impl LoadedProgram {
                         component.export_port.as_u32()
                     ))
                 })?;
+            self.validate_component_import_ports(index, component)?;
             Self::validate_component_required_authority(
                 ComponentId::from_index(index)?,
                 component.required_authority,
@@ -193,6 +194,46 @@ impl LoadedProgram {
                 component.as_u32()
             ))),
         }
+    }
+
+    fn validate_component_import_ports(
+        &self,
+        component_index: usize,
+        component: &ArtifactComponent,
+    ) -> Result<()> {
+        if component.import_ports.len() > MAX_PORT_COUNT {
+            return Err(Error::new(format!(
+                "loaded component.{component_index}.import_count must be no greater than {MAX_PORT_COUNT}"
+            )));
+        }
+        let mut seen_import_ports = [false; MAX_PORT_COUNT];
+        for imported_port in &component.import_ports {
+            if *imported_port == component.export_port {
+                return Err(Error::new(format!(
+                    "loaded component {} cannot import its exported port id {}",
+                    component.debug_name,
+                    imported_port.as_u32()
+                )));
+            }
+
+            let import_index = imported_port.index();
+            self.ports.get(import_index).ok_or_else(|| {
+                Error::new(format!(
+                    "loaded component {} imports undefined port id {}",
+                    component.debug_name,
+                    imported_port.as_u32()
+                ))
+            })?;
+            if seen_import_ports[import_index] {
+                return Err(Error::new(format!(
+                    "loaded component {} imports port id {} more than once",
+                    component.debug_name,
+                    imported_port.as_u32()
+                )));
+            }
+            seen_import_ports[import_index] = true;
+        }
+        Ok(())
     }
 
     fn validate_port_contract(&self, port_id: PortId) -> Result<()> {

@@ -394,6 +394,7 @@ fn required_obligations_for_feature(feature: &Feature) -> BTreeSet<ProofObligati
             EvidenceClass::BoundedOrProperty => {
                 required.insert(ProofObligationClass::BoundedOrProperty);
             }
+            EvidenceClass::PerformanceSmoke => {}
             EvidenceClass::Documentation => {
                 required.insert(ProofObligationClass::Documentation);
             }

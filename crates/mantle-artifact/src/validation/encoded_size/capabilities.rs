@@ -1,8 +1,8 @@
-use super::{KeyLen, add_field_bytes, add_field_u32};
+use super::{EncodedArtifactShape, KeyLen, add_field_bytes, add_field_u32};
 use crate::{ArtifactCapabilityDescriptor, Result};
 
 pub(super) fn add_capability_descriptor_bytes(
-    total: &mut usize,
+    total: &mut EncodedArtifactShape,
     prefix: KeyLen,
     descriptor: ArtifactCapabilityDescriptor,
 ) -> Result<()> {
