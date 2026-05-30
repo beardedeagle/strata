@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use crate::validation::{
-    validate_count, validate_encoded_artifact_size, validate_ident_field, validate_output_text,
+    validate_count, validate_encoded_artifact_shape, validate_ident_field, validate_output_text,
     validate_source_hash, validate_state_value_identity_label,
     validate_unique_message_variant_list, validate_unique_state_value_list,
 };
@@ -12,7 +12,10 @@ mod process_validation;
 mod validation;
 mod value_template;
 
-pub use boundaries::{ArtifactComponent, ArtifactPort, ArtifactProtocol};
+pub use boundaries::{
+    ArtifactComponent, ArtifactComponentInstance, ArtifactComposition, ArtifactPort,
+    ArtifactPortBinding, ArtifactProtocol,
+};
 pub use validation::validate_value_enum_membership;
 pub(in crate::artifact) use validation::{
     validate_artifact_identity, validate_unique_process_ref_list,
@@ -29,12 +32,14 @@ pub use value_template::{
 use crate::{
     ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, AuthorityId, ComponentId,
     EffectOutcomeId, EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
-    MAX_COMPONENT_COUNT, MAX_EFFECTS_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PORT_COUNT, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_PROTOCOL_COUNT, MAX_STATE_VALUES_PER_PROCESS,
-    MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH,
-    MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, PortId, ProcessId, ProcessRefId, ProtocolId,
-    Result, SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
+    MAX_COMPONENT_COUNT, MAX_COMPONENT_INSTANCE_COUNT, MAX_COMPOSITION_COUNT,
+    MAX_EFFECTS_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_OUTPUT_LITERALS, MAX_PORT_BINDING_COUNT, MAX_PORT_COUNT,
+    MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS, MAX_PROTOCOL_COUNT,
+    MAX_STATE_VALUES_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
+    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MessageId, OutputId, PortId, ProcessId,
+    ProcessRefId, ProtocolId, Result, SpawnSiteId, StateId, SupervisorChildId, SupervisorId,
+    TypeId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,6 +303,7 @@ pub struct MantleArtifact {
     pub protocols: Vec<ArtifactProtocol>,
     pub ports: Vec<ArtifactPort>,
     pub components: Vec<ArtifactComponent>,
+    pub compositions: Vec<ArtifactComposition>,
     pub processes: Vec<ArtifactProcess>,
     pub source_hash_fnv1a64: String,
 }

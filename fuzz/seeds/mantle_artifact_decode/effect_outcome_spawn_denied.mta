@@ -1,6 +1,6 @@
 MTA0
 format=mantle-target-artifact
-schema_version=4
+schema_version=5
 source_language=strata
 module=effect_outcome_spawn_denied
 entry_process=0
@@ -10,6 +10,7 @@ output_count=2
 protocol_count=0
 port_count=0
 component_count=0
+composition_count=0
 process_count=2
 type.0.label=MainState
 type.0.kind=value

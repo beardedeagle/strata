@@ -1,8 +1,10 @@
-use super::{KeyLen, add_field_bytes, add_field_u32, add_field_u64, add_field_usize};
+use super::{
+    EncodedArtifactShape, KeyLen, add_field_bytes, add_field_u32, add_field_u64, add_field_usize,
+};
 use crate::{ArtifactProcess, Result};
 
 pub(super) fn add_spawn_site_bytes(
-    total: &mut usize,
+    total: &mut EncodedArtifactShape,
     prefix: KeyLen,
     process: &ArtifactProcess,
 ) -> Result<()> {
@@ -49,7 +51,7 @@ pub(super) fn add_spawn_site_bytes(
 }
 
 pub(super) fn add_supervisor_plan_bytes(
-    total: &mut usize,
+    total: &mut EncodedArtifactShape,
     prefix: KeyLen,
     process: &ArtifactProcess,
 ) -> Result<()> {

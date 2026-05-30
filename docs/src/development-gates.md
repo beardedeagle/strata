@@ -89,11 +89,13 @@ just ci-local
 
 `just performance-smoke` runs stable source-to-runtime resource smoke profiles
 over `examples/collection_state.str`, the multi-file source-unit import example,
+the typed boundary-contract example, the checked component-composition example,
 and the local supervision restart example. It measures repeated Strata checking
-and lowering, root source loading for the import example, Mantle artifact
-encode/decode, repeated Mantle in-memory execution of the collection-state
-artifact, repeated Mantle JSONL-trace execution of the collection-state
-artifact, and repeated Mantle in-memory execution of the supervision artifact.
+and lowering for collection state, source-unit imports, boundary contracts, and
+component composition; Mantle artifact encode/decode; repeated Mantle in-memory
+execution of the collection-state and boundary-contract artifacts; repeated
+Mantle JSONL-trace execution of the collection-state artifact; and repeated
+Mantle in-memory execution of the supervision artifact.
 
 The smoke output reports wall time, allocation/deallocation counts, allocated
 and deallocated bytes, interval-relative live-byte metrics, process CPU time

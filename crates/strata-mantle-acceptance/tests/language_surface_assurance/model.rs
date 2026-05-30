@@ -29,6 +29,7 @@ pub(crate) enum EvidenceClass {
     SourceToRuntimeGate,
     FuzzSeed,
     BoundedOrProperty,
+    PerformanceSmoke,
     Documentation,
 }
 
@@ -279,6 +280,7 @@ pub(crate) mod expected {
         "typed-scalar-value-operators",
         "typed-effect-outcomes",
         "typed-component-protocol-port-boundaries",
+        "checked-component-composition-admission",
         "checked-ir-and-typed-id-boundary",
         "mantle-artifact-admission",
         "loaded-runtime-validation",
@@ -334,6 +336,7 @@ pub(crate) mod expected {
         "typed-scalar-value-operators",
         "typed-effect-outcomes",
         "typed-component-protocol-port-boundaries",
+        "checked-component-composition-admission",
         "checked-ir-action-templates",
         "mantle-artifact-admission",
         "mantle-loaded-artifact-validation",
@@ -358,6 +361,7 @@ impl EvidenceClass {
             EvidenceClass::SourceToRuntimeGate => "source-to-runtime-gate",
             EvidenceClass::FuzzSeed => "fuzz-seed",
             EvidenceClass::BoundedOrProperty => "bounded/property",
+            EvidenceClass::PerformanceSmoke => "performance-smoke",
             EvidenceClass::Documentation => "documentation",
         }
     }
@@ -487,6 +491,7 @@ impl SurfaceLayer {
                     | EvidenceClass::SourceToRuntimeGate
                     | EvidenceClass::FuzzSeed
                     | EvidenceClass::BoundedOrProperty
+                    | EvidenceClass::PerformanceSmoke
                     | EvidenceClass::Documentation
             ),
             SurfaceLayer::ArtifactAdmission => matches!(

@@ -5,7 +5,7 @@ use crate::{
 
 mod encoded_size;
 
-pub(crate) use encoded_size::{encoded_artifact_len, validate_encoded_artifact_size};
+pub(crate) use encoded_size::{encoded_artifact_len, validate_encoded_artifact_shape};
 
 pub(crate) fn validate_ident_field(field: &str, value: &str) -> Result<()> {
     if value.len() > MAX_IDENTIFIER_BYTES {

@@ -54,6 +54,17 @@ bounded deterministic lowering evidence, diagnostics, and docs are tracked
 together. Mantle does not resolve protocol, port, component, or import names at
 runtime; those names remain metadata.
 
+Checked local component port-binding composition admission is recorded as a
+runtime-bearing boundary feature: component import lists, local `composition`
+declarations, implementation-local source admission input, typed
+component-instance IDs, typed port-binding edges, direct-import validation,
+duplicate and unbound import rejection, unimported-port binding rejection,
+protocol mismatch rejection, deterministic graph lowering, Mantle
+composition-table admission, source-to-runtime execution, fuzz seeds,
+performance-smoke evidence, diagnostics, and docs are tracked together. Mantle
+admits typed composition metadata but does not resolve source component names,
+source-unit imports, or source strings at runtime.
+
 Run it with:
 
 ```sh

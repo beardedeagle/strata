@@ -1,0 +1,56 @@
+module component_composition_main_seed;
+import component_composition_worker_seed;
+
+record MainState;
+enum MainMsg { Start }
+
+protocol MainProtocol message MainMsg requires Cap<ProtocolBoundary<MainProtocol>>;
+port MainPort protocol MainProtocol target Main requires Cap<PortConnect<MainPort>>;
+component MainComponent exports MainPort imports WorkerPort requires Cap<ComponentExport<MainComponent>>;
+
+composition AppComposition {
+    instance main component MainComponent;
+    instance worker component WorkerComponent;
+    bind main imports WorkerPort -> worker exports WorkerPort;
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+    authority connect_worker: Cap<PortConnect<WorkerPort>>;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        send worker via WorkerPort Work;
+        return Stop(state);
+    }
+}
+--- strata source unit ---
+module component_composition_worker_seed;
+
+record WorkerState;
+enum WorkerMsg { Work }
+
+protocol WorkerProtocol message WorkerMsg requires Cap<ProtocolBoundary<WorkerProtocol>>;
+port WorkerPort protocol WorkerProtocol target Worker requires Cap<PortConnect<WorkerPort>>;
+component WorkerComponent exports WorkerPort requires Cap<ComponentExport<WorkerComponent>>;
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "composed worker handled Work";
+        return Stop(state);
+    }
+}

@@ -556,6 +556,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         protocols: checked_boundaries.protocols,
         ports: checked_boundaries.ports,
         components: checked_boundaries.components,
+        compositions: checked_boundaries.compositions,
         processes: checked_processes,
     }))
 }

@@ -19,7 +19,7 @@ result of the first invalid shape.
 
 | Diagnostic Contains | Likely Cause | Fix |
 | --- | --- | --- |
-| `expected protocol, port, component, record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `protocol`, `port`, `component`, `record`, `enum`, `fn`, or `proc` after `module` and any imports. |
+| `expected protocol, port, component, composition, record, enum, function, or proc declaration` | A top-level item is not accepted. | Use `protocol`, `port`, `component`, `composition`, `record`, `enum`, `fn`, or `proc` after `module` and any imports. |
 | `imports must appear before top-level declarations` | An `import` appears after a record, enum, function, or process declaration. | Move all `import module_name;` declarations immediately after `module name;`. |
 | `imports require checking from a root source path` | A source string with imports was passed to the single-source checker. | Run `strata check <root.str>` or use the source-program API so imports can be resolved. |
 | `source ... could not be resolved` | An imported sibling `.str` file is missing or cannot be read. | Add the imported `module_name.str` file next to the importing source unit or fix the import name. |
@@ -30,7 +30,12 @@ result of the first invalid shape.
 | `import cycle ... is not supported` | Source units import each other cyclically. | Break the cycle; this surface only accepts an acyclic dependency graph. |
 | `duplicate module identity ...` | Two reachable source units declare the same `module` name. | Give each reachable source unit a unique module identity. |
 | `ambiguous imported ... name ...` | Reachable source units declare the same unqualified type, function, process, protocol, port, component, or cross-unit callable name. | Rename one declaration; aliases, re-exports, and qualified references are not part of this surface. |
-| `references ... without importing ...` | A source unit uses a type, enum variant, pure function, process, protocol, port, or component from another reachable source unit without directly importing that unit. | Add an explicit `import module_name;` to the source unit that uses the declaration. |
+| `references ... without importing ...` | A source unit uses a type, enum variant, pure function, process, protocol, port, component, or composition edge from another reachable source unit without directly importing that unit. | Add an explicit `import module_name;` to the source unit that uses the declaration. |
+| `composition ... instance ... component ... import port ... is not bound` | A component instance imports a port that no composition binding satisfies. | Add one `bind importer imports Port -> exporter exports Port;` edge for that instance import. |
+| `composition ... binds instance ... imported port ... more than once` | A composition tries to bind the same imported port on one instance more than once. | Keep exactly one binding per imported `(instance, port)` pair. |
+| `composition ... cannot bind imported port ... to exported port ... because their protocols differ` | A composition edge connects ports that do not share one protocol. | Bind the import to a component export whose port uses the same protocol. |
+| `composition ... instance ... component ... does not import port ...` | A binding names an imported port that is not declared by the importing component. | Add the port to that component's `imports` list or bind the correct imported port. |
+| `composition ... instance ... component ... does not export port ...` | A binding names an exported port that is not exported by the exporting component. | Bind to the component's declared export port. |
 | `entry process Main is not declared` | The program has no `Main` process. | Add `proc Main ...`. |
 | `root source unit ... must declare entry process Main` | The loaded root source unit imports a module that may contain `Main`, but the root itself does not declare the entry process. | Declare `proc Main ...` in the root source file passed to `strata check` or `strata build`. |
 | `type name ... is reserved` | A source record or enum tries to use a built-in transition, capability, collection, outcome, or scalar type name. | Rename the source type. |

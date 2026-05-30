@@ -1,12 +1,13 @@
 use super::ast::{
-    AuthorityDeclaration, CollectionPatternBinding, Component, ConstructorPayloadPattern,
-    Determinism, Effect, Enum, EnumVariant, ForEachItem, Function, FunctionBlock, FunctionBody,
-    FunctionParam, Identifier, Import, ListPattern, ListValue, MapPattern, MapPatternCompleteness,
-    MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module, OutputLiteral, Param,
-    Pattern, Port, Process, Protocol, Record, RecordField, RecordPatternField, RecordValue,
-    RecordValueField, ReturnExpr, Statement, SupervisorChildDeclaration, SupervisorChildMode,
-    SupervisorDeclaration, SupervisorStrategy, TypeRef, ValueBooleanOperator,
-    ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator, ValueScalarOrderingOperator,
+    AuthorityDeclaration, CollectionPatternBinding, Component, ComponentInstance, Composition,
+    ConstructorPayloadPattern, Determinism, Effect, Enum, EnumVariant, ForEachItem, Function,
+    FunctionBlock, FunctionBody, FunctionParam, Identifier, Import, ListPattern, ListValue,
+    MapPattern, MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm,
+    Module, OutputLiteral, Param, Pattern, Port, PortBinding, Process, Protocol, Record,
+    RecordField, RecordPatternField, RecordValue, RecordValueField, ReturnExpr, Statement,
+    SupervisorChildDeclaration, SupervisorChildMode, SupervisorDeclaration, SupervisorStrategy,
+    TypeRef, ValueBooleanOperator, ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator,
+    ValueScalarOrderingOperator,
 };
 use super::diagnostic::{Error, Result};
 use super::lexer::{Lexer, Token, TokenKind};

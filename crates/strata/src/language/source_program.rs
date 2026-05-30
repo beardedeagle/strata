@@ -206,6 +206,7 @@ impl SourceProgram {
         let mut protocols = Vec::new();
         let mut ports = Vec::new();
         let mut components = Vec::new();
+        let mut compositions = Vec::new();
         let mut records = Vec::new();
         let mut enums = Vec::new();
         let mut functions = Vec::new();
@@ -222,6 +223,7 @@ impl SourceProgram {
             protocols.extend(unit.module.protocols);
             ports.extend(unit.module.ports);
             components.extend(unit.module.components);
+            compositions.extend(unit.module.compositions);
             records.extend(unit.module.records);
             enums.extend(unit.module.enums);
             functions.extend(unit.module.functions);
@@ -234,6 +236,7 @@ impl SourceProgram {
             protocols,
             ports,
             components,
+            compositions,
             records,
             enums,
             functions,
@@ -353,6 +356,7 @@ fn validate_cross_unit_names(units: &[SourceUnit]) -> Result<()> {
     let mut protocols = BTreeMap::new();
     let mut ports = BTreeMap::new();
     let mut components = BTreeMap::new();
+    let mut compositions = BTreeMap::new();
     let mut enum_variants = BTreeMap::new();
     for unit in units {
         for protocol in &unit.module.protocols {
@@ -363,6 +367,9 @@ fn validate_cross_unit_names(units: &[SourceUnit]) -> Result<()> {
         }
         for component in &unit.module.components {
             insert_cross_unit_name(&mut components, "component", unit, &component.name)?;
+        }
+        for composition in &unit.module.compositions {
+            insert_cross_unit_name(&mut compositions, "composition", unit, &composition.name)?;
         }
         for record in &unit.module.records {
             insert_cross_unit_name(&mut types, "type", unit, &record.name)?;

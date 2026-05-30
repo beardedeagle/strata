@@ -16,6 +16,7 @@
   - [Basic Examples](examples-basic.md)
   - [Function And Return-Match Examples](examples-functions.md)
   - [Runtime And Actor Examples](examples-runtime.md)
+  - [Import, Boundary, And Failure Examples](examples-boundary-failure.md)
 - [File Types](file-types.md)
 - [Source-To-Runtime Gates](source-to-runtime-gates.md)
 - [Language Surface Proof Substrate](language-surface-assurance.md)

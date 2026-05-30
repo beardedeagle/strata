@@ -6,7 +6,7 @@ use crate::language::ast::{Effect, Identifier, Module};
 use crate::language::diagnostic::{Error, Result};
 
 use super::{
-    CheckedAuthorityId, CheckedComponent, CheckedComponentId, CheckedMessageId,
+    CheckedAuthorityId, CheckedComponent, CheckedComponentId, CheckedComposition, CheckedMessageId,
     CheckedMessageVariantId, CheckedNextState, CheckedOutputId, CheckedPayloadValue, CheckedPort,
     CheckedPortId, CheckedProcessId, CheckedProcessRefId, CheckedProtocol, CheckedProtocolId,
     CheckedSpawnSiteId, CheckedStateId, CheckedStateValue, CheckedSupervisorChildId,
@@ -625,6 +625,7 @@ pub struct CheckedProgram {
     protocols: Vec<CheckedProtocol>,
     ports: Vec<CheckedPort>,
     components: Vec<CheckedComponent>,
+    compositions: Vec<CheckedComposition>,
     processes: Vec<CheckedProcess>,
 }
 
@@ -639,6 +640,7 @@ impl CheckedProgram {
             protocols: parts.protocols,
             ports: parts.ports,
             components: parts.components,
+            compositions: parts.compositions,
             processes: parts.processes,
         }
     }
@@ -686,6 +688,10 @@ impl CheckedProgram {
         &self.components
     }
 
+    pub(in crate::language) fn compositions(&self) -> &[CheckedComposition] {
+        &self.compositions
+    }
+
     pub(in crate::language) fn processes(&self) -> &[CheckedProcess] {
         &self.processes
     }
@@ -700,5 +706,6 @@ pub(in crate::language) struct CheckedProgramParts {
     pub protocols: Vec<CheckedProtocol>,
     pub ports: Vec<CheckedPort>,
     pub components: Vec<CheckedComponent>,
+    pub compositions: Vec<CheckedComposition>,
     pub processes: Vec<CheckedProcess>,
 }

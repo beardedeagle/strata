@@ -96,6 +96,7 @@ fn supervisor_send_outcome_artifact(exit: StepResult) -> MantleArtifact {
         protocols: Vec::new(),
         ports: Vec::new(),
         components: Vec::new(),
+        compositions: Vec::new(),
         processes: vec![main_process(), worker_process(exit)],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }

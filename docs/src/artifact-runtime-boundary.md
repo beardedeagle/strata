@@ -54,6 +54,9 @@ execution, the artifact decoder and validator check:
   table entries per process;
 - typed protocol, port, and component boundary tables, including exact
   required-authority descriptors and port target process/message compatibility;
+- typed component composition tables, including declared component instances,
+  imported port bindings, protocol compatibility, and complete binding of every
+  component import;
 - either one unguarded transition per accepted message or one state-specific
   transition for each admitted state value;
 - exact transition effect usage for emitted, spawned, and sent actions;
@@ -105,6 +108,15 @@ and message IDs; protocol, port, and component names are trace metadata only.
 Invalid or denied boundary shapes fail artifact or loaded-program admission
 before `ArtifactLoaded`; accepted typed boundary sends emit
 `boundary_send_checked` during runtime dispatch.
+
+Component composition metadata carries component-instance IDs and port IDs. It
+is admitted as a typed graph: every instance must point at a component table
+entry, every imported port edge must target a declared instance, the importing
+component must declare that imported port, the exporting component must export
+the bound port, protocols must match, and every component import on every
+instance must be bound. Runtime dispatch does not look up component names or
+source import names; the composition graph is metadata/admission data for the
+already lowered typed IDs.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect usage, and must exactly match the action effects that execute.

@@ -9,13 +9,13 @@ Mantle artifact internals.
 | Area | Accepted Surface |
 | --- | --- |
 | Source unit | One `module name;` declaration per file, with optional `import module_name;` declarations immediately after it. |
-| Top-level declarations | `protocol`, `port`, `component`, `record`, `enum`, `fn`, and `proc`. |
+| Top-level declarations | `protocol`, `port`, `component`, `composition`, `record`, `enum`, `fn`, and `proc`. |
 | Classes | Not available. |
 | Methods | Not available. |
 | Top-level functions | Pure deterministic one-argument source functions with optional immutable source-local bindings. |
 | Process functions | `init`, `step`, and pure deterministic one-argument process-local functions with optional immutable source-local bindings. |
 | Imports | Root-path loading of explicit sibling source-unit imports with deterministic dependency ordering. |
-| Boundary declarations | `protocol`, `port`, and `component` declarations for checked communication contracts. |
+| Boundary declarations | `protocol`, `port`, `component`, and local `composition` declarations for checked communication contracts. |
 | Standard library | Not available. |
 | Effects | `emit`, `spawn`, and `send`. |
 | Local spawn authority | Process-local `authority name: Cap<Spawn<Target>>;` declarations for dynamic local process creation. |
@@ -49,7 +49,7 @@ module hello;
 ```
 
 After the module declaration, zero or more imports may appear before protocols,
-ports, components, records, enums, source functions, and processes. See
+ports, components, compositions, records, enums, source functions, and processes. See
 [Tutorial: Hello](tutorial-hello.md) for the minimal complete source shape.
 
 Imports use the narrow form `import module_name;`. The CLI resolves
@@ -72,6 +72,19 @@ before lowering. `send target via Port Message;` proves the target process,
 protocol message enum, and process-local `Cap<PortConnect<Port>>` authority, then
 lowers typed boundary IDs into Mantle. Details are in
 [Boundary Contracts](boundary-contracts.md).
+
+Components may declare imported ports with `component MainComponent exports MainPort
+imports WorkerPort requires ...;`. A local `composition` is an
+implementation-local source admission input for component instances and typed
+port binding edges, for example
+`bind main imports WorkerPort -> worker exports WorkerPort;`.
+
+The checker admits this local input only when each instance names a visible
+component, each imported port is bound exactly once, each export belongs to the
+exporting component, and both ports use the same protocol. It is not the
+canonical `strata.component_composition` build/deployment artifact described by the
+architecture spec. Mantle receives typed component-instance and port IDs as artifact
+metadata/admission data and does not resolve source component names at runtime.
 
 Every buildable program must declare a `Main` process. Mantle starts `Main` and
 delivers the first message variant of `Main`'s message enum as the entry
@@ -99,12 +112,12 @@ worker-name
 _
 ```
 
-`_`, `as`, `authority`, `bounded`, `child`, `component`, `else`, `emit`, `enum`,
-`exports`, `fn`, `for`, `if`, `import`, `in`, `let`, `local`, `mailbox`, `match`,
-`module`, `mut`, `one_for_one`, `permanent`, `port`, `proc`, `protocol`,
-`record`, `requires`, `return`, `security`, `send`, `spawn`, `supervise`,
-`target`, `temporary`, `transient`, `type`, `var`, and `via` are reserved everywhere
-identifiers are accepted.
+`_`, `as`, `authority`, `bind`, `bounded`, `child`, `component`, `composition`,
+`else`, `emit`, `enum`, `exports`, `fn`, `for`, `if`, `import`, `imports`, `in`,
+`instance`, `let`, `local`, `mailbox`, `match`, `module`, `mut`, `one_for_one`,
+`permanent`, `port`, `proc`, `protocol`, `record`, `requires`, `return`,
+`security`, `send`, `spawn`, `supervise`, `target`, `temporary`, `transient`,
+`type`, `var`, and `via` are reserved everywhere identifiers are accepted.
 `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`, `PortConnect`,
 `ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`, `SendError`,
 `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` are

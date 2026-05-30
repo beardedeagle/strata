@@ -97,6 +97,7 @@ pub(super) struct SemanticIndex {
     ports: BTreeMap<Symbol, CheckedPortId>,
     components: BTreeMap<Symbol, CheckedComponentId>,
     port_contracts: Vec<PortContract>,
+    component_contracts: Vec<ComponentContract>,
     enum_variants: Vec<BTreeMap<Symbol, usize>>,
 }
 
@@ -105,6 +106,12 @@ pub(super) struct PortContract {
     pub(super) protocol: CheckedProtocolId,
     pub(super) target_process: CheckedProcessId,
     pub(super) message_type: TypeRef,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ComponentContract {
+    pub(super) export_port: CheckedPortId,
+    pub(super) import_ports: Vec<CheckedPortId>,
 }
 
 impl SemanticIndex {
@@ -160,6 +167,20 @@ impl SemanticIndex {
         self.port_contracts
             .get(port.index())
             .ok_or_else(|| Error::new(format!("port id {} is not declared", port.as_u32())))
+    }
+
+    pub(super) fn component_contract(
+        &self,
+        component: CheckedComponentId,
+    ) -> Result<&ComponentContract> {
+        self.component_contracts
+            .get(component.index())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "component id {} is not declared",
+                    component.as_u32()
+                ))
+            })
     }
 
     fn same_identifier(&self, left: &Identifier, right: &Identifier) -> bool {

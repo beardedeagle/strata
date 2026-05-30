@@ -146,6 +146,101 @@ fn decode_rejects_missing_boundary_table_counts() {
 }
 
 #[test]
+fn decode_rejects_missing_composition_instance_component_field() {
+    let encoded = valid_composition_artifact()
+        .encode()
+        .replace("composition.0.instance.0.component=0\n", "");
+
+    let err =
+        MantleArtifact::decode(&encoded).expect_err("missing component instance field should fail");
+
+    assert!(
+        err.to_string()
+            .contains("missing artifact field composition.0.instance.0.component"),
+        "{err}"
+    );
+}
+
+#[test]
+fn decode_rejects_missing_composition_port_binding_field() {
+    let encoded = valid_composition_artifact()
+        .encode()
+        .replace("composition.0.port_binding.0.importer=0\n", "");
+
+    let err = MantleArtifact::decode(&encoded).expect_err("missing port binding field should fail");
+
+    assert!(
+        err.to_string()
+            .contains("missing artifact field composition.0.port_binding.0.importer"),
+        "{err}"
+    );
+}
+
+#[test]
+fn decode_rejects_unbounded_composition_counts_before_allocation() {
+    let cases = [
+        (
+            valid_composition_artifact().encode().replace(
+                "composition.0.component_instance_count=2",
+                &format!(
+                    "composition.0.component_instance_count={}",
+                    MAX_COMPONENT_INSTANCE_COUNT + 1
+                ),
+            ),
+            "composition.0.component_instance_count must be no greater than",
+        ),
+        (
+            valid_composition_artifact().encode().replace(
+                "composition.0.port_binding_count=1",
+                &format!(
+                    "composition.0.port_binding_count={}",
+                    MAX_PORT_BINDING_COUNT + 1
+                ),
+            ),
+            "composition.0.port_binding_count must be no greater than",
+        ),
+    ];
+
+    for (encoded, expected) in cases {
+        let err = MantleArtifact::decode(&encoded)
+            .expect_err("composition count should be bounded before allocation");
+
+        assert!(
+            err.to_string().contains(expected),
+            "unexpected diagnostic for {expected}: {err}"
+        );
+    }
+}
+
+#[test]
+fn decode_and_validate_reject_encoded_field_count_above_limit() {
+    let artifact = artifact_above_encoded_field_count();
+    let encoded = artifact.encode();
+
+    assert!(encoded.len() < MAX_ARTIFACT_BYTES);
+    assert!(encoded.lines().skip(1).count() > MAX_ARTIFACT_FIELDS);
+
+    let validate_err = artifact
+        .validate()
+        .expect_err("programmatic artifact above decode field limit should fail");
+    assert!(
+        validate_err.to_string().contains(&format!(
+            "artifact declares too many fields; maximum supported count is {MAX_ARTIFACT_FIELDS}"
+        )),
+        "unexpected validation diagnostic: {validate_err}"
+    );
+
+    let decode_err = MantleArtifact::decode(&encoded)
+        .expect_err("encoded artifact above decode field limit should fail");
+    assert!(
+        decode_err.to_string().contains(&format!(
+            "artifact declares too many fields; maximum supported count is {MAX_ARTIFACT_FIELDS}"
+        )),
+        "unexpected decode diagnostic: {decode_err}"
+    );
+}
+
+#[test]
 fn decode_rejects_unknown_spawn_site_kind() {
     let encoded = valid_artifact().encode().replace(
         "process.0.spawn_site.0.kind=dynamic_local",
@@ -247,4 +342,105 @@ fn decode_rejects_unknown_transition_effect() {
         err.to_string()
             .contains("process.0.transition.0.effect.1: invalid effect value \"write\"")
     );
+}
+
+fn valid_composition_artifact() -> MantleArtifact {
+    let mut artifact = valid_artifact();
+    artifact.protocols = vec![
+        ArtifactProtocol {
+            debug_name: "MainProtocol".to_string(),
+            message_type: MAIN_MSG,
+            required_authority: ArtifactCapabilityDescriptor::ProtocolBoundary {
+                protocol: ProtocolId::new(0),
+            },
+        },
+        ArtifactProtocol {
+            debug_name: "WorkerProtocol".to_string(),
+            message_type: WORKER_MSG,
+            required_authority: ArtifactCapabilityDescriptor::ProtocolBoundary {
+                protocol: ProtocolId::new(1),
+            },
+        },
+    ];
+    artifact.ports = vec![
+        ArtifactPort {
+            debug_name: "MainPort".to_string(),
+            protocol: ProtocolId::new(0),
+            target_process: ProcessId::new(0),
+            required_authority: ArtifactCapabilityDescriptor::PortConnect {
+                port: PortId::new(0),
+            },
+        },
+        ArtifactPort {
+            debug_name: "WorkerPort".to_string(),
+            protocol: ProtocolId::new(1),
+            target_process: ProcessId::new(1),
+            required_authority: ArtifactCapabilityDescriptor::PortConnect {
+                port: PortId::new(1),
+            },
+        },
+    ];
+    artifact.components = vec![
+        ArtifactComponent {
+            debug_name: "MainComponent".to_string(),
+            export_port: PortId::new(0),
+            import_ports: vec![PortId::new(1)],
+            required_authority: ArtifactCapabilityDescriptor::ComponentExport {
+                component: ComponentId::new(0),
+            },
+        },
+        ArtifactComponent {
+            debug_name: "WorkerComponent".to_string(),
+            export_port: PortId::new(1),
+            import_ports: Vec::new(),
+            required_authority: ArtifactCapabilityDescriptor::ComponentExport {
+                component: ComponentId::new(1),
+            },
+        },
+    ];
+    artifact.compositions = vec![ArtifactComposition {
+        debug_name: "AppComposition".to_string(),
+        component_instances: vec![
+            ArtifactComponentInstance {
+                debug_name: "main".to_string(),
+                component: ComponentId::new(0),
+            },
+            ArtifactComponentInstance {
+                debug_name: "worker".to_string(),
+                component: ComponentId::new(1),
+            },
+        ],
+        port_bindings: vec![ArtifactPortBinding {
+            importer: ComponentInstanceId::new(0),
+            imported_port: PortId::new(1),
+            exporter: ComponentInstanceId::new(1),
+            exported_port: PortId::new(1),
+        }],
+    }];
+    artifact.processes[0].authorities.push(ArtifactAuthority {
+        debug_name: "connect_worker".to_string(),
+        descriptor: ArtifactCapabilityDescriptor::PortConnect {
+            port: PortId::new(1),
+        },
+    });
+    if let ArtifactAction::Send { port, .. } = &mut artifact.processes[0].transitions[0].actions[1]
+    {
+        *port = Some(PortId::new(1));
+    }
+
+    artifact
+}
+
+fn artifact_above_encoded_field_count() -> MantleArtifact {
+    let mut artifact = valid_artifact();
+    while artifact.types.len() < MAX_TYPE_COUNT {
+        artifact.types.push(ArtifactType::value(format!(
+            "ExtraType{}",
+            artifact.types.len()
+        )));
+    }
+    artifact.outputs = (0..MAX_OUTPUT_LITERALS)
+        .map(|index| format!("output_{index}"))
+        .collect();
+    artifact
 }

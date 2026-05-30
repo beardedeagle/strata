@@ -11,8 +11,9 @@ mod validation;
 
 pub use artifact::{
     ArtifactAction, ArtifactAuthority, ArtifactBranch, ArtifactCapabilityDescriptor,
-    ArtifactComponent, ArtifactEffect, ArtifactEnumVariant, ArtifactLoopElement, ArtifactMapEntry,
-    ArtifactMessageVariant, ArtifactPayload, ArtifactPort, ArtifactProcess, ArtifactProcessRef,
+    ArtifactComponent, ArtifactComponentInstance, ArtifactComposition, ArtifactEffect,
+    ArtifactEnumVariant, ArtifactLoopElement, ArtifactMapEntry, ArtifactMessageVariant,
+    ArtifactPayload, ArtifactPort, ArtifactPortBinding, ArtifactProcess, ArtifactProcessRef,
     ArtifactProcessRefPayload, ArtifactProtocol, ArtifactRecordField,
     ArtifactScalarArithmeticOperator, ArtifactScalarOrderingOperator, ArtifactScalarType,
     ArtifactScalarValue, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
@@ -27,9 +28,9 @@ pub use authority_summary::{AuthoritySummaryFormat, render_artifact_authority_su
 pub use constants::*;
 pub use error::{Error, Result};
 pub use ids::{
-    AuthorityId, ComponentId, EffectOutcomeId, EnumVariantId, LoopElementId, MessageId, OutputId,
-    PortId, ProcessId, ProcessRefId, ProtocolId, RecordFieldId, SpawnSiteId, StateId,
-    SupervisorChildId, SupervisorId, TypeId,
+    AuthorityId, ComponentId, ComponentInstanceId, EffectOutcomeId, EnumVariantId, LoopElementId,
+    MessageId, OutputId, PortBindingId, PortId, ProcessId, ProcessRefId, ProtocolId, RecordFieldId,
+    SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
 };
 pub use io::{SourceHashFnv1a64, read_artifact, source_hash_fnv1a64, write_artifact};
 pub use validation::{

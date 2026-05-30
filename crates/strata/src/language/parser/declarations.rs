@@ -10,6 +10,7 @@ impl Parser {
         let mut protocols = Vec::new();
         let mut ports = Vec::new();
         let mut components = Vec::new();
+        let mut compositions = Vec::new();
         let mut records = Vec::new();
         let mut enums = Vec::new();
         let mut functions = Vec::new();
@@ -41,6 +42,11 @@ impl Parser {
                 components.push(self.parse_component()?);
                 continue;
             }
+            if self.peek_keyword("composition") {
+                declarations_started = true;
+                compositions.push(self.parse_composition()?);
+                continue;
+            }
             if self.peek_keyword("record") {
                 declarations_started = true;
                 records.push(self.parse_record()?);
@@ -68,7 +74,7 @@ impl Parser {
             }
 
             return Err(self.error_here(
-                "expected protocol, port, component, record, enum, function, or proc declaration",
+                "expected protocol, port, component, composition, record, enum, function, or proc declaration",
             ));
         }
 
@@ -78,6 +84,7 @@ impl Parser {
             protocols,
             ports,
             components,
+            compositions,
             records,
             enums,
             functions,
@@ -130,13 +137,84 @@ impl Parser {
         let name = self.expect_identifier()?;
         self.expect_keyword("exports")?;
         let export = self.expect_identifier()?;
+        let imports = if self.peek_keyword("imports") {
+            self.parse_component_imports()?
+        } else {
+            Vec::new()
+        };
         self.expect_keyword("requires")?;
         let authority = self.parse_type()?;
         self.expect_symbol(';')?;
         Ok(Component {
             name,
             export,
+            imports,
             authority,
+        })
+    }
+
+    fn parse_component_imports(&mut self) -> Result<Vec<Identifier>> {
+        self.expect_keyword("imports")?;
+        let mut imports = Vec::new();
+        loop {
+            imports.push(self.expect_identifier()?);
+            if self.consume_symbol(',') {
+                continue;
+            }
+            break;
+        }
+        Ok(imports)
+    }
+
+    fn parse_composition(&mut self) -> Result<Composition> {
+        self.expect_keyword("composition")?;
+        let name = self.expect_identifier()?;
+        self.expect_symbol('{')?;
+        let mut instances = Vec::new();
+        let mut port_bindings = Vec::new();
+        while !self.consume_symbol('}') {
+            if self.peek_keyword("instance") {
+                instances.push(self.parse_component_instance()?);
+                continue;
+            }
+            if self.peek_keyword("bind") {
+                port_bindings.push(self.parse_port_binding()?);
+                continue;
+            }
+            return Err(self.error_here("expected component instance or port binding"));
+        }
+        self.reject_braced_type_semicolon("composition")?;
+        Ok(Composition {
+            name,
+            instances,
+            port_bindings,
+        })
+    }
+
+    fn parse_component_instance(&mut self) -> Result<ComponentInstance> {
+        self.expect_keyword("instance")?;
+        let name = self.expect_identifier()?;
+        self.expect_keyword("component")?;
+        let component = self.expect_identifier()?;
+        self.expect_symbol(';')?;
+        Ok(ComponentInstance { name, component })
+    }
+
+    fn parse_port_binding(&mut self) -> Result<PortBinding> {
+        self.expect_keyword("bind")?;
+        let importer = self.expect_identifier()?;
+        self.expect_keyword("imports")?;
+        let imported_port = self.expect_identifier()?;
+        self.expect_arrow()?;
+        let exporter = self.expect_identifier()?;
+        self.expect_keyword("exports")?;
+        let exported_port = self.expect_identifier()?;
+        self.expect_symbol(';')?;
+        Ok(PortBinding {
+            importer,
+            imported_port,
+            exporter,
+            exported_port,
         })
     }
 
