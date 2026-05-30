@@ -15,13 +15,13 @@ mod source_program;
 mod tests;
 
 pub use ast::{
-    AuthorityDeclaration, CollectionPatternBinding, Component, ConstructorPayloadPattern,
-    Determinism, Effect, Enum, ForEachItem, Function, FunctionBlock, FunctionBody, FunctionParam,
-    Identifier, Import, ListPattern, ListValue, MapPattern, MapPatternCompleteness,
-    MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module, OutputLiteral, Param,
-    Pattern, Port, Process, Protocol, Record, RecordField, RecordValue, RecordValueField,
-    ReturnExpr, Statement, TypeRef, ValueBooleanOperator, ValueEqualityOperator, ValueExpr,
-    ValueScalarArithmeticOperator, ValueScalarOrderingOperator,
+    AuthorityDeclaration, CollectionPatternBinding, Component, ComponentInstance, Composition,
+    ConstructorPayloadPattern, Determinism, Effect, Enum, ForEachItem, Function, FunctionBlock,
+    FunctionBody, FunctionParam, Identifier, Import, ListPattern, ListValue, MapPattern,
+    MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module,
+    OutputLiteral, Param, Pattern, Port, PortBinding, Process, Protocol, Record, RecordField,
+    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueBooleanOperator,
+    ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator, ValueScalarOrderingOperator,
 };
 pub use authority_summary::{AuthoritySummaryFormat, render_authority_summary};
 pub use checked::CheckedProgram;
