@@ -112,12 +112,29 @@ fn collect_forbidden_matches(path: &Path, forbidden: &[&str], violations: &mut V
 
     let contents = fs::read_to_string(path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
-    let normalized = contents.to_ascii_lowercase();
+    let normalized = source_boundary_normalized_contents(path, &contents);
     for pattern in forbidden {
         if normalized.contains(&pattern.to_ascii_lowercase()) {
             violations.push(format!("{} contains {pattern:?}", path.display()));
         }
     }
+}
+
+fn source_boundary_normalized_contents(path: &Path, contents: &str) -> String {
+    let mut normalized = contents.to_ascii_lowercase();
+    if path.ends_with("crates/mantle-runtime/src/feature_declaration.rs") {
+        // Mantle may publish spec-defined source-family metadata keys in its
+        // runtime declaration; it still must not own source semantics.
+        for allowed in [
+            "strata_version",
+            "optional_strata_profiles",
+            "strata.exact_effects_supported",
+            "strata.determinism_sources_supported",
+        ] {
+            normalized = normalized.replace(allowed, "");
+        }
+    }
+    normalized
 }
 
 fn is_scanned_file(path: &Path) -> bool {

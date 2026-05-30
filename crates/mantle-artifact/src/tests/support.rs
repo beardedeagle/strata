@@ -29,9 +29,10 @@ pub(super) fn create_fifo(path: &Path) {
 
 pub(super) fn valid_artifact() -> MantleArtifact {
     MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: TEST_SOURCE_LANGUAGE.to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: TEST_SOURCE_LANGUAGE.into(),
+        target_requirements: test_target_requirements(),
         module: "actor_ping".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
@@ -137,6 +138,28 @@ pub(super) fn valid_artifact() -> MantleArtifact {
         ],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }
+}
+
+pub(super) fn test_target_requirements() -> ArtifactTargetRequirements {
+    ArtifactTargetRequirements::new(
+        TEST_SOURCE_LANGUAGE,
+        vec![
+            RuntimeFeature::BoundedMailbox,
+            RuntimeFeature::ComponentCompositionMetadata,
+            RuntimeFeature::EmitEffect,
+            RuntimeFeature::JsonlTrace,
+            RuntimeFeature::LocalExecution,
+            RuntimeFeature::LocalSend,
+            RuntimeFeature::LocalSpawn,
+            RuntimeFeature::LocalSupervision,
+            RuntimeFeature::RuntimeBranching,
+            RuntimeFeature::RuntimeForEach,
+            RuntimeFeature::ScalarValueTemplates,
+            RuntimeFeature::TypedBoundaryTables,
+            RuntimeFeature::TypedEffectOutcomes,
+            RuntimeFeature::TypedValueTemplates,
+        ],
+    )
 }
 
 pub(super) fn state_values(ty: TypeId, values: &[&str]) -> Vec<ArtifactStateValue> {

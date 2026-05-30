@@ -3,10 +3,12 @@ use super::super::*;
 mod boundaries;
 mod capabilities;
 mod supervision;
+mod target_requirements;
 
 use boundaries::encode_boundaries;
 use capabilities::encode_capability_descriptor;
 use supervision::{encode_spawn_sites, encode_supervisor_plans};
+use target_requirements::encode_target_requirements;
 
 impl MantleArtifact {
     pub fn encode(&self) -> String {
@@ -29,6 +31,7 @@ impl MantleArtifact {
             self.compositions.len(),
             self.processes.len()
         ));
+        encode_target_requirements(&mut encoded, &self.target_requirements);
         for (type_index, ty) in self.types.iter().enumerate() {
             encode_type(&mut encoded, type_index, ty);
         }

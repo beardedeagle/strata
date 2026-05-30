@@ -129,6 +129,9 @@ changing the Mantle artifact:
 
 ```sh
 just strata-composition-report examples/component_composition_main.str json
+just strata-target-requirements examples/component_composition_main.str json
+just mantle-feature-declaration json
+just mantle-admit target/strata/component_composition_main.mta json
 ```
 
 ## Run The Standard Gate

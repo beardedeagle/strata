@@ -95,7 +95,16 @@ runtime source-name resolution:
 ```sh
 just run-example component_composition_main
 just strata-composition-report examples/component_composition_main.str json
+just strata-target-requirements examples/component_composition_main.str json
+just mantle-feature-declaration json
+just mantle-admit target/strata/component_composition_main.mta json
 ```
+
+This target-binding gate keeps the boundary explicit. Strata reports the typed
+runtime features required by the checked program; Mantle reports the typed
+features it currently supports; Mantle admission compares those sets before
+execution. Source imports, component names, authority labels, and report data
+remain diagnostics and metadata.
 
 An immutable source computation gate proves sequential source-local bindings are
 resolved before lowering while Mantle executes only typed artifact data:

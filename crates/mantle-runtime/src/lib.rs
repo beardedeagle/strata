@@ -6,6 +6,7 @@ use mantle_artifact::{MantleArtifact, Result, read_artifact};
 
 mod cli;
 mod event;
+mod feature_declaration;
 mod host;
 mod limits;
 mod program;
@@ -17,6 +18,10 @@ pub use event::{
     RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason,
     RuntimeLoopContext, RuntimeOutputStream, RuntimeProcessId, RuntimeStepResult,
     RuntimeStopReason,
+};
+pub use feature_declaration::{
+    RUNTIME_FEATURE_DECLARATION_SCHEMA_VERSION, RuntimeFeatureDeclarationFormat,
+    render_runtime_feature_declaration,
 };
 pub use host::{InMemoryRuntimeHost, RuntimeHost};
 pub use limits::{

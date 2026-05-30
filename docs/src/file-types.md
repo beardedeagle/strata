@@ -34,15 +34,31 @@ Minimum artifact identity fields:
 
 ```text
 format=mantle-target-artifact
-schema_version=5
+schema_version=6
 source_language=strata
+target_requirements.source_language=strata
+target_requirements.feature_count=...
+target_requirements.feature.0=bounded_mailbox
 ```
 
 The schema version identifies the admitted `.mta` encoding shape. It is not a
 Strata language release, a migration counter, or a stability guarantee. In the
-current greenfield implementation, `5` is the single admitted artifact schema
+current greenfield implementation, `6` is the single admitted artifact schema
 baseline. Unsupported schema versions are rejected; artifact producers must emit
 the admitted schema.
+
+The `target_requirements.*` block is a typed frontend-to-runtime binding
+surface. Strata emits it from checked IR and lowering facts; Mantle admits it
+only when the artifact format and schema version match the admitted artifact
+baseline, `source_language` is valid metadata and matches
+`target_requirements.source_language`, and every required runtime feature is
+supported by the current Mantle runtime feature declaration. The current Mantle
+runtime declaration treats source language as opaque artifact metadata rather
+than an executable dispatch key or language whitelist. Requirement entries are
+canonical runtime feature IDs such as
+`local_execution`, `bounded_mailbox`, `local_send`, `local_spawn`,
+`typed_boundary_tables`, and `component_composition_metadata`. They are not
+source names and are never executable dispatch strings.
 
 Executable references, type identity, and state transitions inside `.mta` use
 validated table IDs and typed transition forms. Process transition records are

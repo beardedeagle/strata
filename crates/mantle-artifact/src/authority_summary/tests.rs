@@ -4,8 +4,8 @@ use crate::{
     ArtifactMessageVariant, ArtifactPort, ArtifactProcess, ArtifactProcessRef, ArtifactProtocol,
     ArtifactSendTarget, ArtifactSpawnSite, ArtifactStateValue, ArtifactSupervisorChild,
     ArtifactSupervisorChildMode, ArtifactSupervisorPlan, ArtifactSupervisorRestartIntensity,
-    ArtifactSupervisorStrategy, ArtifactType, MessageId, NextState, ProcessRefId, SpawnSiteId,
-    StateId, StepResult, TypeId,
+    ArtifactSupervisorStrategy, ArtifactTargetRequirements, ArtifactType, MessageId, NextState,
+    ProcessRefId, RuntimeFeature, SpawnSiteId, StateId, StepResult, TypeId,
 };
 
 #[test]
@@ -79,9 +79,22 @@ fn summary_rejects_invalid_artifact_before_rendering() {
 
 fn artifact() -> MantleArtifact {
     MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: "example_lang".to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: "example_lang".into(),
+        target_requirements: ArtifactTargetRequirements::new(
+            "example_lang",
+            vec![
+                RuntimeFeature::BoundedMailbox,
+                RuntimeFeature::JsonlTrace,
+                RuntimeFeature::LocalExecution,
+                RuntimeFeature::LocalSend,
+                RuntimeFeature::LocalSpawn,
+                RuntimeFeature::LocalSupervision,
+                RuntimeFeature::TypedBoundaryTables,
+                RuntimeFeature::TypedValueTemplates,
+            ],
+        ),
         module: "summary".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),

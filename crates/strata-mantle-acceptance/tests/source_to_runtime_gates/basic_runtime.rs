@@ -8,6 +8,32 @@ fn hello_source_checks_builds_and_runs_on_mantle() {
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(stdout.contains("hello from Strata"));
     assert!(stdout.contains("mantle: stopped Main normally"));
+    let requirements = gate.target_requirements("examples/hello.str", "json");
+    let requirements =
+        String::from_utf8(requirements.stdout).expect("target requirements should be UTF-8");
+    assert!(requirements.contains("\"source_language\":\"strata\""));
+    assert!(requirements.contains("\"emit_effect\""));
+    assert!(!requirements.contains("\"local_spawn\""));
+    assert!(!requirements.contains("\"typed_value_templates\""));
+    let artifact = gate.read_artifact("target/strata/hello.mta");
+    assert!(
+        artifact
+            .target_requirements
+            .features
+            .contains(&RuntimeFeature::EmitEffect)
+    );
+    assert!(
+        !artifact
+            .target_requirements
+            .features
+            .contains(&RuntimeFeature::LocalSpawn)
+    );
+    assert!(
+        !artifact
+            .target_requirements
+            .features
+            .contains(&RuntimeFeature::TypedValueTemplates)
+    );
 
     let trace = gate.read_trace("hello");
     assert!(trace.contains(r#""event":"artifact_loaded""#));
@@ -33,6 +59,25 @@ fn actor_ping_checks_builds_and_runs_on_mantle() {
     assert!(stdout.contains("worker handled Ping"));
     assert!(stdout.contains("mantle: stopped Main normally"));
     assert!(stdout.contains("mantle: stopped Worker normally"));
+    let artifact = gate.read_artifact("target/strata/actor_ping.mta");
+    assert!(
+        artifact
+            .target_requirements
+            .features
+            .contains(&RuntimeFeature::LocalSpawn)
+    );
+    assert!(
+        artifact
+            .target_requirements
+            .features
+            .contains(&RuntimeFeature::LocalSend)
+    );
+    assert!(
+        !artifact
+            .target_requirements
+            .features
+            .contains(&RuntimeFeature::RemoteSpawn)
+    );
 
     let trace = gate.read_trace("actor_ping");
     assert!(trace.contains(r#""event":"process_spawned""#));

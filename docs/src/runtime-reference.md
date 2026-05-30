@@ -2,6 +2,37 @@
 
 This page documents Strata source forms that lower to typed Mantle runtime behavior. It continues the authoring reference from [Language Reference](language-reference.md).
 
+## Runtime Feature Declaration And Target Binding
+
+Every lowered `.mta` artifact carries a typed `target_requirements` block. For
+Strata, the block is derived from checked IR and lowering facts: local
+execution, bounded mailboxes, trace support, local spawn/send/effect use,
+runtime branches and loops, typed value templates, typed effect outcomes,
+boundary tables, and component-composition metadata where those surfaces are
+present.
+
+Mantle publishes its own runtime feature declaration:
+
+```sh
+just mantle-feature-declaration json
+```
+
+Admission compares the artifact identity and typed requirements against that
+declaration:
+
+```sh
+just strata-target-requirements examples/component_composition_main.str json
+just mantle-admit target/strata/component_composition_main.mta json
+```
+
+Current implementation limits are reported as runtime implementation limits, not
+Strata language law. Remote send, remote spawn, distributed transport, cluster
+membership, package management, hot upgrade, generated stubs, native output,
+and execution-plan bytecode remain unsupported. Unsupported required features or
+malformed source-language metadata fail before runtime execution. Mantle treats
+source language as opaque artifact metadata and does not dispatch on source
+names.
+
 ## Runtime Branching
 
 Step bodies can use a final-position runtime `if` whose condition is a checked
@@ -378,6 +409,27 @@ port-binding IDs, admitted binding results, empty unsatisfied imports for
 admitted compositions, component export authority surfaces, endpoint port
 authority requirements, and cross-component authority edges. Mantle does not
 read this report; it executes only admitted `.mta` artifacts.
+
+Runtime feature declarations and target requirement reports are read-only
+compatibility inspection surfaces:
+
+```sh
+just strata-target-requirements examples/actor_ping.str
+just strata-target-requirements examples/actor_ping.str json
+just mantle-feature-declaration
+just mantle-feature-declaration json
+```
+
+`strata target-requirements` checks and lowers source, then prints the runtime
+feature IDs embedded in the generated artifact. `mantle feature-declaration`
+prints the current `mantle.feature_declaration.v5` metadata: artifact format,
+schema version, source-language metadata policy, local containment and mailbox
+models, conservative message-observation fields, allocation fields,
+validity-window defaults, component/spawn observability fields, supported
+runtime features, and unsupported implementation limits. Mantle admission
+derives the minimum feature set required by the `.mta` tables and requires the
+embedded target requirements to cover that set. The reports do not execute
+source names or alter runtime state.
 
 ## Step Patterns
 

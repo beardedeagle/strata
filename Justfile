@@ -96,6 +96,15 @@ strata-composition-report source format="text":
 mantle-inspect-authority artifact format="text":
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- inspect-authority "{{artifact}}" --format "{{format}}"
 
+mantle-feature-declaration format="text":
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- feature-declaration --format "{{format}}"
+
+strata-target-requirements source format="text":
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- target-requirements "{{source}}" --format "{{format}}"
+
+mantle-admit artifact format="text":
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- admit "{{artifact}}" --format "{{format}}"
+
 run-example name:
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check "examples/{{name}}.str"
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build "examples/{{name}}.str"
@@ -254,6 +263,9 @@ source-to-runtime-success-gates: build
     done
 
     "${cargo_run[@]}" -p strata --bin strata -- composition-report examples/component_composition_main.str --format json >/dev/null
+    "${cargo_run[@]}" -p strata --bin strata -- target-requirements examples/component_composition_main.str --format json >/dev/null
+    "${cargo_run[@]}" -p mantle-runtime --bin mantle -- feature-declaration --format json >/dev/null
+    "${cargo_run[@]}" -p mantle-runtime --bin mantle -- admit target/strata/component_composition_main.mta --format json >/dev/null
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_spawn_denied.mta --deny-spawn-authority
     "${cargo_run[@]}" -p strata --bin strata -- check examples/effect_outcome_crashed_target.str
     "${cargo_run[@]}" -p strata --bin strata -- build examples/effect_outcome_crashed_target.str

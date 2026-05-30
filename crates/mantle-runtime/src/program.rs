@@ -28,19 +28,24 @@ use mantle_artifact::{
     ArtifactAction, ArtifactAuthority, ArtifactCapabilityDescriptor, ArtifactComponent,
     ArtifactEnumVariant, ArtifactMessageVariant, ArtifactPort, ArtifactProcess, ArtifactProcessRef,
     ArtifactProtocol, ArtifactScalarType, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
-    ArtifactSupervisorChildMode, ArtifactSupervisorStrategy, ArtifactTransition, ArtifactType,
-    ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape, AuthorityId, ComponentId,
-    EffectOutcomeId, EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
-    MAX_AUTHORITIES_PER_PROCESS, MAX_COMPONENT_COUNT, MAX_EFFECT_OUTCOMES_PER_TRANSITION,
-    MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS,
-    MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS, MAX_PORT_COUNT, MAX_PROCESS_COUNT,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_PROTOCOL_COUNT, MAX_SPAWN_SITES_PER_PROCESS,
-    MAX_STATE_VALUES_PER_PROCESS, MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR,
-    MAX_SUPERVISORS_PER_PROCESS, MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT,
-    MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState,
-    OutputId, PortId, ProcessId, ProcessRefId, ProtocolId, RecordFieldId, Result, SpawnSiteId,
-    StateId, StepResult, SupervisorChildId, SupervisorId, TypeId, validate_message_label,
+    ArtifactSupervisorChildMode, ArtifactSupervisorStrategy, ArtifactTargetRequirements,
+    ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape,
+    AuthorityId, ComponentId, EffectOutcomeId, EnumVariantId, Error, LoopElementId,
+    MAX_ACTIONS_PER_PROCESS, MAX_AUTHORITIES_PER_PROCESS, MAX_COMPONENT_COUNT,
+    MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
+    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS,
+    MAX_PORT_COUNT, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS, MAX_PROTOCOL_COUNT,
+    MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
+    MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR, MAX_SUPERVISORS_PER_PROCESS,
+    MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH,
+    MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState, OutputId, PortId, ProcessId,
+    ProcessRefId, ProtocolId, RecordFieldId, Result, SpawnSiteId, StateId, StepResult,
+    SupervisorChildId, SupervisorId, TypeId, validate_message_label,
     validate_state_value_identity_label,
+};
+
+use crate::feature_declaration::{
+    validate_artifact_runtime_requirements, validate_runtime_features_supported,
 };
 
 #[derive(Debug, Clone)]
@@ -51,6 +56,7 @@ pub(crate) struct LoadedProgram {
     pub(crate) module: String,
     pub(crate) entry_process: ProcessId,
     pub(crate) entry_message: MessageId,
+    pub(crate) target_requirements: ArtifactTargetRequirements,
     pub(crate) types: Vec<ArtifactType>,
     pub(crate) outputs: Vec<String>,
     pub(crate) protocols: Vec<ArtifactProtocol>,
@@ -61,7 +67,7 @@ pub(crate) struct LoadedProgram {
 
 impl LoadedProgram {
     pub(crate) fn from_artifact(artifact: &MantleArtifact) -> Result<Self> {
-        artifact.validate()?;
+        validate_artifact_runtime_requirements(artifact)?;
         let processes = artifact
             .processes
             .iter()
@@ -69,12 +75,13 @@ impl LoadedProgram {
             .collect::<Result<Vec<_>>>()?;
 
         Ok(Self {
-            format: artifact.format.clone(),
-            schema_version: artifact.schema_version.clone(),
-            source_language: artifact.source_language.clone(),
+            format: artifact.format.to_string(),
+            schema_version: artifact.schema_version.to_string(),
+            source_language: artifact.source_language.to_string(),
             module: artifact.module.clone(),
             entry_process: artifact.entry_process,
             entry_message: artifact.entry_message,
+            target_requirements: artifact.target_requirements.clone(),
             types: artifact.types.clone(),
             outputs: artifact.outputs.clone(),
             protocols: artifact.protocols.clone(),
@@ -338,6 +345,8 @@ impl LoadedProgram {
 
     pub(crate) fn validate_admission(&self) -> Result<()> {
         validate_loaded_artifact_identity(&self.format, &self.schema_version)?;
+        self.target_requirements.validate(&self.source_language)?;
+        validate_runtime_features_supported(&self.target_requirements.features)?;
         validate_loaded_ident_field("source_language", &self.source_language)?;
         validate_loaded_ident_field("module", &self.module)?;
 

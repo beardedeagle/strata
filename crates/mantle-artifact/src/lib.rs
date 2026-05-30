@@ -7,6 +7,7 @@ mod error;
 mod fields;
 mod ids;
 mod io;
+mod runtime_features;
 mod validation;
 
 pub use artifact::{
@@ -33,6 +34,10 @@ pub use ids::{
     SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
 };
 pub use io::{SourceHashFnv1a64, read_artifact, source_hash_fnv1a64, write_artifact};
+pub use runtime_features::{
+    ArtifactTargetRequirements, RuntimeFeature, TargetRequirementsFormat,
+    render_artifact_target_requirements,
+};
 pub use validation::{
     validate_message_label, validate_payload_value_label, validate_state_value_identity_label,
     validate_state_value_label,

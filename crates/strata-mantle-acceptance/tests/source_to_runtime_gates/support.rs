@@ -9,7 +9,7 @@ pub(crate) use mantle_artifact::{
     ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
     ArtifactValueTemplate, ArtifactValueTemplateField, ArtifactValueTemplateMapEntry, AuthorityId,
     EffectOutcomeId, EnumVariantId, MantleArtifact, MessageId, NextState, ProcessId, RecordFieldId,
-    SpawnSiteId, StateId, TypeId, read_artifact,
+    RuntimeFeature, SpawnSiteId, StateId, TypeId, read_artifact,
 };
 
 static BUILD_WORKSPACE_BINS: Once = Once::new();
@@ -58,6 +58,39 @@ impl GateHarness {
                 "strata composition-report",
             ),
             "strata composition-report",
+        )
+    }
+
+    pub(crate) fn target_requirements(&self, source: &str, format: &str) -> Output {
+        assert_success(
+            self.command(
+                &self.strata,
+                ["target-requirements", source, "--format", format],
+                "strata target-requirements",
+            ),
+            "strata target-requirements",
+        )
+    }
+
+    pub(crate) fn feature_declaration(&self, format: &str) -> Output {
+        assert_success(
+            self.command(
+                &self.mantle,
+                ["feature-declaration", "--format", format],
+                "mantle feature-declaration",
+            ),
+            "mantle feature-declaration",
+        )
+    }
+
+    pub(crate) fn admit(&self, artifact: &str, format: &str) -> Output {
+        assert_success(
+            self.command(
+                &self.mantle,
+                ["admit", artifact, "--format", format],
+                "mantle admit",
+            ),
+            "mantle admit",
         )
     }
 
@@ -413,22 +446,33 @@ pub(crate) const AUTHORITY_ADMISSION_CASES: [AuthorityAdmissionCase; 4] = [
 
 impl AuthorityAdmissionMutation {
     pub(crate) fn invalid_encoded_artifact(self, mut artifact: MantleArtifact) -> String {
-        let effects = hello_start_transition_effects_mut(&mut artifact);
-        assert_eq!(effects.as_slice(), &[ArtifactEffect::Emit]);
+        {
+            let effects = hello_start_transition_effects_mut(&mut artifact);
+            assert_eq!(effects.as_slice(), &[ArtifactEffect::Emit]);
+            match self {
+                Self::MissingEmitAuthority => {
+                    *effects = vec![ArtifactEffect::Spawn];
+                }
+                Self::UnusedSpawnAuthority => {
+                    *effects = vec![ArtifactEffect::Emit, ArtifactEffect::Spawn];
+                }
+                Self::DuplicateEmitAuthority => {
+                    *effects = vec![ArtifactEffect::Emit, ArtifactEffect::Emit];
+                }
+                Self::UnknownEncodedEffect => {}
+            }
+        }
 
         match self {
             Self::MissingEmitAuthority => {
-                *effects = vec![ArtifactEffect::Spawn];
+                ensure_target_requirement(&mut artifact, RuntimeFeature::LocalSpawn);
                 artifact.encode()
             }
             Self::UnusedSpawnAuthority => {
-                *effects = vec![ArtifactEffect::Emit, ArtifactEffect::Spawn];
+                ensure_target_requirement(&mut artifact, RuntimeFeature::LocalSpawn);
                 artifact.encode()
             }
-            Self::DuplicateEmitAuthority => {
-                *effects = vec![ArtifactEffect::Emit, ArtifactEffect::Emit];
-                artifact.encode()
-            }
+            Self::DuplicateEmitAuthority => artifact.encode(),
             Self::UnknownEncodedEffect => replace_exactly_once(
                 &artifact.encode(),
                 "process.0.transition.0.effect.0=emit\n",
@@ -436,6 +480,12 @@ impl AuthorityAdmissionMutation {
             ),
         }
     }
+}
+
+fn ensure_target_requirement(artifact: &mut MantleArtifact, feature: RuntimeFeature) {
+    artifact.target_requirements.features.push(feature);
+    artifact.target_requirements.features.sort_unstable();
+    artifact.target_requirements.features.dedup();
 }
 
 fn hello_start_transition_effects_mut(artifact: &mut MantleArtifact) -> &mut Vec<ArtifactEffect> {

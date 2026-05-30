@@ -40,19 +40,20 @@ const LOCAL_SUPERVISION_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     label: "local_supervision_restart in-memory runtime",
 };
 const PROFILE_SELECTOR_ENV: &str = "STRATA_PERFORMANCE_SMOKE_PROFILE";
-const ALL_PROFILES: [BenchmarkProfile; 10] = [
+const ALL_PROFILES: [BenchmarkProfile; 11] = [
     CHECK_LOWER_PROFILE,
     IMPORTS_CHECK_LOWER_PROFILE,
     boundary_contracts::CHECK_LOWER_PROFILE,
     component_composition::CHECK_LOWER_PROFILE,
     component_composition::REPORT_PROFILE,
+    component_composition::TARGET_REQUIREMENTS_PROFILE,
     IN_MEMORY_RUNTIME_PROFILE,
     boundary_contracts::RUNTIME_PROFILE,
     ARTIFACT_CODEC_PROFILE,
     JSONL_RUNTIME_PROFILE,
     LOCAL_SUPERVISION_RUNTIME_PROFILE,
 ];
-const PROFILE_KEY_LIST: &str = "collection_state.check_lower, imports_main.check_lower, boundary_contracts_main.check_lower, component_composition_main.check_lower, component_composition_main.composition_report, collection_state.in_memory_runtime, boundary_contracts_main.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
+const PROFILE_KEY_LIST: &str = "collection_state.check_lower, imports_main.check_lower, boundary_contracts_main.check_lower, component_composition_main.check_lower, component_composition_main.composition_report, component_composition_main.target_requirements, collection_state.in_memory_runtime, boundary_contracts_main.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
 const JSONL_RUNTIME_ARTIFACT_PATH: &str = "target/performance-smoke/collection_state.mta";
 #[cfg(any(
     target_os = "linux",
@@ -80,56 +81,53 @@ const PERF_RUN_LIMITS: RunLimits = RunLimits {
 fn collection_state_compilation_and_runtime_performance_smoke() {
     let selected_profile = std::env::var(PROFILE_SELECTOR_ENV).ok();
     let selected_profile = selected_profile.as_deref();
-    validate_selected_profile(selected_profile);
+    profile_selection::validate_selected_profile(selected_profile, &ALL_PROFILES, PROFILE_KEY_LIST);
 
-    if profile_is_selected(selected_profile, CHECK_LOWER_PROFILE) {
+    if profile_selection::profile_is_selected(selected_profile, CHECK_LOWER_PROFILE) {
         run_check_lower_profile();
     }
-    if profile_is_selected(selected_profile, IMPORTS_CHECK_LOWER_PROFILE) {
+    if profile_selection::profile_is_selected(selected_profile, IMPORTS_CHECK_LOWER_PROFILE) {
         run_imports_check_lower_profile();
     }
-    if profile_is_selected(selected_profile, boundary_contracts::CHECK_LOWER_PROFILE) {
+    if profile_selection::profile_is_selected(
+        selected_profile,
+        boundary_contracts::CHECK_LOWER_PROFILE,
+    ) {
         boundary_contracts::run_check_lower_profile();
     }
-    if profile_is_selected(selected_profile, component_composition::CHECK_LOWER_PROFILE) {
+    if profile_selection::profile_is_selected(
+        selected_profile,
+        component_composition::CHECK_LOWER_PROFILE,
+    ) {
         component_composition::run_check_lower_profile();
     }
-    if profile_is_selected(selected_profile, component_composition::REPORT_PROFILE) {
+    if profile_selection::profile_is_selected(
+        selected_profile,
+        component_composition::REPORT_PROFILE,
+    ) {
         component_composition::run_report_profile();
     }
-    if profile_is_selected(selected_profile, IN_MEMORY_RUNTIME_PROFILE) {
+    if profile_selection::profile_is_selected(
+        selected_profile,
+        component_composition::TARGET_REQUIREMENTS_PROFILE,
+    ) {
+        component_composition::run_target_requirements_profile();
+    }
+    if profile_selection::profile_is_selected(selected_profile, IN_MEMORY_RUNTIME_PROFILE) {
         run_in_memory_runtime_profile();
     }
-    if profile_is_selected(selected_profile, boundary_contracts::RUNTIME_PROFILE) {
+    if profile_selection::profile_is_selected(selected_profile, boundary_contracts::RUNTIME_PROFILE)
+    {
         boundary_contracts::run_runtime_profile();
     }
-    if profile_is_selected(selected_profile, ARTIFACT_CODEC_PROFILE) {
+    if profile_selection::profile_is_selected(selected_profile, ARTIFACT_CODEC_PROFILE) {
         run_artifact_codec_profile();
     }
-    if profile_is_selected(selected_profile, JSONL_RUNTIME_PROFILE) {
+    if profile_selection::profile_is_selected(selected_profile, JSONL_RUNTIME_PROFILE) {
         run_jsonl_runtime_profile();
     }
-    if profile_is_selected(selected_profile, LOCAL_SUPERVISION_RUNTIME_PROFILE) {
+    if profile_selection::profile_is_selected(selected_profile, LOCAL_SUPERVISION_RUNTIME_PROFILE) {
         run_local_supervision_runtime_profile();
-    }
-}
-
-fn validate_selected_profile(selected_profile: Option<&str>) {
-    if let Some(selected_profile) = selected_profile {
-        assert!(
-            ALL_PROFILES
-                .iter()
-                .any(|profile| profile.key == selected_profile),
-            "{PROFILE_SELECTOR_ENV} must be one of: {}",
-            PROFILE_KEY_LIST
-        );
-    }
-}
-
-fn profile_is_selected(selected_profile: Option<&str>, profile: BenchmarkProfile) -> bool {
-    match selected_profile {
-        Some(selected_profile) => selected_profile == profile.key,
-        None => true,
     }
 }
 
@@ -237,6 +235,8 @@ mod boundary_contracts;
 mod component_composition;
 #[path = "performance_smoke/platform_resources.rs"]
 mod platform_resources;
+#[path = "performance_smoke/profile_selection.rs"]
+mod profile_selection;
 
 use platform_resources::{capture_cpu_time, capture_memory};
 #[derive(Clone, Copy, Debug)]

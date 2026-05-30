@@ -5,7 +5,7 @@ fn write_artifact_rejects_invalid_artifacts_before_writing() {
     let dir = unique_test_dir("invalid-artifact-write");
     let path = dir.join("bad.mta");
     let mut artifact = valid_artifact();
-    artifact.format = "invalid-format".to_string();
+    artifact.format = "invalid-format".into();
 
     let err = write_artifact(&path, &artifact).expect_err("invalid artifact should fail");
 

@@ -26,6 +26,17 @@ fn parses_and_checks_hello() {
         artifact.processes[0].transitions[0].effects,
         vec![ArtifactEffect::Emit]
     );
+    assert_eq!(
+        artifact.target_requirements.source_language.as_ref(),
+        "strata"
+    );
+    assert_requires(&artifact, RuntimeFeature::BoundedMailbox);
+    assert_requires(&artifact, RuntimeFeature::EmitEffect);
+    assert_requires(&artifact, RuntimeFeature::JsonlTrace);
+    assert_requires(&artifact, RuntimeFeature::LocalExecution);
+    assert_does_not_require(&artifact, RuntimeFeature::LocalSpawn);
+    assert_does_not_require(&artifact, RuntimeFeature::LocalSend);
+    assert_does_not_require(&artifact, RuntimeFeature::RemoteSpawn);
 }
 
 #[test]
@@ -111,6 +122,18 @@ fn parses_and_checks_actor_ping() {
         only_transition(worker).next_state(),
         CheckedNextState::Value(checked_state_id(1))
     );
+
+    let artifact = lower_to_artifact(&checked, ACTOR_PING).expect("actor ping should lower");
+    assert_eq!(
+        artifact.target_requirements.source_language.as_ref(),
+        "strata"
+    );
+    assert_requires(&artifact, RuntimeFeature::EmitEffect);
+    assert_requires(&artifact, RuntimeFeature::LocalSend);
+    assert_requires(&artifact, RuntimeFeature::LocalSpawn);
+    assert_does_not_require(&artifact, RuntimeFeature::RemoteSend);
+    assert_does_not_require(&artifact, RuntimeFeature::RemoteSpawn);
+    assert_does_not_require(&artifact, RuntimeFeature::DistributedTransport);
 }
 
 #[test]
@@ -257,4 +280,20 @@ fn parses_and_checks_actor_instances_with_distinct_process_refs() {
     assert!(encoded.contains("process.0.process_ref.1.target_process=1"));
     assert!(encoded.contains("process.0.transition.0.action.2.target_process_ref=0"));
     assert!(encoded.contains("process.0.transition.0.action.3.target_process_ref=1"));
+}
+
+fn assert_requires(artifact: &MantleArtifact, feature: RuntimeFeature) {
+    assert!(
+        artifact.target_requirements.features.contains(&feature),
+        "artifact should require {}",
+        feature.as_str()
+    );
+}
+
+fn assert_does_not_require(artifact: &MantleArtifact, feature: RuntimeFeature) {
+    assert!(
+        !artifact.target_requirements.features.contains(&feature),
+        "artifact should not require {}",
+        feature.as_str()
+    );
 }

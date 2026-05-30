@@ -2,8 +2,10 @@ use super::*;
 
 impl MantleArtifact {
     pub fn validate(&self) -> Result<()> {
-        validate_artifact_identity(&self.format, &self.schema_version)?;
-        validate_ident_field("source_language", &self.source_language)?;
+        validate_artifact_identity(self.format.as_ref(), self.schema_version.as_ref())?;
+        validate_ident_field("source_language", self.source_language.as_ref())?;
+        self.target_requirements
+            .validate(self.source_language.as_ref())?;
         validate_ident_field("module", &self.module)?;
         validate_source_hash(&self.source_hash_fnv1a64)?;
         validate_count("type_count", self.types.len(), 1, MAX_TYPE_COUNT)?;
@@ -55,6 +57,7 @@ impl MantleArtifact {
             process.validate_references(self, ProcessId::from_index(process_index)?)?;
         }
         validate_encoded_artifact_shape(self)?;
+        self.target_requirements.validate_covers_artifact(self)?;
 
         Ok(())
     }
