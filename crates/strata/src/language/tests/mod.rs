@@ -1,6 +1,7 @@
 mod boundary_contracts;
 mod builtin_value_shapes;
 mod component_composition;
+mod composition_report;
 mod effect_outcomes;
 mod effects;
 mod examples;

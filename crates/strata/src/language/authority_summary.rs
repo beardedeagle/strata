@@ -1,7 +1,14 @@
 use super::checked::{
-    CheckedAction, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedComponentId,
-    CheckedPortId, CheckedProgram, CheckedProtocolId, CheckedSpawnKind, CheckedSpawnSite,
-    CheckedSupervisorChildMode, CheckedSupervisorStrategy, CheckedTransition,
+    CheckedAction, CheckedAuthorityId, CheckedCapabilityDescriptor, CheckedPortId, CheckedProgram,
+    CheckedSpawnKind, CheckedSpawnSite, CheckedSupervisorChildMode, CheckedSupervisorStrategy,
+    CheckedTransition,
+};
+use super::checked_render::{
+    checked_process_label, push_checked_descriptor_json, push_checked_descriptor_text,
+    push_json_field,
+};
+use super::component_authority_edges::{
+    push_component_authority_edges_json, push_component_authority_edges_text,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +124,8 @@ fn render_text(program: &CheckedProgram, source_path: &str) -> String {
             }
         }
     }
+
+    push_component_authority_edges_text(&mut out, program);
 
     out
 }
@@ -263,82 +272,10 @@ fn render_json(program: &CheckedProgram, source_path: &str) -> String {
         out.push_str("]}");
     }
 
+    out.push_str("],\"component_authority_edges\":[");
+    push_component_authority_edges_json(&mut out, program);
     out.push_str("]}");
     out
-}
-
-fn push_checked_descriptor_text(
-    out: &mut String,
-    program: &CheckedProgram,
-    descriptor: CheckedCapabilityDescriptor,
-) {
-    match descriptor {
-        CheckedCapabilityDescriptor::Spawn { target } => {
-            out.push_str("Cap<Spawn<");
-            out.push_str(checked_process_label(program, target));
-            out.push_str(">>");
-        }
-        CheckedCapabilityDescriptor::ProtocolBoundary { protocol } => {
-            out.push_str("Cap<ProtocolBoundary<");
-            out.push_str(checked_protocol_label(program, protocol));
-            out.push_str(">>");
-        }
-        CheckedCapabilityDescriptor::PortConnect { port } => {
-            out.push_str("Cap<PortConnect<");
-            out.push_str(checked_port_label(program, port));
-            out.push_str(">>");
-        }
-        CheckedCapabilityDescriptor::ComponentExport { component } => {
-            out.push_str("Cap<ComponentExport<");
-            out.push_str(checked_component_label(program, component));
-            out.push_str(">>");
-        }
-    }
-}
-
-fn push_checked_descriptor_json(
-    out: &mut String,
-    program: &CheckedProgram,
-    descriptor: CheckedCapabilityDescriptor,
-) {
-    match descriptor {
-        CheckedCapabilityDescriptor::Spawn { target } => {
-            out.push_str("{\"kind\":\"spawn\",\"target_process_id\":");
-            out.push_str(&target.as_u32().to_string());
-            out.push(',');
-            push_json_field(
-                out,
-                "target_process",
-                checked_process_label(program, target),
-            );
-            out.push('}');
-        }
-        CheckedCapabilityDescriptor::ProtocolBoundary { protocol } => {
-            out.push_str("{\"kind\":\"protocol_boundary\",\"protocol_id\":");
-            out.push_str(&protocol.as_u32().to_string());
-            out.push(',');
-            push_json_field(out, "protocol", checked_protocol_label(program, protocol));
-            out.push('}');
-        }
-        CheckedCapabilityDescriptor::PortConnect { port } => {
-            out.push_str("{\"kind\":\"port_connect\",\"port_id\":");
-            out.push_str(&port.as_u32().to_string());
-            out.push(',');
-            push_json_field(out, "port", checked_port_label(program, port));
-            out.push('}');
-        }
-        CheckedCapabilityDescriptor::ComponentExport { component } => {
-            out.push_str("{\"kind\":\"component_export\",\"component_id\":");
-            out.push_str(&component.as_u32().to_string());
-            out.push(',');
-            push_json_field(
-                out,
-                "component",
-                checked_component_label(program, component),
-            );
-            out.push('}');
-        }
-    }
 }
 
 fn push_checked_used_spawn_sites(
@@ -441,38 +378,6 @@ fn checked_actions_use_port(actions: &[CheckedAction], expected: CheckedPortId) 
     })
 }
 
-fn checked_process_label(program: &CheckedProgram, id: super::checked::CheckedProcessId) -> &str {
-    program
-        .processes()
-        .get(id.index())
-        .map(|process| process.debug_name().as_str())
-        .unwrap_or("<invalid>")
-}
-
-fn checked_protocol_label(program: &CheckedProgram, id: CheckedProtocolId) -> &str {
-    program
-        .protocols()
-        .get(id.index())
-        .map(|protocol| protocol.debug_name().as_str())
-        .unwrap_or("<invalid>")
-}
-
-fn checked_port_label(program: &CheckedProgram, id: CheckedPortId) -> &str {
-    program
-        .ports()
-        .get(id.index())
-        .map(|port| port.debug_name().as_str())
-        .unwrap_or("<invalid>")
-}
-
-fn checked_component_label(program: &CheckedProgram, id: CheckedComponentId) -> &str {
-    program
-        .components()
-        .get(id.index())
-        .map(|component| component.debug_name().as_str())
-        .unwrap_or("<invalid>")
-}
-
 fn checked_spawn_kind_str(kind: CheckedSpawnKind) -> &'static str {
     match kind {
         CheckedSpawnKind::DynamicLocal => "dynamic_local",
@@ -499,36 +404,6 @@ fn push_optional_id(out: &mut String, id: Option<u32>) {
         Some(id) => out.push_str(&id.to_string()),
         None => out.push_str("none"),
     }
-}
-
-fn push_json_field(out: &mut String, key: &str, value: &str) {
-    push_json_string(out, key);
-    out.push(':');
-    push_json_string(out, value);
-}
-
-fn push_json_string(out: &mut String, value: &str) {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    out.push('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch <= '\u{1f}' => {
-                let value = ch as usize;
-                out.push_str("\\u00");
-                out.push(HEX[value >> 4] as char);
-                out.push(HEX[value & 0x0f] as char);
-            }
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
 }
 
 #[cfg(test)]

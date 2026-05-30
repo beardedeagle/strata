@@ -90,6 +90,9 @@ mantle-run-deny-spawn-authority artifact:
 strata-authority-summary source format="text":
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-summary "{{source}}" --format "{{format}}"
 
+strata-composition-report source format="text":
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- composition-report "{{source}}" --format "{{format}}"
+
 mantle-inspect-authority artifact format="text":
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- inspect-authority "{{artifact}}" --format "{{format}}"
 
@@ -250,6 +253,7 @@ source-to-runtime-success-gates: build
         "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run "target/strata/${example}.mta"
     done
 
+    "${cargo_run[@]}" -p strata --bin strata -- composition-report examples/component_composition_main.str --format json >/dev/null
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_spawn_denied.mta --deny-spawn-authority
     "${cargo_run[@]}" -p strata --bin strata -- check examples/effect_outcome_crashed_target.str
     "${cargo_run[@]}" -p strata --bin strata -- build examples/effect_outcome_crashed_target.str

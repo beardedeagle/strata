@@ -369,6 +369,7 @@ fn required_obligations_for_feature(feature: &Feature) -> BTreeSet<ProofObligati
                 required.insert(ProofObligationClass::CheckedIrProjection);
                 required.insert(ProofObligationClass::StrataMantleBoundary);
             }
+            EvidenceClass::CompositionReport => {}
             EvidenceClass::ArtifactAdmission => {
                 required.insert(ProofObligationClass::ArtifactAdmission);
                 required.insert(ProofObligationClass::StrataMantleBoundary);

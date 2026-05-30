@@ -92,8 +92,10 @@ over `examples/collection_state.str`, the multi-file source-unit import example,
 the typed boundary-contract example, the checked component-composition example,
 and the local supervision restart example. It measures repeated Strata checking
 and lowering for collection state, source-unit imports, boundary contracts, and
-component composition; Mantle artifact encode/decode; repeated Mantle in-memory
-execution of the collection-state and boundary-contract artifacts; repeated
+component composition; repeated checked composition report rendering from a
+prechecked composition input; Mantle
+artifact encode/decode; repeated Mantle in-memory execution of the
+collection-state and boundary-contract artifacts; repeated
 Mantle JSONL-trace execution of the collection-state artifact; and repeated
 Mantle in-memory execution of the supervision artifact.
 

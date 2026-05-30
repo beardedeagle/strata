@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 use mantle_artifact::write_artifact;
 
 use crate::language::{
-    AuthoritySummaryFormat, CheckedProgram, SourceProvenanceHash, check_source_program,
+    AuthoritySummaryFormat, CheckedProgram, CompositionAdmissionReport,
+    CompositionAdmissionReportFormat, SourceProvenanceHash, check_source_program,
     lower_to_artifact_with_source_hash, render_authority_summary,
+    render_composition_admission_report,
 };
 use crate::source_loader::{LoadedSourceProgram, load_root_source_program};
 
@@ -138,6 +140,26 @@ where
             print_summary(&summary);
             Ok(())
         }
+        Some("composition-report") => {
+            let path = required_path(
+                args.next(),
+                "strata composition-report <path.str> [--format text|json]",
+            )?;
+            let format = composition_report_format_from_args(
+                args,
+                "strata composition-report <path.str> [--format text|json]",
+            )?;
+            let (checked, source_hash) = check_source_path(&path)?;
+            let admission_report =
+                CompositionAdmissionReport::from_checked_parts(checked, source_hash);
+            let report = render_composition_admission_report(
+                &admission_report,
+                &path.display().to_string(),
+                format,
+            );
+            print_summary(&report);
+            Ok(())
+        }
         Some("--help") | Some("-h") => {
             print_strata_usage();
             Ok(())
@@ -229,6 +251,39 @@ fn authority_summary_format_from_args(
     Ok(format)
 }
 
+fn composition_report_format_from_args(
+    args: impl IntoIterator<Item = String>,
+    usage: &str,
+) -> Result<CompositionAdmissionReportFormat> {
+    let mut format = CompositionAdmissionReportFormat::Text;
+    let mut format_seen = false;
+    let mut rest = args.into_iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--format" => {
+                if format_seen {
+                    return Err(Error::new("duplicate --format argument"));
+                }
+                format_seen = true;
+                let value = rest
+                    .next()
+                    .ok_or_else(|| Error::new(format!("missing --format value; usage: {usage}")))?;
+                format = match value.as_str() {
+                    "text" => CompositionAdmissionReportFormat::Text,
+                    "json" => CompositionAdmissionReportFormat::Json,
+                    _ => {
+                        return Err(Error::new(format!(
+                            "unsupported --format value {value:?}; expected text or json"
+                        )));
+                    }
+                };
+            }
+            other => return Err(Error::new(format!("unexpected argument {other:?}"))),
+        }
+    }
+    Ok(format)
+}
+
 fn print_summary(summary: &str) {
     print!("{summary}");
     if !summary.ends_with('\n') {
@@ -241,6 +296,7 @@ fn print_strata_usage() {
     println!("  strata check <path.str>");
     println!("  strata build <path.str> [--output <path.mta>]");
     println!("  strata authority-summary <path.str> [--format text|json]");
+    println!("  strata composition-report <path.str> [--format text|json]");
 }
 
 pub fn run_strata_from_env() -> Result<()> {
@@ -301,6 +357,31 @@ mod tests {
         .expect_err("duplicate format should fail");
 
         assert!(err.to_string().contains("duplicate --format argument"));
+    }
+
+    #[test]
+    fn composition_report_format_parser_accepts_json() {
+        let format = composition_report_format_from_args(
+            ["--format".to_string(), "json".to_string()],
+            "usage",
+        )
+        .expect("json format should parse");
+
+        assert_eq!(format, CompositionAdmissionReportFormat::Json);
+    }
+
+    #[test]
+    fn composition_report_format_parser_rejects_unknown_format() {
+        let err = composition_report_format_from_args(
+            ["--format".to_string(), "yaml".to_string()],
+            "usage",
+        )
+        .expect_err("unknown format should fail");
+
+        assert!(
+            err.to_string()
+                .contains("unsupported --format value \"yaml\"")
+        );
     }
 
     #[cfg(all(not(unix), not(windows)))]

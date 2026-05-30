@@ -50,6 +50,17 @@ impl GateHarness {
         );
     }
 
+    pub(crate) fn composition_report(&self, source: &str, format: &str) -> Output {
+        assert_success(
+            self.command(
+                &self.strata,
+                ["composition-report", source, "--format", format],
+                "strata composition-report",
+            ),
+            "strata composition-report",
+        )
+    }
+
     pub(crate) fn check_failure(&self, source: &str) -> Output {
         assert_failure(
             self.command(&self.strata, ["check", source], "strata check"),

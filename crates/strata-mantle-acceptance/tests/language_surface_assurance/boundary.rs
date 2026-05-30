@@ -1,4 +1,22 @@
-use crate::model::{Feature, requirements::*};
+use crate::model::{EvidenceClass, Feature, requirements::*};
+
+const COMPONENT_COMPOSITION_REPORT_REQUIREMENTS: &[EvidenceClass] = &[
+    EvidenceClass::ParserCoverage,
+    EvidenceClass::CheckerValidation,
+    EvidenceClass::CheckedIrLowering,
+    EvidenceClass::CompositionReport,
+    EvidenceClass::ArtifactAdmission,
+    EvidenceClass::RuntimeExecution,
+    EvidenceClass::Diagnostics,
+    EvidenceClass::RunnableExample,
+    EvidenceClass::PositiveTest,
+    EvidenceClass::NegativeTest,
+    EvidenceClass::SourceToRuntimeGate,
+    EvidenceClass::FuzzSeed,
+    EvidenceClass::BoundedOrProperty,
+    EvidenceClass::PerformanceSmoke,
+    EvidenceClass::Documentation,
+];
 
 pub(crate) const FEATURES: &[Feature] = &[
     feature!(
@@ -30,19 +48,22 @@ pub(crate) const FEATURES: &[Feature] = &[
         "Checked local component port-binding composition admission",
         Current,
         RuntimeBehavior,
-        RUNTIME_FUZZ_BOUNDED_REQUIREMENTS,
+        COMPONENT_COMPOSITION_REPORT_REQUIREMENTS,
         [
             ParserCoverage => ("crates/strata/src/language/tests/component_composition.rs", "parser_accepts_component_imports_and_composition"),
             CheckerValidation => ("crates/strata/src/language/tests/component_composition.rs", "checker_builds_typed_composition_graph_and_lowers_metadata"),
             CheckedIrLowering => ("crates/strata/src/language/tests/component_composition.rs", "artifact.compositions[0].port_bindings[0].importer"),
+            CompositionReport => ("crates/strata/src/language/composition_report.rs", "admission_result"),
             ArtifactAdmission => ("crates/mantle-artifact/src/tests/boundary_tables.rs", "validate_accepts_checked_component_composition_metadata"),
             RuntimeExecution => ("crates/strata-mantle-acceptance/tests/source_to_runtime_gates/component_composition.rs", "component_composition_checks_builds_runs_and_admits_typed_graph"),
             Diagnostics => ("docs/src/diagnostics.md", "composition ... instance ... component ... import port ... is not bound"),
             RunnableExample => ("examples/component_composition_main.str", "composition AppComposition"),
             PositiveTest => ("crates/strata-mantle-acceptance/tests/source_to_runtime_gates/component_composition.rs", "component_composition_checks_builds_runs_and_admits_typed_graph"),
+            PositiveTest => ("crates/strata/src/language/tests/composition_report.rs", "json_report_matches_checked_schema_facts"),
             NegativeTest => ("crates/strata/src/language/tests/component_composition.rs", "checker_rejects_unbound_component_import"),
             NegativeTest => ("crates/strata/src/language/tests/component_composition.rs", "checker_rejects_composition_without_process_port_authority"),
             NegativeTest => ("crates/strata/src/language/tests/component_composition.rs", "checker_rejects_bad_composition_bindings"),
+            NegativeTest => ("crates/strata/src/cli.rs", "composition_report_format_parser_rejects_unknown_format"),
             NegativeTest => ("crates/mantle-artifact/src/tests/boundary_tables.rs", "validate_rejects_bad_composition_binding_edges"),
             NegativeTest => ("crates/mantle-artifact/src/tests/codec/decode_failures.rs", "decode_rejects_unbounded_composition_counts_before_allocation"),
             SourceToRuntimeGate => ("Justfile", "examples/component_composition_main.str"),
@@ -52,7 +73,9 @@ pub(crate) const FEATURES: &[Feature] = &[
             FuzzSeed => ("fuzz/seeds/mantle_artifact_decode/component_composition_unbound_import.mta", "composition.0.port_binding_count=0"),
             FuzzSeed => ("fuzz/seeds/mantle_runtime_from_source/component_composition.str", "emit \"composed worker handled Work\""),
             BoundedOrProperty => ("crates/strata/src/language/tests/component_composition.rs", "bounded_composition_graphs_lower_deterministically"),
+            BoundedOrProperty => ("crates/strata/src/language/tests/component_composition.rs", "bounded_composition_reports_are_deterministic"),
             PerformanceSmoke => ("crates/strata-mantle-acceptance/tests/performance_smoke.rs", "component_composition_main.check_lower"),
+            PerformanceSmoke => ("crates/strata-mantle-acceptance/tests/performance_smoke.rs", "component_composition_main.composition_report"),
             Documentation => ("docs/src/language-surface-assurance.md", "Checked local component port-binding composition admission is recorded"),
         ],
     ),

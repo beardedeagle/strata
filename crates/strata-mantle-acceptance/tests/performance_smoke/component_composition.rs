@@ -8,6 +8,10 @@ pub(super) const CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "component_composition_main.check_lower",
     label: "component_composition_main load+check+lower",
 };
+pub(super) const REPORT_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "component_composition_main.composition_report",
+    label: "component_composition_main composition-report render",
+};
 
 pub(super) fn run_check_lower_profile() {
     let budget = PerformanceBudget::load(CHECK_LOWER_PROFILE);
@@ -21,6 +25,25 @@ pub(super) fn run_check_lower_profile() {
         let artifact = strata::language::lower_to_artifact_with_source_hash(&checked, source_hash)
             .expect("component composition performance smoke source should lower");
         black_box(artifact);
+    });
+    assert_within_budget(budget, metrics);
+}
+
+pub(super) fn run_report_profile() {
+    let budget = PerformanceBudget::load(REPORT_PROFILE);
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(SOURCE_PATH);
+    let loaded = strata::load_root_source_program(&source_path)
+        .expect("component composition report performance smoke source should load");
+    let (program, _) = loaded.into_parts();
+    let report_input = strata::language::CompositionAdmissionReport::from_source_program(program)
+        .expect("component composition report performance smoke source should check");
+    let metrics = measure_for(budget.iterations, || {
+        let report = strata::language::render_composition_admission_report(
+            black_box(&report_input),
+            SOURCE_PATH,
+            strata::language::CompositionAdmissionReportFormat::Json,
+        );
+        black_box(report);
     });
     assert_within_budget(budget, metrics);
 }
