@@ -27,13 +27,13 @@ fn render_text(artifact: &MantleArtifact, artifact_path: &str) -> String {
     out.push_str(artifact_path);
     out.push('\n');
     out.push_str("format: ");
-    out.push_str(&artifact.format);
+    out.push_str(artifact.format.as_ref());
     out.push('\n');
     out.push_str("schema_version: ");
-    out.push_str(&artifact.schema_version);
+    out.push_str(artifact.schema_version.as_ref());
     out.push('\n');
     out.push_str("source_language: ");
-    out.push_str(&artifact.source_language);
+    out.push_str(artifact.source_language.as_ref());
     out.push('\n');
     out.push_str("module: ");
     out.push_str(&artifact.module);
@@ -139,11 +139,15 @@ fn render_json(artifact: &MantleArtifact, artifact_path: &str) -> String {
     out.push('{');
     push_json_field(&mut out, "artifact", artifact_path);
     out.push(',');
-    push_json_field(&mut out, "format", &artifact.format);
+    push_json_field(&mut out, "format", artifact.format.as_ref());
     out.push(',');
-    push_json_field(&mut out, "schema_version", &artifact.schema_version);
+    push_json_field(&mut out, "schema_version", artifact.schema_version.as_ref());
     out.push(',');
-    push_json_field(&mut out, "source_language", &artifact.source_language);
+    push_json_field(
+        &mut out,
+        "source_language",
+        artifact.source_language.as_ref(),
+    );
     out.push(',');
     push_json_field(&mut out, "module", &artifact.module);
     out.push_str(",\"entry_process_id\":");

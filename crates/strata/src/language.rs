@@ -13,6 +13,7 @@ mod lexer;
 mod lowering;
 mod parser;
 mod source_program;
+mod target_requirements;
 
 #[cfg(test)]
 mod tests;

@@ -285,6 +285,7 @@ pub(crate) mod expected {
         "checked-ir-and-typed-id-boundary",
         "mantle-artifact-admission",
         "loaded-runtime-validation",
+        "runtime-target-requirements",
         "runtime-observability",
     ];
 
@@ -341,6 +342,7 @@ pub(crate) mod expected {
         "checked-ir-action-templates",
         "mantle-artifact-admission",
         "mantle-loaded-artifact-validation",
+        "runtime-target-requirements",
         "runtime-trace-observability-boundaries",
         "rejection-fail-closed-unsupported-forms",
         "docs-examples-only-surfaces",

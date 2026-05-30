@@ -39,12 +39,22 @@ correlating a lowered artifact with source text during local inspection. It is
 not an integrity, provenance, authority, or trust decision input; artifact
 admission must rely on explicit format/schema validation and typed structures.
 
+Target requirements are checked/lowered facts embedded in the artifact. Strata
+emits `target_requirements.source_language` and a sorted set of canonical
+runtime feature IDs such as `bounded_mailbox`, `local_execution`, `local_send`,
+`local_spawn`, `emit_effect`, and `typed_boundary_tables`. Mantle compares those
+requirements with its runtime feature declaration before `ArtifactLoaded` or
+executing runtime side effects; an unsupported feature fails closed with a
+diagnostic such as `target runtime feature remote_spawn is not supported`.
+
 ## Admission
 
 Mantle admits artifacts through validation, not filename trust. Before
 execution, the artifact decoder and validator check:
 
 - artifact magic, format, schema version, and source language;
+- typed target requirements, including target source language and canonical
+  runtime feature IDs;
 - bounded process, message, state, output, transition, and action counts;
 - bounded type table entries and type-kind targets;
 - unique process debug names;
@@ -65,6 +75,29 @@ execution, the artifact decoder and validator check:
 
 Decode-time bounds must happen before allocation when counts come from the
 artifact body.
+
+Mantle also publishes a typed `mantle.feature_declaration.v5` runtime feature
+declaration. The current declaration names the artifact format and schema
+version it admits, its opaque source-language metadata policy, local runtime
+feature support, non-progress containment class, message-count mailbox model,
+conservative message-observation support, allocation model, component/spawn
+observability support, validity-window defaults, backend identity, and
+explicit implementation limits such as remote send, remote spawn, and
+distributed transport. Admission derives the minimum runtime feature set
+required by the decoded `.mta` tables and requires the artifact's typed
+`target_requirements` block to cover that set before `ArtifactLoaded` or any
+runtime side effect.
+Unsupported schema versions, unsupported required features, underdeclared
+requirements, unsorted or duplicate requirement entries, mismatched
+source-language metadata, and malformed requirement fields fail closed.
+
+Strata owns requirement derivation. It derives requirements from checked IR and
+lowering facts such as local execution, bounded mailboxes, emitted effects,
+local spawn/send, typed effect outcomes, scalar value templates, runtime
+branching, bounded runtime loops, typed boundary tables, and component
+composition metadata. Mantle owns only the declaration and comparison; it does
+not infer Strata source composition, imports, source names, authority widening,
+or deployment safety.
 
 ## Host Path Handling
 
@@ -167,3 +200,13 @@ dispatch by source names, execute runtime actions, or generate a mandatory
 report; JSON output is available only when explicitly requested by the caller.
 The source-side composition report is emitted by `strata composition-report`;
 it is separate from `mantle inspect-authority` and from `.mta` admission.
+
+Target binding inspection is split along the same boundary:
+
+- `strata target-requirements <path.str>` checks and lowers the source, then
+  renders the typed requirements Strata would place in the `.mta`.
+- `mantle feature-declaration` renders the current Mantle runtime feature
+  declaration.
+- `mantle admit <path.mta>` decodes and validates the `.mta`, compares typed
+  target requirements against the Mantle declaration, and returns before
+  executing runtime behavior.

@@ -9,6 +9,11 @@ fn artifact_round_trips_and_validates_magic() {
     assert_eq!(decoded, artifact);
     assert!(encoded.contains(&format!("schema_version={ARTIFACT_SCHEMA_VERSION}")));
     assert!(encoded.contains("entry_process=0"));
+    assert!(encoded.contains("target_requirements.source_language=test_frontend"));
+    assert!(encoded.contains("target_requirements.feature_count="));
+    assert!(encoded.contains("target_requirements.feature.0=bounded_mailbox"));
+    assert!(encoded.contains("target_requirements.feature."));
+    assert!(encoded.contains("local_spawn"));
     assert!(encoded.contains("type.2.label=WorkerState"));
     assert!(encoded.contains("process.1.state_value.1.type_id=2"));
     assert!(encoded.contains("process.1.state_value.1.value=Handled"));

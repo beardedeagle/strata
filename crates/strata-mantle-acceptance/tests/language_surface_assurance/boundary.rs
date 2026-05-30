@@ -18,6 +18,23 @@ const COMPONENT_COMPOSITION_REPORT_REQUIREMENTS: &[EvidenceClass] = &[
     EvidenceClass::Documentation,
 ];
 
+const TARGET_REQUIREMENTS_REQUIREMENTS: &[EvidenceClass] = &[
+    EvidenceClass::ParserCoverage,
+    EvidenceClass::CheckerValidation,
+    EvidenceClass::CheckedIrLowering,
+    EvidenceClass::ArtifactAdmission,
+    EvidenceClass::RuntimeExecution,
+    EvidenceClass::Diagnostics,
+    EvidenceClass::RunnableExample,
+    EvidenceClass::PositiveTest,
+    EvidenceClass::NegativeTest,
+    EvidenceClass::SourceToRuntimeGate,
+    EvidenceClass::FuzzSeed,
+    EvidenceClass::BoundedOrProperty,
+    EvidenceClass::PerformanceSmoke,
+    EvidenceClass::Documentation,
+];
+
 pub(crate) const FEATURES: &[Feature] = &[
     feature!(
         "typed-component-protocol-port-boundaries",
@@ -122,6 +139,30 @@ pub(crate) const FEATURES: &[Feature] = &[
             PositiveTest => ("crates/mantle-runtime/src/run/tests/state_message_admission/action_admission.rs", "runtime_accepts_loaded_for_each_inside_runtime_if_branch"),
             NegativeTest => ("crates/mantle-runtime/src/run/tests/state_message_admission/next_state_templates.rs", "runtime_rejects_loaded_unadmitted_template_state_before_artifact_loaded"),
             Documentation => ("docs/src/artifact-runtime-boundary.md", "Mantle validates loaded"),
+        ],
+    ),
+    feature!(
+        "runtime-target-requirements",
+        "Runtime target requirements and feature declaration",
+        Current,
+        RuntimeBehavior,
+        TARGET_REQUIREMENTS_REQUIREMENTS,
+        [
+            ParserCoverage => ("crates/strata/src/language/tests/target_requirements.rs", "module target_requirements_basic"),
+            CheckerValidation => ("crates/strata/src/language/tests/target_requirements.rs", "lowering_declares_typed_target_requirements_for_basic_runtime_effects"),
+            CheckedIrLowering => ("crates/strata/src/language/tests/target_requirements.rs", "lowering_declares_typed_requirements_for_boundary_composition"),
+            ArtifactAdmission => ("crates/mantle-artifact/src/tests/target_requirements.rs", "validate_accepts_sorted_typed_target_requirements"),
+            RuntimeExecution => ("crates/mantle-runtime/src/tests/runtime_boundaries.rs", "runtime_rejects_unsupported_target_feature_before_artifact_loaded"),
+            Diagnostics => ("docs/src/diagnostics.md", "target runtime feature ... is not supported by this Mantle runtime"),
+            RunnableExample => ("examples/component_composition_main.str", "composition AppComposition"),
+            PositiveTest => ("crates/strata-mantle-acceptance/tests/source_to_runtime_gates/component_composition.rs", "gate.target_requirements"),
+            NegativeTest => ("crates/mantle-runtime/src/tests/runtime_boundaries.rs", "RuntimeFeature::RemoteSpawn"),
+            SourceToRuntimeGate => ("Justfile", "examples/component_composition_main.str"),
+            FuzzSeed => ("fuzz/seeds/mantle_artifact_decode/component_composition.mta", "target_requirements.feature.0=bounded_mailbox"),
+            BoundedOrProperty => ("crates/mantle-artifact/src/tests/target_requirements.rs", "target_requirements_canonicalize_feature_insertion_order"),
+            BoundedOrProperty => ("crates/strata/src/language/tests/target_requirements.rs", "lowering_target_requirements_are_deterministic_across_source_declaration_order"),
+            PerformanceSmoke => ("crates/strata-mantle-acceptance/tests/performance_smoke.rs", "component_composition_main.target_requirements"),
+            Documentation => ("docs/src/language-surface-assurance.md", "Runtime feature declaration and target binding"),
         ],
     ),
 ];

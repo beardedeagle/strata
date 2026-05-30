@@ -266,6 +266,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::ARTIFACT_ADMISSION_ONLY,
     },
     ProofDomain {
+        id: "runtime-target-requirements",
+        title: "Runtime target requirements and feature declaration",
+        feature_ids: &["runtime-target-requirements"],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "runtime-trace-observability-boundaries",
         title: "Runtime trace and observability boundaries",
         feature_ids: &["runtime-observability"],

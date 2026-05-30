@@ -3,7 +3,7 @@ use super::support::*;
 #[test]
 fn runtime_rejects_invalid_artifact_identity() {
     let mut artifact = valid_artifact();
-    artifact.format = "other".to_string();
+    artifact.format = "other".into();
 
     let err = run_artifact(Path::new("target/test/bad.mta"), &artifact)
         .expect_err("invalid artifact must fail closed");
@@ -26,6 +26,69 @@ fn runtime_rejects_action_without_declared_effect() {
     assert!(
         host.events().is_empty(),
         "rejected artifacts must not reach runtime execution"
+    );
+}
+
+#[test]
+fn runtime_rejects_unsupported_target_feature_before_artifact_loaded() {
+    let mut artifact = valid_artifact();
+    let mut requirements = test_target_requirements();
+    requirements.features.push(RuntimeFeature::RemoteSpawn);
+    artifact.target_requirements =
+        ArtifactTargetRequirements::new(TEST_SOURCE_LANGUAGE, requirements.features);
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect_err("unsupported target feature should fail before execution");
+
+    assert!(
+        err.to_string()
+            .contains("target runtime feature remote_spawn is not supported")
+    );
+    assert!(
+        host.events().is_empty(),
+        "runtime requirement mismatch must fail before ArtifactLoaded"
+    );
+}
+
+#[test]
+fn runtime_rejects_underdeclared_target_features_before_artifact_loaded() {
+    let mut artifact = valid_artifact();
+    artifact.target_requirements =
+        ArtifactTargetRequirements::new(TEST_SOURCE_LANGUAGE, vec![RuntimeFeature::BoundedMailbox]);
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect_err("underdeclared target requirements should fail before execution");
+
+    assert!(
+        err.to_string()
+            .contains("target requirements do not declare required runtime feature jsonl_trace"),
+        "{err}"
+    );
+    assert!(
+        host.events().is_empty(),
+        "underdeclared requirements must fail before ArtifactLoaded"
+    );
+}
+
+#[test]
+fn runtime_rejects_malformed_source_language_before_artifact_loaded() {
+    let mut artifact = valid_artifact();
+    artifact.source_language = "not-valid".into();
+    artifact.target_requirements.source_language = "not-valid".into();
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+        .expect_err("malformed source language should fail before execution");
+
+    assert!(
+        err.to_string()
+            .contains("artifact field source_language must be an identifier")
+    );
+    assert!(
+        host.events().is_empty(),
+        "malformed source language must fail before ArtifactLoaded"
     );
 }
 

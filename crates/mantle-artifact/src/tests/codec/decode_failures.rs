@@ -257,6 +257,23 @@ fn decode_rejects_unknown_spawn_site_kind() {
 }
 
 #[test]
+fn decode_rejects_unknown_runtime_feature_requirement() {
+    let encoded = valid_artifact().encode().replace(
+        "target_requirements.feature.0=bounded_mailbox",
+        "target_requirements.feature.0=remote_execution_v99",
+    );
+
+    let err =
+        MantleArtifact::decode(&encoded).expect_err("unknown runtime feature should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("invalid runtime feature \"remote_execution_v99\""),
+        "{err}"
+    );
+}
+
+#[test]
 fn decode_reports_artifact_value_field_context() {
     let encoded = valid_artifact().encode().replace(
         "process.0.state_value.0.value=MainState",
@@ -281,7 +298,7 @@ fn decode_reports_artifact_value_field_context() {
 #[test]
 fn decode_rejects_unbounded_process_count_before_allocation() {
     let encoded = format!(
-        "MTA0\nformat={ARTIFACT_FORMAT}\nschema_version={ARTIFACT_SCHEMA_VERSION}\nprocess_count={}\n",
+        "MTA0\nformat={ARTIFACT_FORMAT}\nschema_version={ARTIFACT_SCHEMA_VERSION}\nsource_language={TEST_SOURCE_LANGUAGE}\ntarget_requirements.source_language={TEST_SOURCE_LANGUAGE}\ntarget_requirements.feature_count=1\ntarget_requirements.feature.0=bounded_mailbox\nprocess_count={}\n",
         MAX_PROCESS_COUNT + 1
     );
 

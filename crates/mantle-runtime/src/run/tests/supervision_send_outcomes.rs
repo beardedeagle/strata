@@ -77,9 +77,10 @@ fn assert_inactive_supervisor_child_send_outcome(exit: StepResult, expected: &st
 
 fn supervisor_send_outcome_artifact(exit: StepResult) -> MantleArtifact {
     MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: TEST_SOURCE_LANGUAGE.to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: TEST_SOURCE_LANGUAGE.into(),
+        target_requirements: test_target_requirements(),
         module: "supervision_send_outcomes".to_string(),
         entry_process: MAIN_PROCESS,
         entry_message: MessageId::new(0),

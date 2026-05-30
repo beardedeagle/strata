@@ -11,12 +11,13 @@ pub(super) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAuthority, ArtifactCapabilityDescriptor,
     ArtifactEffect, ArtifactEnumVariant, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,
     ArtifactProcessRef, ArtifactProcessRefPayload, ArtifactRecordField, ArtifactSpawnKind,
-    ArtifactSpawnSite, ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField,
-    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
-    ArtifactValueTemplate, ArtifactValueTemplateField, AuthorityId, EnumVariantId,
-    MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_NEXT_STATE_IF_ELSE_DEPTH,
+    ArtifactSpawnSite, ArtifactStateValue, ArtifactTargetRequirements, ArtifactTransition,
+    ArtifactType, ArtifactTypeField, ArtifactValue, ArtifactValueBooleanOperator,
+    ArtifactValueEqualityOperator, ArtifactValueTemplate, ArtifactValueTemplateField, AuthorityId,
+    EnumVariantId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_NEXT_STATE_IF_ELSE_DEPTH,
     MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, RecordFieldId, SpawnSiteId, StateId, StepResult, TypeId,
+    OutputId, ProcessId, ProcessRefId, RecordFieldId, RuntimeFeature, SpawnSiteId, StateId,
+    StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
@@ -64,9 +65,10 @@ pub(super) fn loaded_admission_error_before_artifact_loaded(program: &LoadedProg
 
 pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
     MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: TEST_SOURCE_LANGUAGE.to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: TEST_SOURCE_LANGUAGE.into(),
+        target_requirements: test_target_requirements(),
         module: "unbound_worker_process_ref".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
@@ -140,6 +142,28 @@ pub(super) fn artifact_with_unbound_worker_process_ref() -> MantleArtifact {
         ],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }
+}
+
+pub(super) fn test_target_requirements() -> ArtifactTargetRequirements {
+    ArtifactTargetRequirements::new(
+        TEST_SOURCE_LANGUAGE,
+        vec![
+            RuntimeFeature::BoundedMailbox,
+            RuntimeFeature::ComponentCompositionMetadata,
+            RuntimeFeature::EmitEffect,
+            RuntimeFeature::JsonlTrace,
+            RuntimeFeature::LocalExecution,
+            RuntimeFeature::LocalSend,
+            RuntimeFeature::LocalSpawn,
+            RuntimeFeature::LocalSupervision,
+            RuntimeFeature::RuntimeBranching,
+            RuntimeFeature::RuntimeForEach,
+            RuntimeFeature::ScalarValueTemplates,
+            RuntimeFeature::TypedBoundaryTables,
+            RuntimeFeature::TypedEffectOutcomes,
+            RuntimeFeature::TypedValueTemplates,
+        ],
+    )
 }
 
 pub(super) fn artifact_with_large_unbound_process_ref_table() -> MantleArtifact {

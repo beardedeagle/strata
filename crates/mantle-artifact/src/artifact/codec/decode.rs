@@ -9,11 +9,13 @@ mod action_decode;
 mod boundaries;
 mod capabilities;
 mod scalar_decode;
+mod target_requirements;
 mod value_template_decode;
 
 use action_decode::decode_action;
 use boundaries::decode_boundaries;
 use capabilities::decode_capability_descriptor;
+use target_requirements::decode_target_requirements;
 
 impl MantleArtifact {
     pub fn decode(contents: &str) -> Result<Self> {
@@ -21,6 +23,8 @@ impl MantleArtifact {
         let format = fields.take_required("format")?;
         let schema_version = fields.take_required("schema_version")?;
         validate_artifact_identity(format, schema_version)?;
+        let source_language = fields.take_required_string("source_language")?;
+        let target_requirements = decode_target_requirements(&mut fields)?;
 
         let process_count = fields.take_bounded_usize("process_count", 1, MAX_PROCESS_COUNT)?;
         let type_count = fields.take_bounded_usize("type_count", 1, MAX_TYPE_COUNT)?;
@@ -246,9 +250,10 @@ impl MantleArtifact {
         }
 
         let artifact = Self {
-            format: format.to_string(),
-            schema_version: schema_version.to_string(),
-            source_language: fields.take_required_string("source_language")?,
+            format: format.to_string().into(),
+            schema_version: schema_version.to_string().into(),
+            source_language: source_language.into(),
+            target_requirements,
             module: fields.take_required_string("module")?,
             entry_process: fields.take_process_id("entry_process")?,
             entry_message: fields.take_message_id("entry_message")?,

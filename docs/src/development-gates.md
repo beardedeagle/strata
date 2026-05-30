@@ -33,6 +33,14 @@ acceptance criteria.
 just source-to-runtime-gates
 ```
 
+The success gates include the typed target-binding path for the component
+composition example: `strata target-requirements`, `mantle
+feature-declaration`, `mantle admit`, and `mantle run`. That path proves
+requirement extraction, `mantle.feature_declaration.v5` rendering,
+requirements-vs-declaration admission before runtime execution, and Mantle's
+artifact-derived check that declared requirements cover the decoded runtime
+constructs.
+
 ## Language Surface Proof Substrate
 
 `just language-surface-assurance` runs the executable current-language-surface
@@ -92,8 +100,9 @@ over `examples/collection_state.str`, the multi-file source-unit import example,
 the typed boundary-contract example, the checked component-composition example,
 and the local supervision restart example. It measures repeated Strata checking
 and lowering for collection state, source-unit imports, boundary contracts, and
-component composition; repeated checked composition report rendering from a
-prechecked composition input; Mantle
+component composition; repeated checked composition report rendering and target
+requirement rendering from a prechecked composition input; Mantle admission
+comparison through the runtime profiles; Mantle
 artifact encode/decode; repeated Mantle in-memory execution of the
 collection-state and boundary-contract artifacts; repeated
 Mantle JSONL-trace execution of the collection-state artifact; and repeated

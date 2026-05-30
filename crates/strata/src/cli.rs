@@ -2,7 +2,9 @@ use std::env;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use mantle_artifact::write_artifact;
+use mantle_artifact::{
+    TargetRequirementsFormat, render_artifact_target_requirements, write_artifact,
+};
 
 use crate::language::{
     AuthoritySummaryFormat, CheckedProgram, CompositionAdmissionReport,
@@ -160,6 +162,25 @@ where
             print_summary(&report);
             Ok(())
         }
+        Some("target-requirements") => {
+            let path = required_path(
+                args.next(),
+                "strata target-requirements <path.str> [--format text|json]",
+            )?;
+            let format = target_requirements_format_from_args(
+                args,
+                "strata target-requirements <path.str> [--format text|json]",
+            )?;
+            let (checked, source_hash) = check_source_path(&path)?;
+            let artifact = lower_to_artifact_with_source_hash(&checked, source_hash)?;
+            let requirements = render_artifact_target_requirements(
+                &artifact,
+                &path.display().to_string(),
+                format,
+            )?;
+            print_summary(&requirements);
+            Ok(())
+        }
         Some("--help") | Some("-h") => {
             print_strata_usage();
             Ok(())
@@ -284,6 +305,39 @@ fn composition_report_format_from_args(
     Ok(format)
 }
 
+fn target_requirements_format_from_args(
+    args: impl IntoIterator<Item = String>,
+    usage: &str,
+) -> Result<TargetRequirementsFormat> {
+    let mut format = TargetRequirementsFormat::Text;
+    let mut format_seen = false;
+    let mut rest = args.into_iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--format" => {
+                if format_seen {
+                    return Err(Error::new("duplicate --format argument"));
+                }
+                format_seen = true;
+                let value = rest
+                    .next()
+                    .ok_or_else(|| Error::new(format!("missing --format value; usage: {usage}")))?;
+                format = match value.as_str() {
+                    "text" => TargetRequirementsFormat::Text,
+                    "json" => TargetRequirementsFormat::Json,
+                    _ => {
+                        return Err(Error::new(format!(
+                            "unsupported --format value {value:?}; expected text or json"
+                        )));
+                    }
+                };
+            }
+            other => return Err(Error::new(format!("unexpected argument {other:?}"))),
+        }
+    }
+    Ok(format)
+}
+
 fn print_summary(summary: &str) {
     print!("{summary}");
     if !summary.ends_with('\n') {
@@ -297,6 +351,7 @@ fn print_strata_usage() {
     println!("  strata build <path.str> [--output <path.mta>]");
     println!("  strata authority-summary <path.str> [--format text|json]");
     println!("  strata composition-report <path.str> [--format text|json]");
+    println!("  strata target-requirements <path.str> [--format text|json]");
 }
 
 pub fn run_strata_from_env() -> Result<()> {
@@ -373,6 +428,31 @@ mod tests {
     #[test]
     fn composition_report_format_parser_rejects_unknown_format() {
         let err = composition_report_format_from_args(
+            ["--format".to_string(), "yaml".to_string()],
+            "usage",
+        )
+        .expect_err("unknown format should fail");
+
+        assert!(
+            err.to_string()
+                .contains("unsupported --format value \"yaml\"")
+        );
+    }
+
+    #[test]
+    fn target_requirements_format_parser_accepts_json() {
+        let format = target_requirements_format_from_args(
+            ["--format".to_string(), "json".to_string()],
+            "usage",
+        )
+        .expect("json format should parse");
+
+        assert_eq!(format, TargetRequirementsFormat::Json);
+    }
+
+    #[test]
+    fn target_requirements_format_parser_rejects_unknown_format() {
+        let err = target_requirements_format_from_args(
             ["--format".to_string(), "yaml".to_string()],
             "usage",
         )

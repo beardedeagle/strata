@@ -72,6 +72,22 @@ Strata/Mantle boundary obligation. Mantle admits typed composition metadata but
 does not resolve source component names, source-unit imports, source strings, or
 report data at runtime.
 
+Runtime feature declaration and target binding are recorded as a
+runtime-bearing boundary feature: Strata derives canonical typed target
+requirements from checked IR and lowering facts, embeds them in the `.mta`,
+renders them through `strata target-requirements`, Mantle renders its own typed
+`mantle.feature_declaration.v5` declaration, and Mantle admission compares the
+artifact's format, schema version, source language, declared runtime features,
+and artifact-derived minimum required features before execution. The runtime
+declaration includes conservative message-observation fields and explicit
+validity-window defaults without claiming distributed transport support.
+Mismatched or malformed source-language metadata, unsupported runtime
+features, underdeclared requirements, malformed requirement fields, remote
+send/spawn, and distributed transport remain fail-closed implementation limits.
+The evidence includes unit, negative, bounded determinism, source-to-runtime,
+acceptance, fuzz-seed, performance-smoke, docs, and assurance matrix coverage;
+it does not claim theorem-prover coverage.
+
 Run it with:
 
 ```sh

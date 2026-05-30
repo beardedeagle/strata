@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -29,6 +30,7 @@ pub use value_template::{
     ArtifactValueTemplateMapEntry, MapProjectionMode,
 };
 
+pub use crate::runtime_features::ArtifactTargetRequirements;
 use crate::{
     ARTIFACT_FORMAT, ARTIFACT_MAGIC, ARTIFACT_SCHEMA_VERSION, AuthorityId, ComponentId,
     EffectOutcomeId, EnumVariantId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
@@ -292,9 +294,10 @@ impl ArtifactType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MantleArtifact {
-    pub format: String,
-    pub schema_version: String,
-    pub source_language: String,
+    pub format: Cow<'static, str>,
+    pub schema_version: Cow<'static, str>,
+    pub source_language: Cow<'static, str>,
+    pub target_requirements: ArtifactTargetRequirements,
     pub module: String,
     pub entry_process: ProcessId,
     pub entry_message: MessageId,

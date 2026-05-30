@@ -15,6 +15,17 @@ just strata-check examples/hello.str
 If checking fails, fix the first reported error first. Later errors may be a
 result of the first invalid shape.
 
+## Common Artifact And Runtime Errors
+
+| Diagnostic Contains | Likely Cause | Fix |
+| --- | --- | --- |
+| `unsupported artifact schema version` | The `.mta` does not use the single schema version admitted by this Mantle build. | Rebuild the source with the current `strata build` command. |
+| `target requirements source_language ... does not match artifact source_language` | A malformed artifact declares conflicting source-language metadata. | Rebuild the artifact; do not edit `.mta` target requirement fields by hand. |
+| `artifact field source_language must be an identifier` | A malformed artifact has invalid source-language metadata. | Rebuild the artifact; Mantle treats source language as opaque artifact metadata and does not dispatch on source names. |
+| `target requirements do not declare required runtime feature ...` | The artifact uses a typed runtime construct that is missing from its target-requirement block. | Rebuild the artifact from checked source; Mantle derives required features from decoded `.mta` tables and fails closed on underdeclared requirements. |
+| `target runtime feature ... is not supported by this Mantle runtime` | The artifact requires a runtime feature outside the current Mantle declaration, such as remote spawn/send or distributed transport. | Use only currently implemented local runtime features or run on a Mantle runtime that declares the required feature. |
+| `target requirement runtime features must be sorted` / `duplicate target requirement runtime feature` | A malformed artifact target-requirement block is not canonical. | Rebuild the artifact from checked source; Mantle fails closed on malformed requirement fields. |
+
 ## Common Source Errors
 
 | Diagnostic Contains | Likely Cause | Fix |

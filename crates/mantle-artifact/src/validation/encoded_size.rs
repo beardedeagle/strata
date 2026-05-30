@@ -6,11 +6,13 @@ use crate::{
 mod boundaries;
 mod capabilities;
 mod supervision;
+mod target_requirements;
 mod templates;
 
 use boundaries::add_boundary_bytes;
 use capabilities::add_capability_descriptor_bytes;
 use supervision::{add_spawn_site_bytes, add_supervisor_plan_bytes};
+use target_requirements::add_target_requirement_bytes;
 use templates::add_value_template_bytes;
 
 #[derive(Clone, Copy)]
@@ -54,18 +56,19 @@ fn encoded_artifact_shape(artifact: &MantleArtifact) -> Result<EncodedArtifactSh
     add_field_bytes(
         &mut encoded_shape,
         KeyLen::new("format".len()),
-        &artifact.format,
+        artifact.format.as_ref(),
     )?;
     add_field_bytes(
         &mut encoded_shape,
         KeyLen::new("schema_version".len()),
-        &artifact.schema_version,
+        artifact.schema_version.as_ref(),
     )?;
     add_field_bytes(
         &mut encoded_shape,
         KeyLen::new("source_language".len()),
-        &artifact.source_language,
+        artifact.source_language.as_ref(),
     )?;
+    add_target_requirement_bytes(&mut encoded_shape, &artifact.target_requirements)?;
     add_field_bytes(
         &mut encoded_shape,
         KeyLen::new("module".len()),

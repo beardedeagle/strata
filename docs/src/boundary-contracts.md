@@ -95,6 +95,10 @@ Use `just strata-composition-report examples/component_composition_main.str json
 when review or CI needs the Strata-owned checked graph, diagnostic FNV-1a source
 fingerprint, typed component-instance IDs, port-binding IDs, admitted binding
 results, empty unsatisfied imports for admitted compositions, and endpoint
-authority edges. `strata authority-summary ... --format json` also reports the
-checked component-boundary authority edge summary for the same checked IR.
-Mantle admits the lowered `.mta`; it does not consume either source-side report.
+authority edges. Use `just strata-target-requirements
+examples/component_composition_main.str json` to inspect the typed Mantle
+runtime features Strata requires for the checked program. `strata
+authority-summary ... --format json` also reports the checked
+component-boundary authority edge summary for the same checked IR. Mantle admits
+the lowered `.mta` by comparing embedded typed requirements against `mantle
+feature-declaration`; it does not consume either source-side report.

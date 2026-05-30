@@ -9,10 +9,10 @@ pub(crate) use mantle_artifact::{
     ArtifactCapabilityDescriptor, ArtifactComponent, ArtifactEffect, ArtifactEnumVariant,
     ArtifactLoopElement, ArtifactMessageVariant, ArtifactPayload, ArtifactPort, ArtifactProcess,
     ArtifactProcessRef, ArtifactProtocol, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
-    ArtifactStateValue, ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactValue,
-    ArtifactValueTemplate, AuthorityId, ComponentId, EnumVariantId, LoopElementId, MantleArtifact,
-    MessageId, NextState, OutputId, PortId, ProcessId, ProcessRefId, ProtocolId, SpawnSiteId,
-    StateId, StepResult, TypeId,
+    ArtifactStateValue, ArtifactTargetRequirements, ArtifactTransition, ArtifactType,
+    ArtifactTypeField, ArtifactValue, ArtifactValueTemplate, AuthorityId, ComponentId,
+    EnumVariantId, LoopElementId, MantleArtifact, MessageId, NextState, OutputId, PortId,
+    ProcessId, ProcessRefId, ProtocolId, RuntimeFeature, SpawnSiteId, StateId, StepResult, TypeId,
 };
 
 pub(crate) use super::super::program::{LoadedProgram, RuntimePayload};
@@ -32,9 +32,10 @@ pub(crate) const SPAWN_SITE: SpawnSiteId = SpawnSiteId::new(0);
 
 pub(crate) fn valid_artifact() -> MantleArtifact {
     MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: TEST_SOURCE_LANGUAGE.to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: TEST_SOURCE_LANGUAGE.into(),
+        target_requirements: test_target_requirements(),
         module: "actor_ping".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
@@ -109,6 +110,28 @@ pub(crate) fn valid_artifact() -> MantleArtifact {
         ],
         source_hash_fnv1a64: "0000000000000000".to_string(),
     }
+}
+
+pub(crate) fn test_target_requirements() -> ArtifactTargetRequirements {
+    ArtifactTargetRequirements::new(
+        TEST_SOURCE_LANGUAGE,
+        vec![
+            RuntimeFeature::BoundedMailbox,
+            RuntimeFeature::ComponentCompositionMetadata,
+            RuntimeFeature::EmitEffect,
+            RuntimeFeature::JsonlTrace,
+            RuntimeFeature::LocalExecution,
+            RuntimeFeature::LocalSend,
+            RuntimeFeature::LocalSpawn,
+            RuntimeFeature::LocalSupervision,
+            RuntimeFeature::RuntimeBranching,
+            RuntimeFeature::RuntimeForEach,
+            RuntimeFeature::ScalarValueTemplates,
+            RuntimeFeature::TypedBoundaryTables,
+            RuntimeFeature::TypedEffectOutcomes,
+            RuntimeFeature::TypedValueTemplates,
+        ],
+    )
 }
 
 pub(crate) fn panic_artifact() -> MantleArtifact {
@@ -241,9 +264,10 @@ pub(crate) fn for_each_artifact(items: &str, max_items: usize) -> MantleArtifact
 
 pub(crate) fn looping_artifact() -> MantleArtifact {
     MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: TEST_SOURCE_LANGUAGE.to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: TEST_SOURCE_LANGUAGE.into(),
+        target_requirements: test_target_requirements(),
         module: "looping".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),
@@ -372,9 +396,10 @@ pub(crate) fn looping_artifact() -> MantleArtifact {
 
 pub(crate) fn sequence_artifact() -> MantleArtifact {
     let mut artifact = MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: TEST_SOURCE_LANGUAGE.to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: TEST_SOURCE_LANGUAGE.into(),
+        target_requirements: test_target_requirements(),
         module: "actor_sequence".to_string(),
         entry_process: ProcessId::new(0),
         entry_message: MessageId::new(0),

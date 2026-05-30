@@ -1,0 +1,8 @@
+MTA0
+format=mantle-target-artifact
+schema_version=6
+source_language=strata
+target_requirements.source_language=strata
+target_requirements.feature_count=1
+target_requirements.feature.0=remote_execution_v99
+process_count=1

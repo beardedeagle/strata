@@ -443,9 +443,10 @@ fn restart_capacity_denial_records_supervisor_decision() {
 
 fn supervisor_artifact(max_restarts: u32, within_ms: u64) -> MantleArtifact {
     MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: TEST_SOURCE_LANGUAGE.to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: TEST_SOURCE_LANGUAGE.into(),
+        target_requirements: test_target_requirements(),
         module: "supervisor_restart_intensity".to_string(),
         entry_process: MAIN_PROCESS,
         entry_message: MessageId::new(0),

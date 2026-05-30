@@ -22,6 +22,7 @@ use super::checked::{
     CheckedValueEqualityOperator, CheckedValueTemplate,
 };
 use super::source_program::SourceProvenanceHash;
+use super::target_requirements::{STRATA_SOURCE_LANGUAGE, target_requirements_for_checked_program};
 
 mod boundaries;
 mod capabilities;
@@ -33,8 +34,6 @@ use boundaries::{lower_components, lower_compositions, lower_ports, lower_protoc
 use capabilities::lower_capability_descriptor;
 use supervision::{lower_spawn_site, lower_supervisor_plans};
 use value_shapes::lower_value_shape;
-
-const STRATA_SOURCE_LANGUAGE: &str = "strata";
 
 pub(super) struct ArtifactTypeMap {
     artifacts: Vec<ArtifactType>,
@@ -123,9 +122,10 @@ fn lower_to_artifact_with_source_hash_fnv1a64(
     let components = lower_components(checked)?;
     let compositions = lower_compositions(checked)?;
     let artifact = MantleArtifact {
-        format: ARTIFACT_FORMAT.to_string(),
-        schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-        source_language: STRATA_SOURCE_LANGUAGE.to_string(),
+        format: ARTIFACT_FORMAT.into(),
+        schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+        source_language: STRATA_SOURCE_LANGUAGE.into(),
+        target_requirements: target_requirements_for_checked_program(checked),
         module: checked.module().name.to_string(),
         entry_process: lower_process_id(checked.entry_process()),
         entry_message: lower_message_id(checked.entry_message()),
