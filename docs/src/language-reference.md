@@ -70,21 +70,21 @@ artifact; it does not resolve imports or execute by source-unit names.
 The current boundary form declares typed protocols, ports, and component exports
 before lowering. `send target via Port Message;` proves the target process,
 protocol message enum, and process-local `Cap<PortConnect<Port>>` authority, then
-lowers typed boundary IDs into Mantle. Details are in
-[Boundary Contracts](boundary-contracts.md).
+lowers typed boundary IDs into Mantle. Details are in [Boundary Contracts](boundary-contracts.md).
 
-Components may declare imported ports with `component MainComponent exports MainPort
-imports WorkerPort requires ...;`. A local `composition` is an
+Components may declare imported ports with `component MainComponent exports
+MainPort imports WorkerPort requires ...;`. A local `composition` is an
 implementation-local source admission input for component instances and typed
-port binding edges, for example
-`bind main imports WorkerPort -> worker exports WorkerPort;`.
+port binding edges, such as `bind main imports WorkerPort -> worker exports
+WorkerPort;`.
 
-The checker admits this local input only when each instance names a visible
-component, each imported port is bound exactly once, each export belongs to the
-exporting component, and both ports use the same protocol. It is not the
-canonical `strata.component_composition` build/deployment artifact described by the
-architecture spec. Mantle receives typed component-instance and port IDs as artifact
-metadata/admission data and does not resolve source component names at runtime.
+The checker admits this local input only when instances name visible components,
+each import is bound once, exports belong to exporters, ports share one protocol,
+and the binding preserves exact current `Cap<PortConnect<Port>>` authority. It
+is not the canonical `strata.component_composition` artifact. Mantle receives
+typed IDs as metadata/admission data, not source names. The composition report
+command emits the Strata-owned checked graph report; Mantle does not consume it
+or validate source composition syntax.
 
 Every buildable program must declare a `Main` process. Mantle starts `Main` and
 delivers the first message variant of `Main`'s message enum as the entry

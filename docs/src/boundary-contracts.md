@@ -67,10 +67,12 @@ Invalid boundary shapes fail closed at the earliest layer that can see them. A
 source program with an undeclared port, mismatched protocol message type, missing
 port authority, duplicate boundary name, ambiguous direct import, unbound
 component import, duplicate component import binding, unimported-port binding,
-protocol-mismatched composition edge, or reserved descriptor type name fails
+protocol-mismatched or port-authority-mismatched composition edge, or reserved
+descriptor type name fails
 checking. A hand-authored artifact with mismatched boundary table IDs,
 unimported-port composition binding, missing port authority, malformed
-composition edge, or unbound component import fails admission before runtime
+composition edge, port-authority mismatch, or unbound component import fails
+admission before runtime
 events begin.
 
 Accepted typed boundary sends emit `boundary_send_checked` runtime trace events.
@@ -89,3 +91,10 @@ graph admission input for component instances and port bindings. It is not the
 canonical `strata.component_composition` build/deployment artifact, and it does
 not add remote send, distributed transport, capability binding syntax,
 deployment manifests, package resolution, hot upgrade, or generated port stubs.
+Use `just strata-composition-report examples/component_composition_main.str json`
+when review or CI needs the Strata-owned checked graph, diagnostic FNV-1a source
+fingerprint, typed component-instance IDs, port-binding IDs, admitted binding
+results, empty unsatisfied imports for admitted compositions, and endpoint
+authority edges. `strata authority-summary ... --format json` also reports the
+checked component-boundary authority edge summary for the same checked IR.
+Mantle admits the lowered `.mta`; it does not consume either source-side report.

@@ -3,6 +3,9 @@ use super::checked::{
     CheckedPortId, CheckedProgram, CheckedProtocolId, CheckedSpawnKind, CheckedSpawnSite,
     CheckedSupervisorChildMode, CheckedSupervisorStrategy, CheckedTransition,
 };
+use super::component_authority_edges::{
+    push_component_authority_edges_json, push_component_authority_edges_text,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthoritySummaryFormat {
@@ -117,6 +120,8 @@ fn render_text(program: &CheckedProgram, source_path: &str) -> String {
             }
         }
     }
+
+    push_component_authority_edges_text(&mut out, program);
 
     out
 }
@@ -263,6 +268,8 @@ fn render_json(program: &CheckedProgram, source_path: &str) -> String {
         out.push_str("]}");
     }
 
+    out.push_str("],\"component_authority_edges\":[");
+    push_component_authority_edges_json(&mut out, program);
     out.push_str("]}");
     out
 }

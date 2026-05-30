@@ -1,5 +1,7 @@
 use super::super::{
-    SourceProgram, SourceUnit, SourceUnitId, check_source_program, lower_to_artifact, parse_source,
+    CompositionAdmissionReport, CompositionAdmissionReportFormat, SourceProgram, SourceUnit,
+    SourceUnitId, check_source_program, lower_to_artifact, parse_source,
+    render_composition_admission_report,
 };
 use mantle_artifact::{MAX_COMPONENT_INSTANCE_COUNT, MAX_PORT_BINDING_COUNT, MAX_PORT_COUNT};
 
@@ -325,6 +327,50 @@ fn checker_rejects_protocol_mismatch() {
 }
 
 #[test]
+fn checker_rejects_same_protocol_port_authority_mismatch() {
+    let root = root_source()
+        .replace(
+            "port MainPort protocol MainProtocol target Main requires Cap<PortConnect<MainPort>>;",
+            "port MainPort protocol MainProtocol target Main requires Cap<PortConnect<MainPort>>;\nport WorkerClientPort protocol WorkerProtocol target Worker requires Cap<PortConnect<WorkerClientPort>>;",
+        )
+        .replace(
+            "component MainComponent exports MainPort imports WorkerPort",
+            "component MainComponent exports MainPort imports WorkerClientPort",
+        )
+        .replace(
+            "bind main imports WorkerPort -> worker exports WorkerPort",
+            "bind main imports WorkerClientPort -> worker exports WorkerServerPort",
+        )
+        .replace(
+            "authority connect_worker: Cap<PortConnect<WorkerPort>>;",
+            "authority connect_worker: Cap<PortConnect<WorkerClientPort>>;",
+        )
+        .replace(
+            "send worker via WorkerPort Work",
+            "send worker via WorkerClientPort Work",
+        );
+    let worker = worker_source()
+        .replace(
+            "port WorkerPort protocol WorkerProtocol target Worker requires Cap<PortConnect<WorkerPort>>;",
+            "port WorkerServerPort protocol WorkerProtocol target Worker requires Cap<PortConnect<WorkerServerPort>>;",
+        )
+        .replace(
+            "component WorkerComponent exports WorkerPort",
+            "component WorkerComponent exports WorkerServerPort",
+        );
+    let err = source_program([root, worker])
+        .and_then(check_source_program)
+        .expect_err("port authority mismatch should fail closed");
+
+    assert!(
+        err.to_string().contains(
+            "composition AppComposition cannot bind imported port WorkerClientPort to exported port WorkerServerPort because their port authorities differ"
+        ),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
 fn source_program_rejects_ambiguous_direct_component_import() {
     let root = r#"module composition_root;
 import composition_a;
@@ -462,6 +508,39 @@ fn bounded_composition_graphs_lower_deterministically() {
 
     assert_eq!(first.components, second.components);
     assert_eq!(first.compositions, second.compositions);
+}
+
+#[test]
+fn bounded_composition_reports_are_deterministic() {
+    let first_program = composition_program().expect("first composition program should parse");
+    let first_report_input = CompositionAdmissionReport::from_source_program(first_program)
+        .expect("first composition program should check");
+    let first_report = render_composition_admission_report(
+        &first_report_input,
+        "component_composition_main.str",
+        CompositionAdmissionReportFormat::Json,
+    );
+
+    let second_program =
+        source_program_with_root(1, [worker_source().to_string(), root_source().to_string()])
+            .expect("reordered composition program should parse");
+    let second_report_input = CompositionAdmissionReport::from_source_program(second_program)
+        .expect("reordered composition program should check");
+    let second_report = render_composition_admission_report(
+        &second_report_input,
+        "component_composition_main.str",
+        CompositionAdmissionReportFormat::Json,
+    );
+
+    assert_eq!(
+        first_report_input.source_hash(),
+        second_report_input.source_hash()
+    );
+    assert_eq!(first_report, second_report);
+    assert!(
+        first_report.contains("\"authority_edges\":[{\"port_binding_id\":0"),
+        "report should include typed authority edges: {first_report}"
+    );
 }
 
 fn composition_program() -> crate::language::Result<SourceProgram> {

@@ -123,6 +123,14 @@ just mantle-inspect-authority target/strata/actor_emit_spawn_send.mta
 Pass `json` as the final recipe argument when CI or audit tooling needs
 deterministic machine-readable output.
 
+For checked component composition, the source-side report emits the admitted
+composition graph, admitted binding facts, and endpoint authority edges without
+changing the Mantle artifact:
+
+```sh
+just strata-composition-report examples/component_composition_main.str json
+```
+
 ## Run The Standard Gate
 
 After editing source, examples, runtime behavior, artifacts, or docs, use the

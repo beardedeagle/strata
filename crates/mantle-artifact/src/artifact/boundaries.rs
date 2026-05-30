@@ -456,6 +456,15 @@ impl MantleArtifact {
                 binding.exported_port.as_u32()
             )));
         }
+        if imported_contract.required_authority != exported_contract.required_authority {
+            return Err(Error::new(format!(
+                "composition {} port binding id {} connects port ids {} and {} with different port authorities",
+                composition.debug_name,
+                binding_id.as_u32(),
+                binding.imported_port.as_u32(),
+                binding.exported_port.as_u32()
+            )));
+        }
         if !seen_import_bindings.insert((binding.importer, binding.imported_port)) {
             return Err(Error::new(format!(
                 "composition {} binds importer instance id {} port id {} more than once",

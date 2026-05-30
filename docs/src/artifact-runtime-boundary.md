@@ -117,6 +117,12 @@ the bound port, protocols must match, and every component import on every
 instance must be bound. Runtime dispatch does not look up component names or
 source import names; the composition graph is metadata/admission data for the
 already lowered typed IDs.
+The checked composition admission report is a Strata-owned inspection surface
+derived before Mantle execution. It records the diagnostic FNV-1a source
+fingerprint, typed component-instance IDs, typed port-binding IDs, admitted
+binding results, empty unsatisfied imports for admitted compositions, and
+endpoint authority edges for review, but it is not an executable artifact and
+Mantle does not read it.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect usage, and must exactly match the action effects that execute.
@@ -159,3 +165,5 @@ artifacts. It validates the `.mta` through the same artifact reader used before
 execution, then prints the typed authority and spawn-site tables. It does not
 dispatch by source names, execute runtime actions, or generate a mandatory
 report; JSON output is available only when explicitly requested by the caller.
+The source-side composition report is emitted by `strata composition-report`;
+it is separate from `mantle inspect-authority` and from `.mta` admission.

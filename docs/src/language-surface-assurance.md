@@ -60,10 +60,17 @@ declarations, implementation-local source admission input, typed
 component-instance IDs, typed port-binding edges, direct-import validation,
 duplicate and unbound import rejection, unimported-port binding rejection,
 protocol mismatch rejection, deterministic graph lowering, Mantle
-composition-table admission, source-to-runtime execution, fuzz seeds,
-performance-smoke evidence, diagnostics, and docs are tracked together. Mantle
-admits typed composition metadata but does not resolve source component names,
-source-unit imports, or source strings at runtime.
+composition-table admission, Strata-owned composition admission report emission,
+source-to-runtime execution, fuzz seeds, performance-smoke evidence, diagnostics,
+and docs are tracked together. The report records the diagnostic FNV-1a source
+fingerprint, typed component-instance IDs, typed port-binding IDs, admitted
+binding results, empty unsatisfied imports for admitted compositions, endpoint
+port authority requirements, and cross-component authority edges for review.
+The report is evidence for the Strata-owned review surface; checked IR lowering
+and Mantle artifact admission remain the evidence classes that satisfy the
+Strata/Mantle boundary obligation. Mantle admits typed composition metadata but
+does not resolve source component names, source-unit imports, source strings, or
+report data at runtime.
 
 Run it with:
 

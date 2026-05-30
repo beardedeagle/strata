@@ -94,6 +94,7 @@ runtime source-name resolution:
 
 ```sh
 just run-example component_composition_main
+just strata-composition-report examples/component_composition_main.str json
 ```
 
 An immutable source computation gate proves sequential source-local bindings are

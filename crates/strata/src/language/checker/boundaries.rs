@@ -226,6 +226,7 @@ fn check_composition(
             imported_port,
             exported_port,
         )?;
+        validate_port_authority_match(module, composition, imported_port, exported_port)?;
         if !seen_import_bindings.insert((importer, imported_port)) {
             return Err(Error::new(format!(
                 "composition {} binds instance {} imported port {} more than once",
@@ -329,6 +330,30 @@ fn validate_port_protocol_match(
     } else {
         Err(Error::new(format!(
             "composition {} cannot bind imported port {} to exported port {} because their protocols differ",
+            composition.name,
+            port_name(module, imported_port),
+            port_name(module, exported_port)
+        )))
+    }
+}
+
+fn validate_port_authority_match(
+    module: &Module,
+    composition: &Composition,
+    imported_port: super::super::checked::CheckedPortId,
+    exported_port: super::super::checked::CheckedPortId,
+) -> Result<()> {
+    let imported_authority = CheckedCapabilityDescriptor::PortConnect {
+        port: imported_port,
+    };
+    let exported_authority = CheckedCapabilityDescriptor::PortConnect {
+        port: exported_port,
+    };
+    if imported_authority == exported_authority {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "composition {} cannot bind imported port {} to exported port {} because their port authorities differ",
             composition.name,
             port_name(module, imported_port),
             port_name(module, exported_port)

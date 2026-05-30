@@ -20,6 +20,7 @@ pub(crate) enum EvidenceClass {
     ParserCoverage,
     CheckerValidation,
     CheckedIrLowering,
+    CompositionReport,
     ArtifactAdmission,
     RuntimeExecution,
     Diagnostics,
@@ -352,6 +353,7 @@ impl EvidenceClass {
             EvidenceClass::ParserCoverage => "parser",
             EvidenceClass::CheckerValidation => "checker",
             EvidenceClass::CheckedIrLowering => "checked-ir/lowering",
+            EvidenceClass::CompositionReport => "composition-report",
             EvidenceClass::ArtifactAdmission => "artifact-admission",
             EvidenceClass::RuntimeExecution => "runtime-execution",
             EvidenceClass::Diagnostics => "diagnostics",
@@ -484,6 +486,7 @@ impl SurfaceLayer {
                 EvidenceClass::ParserCoverage
                     | EvidenceClass::CheckerValidation
                     | EvidenceClass::CheckedIrLowering
+                    | EvidenceClass::CompositionReport
                     | EvidenceClass::Diagnostics
                     | EvidenceClass::RunnableExample
                     | EvidenceClass::PositiveTest
@@ -512,7 +515,9 @@ impl SurfaceLayer {
 
 #[cfg(test)]
 mod tests {
-    use super::{EvidenceClass, SurfaceLayer};
+    use std::collections::BTreeSet;
+
+    use super::{EvidenceClass, ProofObligationClass, SurfaceLayer};
 
     #[test]
     fn source_only_layer_rejects_runtime_and_boundary_evidence() {
@@ -529,5 +534,12 @@ mod tests {
         assert!(
             !SurfaceLayer::FutureNonAdmitted.allows_evidence(EvidenceClass::SourceToRuntimeGate)
         );
+    }
+
+    #[test]
+    fn composition_report_does_not_satisfy_boundary_obligation_by_itself() {
+        let evidence = BTreeSet::from([EvidenceClass::CompositionReport]);
+
+        assert!(!ProofObligationClass::StrataMantleBoundary.is_supported_by(&evidence));
     }
 }

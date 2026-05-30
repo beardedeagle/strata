@@ -354,6 +354,39 @@ fn validate_rejects_composition_protocol_mismatch() {
 }
 
 #[test]
+fn validate_rejects_composition_port_authority_mismatch() {
+    let mut artifact = composition_artifact();
+    artifact.ports.push(ArtifactPort {
+        debug_name: "WorkerAliasPort".to_string(),
+        protocol: ProtocolId::new(1),
+        target_process: ProcessId::new(1),
+        required_authority: ArtifactCapabilityDescriptor::PortConnect {
+            port: PortId::new(2),
+        },
+    });
+    artifact.components.push(ArtifactComponent {
+        debug_name: "WorkerAliasComponent".to_string(),
+        export_port: PortId::new(2),
+        import_ports: Vec::new(),
+        required_authority: ArtifactCapabilityDescriptor::ComponentExport {
+            component: ComponentId::new(2),
+        },
+    });
+    artifact.compositions[0].component_instances[1].component = ComponentId::new(2);
+    artifact.compositions[0].port_bindings[0].exported_port = PortId::new(2);
+
+    let err = artifact
+        .validate()
+        .expect_err("composition port authority mismatch should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("connects port ids 1 and 2 with different port authorities"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
 fn validate_rejects_duplicate_composition_debug_name() {
     let mut artifact = composition_artifact();
     artifact.compositions.push(artifact.compositions[0].clone());

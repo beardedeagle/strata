@@ -365,6 +365,20 @@ supervisor IDs, supervisor child IDs, child modes, and restart-intensity fields
 so CI and audit tooling can compare the source-side and artifact-side authority
 surfaces. Process, authority, and child labels are included only as metadata.
 
+Composition admission reporting is source-side only:
+
+```sh
+just strata-composition-report examples/component_composition_main.str
+just strata-composition-report examples/component_composition_main.str json
+```
+
+The report is emitted from checked Strata composition facts and a diagnostic
+FNV-1a source fingerprint. It records typed component-instance IDs, typed
+port-binding IDs, admitted binding results, empty unsatisfied imports for
+admitted compositions, component export authority surfaces, endpoint port
+authority requirements, and cross-component authority edges. Mantle does not
+read this report; it executes only admitted `.mta` artifacts.
+
 ## Step Patterns
 
 A `step` parameter pattern handles one message constructor:

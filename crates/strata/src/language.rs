@@ -2,6 +2,8 @@ mod ast;
 mod authority_summary;
 mod checked;
 mod checker;
+mod component_authority_edges;
+mod composition_report;
 mod diagnostic;
 mod import_access;
 mod import_scope;
@@ -26,6 +28,10 @@ pub use ast::{
 pub use authority_summary::{AuthoritySummaryFormat, render_authority_summary};
 pub use checked::CheckedProgram;
 pub use checker::check_module;
+pub use composition_report::{
+    CompositionAdmissionReport, CompositionAdmissionReportFormat,
+    render_composition_admission_report,
+};
 pub use diagnostic::{Error, Result};
 pub use lowering::{lower_to_artifact, lower_to_artifact_with_source_hash};
 pub use parser::parse_source;

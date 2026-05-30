@@ -77,6 +77,9 @@ ports. A composition declares local component instances and port binding edges
 from an imported port on one instance to an exported port on another instance.
 This is the current implementation's local source admission input, not the
 canonical `strata.component_composition` build/deployment artifact.
+The optional `strata composition-report` command reports the checked composition
+graph, admitted binding facts, and endpoint authority edges as Strata-owned
+review evidence and does not change the executable Mantle artifact format.
 The required authority annotations must be exact:
 `Cap<ProtocolBoundary<ProtocolName>>`, `Cap<PortConnect<PortName>>`, and
 `Cap<ComponentExport<ComponentName>>`. See
