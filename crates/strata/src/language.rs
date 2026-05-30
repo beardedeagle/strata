@@ -1,6 +1,7 @@
 mod ast;
 mod authority_summary;
 mod checked;
+mod checked_render;
 mod checker;
 mod component_authority_edges;
 mod composition_report;

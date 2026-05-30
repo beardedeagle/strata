@@ -1,8 +1,11 @@
 use std::fmt::Write as _;
 
-use super::checked::{
-    CheckedCapabilityDescriptor, CheckedComponentId, CheckedComponentInstance,
-    CheckedComponentInstanceId, CheckedPortBinding, CheckedPortId, CheckedProgram,
+use super::checked::{CheckedComponentInstance, CheckedPortBinding, CheckedProgram};
+use super::checked_render::{
+    checked_component_authority, checked_component_label, checked_port_authority,
+    checked_port_label, checked_protocol_label, port_protocol, push_checked_descriptor_json,
+    push_checked_descriptor_text, push_component_instance_ref_json, push_component_ref_json,
+    push_json_field, push_port_ref_json, push_protocol_ref_json, push_text_metadata_value,
 };
 use super::diagnostic::Result;
 use super::source_program::{SourceProgram, SourceProvenanceHash, check_source_program};
@@ -72,7 +75,7 @@ fn render_text(
 ) -> String {
     let mut out = String::new();
     out.push_str("strata composition admission report ");
-    push_escaped_text_metadata(&mut out, source_path);
+    push_text_metadata_value(&mut out, source_path);
     out.push('\n');
     out.push_str("format: ");
     out.push_str(REPORT_FORMAT);
@@ -390,225 +393,4 @@ fn push_authority_edge_json(
         checked_port_authority(program, binding.imported_port()),
     );
     out.push('}');
-}
-
-fn push_component_instance_ref_json(
-    out: &mut String,
-    prefix: &str,
-    instances: &[CheckedComponentInstance],
-    id: CheckedComponentInstanceId,
-) {
-    out.push_str(",\"");
-    out.push_str(prefix);
-    out.push_str("_instance_id\":");
-    let _ = write!(out, "{}", id.as_u32());
-    out.push_str(",\"");
-    out.push_str(prefix);
-    out.push_str("_instance\":\"");
-    push_escaped_json_str(out, instances[id.index()].debug_name().as_str());
-    out.push('"');
-}
-
-fn push_component_ref_json(
-    out: &mut String,
-    prefix: &str,
-    program: &CheckedProgram,
-    id: CheckedComponentId,
-) {
-    out.push_str(",\"");
-    out.push_str(prefix);
-    out.push_str("_id\":");
-    let _ = write!(out, "{}", id.as_u32());
-    out.push_str(",\"");
-    out.push_str(prefix);
-    out.push_str("\":\"");
-    push_escaped_json_str(out, checked_component_label(program, id));
-    out.push('"');
-}
-
-fn push_port_ref_json(out: &mut String, prefix: &str, program: &CheckedProgram, id: CheckedPortId) {
-    out.push_str(",\"");
-    out.push_str(prefix);
-    out.push_str("_id\":");
-    let _ = write!(out, "{}", id.as_u32());
-    out.push_str(",\"");
-    out.push_str(prefix);
-    out.push_str("\":\"");
-    push_escaped_json_str(out, checked_port_label(program, id));
-    out.push('"');
-}
-
-fn push_protocol_ref_json(
-    out: &mut String,
-    program: &CheckedProgram,
-    id: super::checked::CheckedProtocolId,
-) {
-    out.push_str(",\"protocol_id\":");
-    let _ = write!(out, "{}", id.as_u32());
-    out.push_str(",\"protocol\":\"");
-    push_escaped_json_str(out, checked_protocol_label(program, id));
-    out.push('"');
-}
-
-fn push_checked_descriptor_text(
-    out: &mut String,
-    program: &CheckedProgram,
-    descriptor: CheckedCapabilityDescriptor,
-) {
-    match descriptor {
-        CheckedCapabilityDescriptor::Spawn { target } => {
-            out.push_str("Cap<Spawn<");
-            out.push_str(checked_process_label(program, target));
-            out.push_str(">>");
-        }
-        CheckedCapabilityDescriptor::ProtocolBoundary { protocol } => {
-            out.push_str("Cap<ProtocolBoundary<");
-            out.push_str(checked_protocol_label(program, protocol));
-            out.push_str(">>");
-        }
-        CheckedCapabilityDescriptor::PortConnect { port } => {
-            out.push_str("Cap<PortConnect<");
-            out.push_str(checked_port_label(program, port));
-            out.push_str(">>");
-        }
-        CheckedCapabilityDescriptor::ComponentExport { component } => {
-            out.push_str("Cap<ComponentExport<");
-            out.push_str(checked_component_label(program, component));
-            out.push_str(">>");
-        }
-    }
-}
-
-fn push_checked_descriptor_json(
-    out: &mut String,
-    program: &CheckedProgram,
-    descriptor: CheckedCapabilityDescriptor,
-) {
-    match descriptor {
-        CheckedCapabilityDescriptor::Spawn { target } => {
-            out.push_str("{\"kind\":\"spawn\",\"target_process_id\":");
-            let _ = write!(out, "{}", target.as_u32());
-            out.push(',');
-            push_json_field(
-                out,
-                "target_process",
-                checked_process_label(program, target),
-            );
-            out.push('}');
-        }
-        CheckedCapabilityDescriptor::ProtocolBoundary { protocol } => {
-            out.push_str("{\"kind\":\"protocol_boundary\",\"protocol_id\":");
-            let _ = write!(out, "{}", protocol.as_u32());
-            out.push(',');
-            push_json_field(out, "protocol", checked_protocol_label(program, protocol));
-            out.push('}');
-        }
-        CheckedCapabilityDescriptor::PortConnect { port } => {
-            out.push_str("{\"kind\":\"port_connect\",\"port_id\":");
-            let _ = write!(out, "{}", port.as_u32());
-            out.push(',');
-            push_json_field(out, "port", checked_port_label(program, port));
-            out.push('}');
-        }
-        CheckedCapabilityDescriptor::ComponentExport { component } => {
-            out.push_str("{\"kind\":\"component_export\",\"component_id\":");
-            let _ = write!(out, "{}", component.as_u32());
-            out.push(',');
-            push_json_field(
-                out,
-                "component",
-                checked_component_label(program, component),
-            );
-            out.push('}');
-        }
-    }
-}
-
-fn port_protocol(program: &CheckedProgram, id: CheckedPortId) -> super::checked::CheckedProtocolId {
-    program.ports()[id.index()].protocol()
-}
-
-fn checked_component_authority(
-    program: &CheckedProgram,
-    id: CheckedComponentId,
-) -> CheckedCapabilityDescriptor {
-    program.components()[id.index()].required_authority()
-}
-
-fn checked_port_authority(
-    program: &CheckedProgram,
-    id: CheckedPortId,
-) -> CheckedCapabilityDescriptor {
-    program.ports()[id.index()].required_authority()
-}
-
-fn checked_process_label(program: &CheckedProgram, id: super::checked::CheckedProcessId) -> &str {
-    program
-        .processes()
-        .get(id.index())
-        .map(|process| process.debug_name().as_str())
-        .unwrap_or("<invalid-process>")
-}
-
-fn checked_protocol_label(program: &CheckedProgram, id: super::checked::CheckedProtocolId) -> &str {
-    program
-        .protocols()
-        .get(id.index())
-        .map(|protocol| protocol.debug_name().as_str())
-        .unwrap_or("<invalid-protocol>")
-}
-
-fn checked_port_label(program: &CheckedProgram, id: CheckedPortId) -> &str {
-    program
-        .ports()
-        .get(id.index())
-        .map(|port| port.debug_name().as_str())
-        .unwrap_or("<invalid-port>")
-}
-
-fn checked_component_label(program: &CheckedProgram, id: CheckedComponentId) -> &str {
-    program
-        .components()
-        .get(id.index())
-        .map(|component| component.debug_name().as_str())
-        .unwrap_or("<invalid-component>")
-}
-
-fn push_json_field(out: &mut String, key: &str, value: &str) {
-    out.push('"');
-    out.push_str(key);
-    out.push_str("\":\"");
-    push_escaped_json_str(out, value);
-    out.push('"');
-}
-
-fn push_escaped_text_metadata(out: &mut String, value: &str) {
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch.is_control() => {
-                let _ = write!(out, "\\u{{{:x}}}", ch as u32);
-            }
-            ch => out.push(ch),
-        }
-    }
-}
-
-fn push_escaped_json_str(out: &mut String, value: &str) {
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch.is_control() => {
-                let _ = write!(out, "\\u{:04x}", ch as u32);
-            }
-            ch => out.push(ch),
-        }
-    }
 }

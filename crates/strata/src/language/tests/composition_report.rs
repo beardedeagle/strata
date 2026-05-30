@@ -71,6 +71,20 @@ fn text_report_escapes_metadata_fields() {
 }
 
 #[test]
+fn text_report_escapes_control_metadata_with_unicode_scalars() {
+    let report_input = checked_composition();
+    let report = render_composition_admission_report(
+        &report_input,
+        "component\u{0008}\u{000c}\u{001f}main.str",
+        CompositionAdmissionReportFormat::Text,
+    );
+
+    assert!(report.starts_with(
+        "strata composition admission report component\\u0008\\u000c\\u001fmain.str\n"
+    ));
+}
+
+#[test]
 fn report_rejects_distinct_bound_port_authorities() {
     let program = SourceProgram::new(
         SourceUnitId::from_index(0).expect("root id"),
