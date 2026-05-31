@@ -88,6 +88,17 @@ The evidence includes unit, negative, bounded determinism, source-to-runtime,
 acceptance, fuzz-seed, performance-smoke, docs, and assurance matrix coverage;
 it does not claim theorem-prover coverage.
 
+Mantle executable-plan construction is recorded as an internal runtime
+implementation feature: Mantle validates a loaded `.mta`, builds typed
+dispatch/action tables from the admitted `LoadedProgram`, and executes from
+those pre-resolved plan references. The evidence covers plan construction,
+deterministic transition ordering, typed action tables, source-name/debug-label
+retargeting attempts, invalid loaded-reference rejection before
+`ArtifactLoaded`, runtime execution equivalence, performance-smoke coverage,
+and docs. This evidence does not add a serialized bytecode format, a Strata
+lowering target, new source semantics, new fuzz decoder seeds, or new unsafe
+indexing assumptions; it remains bounded machine-checked assurance.
+
 Run it with:
 
 ```sh

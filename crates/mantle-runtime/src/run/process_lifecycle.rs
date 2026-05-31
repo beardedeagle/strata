@@ -6,7 +6,7 @@ use crate::event::{RuntimeEvent, RuntimeProcessId};
 use crate::host::RuntimeHost;
 use crate::report::{ProcessStatus, SpawnReport};
 
-impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
+impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
     pub(super) fn spawn_process(
         &mut self,
         process_id: ProcessId,

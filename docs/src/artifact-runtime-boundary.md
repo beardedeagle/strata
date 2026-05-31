@@ -99,6 +99,23 @@ composition metadata. Mantle owns only the declaration and comparison; it does
 not infer Strata source composition, imports, source names, authority widening,
 or deployment safety.
 
+## Internal Executable Plan
+
+After a `.mta` decodes into a `LoadedProgram`, Mantle validates loaded admission
+and then constructs an internal executable plan for runtime dispatch. The plan
+pre-resolves transition dispatch, action blocks, process-reference targets,
+spawn-site authority references, branch bodies, loop bodies, and value-template
+references into typed runtime structures. Process and message labels may be
+borrowed for reports and traces, but they are not executable dispatch keys.
+
+The executable plan is not serialized bytecode, not a Strata lowering target,
+and not a replacement for artifact validation. Constructing the plan cannot
+grant authority or bypass feature, artifact, or loaded-program admission.
+Invalid loaded references fail before `ArtifactLoaded` and before host-visible
+runtime side effects. Source names, process debug names, message labels, and
+other display strings remain diagnostics and trace metadata; runtime dispatch
+uses admitted typed IDs and executable-plan references.
+
 ## Host Path Handling
 
 Artifact and trace paths are validated before host IO. On Unix targets, Mantle
@@ -112,14 +129,15 @@ support.
 
 ## Execution
 
-Mantle loads admitted transitions into indexed runtime tables. Before emitting
+Mantle executes from the admitted executable plan. Before emitting
 `ArtifactLoaded` or executing runtime side effects, Mantle validates loaded
 entry metadata, state tables, transition state targets and templates, outputs,
-and record field projections. Record field projection and record construction
-templates carry typed record-field IDs into admitted record type shapes; record
-field names remain metadata for value labels, diagnostics, and traces. Process
-references, sends, payload templates, and transition effect usage are validated
-as typed IDs or admitted templates before execution.
+record field projections, and all plan-resolved action references. Record field
+projection and record construction templates carry typed record-field IDs into
+admitted record type shapes; record field names remain metadata for value
+labels, diagnostics, and traces. Process references, sends, payload templates,
+and transition effect usage are validated as typed IDs or admitted templates
+before execution.
 Loaded authority tables and spawn-site tables are validated before any runtime
 side effect. A spawn action references a typed spawn-site ID; that site
 references a typed authority ID whose descriptor must be an exact local
@@ -176,6 +194,7 @@ The action set covers:
 - emitting declared output;
 - spawning a declared process through a process reference and admitted spawn
   authority;
+- binding typed spawn and send effect outcomes in the pre-state action prefix;
 - sending a declared message through a bound process reference;
 - selecting a typed runtime branch over admitted action blocks;
 - iterating over an admitted bounded list template with a typed active loop

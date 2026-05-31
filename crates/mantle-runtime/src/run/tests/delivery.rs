@@ -15,7 +15,9 @@ fn runtime_rejects_send_to_stopped_process_before_acceptance() {
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let main_pid = run
             .spawn_process(MAIN_PROCESS, None)
             .expect("entry process should spawn");
@@ -69,7 +71,9 @@ fn runtime_rejects_send_to_failed_process_before_acceptance() {
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let main_pid = run
             .spawn_process(MAIN_PROCESS, None)
             .expect("entry process should spawn");
@@ -127,7 +131,9 @@ fn runtime_rejects_full_mailbox_before_second_acceptance() {
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let main_pid = run
             .spawn_process(MAIN_PROCESS, None)
             .expect("entry process should spawn");
@@ -177,7 +183,9 @@ fn runtime_rejects_unhandled_messages_after_stopped_process_drain() {
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let main_pid = run
             .spawn_process(MAIN_PROCESS, None)
             .expect("entry process should spawn");
@@ -224,7 +232,9 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let main_pid = run
             .spawn_process(MAIN_PROCESS, None)
             .expect("entry process should spawn");
@@ -264,7 +274,9 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let main_pid = run
             .spawn_process(MAIN_PROCESS, None)
             .expect("entry process should spawn");
@@ -304,7 +316,9 @@ fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation()
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let main_pid = run
             .spawn_process(MAIN_PROCESS, None)
             .expect("entry process should spawn");
@@ -353,7 +367,9 @@ fn runtime_rejects_unspawned_process_ref_payload_before_acceptance() {
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let main_pid = run
             .spawn_process(MAIN_PROCESS, None)
             .expect("entry process should spawn");
@@ -392,7 +408,9 @@ fn runtime_traces_distinct_nested_branches_with_identical_conditions() {
     let mut host = InMemoryRuntimeHost::default();
 
     {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let worker_pid = run
             .spawn_process(WORKER_PROCESS, None)
             .expect("worker process should spawn");
@@ -465,7 +483,9 @@ fn runtime_rejects_message_payload_outside_declared_enum_before_acceptance() {
     let mut host = InMemoryRuntimeHost::default();
 
     let err = {
-        let mut run = new_test_run(&program, &mut host);
+        let executable = ExecutableProgram::from_admitted(&program)
+            .expect("executable plan should admit loaded program");
+        let mut run = new_test_run(&program, &executable, &mut host);
         let worker_pid = run
             .spawn_process(WORKER_PROCESS, None)
             .expect("worker process should spawn");
@@ -595,15 +615,16 @@ fn main_step(main_pid: RuntimeProcessId) -> ActiveStep {
     }
 }
 
-fn new_test_run<'program, 'host>(
+fn new_test_run<'program, 'plan, 'host>(
     program: &'program LoadedProgram,
+    executable: &'plan ExecutableProgram<'program>,
     host: &'host mut InMemoryRuntimeHost,
-) -> RuntimeRun<'program, 'host, InMemoryRuntimeHost> {
-    RuntimeRun::new(program, host, RunLimits::default())
+) -> RuntimeRun<'program, 'plan, 'host, InMemoryRuntimeHost> {
+    RuntimeRun::new(program, executable, host, RunLimits::default())
 }
 
 fn process_index_for_pid(
-    run: &RuntimeRun<'_, '_, InMemoryRuntimeHost>,
+    run: &RuntimeRun<'_, '_, '_, InMemoryRuntimeHost>,
     pid: RuntimeProcessId,
 ) -> usize {
     run.process_index_for_pid(pid)

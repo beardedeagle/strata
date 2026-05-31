@@ -6,7 +6,9 @@ use admission::{
     validate_loaded_artifact_identity, validate_loaded_ident_field, validate_loaded_output_text,
 };
 pub(crate) use effects::LoadedEffectAuthority;
-use transitions::{TransitionLookup, load_transitions, validate_loaded_transition_coverage};
+#[cfg(test)]
+use transitions::TransitionLookup;
+use transitions::{load_transitions, validate_loaded_transition_coverage};
 pub use values::RuntimePayload;
 pub(crate) use values::{
     LoadedStateValue, LoadedValueTemplate, LoadedValueTemplateField, LoadedValueTemplateMapEntry,
@@ -425,6 +427,7 @@ pub(crate) struct LoadedProcess {
     pub(crate) mailbox_bound: usize,
     pub(crate) init_state: StateId,
     pub(crate) transitions: Vec<LoadedTransition>,
+    #[cfg(test)]
     transition_lookup: TransitionLookup,
 }
 

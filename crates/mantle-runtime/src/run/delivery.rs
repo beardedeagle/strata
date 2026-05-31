@@ -23,7 +23,7 @@ enum DeliveryPreflight {
     Failed(DeliveryPreflightFailure),
 }
 
-impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
+impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
     pub(super) fn send_message(
         &mut self,
         target: RuntimeProcessId,

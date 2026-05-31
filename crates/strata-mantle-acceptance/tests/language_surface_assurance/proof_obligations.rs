@@ -155,6 +155,16 @@ pub(crate) const ARTIFACT_ADMISSION_ONLY: &[ProofObligation] = &[
     DOCUMENTATION,
 ];
 
+pub(crate) const ARTIFACT_ADMISSION_BOUNDED: &[ProofObligation] = &[
+    STRATA_MANTLE_BOUNDARY,
+    ARTIFACT_ADMISSION,
+    RUNTIME_EXECUTION,
+    DIAGNOSTICS,
+    TEST_COVERAGE,
+    BOUNDED_PROPERTY,
+    DOCUMENTATION,
+];
+
 pub(crate) const OBSERVABILITY: &[ProofObligation] = &[
     RUNTIME_EXECUTION,
     DIAGNOSTICS,

@@ -26,7 +26,9 @@ fn bounded_restart_intensity_denies_second_restart_within_window() {
     let artifact = supervisor_artifact(1, 1_000);
     let program = LoadedProgram::from_artifact(&artifact).expect("supervisor artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -111,7 +113,9 @@ fn permanent_child_restarts_after_normal_stop() {
     artifact.processes[1].transitions[0].step_result = StepResult::Stop;
     let program = LoadedProgram::from_artifact(&artifact).expect("supervisor artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -153,7 +157,9 @@ fn restarted_supervisor_child_stops_its_old_supervised_subtree() {
     let program =
         LoadedProgram::from_artifact(&artifact).expect("nested supervisor artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -202,7 +208,9 @@ fn restart_intensity_counts_across_children_in_one_supervisor() {
     let program =
         LoadedProgram::from_artifact(&artifact).expect("two-child supervisor artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -241,7 +249,9 @@ fn default_restart_throttle_fails_scope_on_same_tick_restart() {
     let artifact = supervisor_artifact(2, 1_000);
     let program = LoadedProgram::from_artifact(&artifact).expect("supervisor artifact should load");
     let mut host = StaticClockRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -288,7 +298,9 @@ fn supervisor_children_start_in_declaration_order_and_stop_in_reverse_order() {
     let program =
         LoadedProgram::from_artifact(&artifact).expect("two-child supervisor artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -341,7 +353,9 @@ fn supervisor_child_slot_pid_mismatch_fails_closed() {
     let artifact = supervisor_artifact(2, 1_000);
     let program = LoadedProgram::from_artifact(&artifact).expect("supervisor artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -380,7 +394,9 @@ fn restart_capacity_denial_records_supervisor_decision() {
         ..RunLimits::default()
     };
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, limits);
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, limits);
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -614,14 +630,14 @@ fn helper_process() -> ArtifactProcess {
 }
 
 fn current_child_pid<H: RuntimeHost>(
-    run: &RuntimeRun<'_, '_, H>,
+    run: &RuntimeRun<'_, '_, '_, H>,
     main_pid: RuntimeProcessId,
 ) -> RuntimeProcessId {
     current_child_pid_at(run, main_pid, 0)
 }
 
 fn current_child_pid_at<H: RuntimeHost>(
-    run: &RuntimeRun<'_, '_, H>,
+    run: &RuntimeRun<'_, '_, '_, H>,
     main_pid: RuntimeProcessId,
     child_index: usize,
 ) -> RuntimeProcessId {
@@ -630,14 +646,14 @@ fn current_child_pid_at<H: RuntimeHost>(
 }
 
 fn current_child_pid_opt<H: RuntimeHost>(
-    run: &RuntimeRun<'_, '_, H>,
+    run: &RuntimeRun<'_, '_, '_, H>,
     main_pid: RuntimeProcessId,
 ) -> Option<RuntimeProcessId> {
     current_child_pid_opt_at(run, main_pid, 0)
 }
 
 fn current_child_pid_opt_at<H: RuntimeHost>(
-    run: &RuntimeRun<'_, '_, H>,
+    run: &RuntimeRun<'_, '_, '_, H>,
     main_pid: RuntimeProcessId,
     child_index: usize,
 ) -> Option<RuntimeProcessId> {
@@ -648,7 +664,7 @@ fn current_child_pid_opt_at<H: RuntimeHost>(
 }
 
 fn status_for_pid<H: RuntimeHost>(
-    run: &RuntimeRun<'_, '_, H>,
+    run: &RuntimeRun<'_, '_, '_, H>,
     pid: RuntimeProcessId,
 ) -> ProcessStatus {
     let index = run.process_index_for_pid(pid).expect("pid should resolve");

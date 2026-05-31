@@ -5,7 +5,9 @@ fn runtime_process_lookup_indexes_by_pid() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(ProcessId::new(0), None)
         .expect("entry process should spawn");
@@ -33,7 +35,9 @@ fn runtime_process_lookup_rejects_unspawned_pid() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     run.spawn_process(ProcessId::new(0), None)
         .expect("entry process should spawn");
     let missing_pid = RuntimeProcessId::from_u64(2).expect("valid pid should construct");

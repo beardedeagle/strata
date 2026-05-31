@@ -1,7 +1,4 @@
-use std::collections::BTreeSet;
-
 use super::*;
-use mantle_artifact::ArtifactEffect;
 
 mod admission;
 
@@ -71,16 +68,16 @@ pub(crate) enum LoadedSendTarget {
 }
 
 impl LoadedAction {
-    pub(super) fn collect_effects(&self, effects: &mut BTreeSet<ArtifactEffect>) {
+    pub(super) fn collect_effect_usage(&self, effects: &mut [bool; 3]) {
         match self {
             Self::Emit { .. } => {
-                effects.insert(ArtifactEffect::Emit);
+                effects[0] = true;
             }
             Self::Spawn { .. } | Self::SpawnOutcome { .. } => {
-                effects.insert(ArtifactEffect::Spawn);
+                effects[1] = true;
             }
             Self::Send { .. } | Self::SendOutcome { .. } => {
-                effects.insert(ArtifactEffect::Send);
+                effects[2] = true;
             }
             Self::IfElse {
                 then_actions,
@@ -88,15 +85,15 @@ impl LoadedAction {
                 ..
             } => {
                 for action in then_actions {
-                    action.collect_effects(effects);
+                    action.collect_effect_usage(effects);
                 }
                 for action in else_actions {
-                    action.collect_effects(effects);
+                    action.collect_effect_usage(effects);
                 }
             }
             Self::ForEach { body, .. } => {
                 for action in body {
-                    action.collect_effects(effects);
+                    action.collect_effect_usage(effects);
                 }
             }
         }

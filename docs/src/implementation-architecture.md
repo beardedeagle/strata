@@ -9,7 +9,7 @@ required for writing simple Strata programs.
 | --- | --- |
 | `crates/strata` | Strata CLI, parser, AST, checker, checked IR, and lowering. |
 | `crates/mantle-artifact` | Mantle Target Artifact encode, decode, validation, limits, and typed artifact IDs. |
-| `crates/mantle-runtime` | Mantle admission, runtime process state, mailboxes, dispatch, output, and traces. |
+| `crates/mantle-runtime` | Mantle admission, internal executable planning, runtime process state, mailboxes, dispatch, output, and traces. |
 | `crates/strata-mantle-acceptance` | Workspace-owned `.str` to `.mta` to Mantle execution acceptance gates and boundary ownership checks. |
 | `examples` | Runnable Strata programs used by source-to-runtime gates. |
 | `fuzz` | Fuzz targets for parser/checker/lowering, artifact decode, and runtime admission paths. |
@@ -46,18 +46,22 @@ flowchart LR
     Decode["decode"]
     Validate["validate"]
     Load["load typed runtime tables"]
+    Plan["build executable plan"]
     Spawn["spawn Main"]
     Deliver["deliver entry message"]
     Dispatch["dispatch by message ID"]
     Execute["execute typed actions"]
     Trace["write JSONL trace"]
 
-    Artifact --> Decode --> Validate --> Load --> Spawn --> Deliver --> Dispatch --> Execute --> Trace
+    Artifact --> Decode --> Validate --> Load --> Plan --> Spawn --> Deliver --> Dispatch --> Execute --> Trace
 ```
 
 Mantle must validate artifacts before execution. Runtime dispatch uses loaded
 typed IDs, not source strings. Payload and state type identity is admitted
-through Mantle type-table IDs; source type labels are metadata only.
+through Mantle type-table IDs; source type labels are metadata only. The
+executable plan is an internal Mantle structure built from the admitted
+`LoadedProgram`; it pre-resolves typed dispatch and action references but is not
+serialized bytecode and is not emitted by Strata lowering.
 
 ## Important Boundaries
 
@@ -103,11 +107,12 @@ flowchart LR
     subgraph Mantle["Mantle runtime"]
         Admit["artifact admission"]
         Tables["loaded typed tables"]
+        Plan["internal executable plan"]
         Exec["runtime execution"]
         Obs["observability"]
     end
 
-    Syntax --> Check --> Ir --> Map --> Mta --> Admit --> Tables --> Exec --> Obs
+    Syntax --> Check --> Ir --> Map --> Mta --> Admit --> Tables --> Plan --> Exec --> Obs
 ```
 
 Do not move source-only assumptions into Mantle as trusted runtime behavior.

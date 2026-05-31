@@ -107,6 +107,9 @@ artifact encode/decode; repeated Mantle in-memory execution of the
 collection-state and boundary-contract artifacts; repeated
 Mantle JSONL-trace execution of the collection-state artifact; and repeated
 Mantle in-memory execution of the supervision artifact.
+The Mantle runtime profiles exercise artifact admission, loaded-program
+validation, internal executable-plan construction, typed dispatch, and host
+execution together; they do not benchmark a serialized bytecode path.
 
 The smoke output reports wall time, allocation/deallocation counts, allocated
 and deallocated bytes, interval-relative live-byte metrics, process CPU time
@@ -120,7 +123,9 @@ delta budget is an upper bound; negative deltas remain valid. Linux CI reports
 process CPU from `/proc/self/stat` and current/peak RSS through `/proc`; macOS
 and BSD local runs report current RSS through `ps`. RSS budgets are enforced
 against current RSS for each measured profile; process-lifetime peak RSS is
-reported as context when available.
+reported as context when available. Unlike allocation metrics, ordinary smoke
+RSS is whole-test-process resident memory, so use it as a budget signal rather
+than per-profile attribution.
 
 The gate uses enforced resource ceilings with CI headroom for scheduler noise.
 It is meant to catch meaningful regressions in compilation, runtime, CPU, or
@@ -140,10 +145,18 @@ minimum, maximum, and p90 current-RSS deltas in KiB. This keeps profile-order,
 test-binary, and allocator-retained-page effects separate from the ordinary
 multi-profile smoke gate.
 
-The default RSS comparison profiles cover collection-state checking/lowering
-and in-memory runtime execution. To attribute local-supervision RSS, pass
+The default RSS comparison profiles cover collection-state checking/lowering,
+collection-state in-memory runtime execution, and boundary-contract in-memory
+runtime execution. To attribute local-supervision RSS, pass
 `local_supervision_restart.in_memory_runtime` explicitly after the two
 worktrees; both worktrees must contain `examples/local_supervision_restart.str`.
+
+For review-grade memory evidence, use `just performance-memory-review
+<base-worktree> <current-worktree>`. It runs both the fresh-process test-profile
+RSS comparison and the product CLI footprint comparison. Treat allocator
+metrics as the strict code-path signal. Treat RSS as a repeated median/p90
+comparison signal because operating systems and allocators can keep freed pages
+resident outside the measured source path.
 
 For product-footprint attribution, use `just performance-cli-footprint-compare
 <base-worktree> <current-worktree>`. It builds the release Strata and Mantle CLI
@@ -154,6 +167,18 @@ The reported CLI RSS values come from the operating system process for each
 command; they are closer to product footprint than test-harness RSS, but they
 still are not per-Mantle-actor memory. The harness also writes metadata with the
 compared worktrees, HEADs, platform, run count, and clean-environment policy.
+
+For Linux `/proc`-based memory evidence from a macOS checkout, run the same
+review through local `act` with two mounted worktrees:
+
+```sh
+just performance-memory-review-act /tmp/strata-base .
+```
+
+The `act` recipe uses the `performance-memory` workflow and mounts the base and
+current worktrees into an Ubuntu container. It is an optional review tool, not a
+replacement for `just quality`. The same workflow can also be started manually
+in GitHub with a base ref when local worktree mounts are not available.
 
 Useful local command:
 
@@ -171,6 +196,12 @@ Useful product CLI footprint command:
 
 ```sh
 just performance-cli-footprint-compare /tmp/strata-base .
+```
+
+Useful full memory review command:
+
+```sh
+just performance-memory-review /tmp/strata-base .
 ```
 
 ## Fuzzing

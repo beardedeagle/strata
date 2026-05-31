@@ -33,7 +33,9 @@ fn assert_inactive_supervisor_child_send_outcome(exit: StepResult, expected: &st
     let artifact = supervisor_send_outcome_artifact(exit);
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
 
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
@@ -201,14 +203,14 @@ fn send_error_type() -> ArtifactType {
 }
 
 fn current_child_pid<H: RuntimeHost>(
-    run: &RuntimeRun<'_, '_, H>,
+    run: &RuntimeRun<'_, '_, '_, H>,
     main_pid: RuntimeProcessId,
 ) -> RuntimeProcessId {
     current_child_pid_opt(run, main_pid).expect("supervisor child should be running")
 }
 
 fn current_child_pid_opt<H: RuntimeHost>(
-    run: &RuntimeRun<'_, '_, H>,
+    run: &RuntimeRun<'_, '_, '_, H>,
     main_pid: RuntimeProcessId,
 ) -> Option<RuntimeProcessId> {
     let main_index = run

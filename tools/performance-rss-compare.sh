@@ -9,6 +9,7 @@ Usage:
 Profiles default to:
   collection_state.check_lower
   collection_state.in_memory_runtime
+  boundary_contracts_main.in_memory_runtime
 
 Additional supported profile when both worktrees contain the example:
   local_supervision_restart.in_memory_runtime
@@ -71,6 +72,7 @@ if [[ ${#profiles[@]} -eq 0 ]]; then
     profiles=(
         "collection_state.check_lower"
         "collection_state.in_memory_runtime"
+        "boundary_contracts_main.in_memory_runtime"
     )
 fi
 

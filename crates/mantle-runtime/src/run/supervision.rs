@@ -36,7 +36,7 @@ struct RestartFailureRecord<'a> {
     decision: RestartDecisionRecord<'a>,
 }
 
-impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
+impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
     pub(super) fn start_supervisor_children(
         &mut self,
         supervisor_pid: RuntimeProcessId,

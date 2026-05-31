@@ -4,8 +4,8 @@ use super::RuntimeRun;
 use super::delivery::DeliveryPreflightFailure;
 use super::model::{ActiveStep, RuntimeMessageEnvelope, RuntimeSupervisorRef};
 use crate::event::RuntimeProcessId;
+use crate::executable::ExecutableSendTarget;
 use crate::host::RuntimeHost;
-use crate::program::LoadedSendTarget;
 use crate::report::ProcessStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,18 +70,18 @@ impl LocalProcessRefs {
     }
 }
 
-impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
+impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
     pub(super) fn resolve_send_target(
         &self,
         local_process_refs: &LocalProcessRefs,
         step: &ActiveStep,
-        target: &LoadedSendTarget,
+        target: &ExecutableSendTarget,
     ) -> Result<RuntimeProcessId> {
         match target {
-            LoadedSendTarget::ProcessRef(process_ref) => {
-                self.resolve_process_ref(local_process_refs, step, *process_ref)
+            ExecutableSendTarget::ProcessRef(process_ref) => {
+                self.resolve_process_ref(local_process_refs, step, process_ref.id)
             }
-            LoadedSendTarget::SupervisorChild {
+            ExecutableSendTarget::SupervisorChild {
                 supervisor,
                 child,
                 target_process,
@@ -97,7 +97,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     })?;
                 Ok(pid)
             }
-            LoadedSendTarget::ReceivedPayload { ty, target_process } => {
+            ExecutableSendTarget::ReceivedPayload { ty, target_process } => {
                 let payload = step.payload.as_ref().ok_or_else(|| {
                     Error::new("received process reference send target requires a payload")
                 })?;
@@ -127,10 +127,10 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &self,
         local_process_refs: &LocalProcessRefs,
         step: &ActiveStep,
-        target: &LoadedSendTarget,
+        target: &ExecutableSendTarget,
     ) -> Result<SendOutcomeTarget> {
         match target {
-            LoadedSendTarget::SupervisorChild {
+            ExecutableSendTarget::SupervisorChild {
                 supervisor,
                 child,
                 target_process,
@@ -153,7 +153,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     )?,
                 }),
             },
-            LoadedSendTarget::ProcessRef(_) | LoadedSendTarget::ReceivedPayload { .. } => {
+            ExecutableSendTarget::ProcessRef(_) | ExecutableSendTarget::ReceivedPayload { .. } => {
                 Ok(SendOutcomeTarget::Active(self.resolve_send_target(
                     local_process_refs,
                     step,
