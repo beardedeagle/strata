@@ -1,11 +1,12 @@
 pub(super) use super::super::model::RuntimeMessageEnvelope;
 pub(super) use super::super::*;
+pub(super) use crate::executable::ExecutableProgram;
 pub(super) use crate::host::InMemoryRuntimeHost;
 pub(super) use crate::limits::RunLimits;
 pub(super) use crate::program::{
-    LoadedAuthority, LoadedCapabilityDescriptor, LoadedEffectAuthority, LoadedNextState,
-    LoadedProgram, LoadedSendTarget, LoadedSpawnKind, LoadedSpawnSite, LoadedStateValue,
-    LoadedValueTemplate, RuntimePayload, RuntimeValue,
+    LoadedAction, LoadedAuthority, LoadedCapabilityDescriptor, LoadedEffectAuthority,
+    LoadedNextState, LoadedProgram, LoadedSendTarget, LoadedSpawnKind, LoadedSpawnSite,
+    LoadedStateValue, LoadedValueTemplate, RuntimePayload, RuntimeValue,
 };
 pub(super) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAuthority, ArtifactCapabilityDescriptor,

@@ -223,7 +223,9 @@ fn runtime_rejects_unspawned_process_ref_payload() {
     );
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(ProcessId::new(0), None)
         .expect("entry process should spawn");
@@ -265,7 +267,9 @@ fn runtime_rejects_process_ref_payload_target_type_mismatch() {
     );
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(ProcessId::new(0), None)
         .expect("entry process should spawn");

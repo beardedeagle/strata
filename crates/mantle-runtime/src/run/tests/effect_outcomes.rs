@@ -39,7 +39,9 @@ fn runtime_send_outcome_returns_full_and_preserves_process_ref_message_payload()
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
 
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");
@@ -107,7 +109,9 @@ fn runtime_spawn_outcome_commits_ok_after_acceptance() {
     let artifact = spawn_outcome_artifact();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");
@@ -146,7 +150,9 @@ fn runtime_spawn_outcome_returns_exhausted_before_acceptance() {
         ..RunLimits::default()
     };
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, limits);
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, limits);
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");
@@ -452,7 +458,9 @@ fn assert_direct_send_outcome_failure(status: ProcessStatus, expected: &str) {
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
 
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");
@@ -494,7 +502,9 @@ fn assert_direct_send_outcome_full(expected: &str) {
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
 
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");

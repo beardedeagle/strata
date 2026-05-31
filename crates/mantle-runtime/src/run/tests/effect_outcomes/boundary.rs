@@ -47,7 +47,9 @@ fn runtime_boundary_send_outcome_returns_full_without_accepted_boundary_trace() 
         .expect("boundary send outcome should admit");
     let mut host = InMemoryRuntimeHost::default();
 
-    let mut run = RuntimeRun::new(&program, &mut host, RunLimits::default());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");

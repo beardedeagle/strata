@@ -286,6 +286,7 @@ pub(crate) mod expected {
         "mantle-artifact-admission",
         "loaded-runtime-validation",
         "runtime-target-requirements",
+        "mantle-executable-plan",
         "runtime-observability",
     ];
 
@@ -343,6 +344,7 @@ pub(crate) mod expected {
         "mantle-artifact-admission",
         "mantle-loaded-artifact-validation",
         "runtime-target-requirements",
+        "mantle-executable-plan",
         "runtime-trace-observability-boundaries",
         "rejection-fail-closed-unsupported-forms",
         "docs-examples-only-surfaces",

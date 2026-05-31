@@ -32,20 +32,22 @@ impl LoadedEffectAuthority {
             admitted[index] = true;
         }
 
-        let mut action_effects = std::collections::BTreeSet::new();
-        for action in actions {
-            action.collect_effects(&mut action_effects);
-        }
         let mut used = [false; 3];
-        for effect in action_effects {
+        for action in actions {
+            action.collect_effect_usage(&mut used);
+        }
+        for effect in [
+            ArtifactEffect::Emit,
+            ArtifactEffect::Spawn,
+            ArtifactEffect::Send,
+        ] {
             let index = Self::effect_index(effect);
-            if !admitted[index] {
+            if used[index] && !admitted[index] {
                 return Err(Error::new(format!(
                     "process {process_name} transition {} uses effect {effect} without admitted authority",
                     message.as_u32()
                 )));
             }
-            used[index] = true;
         }
 
         for &effect in &self.effects {

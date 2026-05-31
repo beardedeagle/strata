@@ -272,6 +272,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
     },
     ProofDomain {
+        id: "mantle-executable-plan",
+        title: "Mantle internal executable plan construction",
+        feature_ids: &["mantle-executable-plan"],
+        obligations: proof_obligations::ARTIFACT_ADMISSION_BOUNDED,
+    },
+    ProofDomain {
         id: "runtime-trace-observability-boundaries",
         title: "Runtime trace and observability boundaries",
         feature_ids: &["runtime-observability"],

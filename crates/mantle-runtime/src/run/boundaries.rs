@@ -10,7 +10,7 @@ pub(super) struct BoundarySendContext<'a> {
     pub(super) port_id: PortId,
 }
 
-impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
+impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
     pub(super) fn record_boundary_send_checked(
         &mut self,
         step: &ActiveStep,

@@ -3,12 +3,15 @@ use mantle_artifact::{ArtifactBranch, ArtifactValue, Error, LoopElementId, Resul
 use super::model::ActiveStep;
 use super::process_refs::LocalProcessRefs;
 use super::templates::evaluate_runtime_template;
-use super::{BranchSelection, RuntimeEffectOutcome, RuntimeLoopElement, RuntimeRun};
+use super::{
+    BranchSelection, RuntimeActionScope, RuntimeEffectOutcome, RuntimeLoopElement, RuntimeRun,
+};
 use crate::event::{RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeLoopContext};
+use crate::executable::{ExecutableActionBlock, ExecutableActionPlan};
 use crate::host::RuntimeHost;
-use crate::program::{LoadedAction, LoadedLoopElement, LoadedValueTemplate, RuntimePayload};
+use crate::program::{LoadedLoopElement, LoadedValueTemplate, RuntimePayload};
 
-impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
+impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
     pub(super) fn ensure_loop_iteration_budget(&self, item_count: usize) -> Result<()> {
         let remaining = self
             .max_loop_iterations
@@ -195,9 +198,9 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         local_process_refs: &LocalProcessRefs,
         step: &ActiveStep,
         element: &LoadedLoopElement,
-        body: &[LoadedAction],
+        body: &ExecutableActionBlock<'_>,
         loop_payloads: &[RuntimePayload],
-        effect_outcomes: &[RuntimeEffectOutcome],
+        scope: RuntimeActionScope<'_, '_>,
     ) -> Result<()> {
         if loop_payloads.is_empty() {
             return Ok(());
@@ -210,13 +213,17 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                 index,
                 payload,
             }];
-            for action in body {
+            let active_scope = RuntimeActionScope {
+                executable_actions: scope.executable_actions,
+                loop_elements: &active,
+                effect_outcomes: scope.effect_outcomes,
+            };
+            for (_, action) in body.all_actions(scope.executable_actions) {
                 self.preflight_loop_action(
                     local_process_refs,
                     step,
                     action,
-                    &active,
-                    effect_outcomes,
+                    active_scope,
                     &mut queued_mailbox_messages,
                 )?;
             }
@@ -228,24 +235,23 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &self,
         local_process_refs: &LocalProcessRefs,
         step: &ActiveStep,
-        action: &LoadedAction,
-        loop_elements: &[RuntimeLoopElement<'_>],
-        effect_outcomes: &[RuntimeEffectOutcome],
+        action: &ExecutableActionPlan<'_>,
+        scope: RuntimeActionScope<'_, '_>,
         queued_mailbox_messages: &mut Option<Vec<usize>>,
     ) -> Result<()> {
         match action {
-            LoadedAction::Emit { .. } => Ok(()),
-            LoadedAction::Spawn { .. } | LoadedAction::SpawnOutcome { .. } => {
+            ExecutableActionPlan::Emit { .. } => Ok(()),
+            ExecutableActionPlan::Spawn { .. } | ExecutableActionPlan::SpawnOutcome { .. } => {
                 Err(Error::new(format!(
                     "process {} for loop body cannot bind process references or spawn outcomes",
                     step.process_name
                 )))
             }
-            LoadedAction::SendOutcome { .. } => Err(Error::new(format!(
+            ExecutableActionPlan::SendOutcome { .. } => Err(Error::new(format!(
                 "process {} for loop body cannot bind send outcomes",
                 step.process_name
             ))),
-            LoadedAction::Send {
+            ExecutableActionPlan::Send {
                 target,
                 port,
                 message,
@@ -274,8 +280,8 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         step.payload.as_ref(),
                         step,
                         local_process_refs,
-                        loop_elements,
-                        effect_outcomes,
+                        scope.loop_elements,
+                        scope.effect_outcomes,
                     )?;
                 }
                 let queued_messages = queued_mailbox_messages
@@ -288,7 +294,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     .ok_or_else(|| Error::new("runtime mailbox preflight count overflowed"))?;
                 Ok(())
             }
-            LoadedAction::IfElse {
+            ExecutableActionPlan::IfElse {
                 condition,
                 then_actions,
                 else_actions,
@@ -297,26 +303,25 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     step,
                     condition,
                     local_process_refs,
-                    loop_elements,
-                    effect_outcomes,
+                    scope.loop_elements,
+                    scope.effect_outcomes,
                 )?;
                 let selected_actions = match branch {
                     ArtifactBranch::Then => then_actions,
                     ArtifactBranch::Else => else_actions,
                 };
-                for action in selected_actions {
+                for (_, action) in selected_actions.all_actions(scope.executable_actions) {
                     self.preflight_loop_action(
                         local_process_refs,
                         step,
                         action,
-                        loop_elements,
-                        effect_outcomes,
+                        scope,
                         queued_mailbox_messages,
                     )?;
                 }
                 Ok(())
             }
-            LoadedAction::ForEach { .. } => Err(Error::new(format!(
+            ExecutableActionPlan::ForEach { .. } => Err(Error::new(format!(
                 "process {} nested for loops are not supported in this artifact slice",
                 step.process_name
             ))),

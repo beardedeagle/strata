@@ -9,8 +9,11 @@ use super::model::{ActiveStep, RuntimeMessageEnvelope};
 use super::process_refs::{LocalProcessRefs, SendOutcomeTarget};
 use super::templates::evaluate_runtime_template;
 use crate::event::RuntimeProcessId;
+use crate::executable::{ExecutableActionPlan, ExecutableSendTarget, ExecutableSpawnSite};
 use crate::host::RuntimeHost;
-use crate::program::{LoadedAction, LoadedSendTarget, LoadedValueTemplate, RuntimePayload};
+#[cfg(test)]
+use crate::program::LoadedAction;
+use crate::program::{LoadedValueTemplate, RuntimePayload};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeEffectOutcome {
@@ -22,14 +25,15 @@ struct SendOutcomeExecution<'a> {
     local_process_refs: &'a LocalProcessRefs,
     step: &'a ActiveStep,
     outcome_ty: TypeId,
-    target: &'a LoadedSendTarget,
+    target: &'a ExecutableSendTarget,
     port: Option<PortId>,
     message: MessageId,
     payload: Option<&'a LoadedValueTemplate>,
     effect_outcomes: &'a [RuntimeEffectOutcome],
 }
 
-impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
+impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
+    #[cfg(test)]
     pub(super) fn execute_prestate_action(
         &mut self,
         local_process_refs: &mut LocalProcessRefs,
@@ -37,46 +41,56 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         action: &LoadedAction,
         effect_outcomes: &mut Vec<RuntimeEffectOutcome>,
     ) -> Result<bool> {
+        let process = self.program.process(step.process_id)?;
+        let plan = ExecutableActionPlan::from_loaded_for_test(process, action)?;
+        self.execute_prestate_plan_action(local_process_refs, step, plan.action(), effect_outcomes)
+    }
+
+    pub(super) fn execute_prestate_plan_action(
+        &mut self,
+        local_process_refs: &mut LocalProcessRefs,
+        step: &ActiveStep,
+        action: &ExecutableActionPlan<'_>,
+        effect_outcomes: &mut Vec<RuntimeEffectOutcome>,
+    ) -> Result<bool> {
         match action {
-            LoadedAction::Spawn {
+            ExecutableActionPlan::Spawn {
                 target,
                 process_ref,
-                spawn_site,
+                spawn,
             } => {
-                if !self.record_spawn_authority(step, *target, *spawn_site)? {
+                if process_ref.target_process != *target {
+                    return Err(Error::new(format!(
+                        "process {} executable process reference id {} targets process id {}, expected {}",
+                        step.process_name,
+                        process_ref.id.as_u32(),
+                        process_ref.target_process.as_u32(),
+                        target.as_u32()
+                    )));
+                }
+                if !self.record_spawn_authority(step, *target, *spawn)? {
                     return Err(Error::new(format!(
                         "process {} spawn authority denied for process id {}",
                         step.process_name,
                         target.as_u32()
                     )));
                 }
-                let declared_target = self.process_ref_target(step, *process_ref)?;
-                if declared_target != *target {
-                    return Err(Error::new(format!(
-                        "process {} spawn process reference id {} targets process id {}, expected {}",
-                        step.process_name,
-                        process_ref.as_u32(),
-                        target.as_u32(),
-                        declared_target.as_u32()
-                    )));
-                }
-                self.ensure_process_ref_unbound(local_process_refs, step, *process_ref)?;
+                self.ensure_process_ref_unbound(local_process_refs, step, process_ref.id)?;
                 let pid = self.spawn_process(*target, Some(step.pid))?;
-                self.bind_process_ref(local_process_refs, step, *process_ref, pid)?;
+                self.bind_process_ref(local_process_refs, step, process_ref.id, pid)?;
                 Ok(true)
             }
-            LoadedAction::SpawnOutcome {
+            ExecutableActionPlan::SpawnOutcome {
                 outcome,
                 outcome_ty,
                 target,
-                spawn_site,
+                spawn,
             } => {
-                let payload =
-                    self.execute_spawn_outcome(step, *outcome_ty, *target, *spawn_site)?;
+                let payload = self.execute_spawn_outcome(step, *outcome_ty, *target, *spawn)?;
                 bind_effect_outcome(effect_outcomes, *outcome, payload)?;
                 Ok(true)
             }
-            LoadedAction::SendOutcome {
+            ExecutableActionPlan::SendOutcome {
                 outcome,
                 outcome_ty,
                 target,
@@ -91,14 +105,14 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     target,
                     port: *port,
                     message: *message,
-                    payload: payload.as_ref(),
+                    payload: *payload,
                     effect_outcomes,
                 })?;
                 bind_effect_outcome(effect_outcomes, *outcome, payload)?;
                 Ok(true)
             }
-            LoadedAction::IfElse { .. } | LoadedAction::ForEach { .. } => Ok(false),
-            LoadedAction::Emit { .. } | LoadedAction::Send { .. } => Ok(false),
+            ExecutableActionPlan::IfElse { .. } | ExecutableActionPlan::ForEach { .. } => Ok(false),
+            ExecutableActionPlan::Emit { .. } | ExecutableActionPlan::Send { .. } => Ok(false),
         }
     }
 
@@ -107,10 +121,10 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         step: &ActiveStep,
         outcome_ty: TypeId,
         target: ProcessId,
-        spawn_site: mantle_artifact::SpawnSiteId,
+        spawn: ExecutableSpawnSite,
     ) -> Result<RuntimePayload> {
         self.program.process(target)?;
-        if !self.record_spawn_authority(step, target, spawn_site)? {
+        if !self.record_spawn_authority(step, target, spawn)? {
             return self.spawn_error_outcome(outcome_ty, "Denied");
         }
         if !self.spawn_capacity_available(target)? {

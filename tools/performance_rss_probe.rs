@@ -14,6 +14,7 @@ const PROFILE_ENV: &str = "STRATA_RSS_PROBE_PROFILE";
 const COLLECTION_STATE_SOURCE: &str = include_str!("../../../examples/collection_state.str");
 const LOCAL_SUPERVISION_SOURCE_PATH: &str = "../../examples/local_supervision_restart.str";
 const IMPORTS_MAIN_SOURCE_PATH: &str = "../../examples/imports_main.str";
+const BOUNDARY_CONTRACTS_SOURCE_PATH: &str = "../../examples/boundary_contracts_main.str";
 const CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "collection_state.check_lower",
     iterations: 64,
@@ -26,17 +27,25 @@ const LOCAL_SUPERVISION_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "local_supervision_restart.in_memory_runtime",
     iterations: 32,
 };
+const BOUNDARY_CONTRACTS_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "boundary_contracts_main.in_memory_runtime",
+    iterations: 64,
+};
 const IMPORTS_CHECK_LOWER_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "imports_main.check_lower",
     iterations: 32,
 };
-const ALL_PROFILES: [BenchmarkProfile; 4] = [
+const ALL_PROFILES: [BenchmarkProfile; 5] = [
     CHECK_LOWER_PROFILE,
     IN_MEMORY_RUNTIME_PROFILE,
     LOCAL_SUPERVISION_RUNTIME_PROFILE,
+    BOUNDARY_CONTRACTS_RUNTIME_PROFILE,
     IMPORTS_CHECK_LOWER_PROFILE,
 ];
-const PROFILE_KEY_LIST: &str = "collection_state.check_lower, collection_state.in_memory_runtime, local_supervision_restart.in_memory_runtime, imports_main.check_lower";
+const PROFILE_KEY_LIST: &str = "\
+collection_state.check_lower, collection_state.in_memory_runtime, \
+local_supervision_restart.in_memory_runtime, boundary_contracts_main.in_memory_runtime, \
+imports_main.check_lower";
 #[cfg(any(
     target_os = "linux",
     target_os = "macos",
@@ -85,6 +94,9 @@ fn rss_probe_runs_selected_profile() {
         "local_supervision_restart.in_memory_runtime" => {
             measure_local_supervision_runtime_profile(profile);
         }
+        "boundary_contracts_main.in_memory_runtime" => {
+            measure_boundary_contracts_runtime_profile(profile);
+        }
         "imports_main.check_lower" => measure_imports_check_lower_profile(profile),
         _ => unreachable!("selected profile is validated before dispatch"),
     }
@@ -132,6 +144,16 @@ fn measure_local_supervision_runtime_profile(profile: BenchmarkProfile) {
     print_metrics(profile, metrics);
 }
 
+fn measure_boundary_contracts_runtime_profile(profile: BenchmarkProfile) {
+    let artifact = boundary_contracts_artifact();
+    run_boundary_contracts_artifact(&artifact);
+    let metrics = measure_for(profile.iterations, || {
+        let report = run_boundary_contracts_artifact(&artifact);
+        black_box(report);
+    });
+    print_metrics(profile, metrics);
+}
+
 fn measure_imports_check_lower_profile(profile: BenchmarkProfile) {
     let source_path = workspace_source_path(IMPORTS_MAIN_SOURCE_PATH);
     let metrics = measure_for(profile.iterations, || {
@@ -160,6 +182,17 @@ fn collection_state_artifact() -> mantle_artifact::MantleArtifact {
     source_artifact(COLLECTION_STATE_SOURCE)
 }
 
+fn boundary_contracts_artifact() -> mantle_artifact::MantleArtifact {
+    let source_path = workspace_source_path(BOUNDARY_CONTRACTS_SOURCE_PATH);
+    let loaded =
+        strata::load_root_source_program(&source_path).expect("RSS probe source should load");
+    let (program, source_hash) = loaded.into_parts();
+    let checked =
+        strata::language::check_source_program(program).expect("RSS probe source should check");
+    strata::language::lower_to_artifact_with_source_hash(&checked, source_hash)
+        .expect("RSS probe source should lower")
+}
+
 fn source_artifact(source: &str) -> mantle_artifact::MantleArtifact {
     let checked = strata::language::check_source(source).expect("RSS probe source should check");
     strata::language::lower_to_artifact(&checked, source).expect("RSS probe source should lower")
@@ -185,6 +218,18 @@ fn run_local_supervision_artifact(
         .expect("RSS probe local supervision artifact should run");
     assert!(!report.spawned_processes.is_empty());
     assert!(!report.processes.is_empty());
+    report
+}
+
+fn run_boundary_contracts_artifact(
+    artifact: &mantle_artifact::MantleArtifact,
+) -> mantle_runtime::RuntimeReport {
+    let mut host = InMemoryRuntimeHost::default();
+    let report = run_artifact_with_host(artifact, &mut host, PERF_RUN_LIMITS)
+        .expect("RSS probe boundary-contract artifact should run");
+    assert_eq!(report.spawned_processes.len(), 2);
+    assert_eq!(report.delivered_messages.len(), 2);
+    assert_eq!(report.emitted_outputs.len(), 1);
     report
 }
 

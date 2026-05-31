@@ -6,6 +6,7 @@ use mantle_artifact::{MantleArtifact, Result, read_artifact};
 
 mod cli;
 mod event;
+mod executable;
 mod feature_declaration;
 mod host;
 mod limits;

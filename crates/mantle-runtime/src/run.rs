@@ -13,15 +13,16 @@ use crate::event::{
     RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
     RuntimeSpawnKind, RuntimeStepResult, RuntimeStopReason, RuntimeSupervisorExitReason,
 };
+use crate::executable::{ExecutableActionPlan, ExecutableProgram, ExecutableSpawnSite};
 use crate::host::RuntimeHost;
 use crate::limits::{RunLimits, SpawnAuthorityPolicy};
 use crate::program::{
-    LoadedAction, LoadedNextState, LoadedProgram, LoadedSpawnKind, LoadedValueTemplate,
-    RuntimePayload,
+    LoadedNextState, LoadedProgram, LoadedSpawnKind, LoadedValueTemplate, RuntimePayload,
 };
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
 mod accounting;
+mod action_scope;
 mod boundaries;
 mod control_flow;
 mod delivery;
@@ -32,6 +33,7 @@ mod process_refs;
 mod supervision;
 mod templates;
 
+use action_scope::{BranchSelection, RuntimeActionScope};
 use boundaries::BoundarySendContext;
 use effect_outcomes::RuntimeEffectOutcome;
 
@@ -40,16 +42,6 @@ pub(super) struct RuntimeLoopElement<'a> {
     id: LoopElementId,
     index: usize,
     payload: &'a RuntimePayload,
-}
-
-struct BranchSelection<'a> {
-    step: &'a ActiveStep,
-    scope: RuntimeBranchScope,
-    branch_path: RuntimeBranchPath,
-    condition: &'a LoadedValueTemplate,
-    local_process_refs: &'a LocalProcessRefs,
-    loop_elements: &'a [RuntimeLoopElement<'a>],
-    effect_outcomes: &'a [RuntimeEffectOutcome],
 }
 
 pub fn run_artifact_with_host<H: RuntimeHost>(
@@ -67,22 +59,23 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
     host: &mut H,
     limits: RunLimits,
 ) -> Result<RuntimeReport> {
-    program.validate_admission()?;
-    let mut run = RuntimeRun::new(program, host, limits);
+    let executable = ExecutableProgram::from_admitted(program)?;
+    let mut run = RuntimeRun::new(program, &executable, host, limits);
+    let entry = executable.entry();
     run.record_event(RuntimeEvent::ArtifactLoaded {
         format: program.format.clone(),
         schema_version: program.schema_version.clone(),
         source_language: program.source_language.clone(),
         module: program.module.clone(),
-        entry_process_id: program.entry_process,
-        entry_process: program.process_label(program.entry_process)?.to_string(),
-        entry_message_id: program.entry_message,
-        process_count: program.processes.len(),
+        entry_process_id: entry.process_id,
+        entry_process: entry.process_label.to_string(),
+        entry_message_id: entry.message_id,
+        process_count: run.executable.process_count(),
     })?;
-    let entry_pid = run.spawn_process(program.entry_process, None)?;
+    let entry_pid = run.spawn_process(entry.process_id, None)?;
     run.send_message(
         entry_pid,
-        RuntimeMessageEnvelope::new(program.entry_message, None),
+        RuntimeMessageEnvelope::new(entry.message_id, None),
         None,
     )?;
     run.drain_mailboxes(limits.max_dispatches)?;
@@ -105,10 +98,8 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
         .collect::<Result<Vec<_>>>()?;
 
     Ok(RuntimeReport {
-        entry_process: program.process_label(program.entry_process)?.to_string(),
-        entry_message: program
-            .message_label(program.entry_process, program.entry_message)?
-            .to_string(),
+        entry_process: entry.process_label.to_string(),
+        entry_message: entry.message_label.to_string(),
         spawned_processes: run.spawned_processes,
         delivered_messages: run.delivered_messages,
         processes: process_reports,
@@ -116,8 +107,9 @@ pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
     })
 }
 
-struct RuntimeRun<'program, 'host, H: RuntimeHost> {
+struct RuntimeRun<'program, 'plan, 'host, H: RuntimeHost> {
     program: &'program LoadedProgram,
+    executable: &'plan ExecutableProgram<'program>,
     host: &'host mut H,
     processes: Vec<ProcessInstance>,
     next_pid: RuntimeProcessId,
@@ -134,10 +126,16 @@ struct RuntimeRun<'program, 'host, H: RuntimeHost> {
     emitted_outputs: Vec<String>,
 }
 
-impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
-    fn new(program: &'program LoadedProgram, host: &'host mut H, limits: RunLimits) -> Self {
+impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
+    fn new(
+        program: &'program LoadedProgram,
+        executable: &'plan ExecutableProgram<'program>,
+        host: &'host mut H,
+        limits: RunLimits,
+    ) -> Self {
         Self {
             program,
+            executable,
             host,
             processes: Vec::new(),
             next_pid: RuntimeProcessId::FIRST,
@@ -180,26 +178,17 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         &mut self,
         step: &ActiveStep,
         target: ProcessId,
-        spawn_site: mantle_artifact::SpawnSiteId,
+        spawn: ExecutableSpawnSite,
     ) -> Result<bool> {
-        let process = self.program.process(step.process_id)?;
-        let site = process.validate_spawn_site(spawn_site, target)?;
-        let authority_id = site.authority.ok_or_else(|| {
-            Error::new(format!(
-                "process {} dynamic spawn site id {} does not reference an authority",
-                step.process_name,
-                spawn_site.as_u32()
-            ))
-        })?;
         let admitted = self.is_spawn_authority_admitted();
         self.record_event(RuntimeEvent::SpawnAuthorityChecked {
             pid: step.pid,
             process_id: step.process_id,
             process: step.process_name.clone(),
             target_process_id: target,
-            spawn_site_id: spawn_site,
-            authority_id,
-            spawn_kind: match site.kind {
+            spawn_site_id: spawn.id,
+            authority_id: spawn.authority,
+            spawn_kind: match spawn.kind {
                 LoadedSpawnKind::DynamicLocal => RuntimeSpawnKind::DynamicLocal,
                 LoadedSpawnKind::LexicalSupervisorChild => RuntimeSpawnKind::LexicalSupervisorChild,
             },
@@ -231,58 +220,50 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         }
 
         let step = ActiveStep::new(self.program, &self.processes[process_index], envelope)?;
-        let definition = self.program.process(step.process_id)?;
-        let transition = definition.transition_for_dispatch(
+        let executable = self.executable;
+        let executable_actions = executable.actions();
+        let executable_process = executable.process(step.process_id)?;
+        let executable_transition = executable.transition_for_dispatch(
+            step.process_id,
             step.message,
             step.current_state,
             step.payload.as_ref(),
         )?;
-        let next_state = transition.next_state.clone();
-        let step_result = transition.step_result;
-        let mut local_process_refs = LocalProcessRefs::new(definition.process_refs.len());
+        let process_ref_count = executable_process.process_ref_count();
+        let next_state = executable_transition.next_state();
+        let step_result = executable_transition.step_result();
+        let actions = executable_transition.actions();
+        let mut local_process_refs = LocalProcessRefs::new(process_ref_count);
         let mut effect_outcomes = Vec::new();
-        let mut preexecuted_prefix_len = 0usize;
 
-        let mut prestate_prefix_open = true;
-        for (action_index, action) in transition.actions.iter().enumerate() {
-            if prestate_prefix_open && is_prestate_prefix_action(action) {
-                self.execute_prestate_action(
-                    &mut local_process_refs,
-                    &step,
-                    action,
-                    &mut effect_outcomes,
-                )?;
-                preexecuted_prefix_len = action_index.saturating_add(1);
-                continue;
-            }
-            prestate_prefix_open = false;
-            if is_effect_outcome_action(action) {
-                return Err(Error::new(format!(
-                    "process {} effect outcome action appears after ordinary effects",
-                    step.process_name
-                )));
-            }
+        for action in actions.prestate_actions(executable_actions) {
+            self.execute_prestate_plan_action(
+                &mut local_process_refs,
+                &step,
+                action,
+                &mut effect_outcomes,
+            )?;
         }
 
         let final_state = self.resolve_next_state(
             process_index,
             &step,
-            &next_state,
+            next_state,
             RuntimeBranchPath::root(),
             &effect_outcomes,
         )?;
 
-        for (action_index, action) in transition.actions.iter().enumerate() {
-            if action_index < preexecuted_prefix_len {
-                continue;
-            }
-            self.execute_action(
+        for (action_index, action) in actions.poststate_actions(executable_actions) {
+            self.execute_action_plan(
                 &mut local_process_refs,
                 &step,
                 action,
                 RuntimeBranchPath::root().child(RuntimeBranchPathSegment::action(action_index)?)?,
-                &[],
-                &effect_outcomes,
+                RuntimeActionScope {
+                    executable_actions,
+                    loop_elements: &[],
+                    effect_outcomes: &effect_outcomes,
+                },
             )?;
         }
 
@@ -290,51 +271,73 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         self.record_step_completion(process_index, &step, step_result)
     }
 
+    #[cfg(test)]
     fn execute_action(
         &mut self,
         local_process_refs: &mut LocalProcessRefs,
         step: &ActiveStep,
-        action: &LoadedAction,
+        action: &crate::program::LoadedAction,
         branch_path: RuntimeBranchPath,
         loop_elements: &[RuntimeLoopElement<'_>],
         effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<()> {
+        let process = self.program.process(step.process_id)?;
+        let plan = ExecutableActionPlan::from_loaded_for_test(process, action)?;
+        self.execute_action_plan(
+            local_process_refs,
+            step,
+            plan.action(),
+            branch_path,
+            RuntimeActionScope {
+                executable_actions: plan.actions(),
+                loop_elements,
+                effect_outcomes,
+            },
+        )
+    }
+
+    fn execute_action_plan(
+        &mut self,
+        local_process_refs: &mut LocalProcessRefs,
+        step: &ActiveStep,
+        action: &ExecutableActionPlan<'_>,
+        branch_path: RuntimeBranchPath,
+        scope: RuntimeActionScope<'_, '_>,
+    ) -> Result<()> {
         match action {
-            LoadedAction::Emit { output } => self.emit_output(step, *output),
-            LoadedAction::Spawn {
+            ExecutableActionPlan::Emit { output } => self.emit_output(step, *output),
+            ExecutableActionPlan::Spawn {
                 target,
                 process_ref,
-                spawn_site,
+                spawn,
             } => {
-                if !self.record_spawn_authority(step, *target, *spawn_site)? {
+                if process_ref.target_process != *target {
+                    return Err(Error::new(format!(
+                        "process {} executable process reference id {} targets process id {}, expected {}",
+                        step.process_name,
+                        process_ref.id.as_u32(),
+                        process_ref.target_process.as_u32(),
+                        target.as_u32()
+                    )));
+                }
+                if !self.record_spawn_authority(step, *target, *spawn)? {
                     return Err(Error::new(format!(
                         "process {} spawn authority denied for process id {}",
                         step.process_name,
                         target.as_u32()
                     )));
                 }
-                let declared_target = self.process_ref_target(step, *process_ref)?;
-                if declared_target != *target {
-                    return Err(Error::new(format!(
-                        "process {} spawn process reference id {} targets process id {}, expected {}",
-                        step.process_name,
-                        process_ref.as_u32(),
-                        target.as_u32(),
-                        declared_target.as_u32()
-                    )));
-                }
-                self.ensure_process_ref_unbound(local_process_refs, step, *process_ref)?;
+                self.ensure_process_ref_unbound(local_process_refs, step, process_ref.id)?;
                 let pid = self.spawn_process(*target, Some(step.pid))?;
-                self.bind_process_ref(local_process_refs, step, *process_ref, pid)?;
+                self.bind_process_ref(local_process_refs, step, process_ref.id, pid)?;
                 Ok(())
             }
-            LoadedAction::SpawnOutcome { .. } | LoadedAction::SendOutcome { .. } => {
-                Err(Error::new(format!(
-                    "process {} nested effect outcome action reached ordinary execution",
-                    step.process_name
-                )))
-            }
-            LoadedAction::Send {
+            ExecutableActionPlan::SpawnOutcome { .. }
+            | ExecutableActionPlan::SendOutcome { .. } => Err(Error::new(format!(
+                "process {} nested effect outcome action reached ordinary execution",
+                step.process_name
+            ))),
+            ExecutableActionPlan::Send {
                 target,
                 port,
                 message,
@@ -360,8 +363,8 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         step.payload.as_ref(),
                         step,
                         local_process_refs,
-                        loop_elements,
-                        effect_outcomes,
+                        scope.loop_elements,
+                        scope.effect_outcomes,
                     )?),
                     None => None,
                 };
@@ -379,7 +382,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     None => self.send_message(pid, envelope, Some(step.pid)),
                 }
             }
-            LoadedAction::IfElse {
+            ExecutableActionPlan::IfElse {
                 condition,
                 then_actions,
                 else_actions,
@@ -390,29 +393,29 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     branch_path,
                     condition,
                     local_process_refs,
-                    loop_elements,
-                    effect_outcomes,
+                    loop_elements: scope.loop_elements,
+                    effect_outcomes: scope.effect_outcomes,
                 })?;
                 let selected_actions = match branch {
                     ArtifactBranch::Then => then_actions,
                     ArtifactBranch::Else => else_actions,
                 };
-                for (action_index, action) in selected_actions.iter().enumerate() {
+                for (action_index, action) in selected_actions.all_actions(scope.executable_actions)
+                {
                     let selected_branch_path = branch_path.child(
                         RuntimeBranchPathSegment::branch_action(branch, action_index)?,
                     )?;
-                    self.execute_action(
+                    self.execute_action_plan(
                         local_process_refs,
                         step,
                         action,
                         selected_branch_path,
-                        loop_elements,
-                        effect_outcomes,
+                        scope,
                     )?;
                 }
                 Ok(())
             }
-            LoadedAction::ForEach {
+            ExecutableActionPlan::ForEach {
                 element,
                 collection,
                 max_items,
@@ -424,8 +427,8 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     step.payload.as_ref(),
                     step,
                     local_process_refs,
-                    loop_elements,
-                    effect_outcomes,
+                    scope.loop_elements,
+                    scope.effect_outcomes,
                 )?;
                 let collection_type = collection.ty;
                 let items = match collection.value {
@@ -467,7 +470,7 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                     element,
                     body,
                     &loop_payloads,
-                    effect_outcomes,
+                    scope,
                 )?;
                 self.record_loop_started(
                     step,
@@ -484,16 +487,20 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
                         index,
                         payload,
                     }];
-                    for (action_index, action) in body.iter().enumerate() {
+                    let active_scope = RuntimeActionScope {
+                        executable_actions: scope.executable_actions,
+                        loop_elements: &active,
+                        effect_outcomes: scope.effect_outcomes,
+                    };
+                    for (action_index, action) in body.all_actions(scope.executable_actions) {
                         let body_action_path = branch_path
                             .child(RuntimeBranchPathSegment::loop_body_action(action_index)?)?;
-                        self.execute_action(
+                        self.execute_action_plan(
                             local_process_refs,
                             step,
                             action,
                             body_action_path,
-                            &active,
-                            effect_outcomes,
+                            active_scope,
                         )?;
                     }
                 }
@@ -726,22 +733,6 @@ impl<'program, 'host, H: RuntimeHost> RuntimeRun<'program, 'host, H> {
         }
         Ok(())
     }
-}
-
-const fn is_prestate_prefix_action(action: &LoadedAction) -> bool {
-    matches!(
-        action,
-        LoadedAction::Spawn { .. }
-            | LoadedAction::SpawnOutcome { .. }
-            | LoadedAction::SendOutcome { .. }
-    )
-}
-
-const fn is_effect_outcome_action(action: &LoadedAction) -> bool {
-    matches!(
-        action,
-        LoadedAction::SpawnOutcome { .. } | LoadedAction::SendOutcome { .. }
-    )
 }
 
 #[cfg(test)]

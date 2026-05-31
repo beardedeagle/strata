@@ -35,6 +35,17 @@ const TARGET_REQUIREMENTS_REQUIREMENTS: &[EvidenceClass] = &[
     EvidenceClass::Documentation,
 ];
 
+const EXECUTABLE_PLAN_REQUIREMENTS: &[EvidenceClass] = &[
+    EvidenceClass::ArtifactAdmission,
+    EvidenceClass::RuntimeExecution,
+    EvidenceClass::Diagnostics,
+    EvidenceClass::PositiveTest,
+    EvidenceClass::NegativeTest,
+    EvidenceClass::BoundedOrProperty,
+    EvidenceClass::PerformanceSmoke,
+    EvidenceClass::Documentation,
+];
+
 pub(crate) const FEATURES: &[Feature] = &[
     feature!(
         "typed-component-protocol-port-boundaries",
@@ -163,6 +174,26 @@ pub(crate) const FEATURES: &[Feature] = &[
             BoundedOrProperty => ("crates/strata/src/language/tests/target_requirements.rs", "lowering_target_requirements_are_deterministic_across_source_declaration_order"),
             PerformanceSmoke => ("crates/strata-mantle-acceptance/tests/performance_smoke.rs", "component_composition_main.target_requirements"),
             Documentation => ("docs/src/language-surface-assurance.md", "Runtime feature declaration and target binding"),
+        ],
+    ),
+    feature!(
+        "mantle-executable-plan",
+        "Mantle internal executable plan construction",
+        Current,
+        RuntimeBehavior,
+        EXECUTABLE_PLAN_REQUIREMENTS,
+        [
+            ArtifactAdmission => ("crates/mantle-runtime/src/executable.rs", "pub(crate) fn from_admitted"),
+            RuntimeExecution => ("crates/mantle-runtime/src/run.rs", "ExecutableProgram::from_admitted(program)?"),
+            Diagnostics => ("docs/src/artifact-runtime-boundary.md", "Source names, process debug names, message labels"),
+            PositiveTest => ("crates/mantle-runtime/src/tests/executable_plan.rs", "executable_plan_constructs_typed_action_tables_after_admission"),
+            PositiveTest => ("crates/mantle-runtime/src/executable/tests.rs", "executable_plan_precomputes_prestate_action_prefix"),
+            NegativeTest => ("crates/mantle-runtime/src/tests/executable_plan.rs", "executable_plan_rejects_invalid_loaded_references_before_artifact_loaded"),
+            NegativeTest => ("crates/mantle-runtime/src/executable/tests.rs", "executable_dispatch_uses_typed_message_ids_not_labels"),
+            BoundedOrProperty => ("crates/mantle-runtime/src/tests/executable_plan.rs", "executable_plan_order_is_deterministic_when_loaded_transition_order_changes"),
+            BoundedOrProperty => ("crates/mantle-runtime/src/executable/tests.rs", "executable_plan_orders_dispatch_deterministically"),
+            PerformanceSmoke => ("crates/strata-mantle-acceptance/tests/performance_smoke.rs", "collection_state.in_memory_runtime"),
+            Documentation => ("docs/src/language-surface-assurance.md", "Mantle executable-plan construction is recorded"),
         ],
     ),
 ];

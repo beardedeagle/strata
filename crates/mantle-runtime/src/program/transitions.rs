@@ -1,9 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
-use mantle_artifact::{ArtifactProcess, Error, MessageId, Result, StateId};
+#[cfg(test)]
+use mantle_artifact::MessageId;
+use mantle_artifact::{ArtifactProcess, Error, Result, StateId};
 
 use super::{LoadedProcess, LoadedTransition, RuntimePayload};
 
+#[cfg(test)]
 type TransitionBaseKey = (u32, Option<u32>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -13,6 +18,7 @@ struct TransitionCoverageKey {
     payload_guarded: bool,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(super) struct TransitionLookup {
     unguarded_by_key: BTreeMap<TransitionBaseKey, usize>,
@@ -21,6 +27,7 @@ pub(super) struct TransitionLookup {
     payload_specific_transitions: BTreeSet<TransitionBaseKey>,
 }
 
+#[cfg(test)]
 impl TransitionLookup {
     pub(super) fn from_transitions(transitions: &[LoadedTransition]) -> Self {
         let mut unguarded_by_key: BTreeMap<TransitionBaseKey, usize> = BTreeMap::new();

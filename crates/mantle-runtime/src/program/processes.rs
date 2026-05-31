@@ -9,6 +9,7 @@ mod supervision;
 impl LoadedProcess {
     pub(in crate::program) fn from_artifact(process: &ArtifactProcess) -> Result<Self> {
         let transitions = load_transitions(process)?;
+        #[cfg(test)]
         let transition_lookup = TransitionLookup::from_transitions(&transitions);
 
         Ok(Self {
@@ -48,10 +49,12 @@ impl LoadedProcess {
             mailbox_bound: process.mailbox_bound,
             init_state: process.init_state,
             transitions,
+            #[cfg(test)]
             transition_lookup,
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn transition_for_dispatch(
         &self,
         message: MessageId,
@@ -74,6 +77,7 @@ impl LoadedProcess {
         self.transition_by_lookup_index(transition_index)
     }
 
+    #[cfg(test)]
     fn transition_by_lookup_index(&self, index: usize) -> Result<&LoadedTransition> {
         self.transitions.get(index).ok_or_else(|| {
             Error::new(format!(
@@ -83,6 +87,7 @@ impl LoadedProcess {
         })
     }
 
+    #[cfg(test)]
     fn transition_lookup_error(
         &self,
         message: MessageId,

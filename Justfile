@@ -66,11 +66,49 @@ performance-smoke:
 performance-smoke-profile profile:
     STRATA_PERFORMANCE_SMOKE_PROFILE="{{profile}}" cargo +{{stable_toolchain}} test -p strata-mantle-acceptance --test performance_smoke -- --ignored --nocapture
 
-performance-rss-compare base current runs="30" profiles="collection_state.check_lower collection_state.in_memory_runtime":
+performance-rss-compare base current runs="30" profiles="collection_state.check_lower collection_state.in_memory_runtime boundary_contracts_main.in_memory_runtime":
     bash tools/performance-rss-compare.sh --runs "{{runs}}" "{{base}}" "{{current}}" {{profiles}}
 
 performance-cli-footprint-compare base current runs="20":
     bash tools/performance-cli-footprint-compare.sh --runs "{{runs}}" "{{base}}" "{{current}}"
+
+performance-memory-review base current rss_runs="30" cli_runs="20":
+    just performance-rss-compare "{{base}}" "{{current}}" "{{rss_runs}}"
+    just performance-cli-footprint-compare "{{base}}" "{{current}}" "{{cli_runs}}"
+
+performance-memory-review-act base current rss_runs="30" cli_runs="20":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v act >/dev/null 2>&1; then
+        echo "Error: act is required for Linux memory review." >&2
+        echo "Install it from https://nektosact.com/ and retry." >&2
+        exit 1
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is required by act but is not on PATH." >&2
+        exit 1
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        echo "Error: Docker is not running. Start Docker and retry." >&2
+        exit 1
+    fi
+
+    base_path="$(cd "{{base}}" && pwd -P)"
+    current_path="$(cd "{{current}}" && pwd -P)"
+
+    act workflow_dispatch \
+        -W .github/workflows/performance-memory.yml \
+        -j memory-review \
+        -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:rust-latest \
+        --container-architecture linux/amd64 \
+        --container-options "--volume ${base_path}:/strata-base --volume ${current_path}:/strata-current" \
+        --env STRATA_PERFORMANCE_BASE_WORKTREE=/strata-base \
+        --env STRATA_PERFORMANCE_CURRENT_WORKTREE=/strata-current \
+        --env STRATA_PERFORMANCE_RSS_RUNS="{{rss_runs}}" \
+        --env STRATA_PERFORMANCE_CLI_RUNS="{{cli_runs}}"
 
 build:
     cargo +{{stable_toolchain}} build

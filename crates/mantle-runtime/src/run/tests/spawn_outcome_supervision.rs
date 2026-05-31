@@ -23,7 +23,9 @@ fn runtime_spawn_outcome_returns_exhausted_before_supervised_subtree_partial_spa
         ..RunLimits::default()
     };
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, limits);
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, limits);
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");

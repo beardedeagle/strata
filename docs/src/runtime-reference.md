@@ -28,10 +28,12 @@ just mantle-admit target/strata/component_composition_main.mta json
 Current implementation limits are reported as runtime implementation limits, not
 Strata language law. Remote send, remote spawn, distributed transport, cluster
 membership, package management, hot upgrade, generated stubs, native output,
-and execution-plan bytecode remain unsupported. Unsupported required features or
-malformed source-language metadata fail before runtime execution. Mantle treats
-source language as opaque artifact metadata and does not dispatch on source
-names.
+and serialized execution-plan bytecode remain unsupported. Mantle may compile
+an admitted `LoadedProgram` into an internal executable plan for dispatch, but
+the `.mta` remains the language-neutral boundary. Unsupported required features
+or malformed source-language metadata fail before runtime execution. Mantle
+treats source language as opaque artifact metadata and does not dispatch on
+source names.
 
 ## Runtime Branching
 

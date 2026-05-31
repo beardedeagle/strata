@@ -1,7 +1,7 @@
 use super::support::*;
 use crate::SpawnAuthorityPolicy;
 use crate::event::{RuntimeAuthorityResult, RuntimeEvent, RuntimeProcessId, RuntimeSpawnKind};
-use mantle_artifact::{ArtifactAction, EffectOutcomeId};
+use mantle_artifact::{ArtifactAction, ArtifactEffect, EffectOutcomeId};
 
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
 const WORKER_PROCESS: ProcessId = ProcessId::new(1);
@@ -14,7 +14,14 @@ fn runtime_spawn_outcome_returns_denied_before_acceptance() {
     let artifact = spawn_outcome_artifact();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, deny_spawn_authority_limits());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(
+        &program,
+        &executable,
+        &mut host,
+        deny_spawn_authority_limits(),
+    );
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");
@@ -45,11 +52,24 @@ fn runtime_spawn_outcome_returns_denied_before_acceptance() {
 
 #[test]
 fn runtime_bare_spawn_denial_fails_closed_before_acceptance() {
-    let artifact = artifact_with_unbound_worker_process_ref();
-    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
-    grant_loaded_main_spawn_authority(&mut program);
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    grant_main_spawn_authority(&mut artifact);
+    artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Spawn];
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::Spawn {
+        target: WORKER_PROCESS,
+        process_ref: ProcessRefId::new(0),
+        spawn_site: SPAWN_SITE,
+    }];
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
-    let mut run = RuntimeRun::new(&program, &mut host, deny_spawn_authority_limits());
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(
+        &program,
+        &executable,
+        &mut host,
+        deny_spawn_authority_limits(),
+    );
     let main_pid = run
         .spawn_process(MAIN_PROCESS, None)
         .expect("main should spawn");

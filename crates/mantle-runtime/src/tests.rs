@@ -5,6 +5,8 @@ mod support;
 mod actor_host;
 #[path = "tests/boundary_runtime.rs"]
 mod boundary_runtime;
+#[path = "tests/executable_plan.rs"]
+mod executable_plan;
 #[path = "tests/for_each_host.rs"]
 mod for_each_host;
 #[path = "tests/loaded_program_selection.rs"]
