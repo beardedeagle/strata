@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[path = "language_surface_assurance/model.rs"]
@@ -350,8 +351,62 @@ fn proof_domain_obligations_match_surface_layers_and_evidence() {
     );
 }
 
+#[test]
+fn mantle_trace_validate_seed_inventory_covers_committed_jsonl_seeds() {
+    let committed = committed_mantle_trace_validate_seed_paths();
+    let declared = runtime::FEATURES
+        .iter()
+        .flat_map(|feature| feature.evidence)
+        .filter(|evidence| {
+            evidence.class == EvidenceClass::FuzzSeed
+                && evidence
+                    .path
+                    .starts_with("fuzz/seeds/mantle_trace_validate/")
+        })
+        .map(|evidence| evidence.path.to_string())
+        .collect::<BTreeSet<_>>();
+
+    let missing = committed
+        .difference(&declared)
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let stale = declared
+        .difference(&committed)
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+
+    assert!(
+        missing.is_empty() && stale.is_empty(),
+        "mantle_trace_validate fuzz seed inventory drifted\nmissing from inventory: {missing:#?}\nstale inventory entries: {stale:#?}"
+    );
+}
+
 fn inventory() -> impl Iterator<Item = &'static Feature> {
     FEATURE_GROUPS.iter().flat_map(|features| features.iter())
+}
+
+fn committed_mantle_trace_validate_seed_paths() -> BTreeSet<String> {
+    let seed_dir = workspace_root().join("fuzz/seeds/mantle_trace_validate");
+    fs::read_dir(&seed_dir)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", seed_dir.display()))
+        .map(|entry| {
+            let path = entry
+                .unwrap_or_else(|err| panic!("failed to read seed entry: {err}"))
+                .path();
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_else(|| {
+                    panic!("seed path {} must have a UTF-8 file name", path.display())
+                });
+            assert!(
+                file_name.ends_with(".jsonl"),
+                "mantle trace fuzz seed {} must be a JSONL corpus file",
+                path.display()
+            );
+            format!("fuzz/seeds/mantle_trace_validate/{file_name}")
+        })
+        .collect()
 }
 
 fn required_obligations_for_feature(feature: &Feature) -> BTreeSet<ProofObligationClass> {

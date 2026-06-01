@@ -1,0 +1,3 @@
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"6","source_language":"language-neutral","module":"branch","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":1,"trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"Ready","mailbox_bound":1,"trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"branch_selected","pid":1,"process_id":0,"process":"Main","message_id":0,"message":"Start","branch":"then","scope":"action","branch_path":[65535],"condition_type_id":1,"condition":"True","trace_schema":"mantle-runtime-observability","trace_schema_version":1}

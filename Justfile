@@ -6,8 +6,8 @@ mdbook_version := "0.5.2"
 mdbook_mermaid_version := "0.17.0"
 cargo_fuzz_version := "0.13.1"
 cfg_check_targets := "x86_64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc"
-fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower mantle_artifact_decode mantle_runtime_from_source"
-fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 mantle_artifact_decode:256 mantle_runtime_from_source:128"
+fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower mantle_artifact_decode mantle_runtime_from_source mantle_trace_validate"
+fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_trace_validate:128"
 
 default:
     @just --list

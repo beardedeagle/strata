@@ -130,6 +130,8 @@ fn run_artifact_path_writes_trace_for_current_directory_artifact() {
     let trace = fs::read_to_string(&trace_path).expect("runtime trace should be readable");
     assert!(trace.contains(r#""event":"artifact_loaded""#));
     assert!(trace.contains(&format!(r#""schema_version":"{ARTIFACT_SCHEMA_VERSION}""#)));
+    assert!(trace.contains(r#""trace_schema":"mantle-runtime-observability""#));
+    validate_runtime_trace_jsonl(&trace).expect("runtime trace should match Mantle trace schema");
     assert!(trace.contains(r#""event":"process_stopped""#));
 
     fs::remove_file(artifact_path).expect("test artifact should be removed");

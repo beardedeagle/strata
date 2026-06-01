@@ -211,6 +211,30 @@ Runtime traces are line-delimited JSON. They include labels for readability and
 numeric IDs for process, message, state, payload type, and output identity. A
 trace is evidence of runtime execution, not a substitute for running the
 source-to-runtime gate.
+Every emitted event also carries the Mantle-owned trace schema ID
+`mantle-runtime-observability` and schema version `1`. The schema identifies the
+observability contract only; it is not a `.mta` schema, serialized bytecode,
+source semantic surface, retargeting input, or dispatch table. Trace validators
+may check required fields, typed ID field shapes, `artifact_loaded`
+first/no-repeat ordering, Mantle-contiguous spawned PID sequencing, and runtime
+PID-to-process-ID correlation. Repository validation rejects fields outside the
+per-event trace contract and checks grouped payload/loop fields, strict unsigned
+integer syntax, u32 artifact typed-ID width, u16 branch-path segment width,
+branch-path length, renderer-valid branch-path segment encoding, non-entry
+spawn parent evidence, closed runtime enum value domains, process lifecycle
+causality boundaries after terminal stop/fail events, and artifact process-ID
+bounds. Lifecycle causality validation requires active parent/sender/supervisor
+PIDs for events that imply runtime action. Supervisor restart validation also
+requires prior child-start evidence for the same typed supervisor/child slot, a
+terminal event for the current child PID, and a distinct active replacement PID
+spawned by the supervisor for restarted decisions. It also rejects impossible
+restart-window evidence such as zero limits/windows, observed counts above the
+configured limit, restarted decisions with zero count, and non-restarted
+decisions with nonzero count, while still allowing typed evidence to reference
+the terminated child when reporting a supervisor decision.
+Validators apply explicit byte, event, and runtime-process limits, remain
+read-only, and never turn labels, source names, process names, message labels,
+or debug strings into executable meaning.
 
 `mantle inspect-authority` is a read-only inspection command for admitted
 artifacts. It validates the `.mta` through the same artifact reader used before

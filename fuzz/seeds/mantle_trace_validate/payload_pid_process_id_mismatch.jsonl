@@ -1,0 +1,4 @@
+{"event":"artifact_loaded","format":"mantle-target-artifact","schema_version":"6","source_language":"strata","module":"payload-ref","entry_process_id":0,"entry_process":"Main","entry_message_id":0,"process_count":2,"trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"process_spawned","pid":1,"process_id":0,"process":"Main","state_id":0,"state":"Ready","mailbox_bound":1,"trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"process_spawned","pid":2,"process_id":1,"process":"Worker","state_id":0,"state":"Ready","mailbox_bound":1,"spawned_by_pid":1,"trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"message_accepted","pid":1,"process_id":0,"process":"Main","message_id":0,"message":"Start","payload_type_id":2,"payload":"type2#2","payload_process_id":0,"payload_pid":2,"queue_depth":1,"trace_schema":"mantle-runtime-observability","trace_schema_version":1}

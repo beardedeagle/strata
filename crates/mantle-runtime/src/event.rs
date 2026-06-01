@@ -9,7 +9,18 @@ use mantle_artifact::{
 
 use crate::program::RuntimePayload;
 
+mod contract;
 mod jsonl;
+mod validate;
+
+pub use contract::{
+    RUNTIME_TRACE_SCHEMA_ID, RUNTIME_TRACE_SCHEMA_VERSION, RuntimeTraceEventContract,
+    RuntimeTraceEventKind,
+};
+pub use validate::{
+    RuntimeTraceSummary, RuntimeTraceValidationLimits, validate_runtime_trace_jsonl,
+    validate_runtime_trace_jsonl_with_limits,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RuntimeProcessId(NonZeroU64);
@@ -120,6 +131,22 @@ impl RuntimeBranchPathSegment {
         match branch {
             ArtifactBranch::Then => Self(BRANCH_PATH_THEN_STATE),
             ArtifactBranch::Else => Self(BRANCH_PATH_ELSE_STATE),
+        }
+    }
+
+    pub(crate) const fn is_valid_encoded(segment: u16) -> bool {
+        match segment {
+            BRANCH_PATH_THEN_STATE | BRANCH_PATH_ELSE_STATE => true,
+            _ => {
+                let prefix = segment & !BRANCH_PATH_INDEX_MASK;
+                let index = (segment & BRANCH_PATH_INDEX_MASK) as usize;
+                matches!(
+                    prefix,
+                    0 | BRANCH_PATH_THEN_ACTION
+                        | BRANCH_PATH_ELSE_ACTION
+                        | BRANCH_PATH_LOOP_BODY_ACTION
+                ) && index < MAX_ACTIONS_PER_PROCESS
+            }
         }
     }
 
@@ -323,6 +350,32 @@ pub enum RuntimeEvent {
         restart_window_ms: u64,
         new_child_pid: Option<RuntimeProcessId>,
     },
+}
+
+impl RuntimeEvent {
+    pub const fn trace_kind(&self) -> RuntimeTraceEventKind {
+        match self {
+            Self::ArtifactLoaded { .. } => RuntimeTraceEventKind::ArtifactLoaded,
+            Self::ProcessSpawned { .. } => RuntimeTraceEventKind::ProcessSpawned,
+            Self::MessageAccepted { .. } => RuntimeTraceEventKind::MessageAccepted,
+            Self::MessageDequeued { .. } => RuntimeTraceEventKind::MessageDequeued,
+            Self::ProgramOutput { .. } => RuntimeTraceEventKind::ProgramOutput,
+            Self::SpawnAuthorityChecked { .. } => RuntimeTraceEventKind::SpawnAuthorityChecked,
+            Self::BoundarySendChecked { .. } => RuntimeTraceEventKind::BoundarySendChecked,
+            Self::BranchSelected { .. } => RuntimeTraceEventKind::BranchSelected,
+            Self::LoopStarted { .. } => RuntimeTraceEventKind::LoopStarted,
+            Self::LoopIteration { .. } => RuntimeTraceEventKind::LoopIteration,
+            Self::LoopCompleted { .. } => RuntimeTraceEventKind::LoopCompleted,
+            Self::StateUpdated { .. } => RuntimeTraceEventKind::StateUpdated,
+            Self::ProcessStepped { .. } => RuntimeTraceEventKind::ProcessStepped,
+            Self::ProcessStopped { .. } => RuntimeTraceEventKind::ProcessStopped,
+            Self::ProcessFailed { .. } => RuntimeTraceEventKind::ProcessFailed,
+            Self::SupervisorChildStarted { .. } => RuntimeTraceEventKind::SupervisorChildStarted,
+            Self::SupervisorRestartDecision { .. } => {
+                RuntimeTraceEventKind::SupervisorRestartDecision
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
