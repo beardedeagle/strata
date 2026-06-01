@@ -99,6 +99,29 @@ and docs. This evidence does not add a serialized bytecode format, a Strata
 lowering target, new source semantics, new fuzz decoder seeds, or new unsafe
 indexing assumptions; it remains bounded machine-checked assurance.
 
+Runtime trace observability is recorded as a Mantle-owned runtime feature:
+runtime events are strongly typed before rendering, JSONL output carries the
+`mantle-runtime-observability` schema ID and version, and the validator checks
+required fields, exact per-event field sets, grouped payload/loop fields, typed
+ID fields, strict unsigned integer syntax, u16 branch path segments plus
+bounded path length, closed runtime enum value domains, u32 artifact typed-ID
+width, artifact process-ID bounds, `artifact_loaded` first/no-repeat ordering,
+Mantle-contiguous spawned PID sequencing, non-entry spawn parent evidence,
+runtime PID-to-process-ID correlation, supervisor-child restart causality, and
+restart-window numeric bounds/coupling using borrowed line scans over
+already-read trace text.
+Validation is capped by explicit trace-byte, event-count, and runtime-process
+limits before trace evidence is used by a gate.
+The evidence includes unit and negative schema tests, source-to-runtime trace
+validation, fuzz seeds for malformed traces, bounded rendered-all-event
+contract evidence for metadata-vs-typed-ID separation, JSONL performance-smoke
+coverage, docs, and assurance matrix coverage. No new unsafe code, arena
+indexing assumption, or unchecked correlation path is introduced by the trace
+validator, so this slice does not add a new Miri-specific target beyond the
+existing `just miri-ci` disposition. The trace contract remains observability
+evidence only; it is not an artifact format, Strata lowering target, source
+semantic surface, or executable dispatch input.
+
 Run it with:
 
 ```sh

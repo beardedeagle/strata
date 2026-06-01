@@ -224,6 +224,9 @@ pub(crate) mod requirements {
         EvidenceClass::PositiveTest,
         EvidenceClass::NegativeTest,
         EvidenceClass::SourceToRuntimeGate,
+        EvidenceClass::FuzzSeed,
+        EvidenceClass::BoundedOrProperty,
+        EvidenceClass::PerformanceSmoke,
         EvidenceClass::Documentation,
     ];
 

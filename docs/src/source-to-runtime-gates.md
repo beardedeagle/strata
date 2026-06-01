@@ -194,6 +194,15 @@ Each successful `mantle run` command must validate the generated `.mta`, execute
 and emit an observability trace under `target/strata/`. Expected-failure gates
 must return non-zero with source diagnostics or runtime failure evidence at the
 layer being tested.
+Acceptance tests that read trace evidence validate the Mantle-owned JSONL trace
+schema before trusting the trace summary. That validation checks schema identity,
+exact per-event field sets, required fields, typed ID field shapes, grouped
+payload/loop fields, `artifact_loaded` first/no-repeat ordering,
+Mantle-contiguous spawned PID sequencing, u32 artifact typed-ID width, u16
+branch path segments and bounded path length, non-entry spawn parent evidence,
+runtime PID-to-process-ID correlation, supervisor-child restart causality, and
+restart-window numeric bounds/coupling only; it does not make trace JSON an
+artifact boundary or a source semantics input.
 
 When adding a new user-visible language or runtime behavior, add or update an
 example that follows this shape. A passing unit test is useful, but it does not

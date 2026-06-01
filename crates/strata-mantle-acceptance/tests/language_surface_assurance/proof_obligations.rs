@@ -42,7 +42,7 @@ const SOURCE_TO_RUNTIME: ProofObligation = obligation(
 );
 const FUZZ_SEED: ProofObligation = obligation(
     ProofObligationClass::FuzzSeedCorpus,
-    "fuzz seeds keep mutation-based gates anchored on admitted examples",
+    "fuzz seeds keep mutation-based gates anchored on admitted examples and fail-closed rejections",
 );
 const BOUNDED_PROPERTY: ProofObligation = obligation(
     ProofObligationClass::BoundedOrProperty,
@@ -171,6 +171,8 @@ pub(crate) const OBSERVABILITY: &[ProofObligation] = &[
     RUNNABLE_EXAMPLE,
     TEST_COVERAGE,
     SOURCE_TO_RUNTIME,
+    FUZZ_SEED,
+    BOUNDED_PROPERTY,
     DOCUMENTATION,
 ];
 

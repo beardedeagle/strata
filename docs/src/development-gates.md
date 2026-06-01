@@ -40,6 +40,15 @@ requirement extraction, `mantle.feature_declaration.v5` rendering,
 requirements-vs-declaration admission before runtime execution, and Mantle's
 artifact-derived check that declared requirements cover the decoded runtime
 constructs.
+Trace-reading acceptance gates also validate the Mantle-owned JSONL trace
+schema before using trace evidence. That validation is limited to observability
+metadata, exact per-event field sets, required field shapes, grouped
+payload/loop fields, `artifact_loaded` first/no-repeat ordering,
+Mantle-contiguous spawned PID sequencing, u32 artifact typed-ID width, u16
+branch path segments and bounded path length, non-entry spawn parent evidence,
+runtime PID-to-process-ID correlation, supervisor-child restart causality, and
+restart-window numeric bounds/coupling; executable behavior still comes from
+checked IR, admitted `.mta` tables, and Mantle runtime dispatch.
 
 ## Language Surface Proof Substrate
 
@@ -207,12 +216,14 @@ just performance-memory-review /tmp/strata-base .
 ## Fuzzing
 
 The fuzz harnesses live under `fuzz/` and run with `cargo-fuzz` on nightly Rust.
-They cover four boundaries:
+They cover five boundaries:
 
 - parsing, checking, and lowering arbitrary UTF-8 source;
 - parsing, checking, and lowering delimited multi-source Strata source programs;
 - decoding and re-encoding arbitrary UTF-8 artifact text;
-- running valid lowered artifacts through the in-memory runtime host.
+- running valid lowered artifacts through the in-memory runtime host;
+- validating Mantle-owned runtime trace JSONL without trusting trace strings as
+  executable meaning.
 
 Committed seed corpora under `fuzz/seeds/` keep the smoke runs exercising valid
 collection, template, and source-to-runtime examples even before mutation finds

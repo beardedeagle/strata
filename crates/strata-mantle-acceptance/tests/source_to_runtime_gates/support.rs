@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Once;
 
+use mantle_runtime::{RuntimeTraceValidationLimits, validate_runtime_trace_jsonl};
+
 pub(crate) use mantle_artifact::{
     ArtifactAction, ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactProcess,
     ArtifactSendTarget, ArtifactSpawnKind, ArtifactTransition, ArtifactTypeKind, ArtifactValue,
@@ -171,8 +173,20 @@ impl GateHarness {
 
     pub(crate) fn read_trace(&self, stem: &str) -> String {
         let trace_path = self.trace_path(stem);
-        fs::read_to_string(&trace_path)
+        let max_trace_bytes = RuntimeTraceValidationLimits::default().max_bytes();
+        let trace_bytes = fs::metadata(&trace_path)
             .unwrap_or_else(|err| panic!("expected trace {}: {err}", trace_path.display()))
+            .len();
+        assert!(
+            trace_bytes <= u64::try_from(max_trace_bytes).expect("trace byte limit should fit u64"),
+            "expected trace {} to stay within validation byte limit {max_trace_bytes}, got {trace_bytes} bytes",
+            trace_path.display()
+        );
+        let trace = fs::read_to_string(&trace_path)
+            .unwrap_or_else(|err| panic!("expected trace {}: {err}", trace_path.display()));
+        validate_runtime_trace_jsonl(&trace)
+            .unwrap_or_else(|err| panic!("invalid trace {}: {err}", trace_path.display()));
+        trace
     }
 
     pub(crate) fn read_artifact(&self, artifact: &str) -> MantleArtifact {

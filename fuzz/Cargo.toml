@@ -44,3 +44,10 @@ path = "fuzz_targets/mantle_runtime_from_source.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "mantle_trace_validate"
+path = "fuzz_targets/mantle_trace_validate.rs"
+test = false
+doc = false
+bench = false
