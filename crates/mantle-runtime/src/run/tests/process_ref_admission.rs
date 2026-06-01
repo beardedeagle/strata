@@ -110,6 +110,42 @@ fn runtime_rejects_loaded_process_ref_payload_target_mismatch_before_artifact_lo
 }
 
 #[test]
+fn runtime_rejects_loaded_process_ref_template_declared_target_mismatch_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    grant_loaded_main_spawn_authority(&mut program);
+    program.processes[1].message_variants[0].payload_type = Some(PROCESS_REF_MAIN);
+    align_loaded_process_message_type(&mut program, 1);
+    program.processes[0].transitions[0].effect_authority =
+        crate::program::LoadedEffectAuthority::from_artifact(&[
+            ArtifactEffect::Spawn,
+            ArtifactEffect::Send,
+        ]);
+    program.processes[0].transitions[0].actions = vec![
+        LoadedAction::Spawn {
+            target: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
+        },
+        LoadedAction::Send {
+            target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
+            message: MessageId::new(0),
+            payload: Some(loaded_template(ArtifactValueTemplate::ProcessRef {
+                ty: PROCESS_REF_MAIN,
+                target_process: ProcessId::new(0),
+                process_ref: ProcessRefId::new(0),
+            })),
+        },
+    ];
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process Main process reference payload id 0 targets process id 1, expected 0",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
@@ -146,6 +182,53 @@ fn runtime_rejects_loaded_projected_process_ref_payload_before_artifact_loaded()
     assert_loaded_admission_rejects_before_artifact_loaded(
         &program,
         "process Main transition 0 send payload process reference template must be a direct message payload",
+    );
+}
+
+#[test]
+fn runtime_rejects_loaded_nested_process_ref_payload_before_artifact_loaded() {
+    let artifact = artifact_with_unbound_worker_process_ref();
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    grant_loaded_main_spawn_authority(&mut program);
+    program.types[BOX.index()] = ArtifactType::enum_value_with_payloads(
+        "RefEnvelope",
+        vec![ArtifactEnumVariant {
+            label: "ReplyTo".to_string(),
+            payload_type: Some(PROCESS_REF_WORKER),
+        }],
+    );
+    program.processes[1].message_variants[0].payload_type = Some(BOX);
+    align_loaded_process_message_type(&mut program, 1);
+    program.processes[0].transitions[0].effect_authority =
+        crate::program::LoadedEffectAuthority::from_artifact(&[
+            ArtifactEffect::Spawn,
+            ArtifactEffect::Send,
+        ]);
+    program.processes[0].transitions[0].actions = vec![
+        LoadedAction::Spawn {
+            target: ProcessId::new(1),
+            process_ref: ProcessRefId::new(0),
+            spawn_site: SPAWN_SITE,
+        },
+        LoadedAction::Send {
+            target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
+            port: None,
+            message: MessageId::new(0),
+            payload: Some(LoadedValueTemplate::EnumVariant {
+                ty: BOX,
+                variant: EnumVariantId::new(0),
+                payload: Box::new(LoadedValueTemplate::ProcessRef {
+                    ty: PROCESS_REF_WORKER,
+                    target_process: ProcessId::new(1),
+                    process_ref: ProcessRefId::new(0),
+                }),
+            }),
+        },
+    ];
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "process reference template must be a direct message payload",
     );
 }
 
@@ -305,6 +388,8 @@ fn runtime_rejects_oversized_record_payload_template_value() {
     let artifact = artifact_with_unbound_worker_process_ref();
     let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let list_ty = push_list_type(&mut program, "LeafList", LEAF, 127);
+    program.processes[0].message_variants[0].payload_type = Some(list_ty);
+    align_loaded_process_message_type(&mut program, 0);
     program.types[BOX.index()] = box_record_type("item", list_ty);
     let template = ArtifactValueTemplate::Record {
         ty: BOX,
@@ -331,14 +416,33 @@ fn runtime_rejects_oversized_record_payload_template_value() {
         current_state: StateId::new(0),
     };
 
+    let action = LoadedAction::IfElse {
+        condition: loaded_template(template),
+        then_actions: vec![],
+        else_actions: vec![],
+    };
+    let process = program
+        .process(ProcessId::new(0))
+        .expect("process should load");
+    let plan =
+        crate::executable::ExecutableActionPlan::from_loaded_for_test(&program, process, &action)
+            .expect("template should compile into an executable template program");
+    let crate::executable::ExecutableActionPlan::IfElse { condition, .. } = plan.action() else {
+        panic!("test action should compile as an if condition")
+    };
+
+    let process_refs = LocalProcessRefs::empty();
     let err = evaluate_runtime_template(
-        &program,
-        &loaded_template(template),
-        Some(&received),
-        &step,
-        &LocalProcessRefs::empty(),
-        &[],
-        &[],
+        RuntimeTemplateContext {
+            program: &program,
+            templates: plan.templates(),
+            received_payload: Some(&received),
+            step: &step,
+            process_refs: &process_refs,
+            loop_elements: &[],
+            effect_outcomes: &[],
+        },
+        *condition,
     )
     .expect_err("oversized record payload labels should fail closed");
 

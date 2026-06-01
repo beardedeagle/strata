@@ -2,16 +2,51 @@ use mantle_artifact::{ArtifactBranch, ArtifactValue, Error, LoopElementId, Resul
 
 use super::model::ActiveStep;
 use super::process_refs::LocalProcessRefs;
-use super::templates::evaluate_runtime_template;
+use super::templates::{RuntimeTemplateContext, evaluate_runtime_template};
 use super::{
     BranchSelection, RuntimeActionScope, RuntimeEffectOutcome, RuntimeLoopElement, RuntimeRun,
 };
 use crate::event::{RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeLoopContext};
-use crate::executable::{ExecutableActionBlock, ExecutableActionPlan};
+use crate::executable::{
+    ExecutableActionBlock, ExecutableActionPlan, ExecutableTemplateProgram,
+    ExecutableValueTemplateRef,
+};
 use crate::host::RuntimeHost;
-use crate::program::{LoadedLoopElement, LoadedValueTemplate, RuntimePayload};
+use crate::program::{LoadedLoopElement, RuntimePayload};
 
 impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
+    #[cfg(test)]
+    pub(in crate::run) fn execute_action(
+        &mut self,
+        local_process_refs: &mut LocalProcessRefs,
+        step: &ActiveStep,
+        action: &crate::program::LoadedAction,
+        branch_path: RuntimeBranchPath,
+        loop_elements: &[RuntimeLoopElement<'_>],
+        effect_outcomes: &[RuntimeEffectOutcome],
+    ) -> Result<()> {
+        let process = self.program.process(step.process_id)?;
+        let spawned_refs = local_process_refs.binding_flags();
+        let plan = ExecutableActionPlan::from_loaded_for_test_with_spawned_refs(
+            self.program,
+            process,
+            action,
+            &spawned_refs,
+        )?;
+        self.execute_action_plan(
+            local_process_refs,
+            step,
+            plan.action(),
+            branch_path,
+            RuntimeActionScope {
+                executable_actions: plan.actions(),
+                executable_templates: plan.templates(),
+                loop_elements,
+                effect_outcomes,
+            },
+        )
+    }
+
     pub(super) fn ensure_loop_iteration_budget(&self, item_count: usize) -> Result<()> {
         let remaining = self
             .max_loop_iterations
@@ -25,29 +60,34 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         Ok(())
     }
 
-    pub(super) fn evaluate_bool_condition(
+    pub(super) fn evaluate_bool_condition<'template>(
         &self,
         step: &ActiveStep,
-        condition: &LoadedValueTemplate,
+        condition: ExecutableValueTemplateRef,
+        executable_templates: &ExecutableTemplateProgram<'template>,
         local_process_refs: &LocalProcessRefs,
         loop_elements: &[RuntimeLoopElement<'_>],
         effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<(ArtifactBranch, RuntimePayload)> {
         let condition_value = evaluate_runtime_template(
-            self.program,
+            RuntimeTemplateContext {
+                program: self.program,
+                templates: executable_templates,
+                received_payload: step.payload.as_ref(),
+                step,
+                process_refs: local_process_refs,
+                loop_elements,
+                effect_outcomes,
+            },
             condition,
-            step.payload.as_ref(),
-            step,
-            local_process_refs,
-            loop_elements,
-            effect_outcomes,
         )?;
-        if condition_value.ty != condition.result_type() {
+        let expected_type = executable_templates.result_type(condition)?;
+        if condition_value.ty != expected_type {
             return Err(Error::new(format!(
                 "process {} if condition produced type id {}, expected {}",
                 step.process_name,
                 condition_value.ty.as_u32(),
-                condition.result_type().as_u32()
+                expected_type.as_u32()
             )));
         }
         let ArtifactValue::Atom(value) = &condition_value.value else {
@@ -71,13 +111,14 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         Ok((branch, condition_value))
     }
 
-    pub(super) fn select_branch(
+    pub(super) fn select_branch<'template>(
         &mut self,
-        selection: BranchSelection<'_>,
+        selection: BranchSelection<'_, 'template>,
     ) -> Result<ArtifactBranch> {
         let (branch, condition_value) = self.evaluate_bool_condition(
             selection.step,
             selection.condition,
+            selection.executable_templates,
             selection.local_process_refs,
             selection.loop_elements,
             selection.effect_outcomes,
@@ -215,6 +256,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             }];
             let active_scope = RuntimeActionScope {
                 executable_actions: scope.executable_actions,
+                executable_templates: scope.executable_templates,
                 loop_elements: &active,
                 effect_outcomes: scope.effect_outcomes,
             };
@@ -275,13 +317,16 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 }
                 if let Some(payload) = payload {
                     evaluate_runtime_template(
-                        self.program,
-                        payload,
-                        step.payload.as_ref(),
-                        step,
-                        local_process_refs,
-                        scope.loop_elements,
-                        scope.effect_outcomes,
+                        RuntimeTemplateContext {
+                            program: self.program,
+                            templates: scope.executable_templates,
+                            received_payload: step.payload.as_ref(),
+                            step,
+                            process_refs: local_process_refs,
+                            loop_elements: scope.loop_elements,
+                            effect_outcomes: scope.effect_outcomes,
+                        },
+                        *payload,
                     )?;
                 }
                 let queued_messages = queued_mailbox_messages
@@ -301,7 +346,8 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             } => {
                 let (branch, _) = self.evaluate_bool_condition(
                     step,
-                    condition,
+                    *condition,
+                    scope.executable_templates,
                     local_process_refs,
                     scope.loop_elements,
                     scope.effect_outcomes,

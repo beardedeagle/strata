@@ -45,6 +45,20 @@ impl LocalProcessRefs {
         self.get(process_ref).is_some()
     }
 
+    #[cfg(test)]
+    pub(super) fn binding_flags(&self) -> Vec<bool> {
+        (0..self.process_ref_count)
+            .map(|index| {
+                self.pids
+                    .as_ref()
+                    .and_then(|pids| pids.get(index))
+                    .copied()
+                    .flatten()
+                    .is_some()
+            })
+            .collect()
+    }
+
     pub(super) fn bind(
         &mut self,
         process_ref: ProcessRefId,

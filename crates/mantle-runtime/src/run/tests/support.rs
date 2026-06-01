@@ -15,10 +15,10 @@ pub(super) use mantle_artifact::{
     ArtifactSpawnSite, ArtifactStateValue, ArtifactTargetRequirements, ArtifactTransition,
     ArtifactType, ArtifactTypeField, ArtifactValue, ArtifactValueBooleanOperator,
     ArtifactValueEqualityOperator, ArtifactValueTemplate, ArtifactValueTemplateField, AuthorityId,
-    EnumVariantId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES, MAX_NEXT_STATE_IF_ELSE_DEPTH,
-    MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MantleArtifact, MessageId, NextState,
-    OutputId, ProcessId, ProcessRefId, RecordFieldId, RuntimeFeature, SpawnSiteId, StateId,
-    StepResult, TypeId,
+    EnumVariantId, LoopElementId, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_PROCESS_REFS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH,
+    MantleArtifact, MessageId, NextState, OutputId, ProcessId, ProcessRefId, RecordFieldId,
+    RuntimeFeature, SpawnSiteId, StateId, StepResult, TypeId,
 };
 
 pub(super) const TEST_SOURCE_LANGUAGE: &str = "test_frontend";
@@ -31,6 +31,7 @@ pub(super) const BOX: TypeId = TypeId::new(5);
 pub(super) const LEAF: TypeId = TypeId::new(6);
 pub(super) const START_PAYLOAD: TypeId = TypeId::new(7);
 pub(super) const PROCESS_REF_WORKER: TypeId = TypeId::new(8);
+pub(super) const PROCESS_REF_MAIN: TypeId = TypeId::new(9);
 pub(super) const SPAWN_AUTHORITY: AuthorityId = AuthorityId::new(0);
 pub(super) const SPAWN_SITE: SpawnSiteId = SpawnSiteId::new(0);
 

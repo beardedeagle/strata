@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use mantle_artifact::{
-    Error, MessageId, ProcessId, Result, StateId, SupervisorChildId, SupervisorId,
+    Error, LoopElementId, MessageId, ProcessId, Result, StateId, SupervisorChildId, SupervisorId,
 };
 
 use crate::event::RuntimeProcessId;
@@ -12,6 +12,13 @@ use crate::report::ProcessStatus;
 pub(super) struct RuntimeSupervisorRef {
     pub(super) supervisor: SupervisorId,
     pub(super) child: SupervisorChildId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RuntimeLoopElement<'a> {
+    pub(super) id: LoopElementId,
+    pub(super) index: usize,
+    pub(super) payload: &'a RuntimePayload,
 }
 
 pub(super) struct RuntimeSupervisorChildState {

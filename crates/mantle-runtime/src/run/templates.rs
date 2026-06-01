@@ -1,202 +1,175 @@
-use mantle_artifact::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactScalarValue, ArtifactValueBooleanOperator,
-    ArtifactValueEqualityOperator, Error, Result,
-};
+use mantle_artifact::{ArtifactMapEntry, ArtifactScalarValue, Error, Result};
 
-use super::model::ActiveStep;
+use super::RuntimeEffectOutcome;
+use super::model::{ActiveStep, RuntimeLoopElement};
 use super::process_refs::LocalProcessRefs;
-use super::{RuntimeEffectOutcome, RuntimeLoopElement};
-use crate::program::{LoadedProgram, LoadedValueTemplate, RuntimePayload, RuntimeValue};
+use crate::executable::{
+    ExecutableTemplateProgram, ExecutableValueTemplate, ExecutableValueTemplateRef,
+};
+use crate::program::{LoadedProgram, RuntimePayload, RuntimeValue};
+
+#[derive(Clone, Copy)]
+pub(super) struct RuntimeTemplateContext<'a, 'program, 'template> {
+    pub(super) program: &'program LoadedProgram,
+    pub(super) templates: &'a ExecutableTemplateProgram<'template>,
+    pub(super) received_payload: Option<&'a RuntimePayload>,
+    pub(super) step: &'a ActiveStep,
+    pub(super) process_refs: &'a LocalProcessRefs,
+    pub(super) loop_elements: &'a [RuntimeLoopElement<'a>],
+    pub(super) effect_outcomes: &'a [RuntimeEffectOutcome],
+}
 
 pub(super) fn evaluate_runtime_template(
-    program: &LoadedProgram,
-    template: &LoadedValueTemplate,
-    received_payload: Option<&RuntimePayload>,
-    step: &ActiveStep,
-    process_refs: &LocalProcessRefs,
-    loop_elements: &[RuntimeLoopElement<'_>],
-    effect_outcomes: &[RuntimeEffectOutcome],
+    context: RuntimeTemplateContext<'_, '_, '_>,
+    template: ExecutableValueTemplateRef,
 ) -> Result<RuntimePayload> {
+    let template = context.templates.get(template)?;
     match template {
-        LoadedValueTemplate::Literal { ty, value } => {
-            program.runtime_payload_value("literal value template", *ty, value.clone())
+        ExecutableValueTemplate::Literal { ty, value } => {
+            context
+                .program
+                .runtime_payload_value("literal value template", *ty, (*value).clone())
         }
-        LoadedValueTemplate::ReceivedPayload { ty } => {
-            let payload = received_payload.ok_or_else(|| {
+        ExecutableValueTemplate::ReceivedPayload { ty } => {
+            let payload = context.received_payload.ok_or_else(|| {
                 Error::new("received payload template requires a payload-bearing message")
             })?;
-            program.validate_runtime_payload_matches_type("received payload", *ty, payload)?;
-            Ok(payload.clone())
-        }
-        LoadedValueTemplate::CurrentStatePayload { ty } => {
-            let payload = step.current_state_payload(program)?.ok_or_else(|| {
-                Error::new("current state payload template requires a payload-bearing state")
-            })?;
-            program.validate_runtime_payload_matches_type("current state payload", *ty, payload)?;
-            Ok(payload.clone())
-        }
-        LoadedValueTemplate::EnumPayload { ty, value, variant } => {
-            let value = evaluate_runtime_template(
-                program,
-                value,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
+            context.program.validate_runtime_payload_matches_type(
+                "received payload",
+                *ty,
+                payload,
             )?;
-            let variant = program.enum_variant_label(value.ty, *variant)?;
-            program.runtime_payload_value(
+            Ok(payload.clone())
+        }
+        ExecutableValueTemplate::CurrentStatePayload { ty } => {
+            let payload = context
+                .step
+                .current_state_payload(context.program)?
+                .ok_or_else(|| {
+                    Error::new("current state payload template requires a payload-bearing state")
+                })?;
+            context.program.validate_runtime_payload_matches_type(
+                "current state payload",
+                *ty,
+                payload,
+            )?;
+            Ok(payload.clone())
+        }
+        ExecutableValueTemplate::EnumPayload { ty, value, variant } => {
+            let value = evaluate_runtime_template(context, *value)?;
+            context.program.runtime_payload_value(
                 "enum payload projection value",
                 *ty,
-                value.value.project_enum_payload(variant)?,
+                context.program.project_enum_payload_by_id(
+                    "enum payload projection value",
+                    value.ty,
+                    *variant,
+                    &value.value,
+                )?,
             )
         }
-        LoadedValueTemplate::RecordField { ty, record, field } => {
-            let record = evaluate_runtime_template(
-                program,
-                record,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
-            let field_name = program.record_field_name(record.ty, *field)?;
-            program.runtime_payload_value(
+        ExecutableValueTemplate::RecordField { ty, record, field } => {
+            let record = evaluate_runtime_template(context, *record)?;
+            context.program.runtime_payload_value(
                 "record field projection value",
                 *ty,
-                record.value.project_record_field(field_name)?,
+                context.program.project_record_field_by_id(
+                    "record field projection value",
+                    record.ty,
+                    *field,
+                    &record.value,
+                )?,
             )
         }
-        LoadedValueTemplate::ListElement {
+        ExecutableValueTemplate::ListElement {
             ty,
             list,
             index,
             len,
         } => {
-            let list = evaluate_runtime_template(
-                program,
-                list,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
-            program.runtime_payload_value(
+            let list = evaluate_runtime_template(context, *list)?;
+            context.program.runtime_payload_value(
                 "list element projection value",
                 *ty,
                 list.value.project_list_element(*index, *len)?,
             )
         }
-        LoadedValueTemplate::ListPrefixElement {
+        ExecutableValueTemplate::ListPrefixElement {
             ty,
             list,
             index,
             prefix_len,
         } => {
-            let list = evaluate_runtime_template(
-                program,
-                list,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
-            program.runtime_payload_value(
+            let list = evaluate_runtime_template(context, *list)?;
+            context.program.runtime_payload_value(
                 "list prefix projection value",
                 *ty,
                 list.value
                     .project_list_prefix_element(*index, *prefix_len)?,
             )
         }
-        LoadedValueTemplate::ListRest {
+        ExecutableValueTemplate::ListRest {
             ty,
             list,
             prefix_len,
         } => {
-            let list = evaluate_runtime_template(
-                program,
-                list,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
-            program.runtime_payload_value(
+            let list = evaluate_runtime_template(context, *list)?;
+            context.program.runtime_payload_value(
                 "list rest projection value",
                 *ty,
                 list.value.project_list_rest(*prefix_len)?,
             )
         }
-        LoadedValueTemplate::MapValue {
+        ExecutableValueTemplate::MapValue {
             ty,
             map,
             key,
             keys,
             projection,
         } => {
-            let map = evaluate_runtime_template(
-                program,
-                map,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
-            program.runtime_payload_value(
+            let map = evaluate_runtime_template(context, *map)?;
+            context.program.runtime_payload_value(
                 "map value projection value",
                 *ty,
                 map.value.project_map_value(key, keys, *projection)?,
             )
         }
-        LoadedValueTemplate::MapRest {
+        ExecutableValueTemplate::MapRest {
             ty,
             map,
             excluded_keys,
         } => {
-            let map = evaluate_runtime_template(
-                program,
-                map,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
-            program.runtime_payload_value(
+            let map = evaluate_runtime_template(context, *map)?;
+            context.program.runtime_payload_value(
                 "map rest projection value",
                 *ty,
                 map.value.project_map_rest(excluded_keys)?,
             )
         }
-        LoadedValueTemplate::ProcessRef {
+        ExecutableValueTemplate::ProcessRef {
             ty,
             target_process,
             process_ref,
         } => {
-            let pid = process_refs.get(*process_ref).ok_or_else(|| {
+            let pid = context.process_refs.get(*process_ref).ok_or_else(|| {
                 Error::new(format!(
                     "process {} sends unbound process reference id {} as payload",
-                    step.process_name,
+                    context.step.process_name,
                     process_ref.as_u32()
                 ))
             })?;
             RuntimePayload::from_process_ref(*ty, *target_process, pid)
         }
-        LoadedValueTemplate::LoopElement { ty, element } => {
-            let payload = loop_elements
+        ExecutableValueTemplate::LoopElement { ty, element } => {
+            let payload = context
+                .loop_elements
                 .iter()
                 .find(|binding| binding.id == *element)
                 .map(|binding| binding.payload)
                 .ok_or_else(|| {
                     Error::new(format!(
                         "process {} references inactive loop element id {}",
-                        step.process_name,
+                        context.step.process_name,
                         element.as_u32()
                     ))
                 })?;
@@ -210,15 +183,16 @@ pub(super) fn evaluate_runtime_template(
             }
             Ok(payload.clone())
         }
-        LoadedValueTemplate::EffectOutcome { ty, outcome } => {
-            let payload = effect_outcomes
+        ExecutableValueTemplate::EffectOutcome { ty, outcome } => {
+            let payload = context
+                .effect_outcomes
                 .iter()
                 .find(|binding| binding.id == *outcome)
                 .map(|binding| &binding.payload)
                 .ok_or_else(|| {
                     Error::new(format!(
                         "process {} references unbound effect outcome id {}",
-                        step.process_name,
+                        context.step.process_name,
                         outcome.as_u32()
                     ))
                 })?;
@@ -232,42 +206,23 @@ pub(super) fn evaluate_runtime_template(
             }
             Ok(payload.clone())
         }
-        LoadedValueTemplate::EnumVariant {
+        ExecutableValueTemplate::EnumVariant {
             ty,
             variant,
             payload,
         } => {
-            let payload = evaluate_runtime_template(
-                program,
-                payload,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
-            program.runtime_payload_value(
+            let payload = evaluate_runtime_template(context, *payload)?;
+            context.program.runtime_enum_variant_payload(
                 "enum variant template value",
                 *ty,
-                RuntimeValue::EnumVariant {
-                    variant: program.enum_variant_label(*ty, *variant)?.to_string(),
-                    payload: Box::new(payload.value),
-                },
+                *variant,
+                payload.value,
             )
         }
-        LoadedValueTemplate::Record { ty, fields } => {
-            let type_label = program.type_label(*ty)?;
+        ExecutableValueTemplate::Record { ty, fields } => {
             let mut values = Vec::with_capacity(fields.len());
             for (field_index, field) in fields.iter().enumerate() {
-                let value = evaluate_runtime_template(
-                    program,
-                    &field.value,
-                    received_payload,
-                    step,
-                    process_refs,
-                    loop_elements,
-                    effect_outcomes,
-                )?;
+                let value = evaluate_runtime_template(context, field.value)?;
                 if fields[..field_index]
                     .iter()
                     .any(|previous| previous.field == field.field)
@@ -277,58 +232,29 @@ pub(super) fn evaluate_runtime_template(
                         field.field.as_u32()
                     )));
                 }
-                let field_name = program.record_field_name(*ty, field.field)?;
-                values.push(ArtifactRecordField {
-                    name: field_name.to_string(),
-                    value: value.value,
-                });
+                values.push((field.field, value.value));
             }
-            program.runtime_payload_value(
-                "record template value",
-                *ty,
-                RuntimeValue::Record {
-                    constructor: type_label.to_string(),
-                    fields: values,
-                },
-            )
+            context
+                .program
+                .runtime_record_payload("record template value", *ty, values)
         }
-        LoadedValueTemplate::List { ty, items } => {
+        ExecutableValueTemplate::List { ty, items } => {
             let mut values = Vec::with_capacity(items.len());
             for item in items {
-                let value = evaluate_runtime_template(
-                    program,
-                    item,
-                    received_payload,
-                    step,
-                    process_refs,
-                    loop_elements,
-                    effect_outcomes,
-                )?;
+                let value = evaluate_runtime_template(context, *item)?;
                 values.push(value.value);
             }
-            program.runtime_payload_value("list template value", *ty, RuntimeValue::List(values))
+            context.program.runtime_payload_value(
+                "list template value",
+                *ty,
+                RuntimeValue::List(values),
+            )
         }
-        LoadedValueTemplate::Map { ty, entries } => {
+        ExecutableValueTemplate::Map { ty, entries } => {
             let mut values: Vec<ArtifactMapEntry> = Vec::with_capacity(entries.len());
             for entry in entries {
-                let key = evaluate_runtime_template(
-                    program,
-                    &entry.key,
-                    received_payload,
-                    step,
-                    process_refs,
-                    loop_elements,
-                    effect_outcomes,
-                )?;
-                let value = evaluate_runtime_template(
-                    program,
-                    &entry.value,
-                    received_payload,
-                    step,
-                    process_refs,
-                    loop_elements,
-                    effect_outcomes,
-                )?;
+                let key = evaluate_runtime_template(context, entry.key)?;
+                let value = evaluate_runtime_template(context, entry.value)?;
                 if values.iter().any(|previous| previous.key == key.value) {
                     return Err(Error::new(format!(
                         "map template duplicates key {}",
@@ -340,37 +266,25 @@ pub(super) fn evaluate_runtime_template(
                     value: value.value,
                 });
             }
-            program.runtime_payload_value("map template value", *ty, RuntimeValue::Map(values))
+            context.program.runtime_payload_value(
+                "map template value",
+                *ty,
+                RuntimeValue::Map(values),
+            )
         }
-        LoadedValueTemplate::IfElse {
+        ExecutableValueTemplate::IfElse {
             ty,
             condition,
             then_value,
             else_value,
         } => {
-            let condition = evaluate_runtime_template(
-                program,
-                condition,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let condition = evaluate_runtime_template(context, *condition)?;
             let selected = if runtime_bool_value(&condition.value)? {
                 then_value
             } else {
                 else_value
             };
-            let value = evaluate_runtime_template(
-                program,
-                selected,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let value = evaluate_runtime_template(context, *selected)?;
             if value.ty != *ty {
                 return Err(Error::new(format!(
                     "if_else value branch has type id {}, expected {}",
@@ -380,22 +294,14 @@ pub(super) fn evaluate_runtime_template(
             }
             Ok(value)
         }
-        LoadedValueTemplate::Equality {
+        ExecutableValueTemplate::Equality {
             ty,
             operand_ty,
             operator,
             left,
             right,
         } => {
-            let left = evaluate_runtime_template(
-                program,
-                left,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let left = evaluate_runtime_template(context, *left)?;
             if left.ty != *operand_ty {
                 return Err(Error::new(format!(
                     "equality left operand has type id {}, expected {}",
@@ -403,15 +309,7 @@ pub(super) fn evaluate_runtime_template(
                     operand_ty.as_u32()
                 )));
             }
-            let right = evaluate_runtime_template(
-                program,
-                right,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let right = evaluate_runtime_template(context, *right)?;
             if right.ty != *operand_ty {
                 return Err(Error::new(format!(
                     "equality right operand has type id {}, expected {}",
@@ -421,30 +319,22 @@ pub(super) fn evaluate_runtime_template(
             }
             let is_equal = left.value == right.value;
             let selected = match operator {
-                ArtifactValueEqualityOperator::Equal => is_equal,
-                ArtifactValueEqualityOperator::NotEqual => !is_equal,
+                mantle_artifact::ArtifactValueEqualityOperator::Equal => is_equal,
+                mantle_artifact::ArtifactValueEqualityOperator::NotEqual => !is_equal,
             };
-            program.runtime_payload_value(
+            context.program.runtime_payload_value(
                 "equality template value",
                 *ty,
                 RuntimeValue::Atom(bool_atom(selected)),
             )
         }
-        LoadedValueTemplate::ScalarArithmetic {
+        ExecutableValueTemplate::ScalarArithmetic {
             ty,
             operator,
             left,
             right,
         } => {
-            let left = evaluate_runtime_template(
-                program,
-                left,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let left = evaluate_runtime_template(context, *left)?;
             if left.ty != *ty {
                 return Err(Error::new(format!(
                     "scalar arithmetic left operand has type id {}, expected {}",
@@ -452,15 +342,7 @@ pub(super) fn evaluate_runtime_template(
                     ty.as_u32()
                 )));
             }
-            let right = evaluate_runtime_template(
-                program,
-                right,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let right = evaluate_runtime_template(context, *right)?;
             if right.ty != *ty {
                 return Err(Error::new(format!(
                     "scalar arithmetic right operand has type id {}, expected {}",
@@ -475,7 +357,7 @@ pub(super) fn evaluate_runtime_template(
                     "scalar arithmetic operands must produce scalar values",
                 ));
             };
-            program.runtime_payload_value(
+            context.program.runtime_payload_value(
                 "scalar arithmetic template value",
                 *ty,
                 RuntimeValue::Scalar(ArtifactScalarValue::checked_arithmetic(
@@ -483,22 +365,14 @@ pub(super) fn evaluate_runtime_template(
                 )?),
             )
         }
-        LoadedValueTemplate::ScalarOrdering {
+        ExecutableValueTemplate::ScalarOrdering {
             ty,
             operand_ty,
             operator,
             left,
             right,
         } => {
-            let left = evaluate_runtime_template(
-                program,
-                left,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let left = evaluate_runtime_template(context, *left)?;
             if left.ty != *operand_ty {
                 return Err(Error::new(format!(
                     "scalar ordering left operand has type id {}, expected {}",
@@ -506,15 +380,7 @@ pub(super) fn evaluate_runtime_template(
                     operand_ty.as_u32()
                 )));
             }
-            let right = evaluate_runtime_template(
-                program,
-                right,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let right = evaluate_runtime_template(context, *right)?;
             if right.ty != *operand_ty {
                 return Err(Error::new(format!(
                     "scalar ordering right operand has type id {}, expected {}",
@@ -529,7 +395,7 @@ pub(super) fn evaluate_runtime_template(
                     "scalar ordering operands must produce scalar values",
                 ));
             };
-            program.runtime_payload_value(
+            context.program.runtime_payload_value(
                 "scalar ordering template value",
                 *ty,
                 RuntimeValue::Atom(bool_atom(ArtifactScalarValue::compare(
@@ -537,69 +403,31 @@ pub(super) fn evaluate_runtime_template(
                 )?)),
             )
         }
-        LoadedValueTemplate::BooleanNot { ty, operand } => {
-            let value = evaluate_runtime_template(
-                program,
-                operand,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
-            program.runtime_payload_value(
+        ExecutableValueTemplate::BooleanNot { ty, operand } => {
+            let value = evaluate_runtime_template(context, *operand)?;
+            context.program.runtime_payload_value(
                 "boolean predicate template value",
                 *ty,
                 RuntimeValue::Atom(bool_atom(!runtime_bool_value(&value.value)?)),
             )
         }
-        LoadedValueTemplate::BooleanBinary {
+        ExecutableValueTemplate::BooleanBinary {
             ty,
             operator,
             left,
             right,
         } => {
-            let left = evaluate_runtime_template(
-                program,
-                left,
-                received_payload,
-                step,
-                process_refs,
-                loop_elements,
-                effect_outcomes,
-            )?;
+            let left = evaluate_runtime_template(context, *left)?;
             let left = runtime_bool_value(&left.value)?;
             let selected = match operator {
-                ArtifactValueBooleanOperator::And => {
-                    left && runtime_bool_value(
-                        &evaluate_runtime_template(
-                            program,
-                            right,
-                            received_payload,
-                            step,
-                            process_refs,
-                            loop_elements,
-                            effect_outcomes,
-                        )?
-                        .value,
-                    )?
+                mantle_artifact::ArtifactValueBooleanOperator::And => {
+                    left && runtime_bool_value(&evaluate_runtime_template(context, *right)?.value)?
                 }
-                ArtifactValueBooleanOperator::Or => {
-                    left || runtime_bool_value(
-                        &evaluate_runtime_template(
-                            program,
-                            right,
-                            received_payload,
-                            step,
-                            process_refs,
-                            loop_elements,
-                            effect_outcomes,
-                        )?
-                        .value,
-                    )?
+                mantle_artifact::ArtifactValueBooleanOperator::Or => {
+                    left || runtime_bool_value(&evaluate_runtime_template(context, *right)?.value)?
                 }
             };
-            program.runtime_payload_value(
+            context.program.runtime_payload_value(
                 "boolean predicate template value",
                 *ty,
                 RuntimeValue::Atom(bool_atom(selected)),
