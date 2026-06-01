@@ -105,16 +105,24 @@ After a `.mta` decodes into a `LoadedProgram`, Mantle validates loaded admission
 and then constructs an internal executable plan for runtime dispatch. The plan
 pre-resolves transition dispatch, action blocks, process-reference targets,
 spawn-site authority references, branch bodies, loop bodies, and value-template
-references into typed runtime structures. Process and message labels may be
-borrowed for reports and traces, but they are not executable dispatch keys.
+program references into typed runtime structures. Runtime value templates are
+compiled into Mantle-owned `ExecutableTemplateProgram` entries and runtime
+actions/next-state plans carry `ExecutableValueTemplate` references rather than
+walking recursive loaded artifact templates on the hot path. Process and message
+labels may be borrowed for reports and traces, but they are not executable
+dispatch keys.
 
-The executable plan is not serialized bytecode, not a Strata lowering target,
-and not a replacement for artifact validation. Constructing the plan cannot
-grant authority or bypass feature, artifact, or loaded-program admission.
-Invalid loaded references fail before `ArtifactLoaded` and before host-visible
-runtime side effects. Source names, process debug names, message labels, and
-other display strings remain diagnostics and trace metadata; runtime dispatch
-uses admitted typed IDs and executable-plan references.
+The executable plan and executable template program are not serialized bytecode,
+not Strata lowering targets, and not replacements for artifact validation.
+Constructing them cannot grant authority or bypass feature, artifact, or
+loaded-program admission. Invalid loaded references fail before `ArtifactLoaded`
+and before host-visible runtime side effects. Source names, process debug names,
+message labels, template labels, and other display strings remain diagnostics
+and trace metadata; runtime dispatch and template execution use admitted typed
+IDs and executable-plan references. Canonical type, variant, and field labels
+are materialized only when Mantle constructs the bounded `RuntimeValue`
+representation for payload/state data or trace/report rendering; executable
+template plans carry typed IDs, not string selectors.
 
 ## Host Path Handling
 

@@ -1,19 +1,33 @@
 use std::cmp::Ordering;
 
 use mantle_artifact::{
-    AuthorityId, EffectOutcomeId, Error, MessageId, OutputId, PortId, ProcessId, ProcessRefId,
-    Result, SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId, TypeId,
+    EffectOutcomeId, Error, MessageId, OutputId, PortId, ProcessId, Result, StateId, StepResult,
+    TypeId,
 };
 
 use crate::program::{
-    LoadedAction, LoadedLoopElement, LoadedNextState, LoadedProcess, LoadedProgram,
-    LoadedSendTarget, LoadedSpawnKind, LoadedValueTemplate, RuntimePayload,
+    LoadedAction, LoadedLoopElement, LoadedProcess, LoadedProgram, RuntimePayload,
 };
 
+mod build_scope;
 mod compact;
+use build_scope::ExecutableTemplateBindings;
 use compact::{CompactList, CompactListBuilder};
+mod counts;
+#[cfg(test)]
+use counts::count_loaded_action_block;
+use counts::count_loaded_actions;
 mod dispatch;
 use dispatch::ExecutableDispatchTable;
+mod refs;
+mod templates;
+pub(crate) use refs::{ExecutableProcessRef, ExecutableSendTarget, ExecutableSpawnSite};
+use refs::{executable_process_ref, executable_spawn_site};
+use templates::ExecutableTemplateProgramBuilder;
+pub(crate) use templates::{
+    ExecutableNextState, ExecutableTemplateProgram, ExecutableValueTemplate,
+    ExecutableValueTemplateRef,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ExecutableTransitionId(u32);
@@ -38,6 +52,7 @@ impl ExecutableTransitionId {
 pub(crate) struct ExecutableProgram<'program> {
     processes: CompactList<ExecutableProcess<'program>>,
     actions: CompactList<ExecutableActionPlan<'program>>,
+    templates: ExecutableTemplateProgram<'program>,
     entry: ExecutableEntry<'program>,
 }
 
@@ -70,9 +85,12 @@ impl<'program> ExecutableProgram<'program> {
                 ))
             })?;
 
+        let (actions, templates) = builder.finish();
+
         Ok(Self {
             processes: processes.finish(),
-            actions: builder.finish_actions(),
+            actions,
+            templates,
             entry: ExecutableEntry {
                 process_id: loaded.entry_process,
                 process_label: entry_process.debug_name.as_str(),
@@ -114,6 +132,10 @@ impl<'program> ExecutableProgram<'program> {
         self.actions.as_slice()
     }
 
+    pub(crate) const fn templates(&self) -> &ExecutableTemplateProgram<'program> {
+        &self.templates
+    }
+
     #[cfg(test)]
     pub(crate) fn transition_signature(&self) -> Vec<(u32, u32, u32, Option<u32>)> {
         self.processes
@@ -136,17 +158,19 @@ impl<'program> ExecutableProgram<'program> {
 #[derive(Debug)]
 struct ExecutablePlanBuilder<'program> {
     actions: CompactListBuilder<ExecutableActionPlan<'program>>,
+    templates: ExecutableTemplateProgramBuilder<'program>,
     action_count: usize,
 }
 
 impl<'program> ExecutablePlanBuilder<'program> {
     fn new(loaded: &'program LoadedProgram) -> Self {
-        Self::with_action_capacity(count_loaded_actions(loaded))
+        Self::with_action_capacity(loaded, count_loaded_actions(loaded))
     }
 
-    fn with_action_capacity(action_capacity: usize) -> Self {
+    fn with_action_capacity(loaded: &'program LoadedProgram, action_capacity: usize) -> Self {
         Self {
             actions: CompactListBuilder::with_expected_len(action_capacity),
+            templates: ExecutableTemplateProgramBuilder::new(loaded),
             action_count: 0,
         }
     }
@@ -155,42 +179,14 @@ impl<'program> ExecutablePlanBuilder<'program> {
         self.actions.append_from(actions);
     }
 
-    fn finish_actions(self) -> CompactList<ExecutableActionPlan<'program>> {
-        self.actions.finish()
+    fn finish(
+        self,
+    ) -> (
+        CompactList<ExecutableActionPlan<'program>>,
+        ExecutableTemplateProgram<'program>,
+    ) {
+        (self.actions.finish(), self.templates.finish())
     }
-}
-
-fn count_loaded_actions(loaded: &LoadedProgram) -> usize {
-    loaded
-        .processes
-        .iter()
-        .flat_map(|process| &process.transitions)
-        .map(|transition| count_loaded_action_block(&transition.actions))
-        .sum()
-}
-
-fn count_loaded_action_block(actions: &[LoadedAction]) -> usize {
-    actions
-        .iter()
-        .map(|action| {
-            1 + match action {
-                LoadedAction::IfElse {
-                    then_actions,
-                    else_actions,
-                    ..
-                } => {
-                    count_loaded_action_block(then_actions)
-                        + count_loaded_action_block(else_actions)
-                }
-                LoadedAction::ForEach { body, .. } => count_loaded_action_block(body),
-                LoadedAction::Emit { .. }
-                | LoadedAction::Spawn { .. }
-                | LoadedAction::SpawnOutcome { .. }
-                | LoadedAction::Send { .. }
-                | LoadedAction::SendOutcome { .. } => 0,
-            }
-        })
-        .sum()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -336,7 +332,7 @@ pub(crate) struct ExecutableTransition<'program> {
     message: MessageId,
     payload_guard: Option<&'program RuntimePayload>,
     step_result: StepResult,
-    next_state: &'program LoadedNextState,
+    next_state: ExecutableNextState,
     actions: ExecutableActionBlock<'program>,
 }
 
@@ -344,17 +340,26 @@ impl<'program> ExecutableTransition<'program> {
     fn from_loaded(
         builder: &mut ExecutablePlanBuilder<'program>,
         id: ExecutableTransitionId,
-        process: &LoadedProcess,
+        process: &'program LoadedProcess,
         loaded: &'program crate::program::LoadedTransition,
     ) -> Result<Self> {
+        let mut scope = ExecutableTemplateBindings::new(process, loaded)?;
+        let actions =
+            ExecutableActionBlock::from_loaded(builder, process, &loaded.actions, &mut scope, &[])?;
+        let next_state = ExecutableNextState::from_loaded(
+            &mut builder.templates,
+            process,
+            &loaded.next_state,
+            scope.template_scope(&[], false),
+        )?;
         Ok(Self {
             id,
             current_state: loaded.current_state,
             message: loaded.message,
             payload_guard: loaded.payload_guard.as_ref(),
             step_result: loaded.step_result,
-            next_state: &loaded.next_state,
-            actions: ExecutableActionBlock::from_loaded(builder, process, &loaded.actions)?,
+            next_state,
+            actions,
         })
     }
 
@@ -362,8 +367,8 @@ impl<'program> ExecutableTransition<'program> {
         self.step_result
     }
 
-    pub(crate) const fn next_state(&self) -> &'program LoadedNextState {
-        self.next_state
+    pub(crate) const fn next_state(&self) -> &ExecutableNextState {
+        &self.next_state
     }
 
     pub(crate) const fn actions(&self) -> ExecutableActionBlock<'program> {
@@ -387,15 +392,18 @@ pub(crate) struct ExecutableActionBlock<'program> {
 impl<'program> ExecutableActionBlock<'program> {
     fn from_loaded(
         builder: &mut ExecutablePlanBuilder<'program>,
-        process: &LoadedProcess,
+        process: &'program LoadedProcess,
         actions: &'program [LoadedAction],
+        scope: &mut ExecutableTemplateBindings,
+        loop_elements: &[LoadedLoopElement],
     ) -> Result<Self> {
         let mut prestate_prefix_open = true;
         let mut prestate_prefix_len = 0usize;
         let mut plans = CompactListBuilder::with_expected_len(actions.len());
 
         for (index, action) in actions.iter().enumerate() {
-            let plan = ExecutableActionPlan::from_loaded(builder, process, action)?;
+            let plan =
+                ExecutableActionPlan::from_loaded(builder, process, action, scope, loop_elements)?;
             if prestate_prefix_open && plan.is_prestate_prefix_action() {
                 prestate_prefix_len = index.saturating_add(1);
             } else {
@@ -494,7 +502,7 @@ pub(crate) enum ExecutableActionPlan<'program> {
         target: ExecutableSendTarget,
         port: Option<PortId>,
         message: MessageId,
-        payload: Option<&'program LoadedValueTemplate>,
+        payload: Option<ExecutableValueTemplateRef>,
     },
     SendOutcome {
         outcome: EffectOutcomeId,
@@ -502,16 +510,16 @@ pub(crate) enum ExecutableActionPlan<'program> {
         target: ExecutableSendTarget,
         port: Option<PortId>,
         message: MessageId,
-        payload: Option<&'program LoadedValueTemplate>,
+        payload: Option<ExecutableValueTemplateRef>,
     },
     IfElse {
-        condition: &'program LoadedValueTemplate,
+        condition: ExecutableValueTemplateRef,
         then_actions: ExecutableActionBlock<'program>,
         else_actions: ExecutableActionBlock<'program>,
     },
     ForEach {
         element: LoadedLoopElement,
-        collection: &'program LoadedValueTemplate,
+        collection: ExecutableValueTemplateRef,
         max_items: usize,
         body: ExecutableActionBlock<'program>,
     },
@@ -520,8 +528,10 @@ pub(crate) enum ExecutableActionPlan<'program> {
 impl<'program> ExecutableActionPlan<'program> {
     fn from_loaded(
         builder: &mut ExecutablePlanBuilder<'program>,
-        process: &LoadedProcess,
+        process: &'program LoadedProcess,
         action: &'program LoadedAction,
+        scope: &mut ExecutableTemplateBindings,
+        loop_elements: &[LoadedLoopElement],
     ) -> Result<Self> {
         match action {
             LoadedAction::Emit { output } => Ok(Self::Emit { output: *output }),
@@ -529,22 +539,31 @@ impl<'program> ExecutableActionPlan<'program> {
                 target,
                 process_ref,
                 spawn_site,
-            } => Ok(Self::Spawn {
-                target: *target,
-                process_ref: executable_process_ref(process, *process_ref)?,
-                spawn: executable_spawn_site(process, *spawn_site, *target)?,
-            }),
+            } => {
+                let executable_ref = executable_process_ref(process, *process_ref)?;
+                let spawn = executable_spawn_site(process, *spawn_site, *target)?;
+                scope.bind_process_ref(process, *process_ref)?;
+                Ok(Self::Spawn {
+                    target: *target,
+                    process_ref: executable_ref,
+                    spawn,
+                })
+            }
             LoadedAction::SpawnOutcome {
                 outcome,
                 outcome_ty,
                 target,
                 spawn_site,
-            } => Ok(Self::SpawnOutcome {
-                outcome: *outcome,
-                outcome_ty: *outcome_ty,
-                target: *target,
-                spawn: executable_spawn_site(process, *spawn_site, *target)?,
-            }),
+            } => {
+                let plan = Self::SpawnOutcome {
+                    outcome: *outcome,
+                    outcome_ty: *outcome_ty,
+                    target: *target,
+                    spawn: executable_spawn_site(process, *spawn_site, *target)?,
+                };
+                scope.bind_effect_outcome(process, *outcome, *outcome_ty)?;
+                Ok(plan)
+            }
             LoadedAction::Send {
                 target,
                 port,
@@ -554,7 +573,16 @@ impl<'program> ExecutableActionPlan<'program> {
                 target: ExecutableSendTarget::from_loaded(process, target)?,
                 port: *port,
                 message: *message,
-                payload: payload.as_ref(),
+                payload: payload
+                    .as_ref()
+                    .map(|payload| {
+                        builder.templates.append(
+                            process,
+                            payload,
+                            scope.template_scope(loop_elements, true),
+                        )
+                    })
+                    .transpose()?,
             }),
             LoadedAction::SendOutcome {
                 outcome,
@@ -563,22 +591,51 @@ impl<'program> ExecutableActionPlan<'program> {
                 port,
                 message,
                 payload,
-            } => Ok(Self::SendOutcome {
-                outcome: *outcome,
-                outcome_ty: *outcome_ty,
-                target: ExecutableSendTarget::from_loaded(process, target)?,
-                port: *port,
-                message: *message,
-                payload: payload.as_ref(),
-            }),
+            } => {
+                let plan = Self::SendOutcome {
+                    outcome: *outcome,
+                    outcome_ty: *outcome_ty,
+                    target: ExecutableSendTarget::from_loaded(process, target)?,
+                    port: *port,
+                    message: *message,
+                    payload: payload
+                        .as_ref()
+                        .map(|payload| {
+                            builder.templates.append(
+                                process,
+                                payload,
+                                scope.template_scope(loop_elements, true),
+                            )
+                        })
+                        .transpose()?,
+                };
+                scope.bind_effect_outcome(process, *outcome, *outcome_ty)?;
+                Ok(plan)
+            }
             LoadedAction::IfElse {
                 condition,
                 then_actions,
                 else_actions,
             } => Ok(Self::IfElse {
-                condition,
-                then_actions: ExecutableActionBlock::from_loaded(builder, process, then_actions)?,
-                else_actions: ExecutableActionBlock::from_loaded(builder, process, else_actions)?,
+                condition: builder.templates.append(
+                    process,
+                    condition,
+                    scope.template_scope(loop_elements, false),
+                )?,
+                then_actions: ExecutableActionBlock::from_loaded(
+                    builder,
+                    process,
+                    then_actions,
+                    scope,
+                    loop_elements,
+                )?,
+                else_actions: ExecutableActionBlock::from_loaded(
+                    builder,
+                    process,
+                    else_actions,
+                    scope,
+                    loop_elements,
+                )?,
             }),
             LoadedAction::ForEach {
                 element,
@@ -587,25 +644,51 @@ impl<'program> ExecutableActionPlan<'program> {
                 body,
             } => Ok(Self::ForEach {
                 element: element.clone(),
-                collection,
+                collection: builder.templates.append(
+                    process,
+                    collection,
+                    scope.template_scope(loop_elements, false),
+                )?,
                 max_items: *max_items,
-                body: ExecutableActionBlock::from_loaded(builder, process, body)?,
+                body: {
+                    let active = [element.clone()];
+                    ExecutableActionBlock::from_loaded(builder, process, body, scope, &active)?
+                },
             }),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn from_loaded_for_test(
-        process: &LoadedProcess,
+        loaded: &'program LoadedProgram,
+        process: &'program LoadedProcess,
         action: &'program LoadedAction,
     ) -> Result<ExecutableTestActionPlan<'program>> {
-        let mut builder = ExecutablePlanBuilder::with_action_capacity(count_loaded_action_block(
-            std::slice::from_ref(action),
-        ));
-        let action = Self::from_loaded(&mut builder, process, action)?;
+        Self::from_loaded_for_test_with_spawned_refs(loaded, process, action, &[])
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_loaded_for_test_with_spawned_refs(
+        loaded: &'program LoadedProgram,
+        process: &'program LoadedProcess,
+        action: &'program LoadedAction,
+        spawned_refs: &[bool],
+    ) -> Result<ExecutableTestActionPlan<'program>> {
+        let mut builder = ExecutablePlanBuilder::with_action_capacity(
+            loaded,
+            count_loaded_action_block(std::slice::from_ref(action)),
+        );
+        let mut scope = if spawned_refs.is_empty() {
+            ExecutableTemplateBindings::for_test(process)
+        } else {
+            ExecutableTemplateBindings::for_test_with_spawned_refs(process, spawned_refs)?
+        };
+        let action = Self::from_loaded(&mut builder, process, action, &mut scope, &[])?;
+        let (actions, templates) = builder.finish();
         Ok(ExecutableTestActionPlan {
             action,
-            actions: builder.finish_actions(),
+            actions,
+            templates,
         })
     }
 
@@ -626,6 +709,7 @@ impl<'program> ExecutableActionPlan<'program> {
 pub(crate) struct ExecutableTestActionPlan<'program> {
     action: ExecutableActionPlan<'program>,
     actions: CompactList<ExecutableActionPlan<'program>>,
+    templates: ExecutableTemplateProgram<'program>,
 }
 
 #[cfg(test)]
@@ -637,97 +721,10 @@ impl<'program> ExecutableTestActionPlan<'program> {
     pub(crate) fn actions(&self) -> &[ExecutableActionPlan<'program>] {
         self.actions.as_slice()
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExecutableProcessRef {
-    pub(crate) id: ProcessRefId,
-    pub(crate) target_process: ProcessId,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExecutableSpawnSite {
-    pub(crate) id: SpawnSiteId,
-    pub(crate) authority: AuthorityId,
-    pub(crate) kind: LoadedSpawnKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExecutableSendTarget {
-    ProcessRef(ExecutableProcessRef),
-    SupervisorChild {
-        supervisor: SupervisorId,
-        child: SupervisorChildId,
-        target_process: ProcessId,
-    },
-    ReceivedPayload {
-        ty: TypeId,
-        target_process: ProcessId,
-    },
-}
-
-impl ExecutableSendTarget {
-    fn from_loaded(process: &LoadedProcess, target: &LoadedSendTarget) -> Result<Self> {
-        match target {
-            LoadedSendTarget::ProcessRef(process_ref) => Ok(Self::ProcessRef(
-                executable_process_ref(process, *process_ref)?,
-            )),
-            LoadedSendTarget::SupervisorChild {
-                supervisor,
-                child,
-                target_process,
-            } => Ok(Self::SupervisorChild {
-                supervisor: *supervisor,
-                child: *child,
-                target_process: *target_process,
-            }),
-            LoadedSendTarget::ReceivedPayload { ty, target_process } => Ok(Self::ReceivedPayload {
-                ty: *ty,
-                target_process: *target_process,
-            }),
-        }
+    pub(crate) const fn templates(&self) -> &ExecutableTemplateProgram<'program> {
+        &self.templates
     }
-}
-
-fn executable_process_ref(
-    process: &LoadedProcess,
-    process_ref: ProcessRefId,
-) -> Result<ExecutableProcessRef> {
-    let target_process = process
-        .process_refs
-        .get(process_ref.index())
-        .map(|process_ref| process_ref.target)
-        .ok_or_else(|| {
-            Error::new(format!(
-                "process {} executable action references unloaded process reference id {}",
-                process.debug_name,
-                process_ref.as_u32()
-            ))
-        })?;
-    Ok(ExecutableProcessRef {
-        id: process_ref,
-        target_process,
-    })
-}
-
-fn executable_spawn_site(
-    process: &LoadedProcess,
-    spawn_site: SpawnSiteId,
-    target: ProcessId,
-) -> Result<ExecutableSpawnSite> {
-    let site = process.validate_spawn_site(spawn_site, target)?;
-    let authority = site.authority.ok_or_else(|| {
-        Error::new(format!(
-            "process {} executable dynamic spawn site id {} has no authority id",
-            process.debug_name,
-            spawn_site.as_u32()
-        ))
-    })?;
-    Ok(ExecutableSpawnSite {
-        id: spawn_site,
-        authority,
-        kind: site.kind,
-    })
 }
 
 #[cfg(test)]

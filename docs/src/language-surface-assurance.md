@@ -90,14 +90,16 @@ it does not claim theorem-prover coverage.
 
 Mantle executable-plan construction is recorded as an internal runtime
 implementation feature: Mantle validates a loaded `.mta`, builds typed
-dispatch/action tables from the admitted `LoadedProgram`, and executes from
-those pre-resolved plan references. The evidence covers plan construction,
-deterministic transition ordering, typed action tables, source-name/debug-label
-retargeting attempts, invalid loaded-reference rejection before
-`ArtifactLoaded`, runtime execution equivalence, performance-smoke coverage,
-and docs. This evidence does not add a serialized bytecode format, a Strata
-lowering target, new source semantics, new fuzz decoder seeds, or new unsafe
-indexing assumptions; it remains bounded machine-checked assurance.
+dispatch/action tables and a Mantle-owned executable template program from the
+admitted `LoadedProgram`, and executes from those pre-resolved plan references.
+The evidence covers plan construction, deterministic transition ordering, typed
+action tables, executable next-state/send/for-each template refs,
+source-name/debug-label retargeting attempts, invalid loaded-template reference
+rejection before `ArtifactLoaded`, runtime execution equivalence,
+source-to-runtime gates, performance-smoke coverage, and docs. This evidence
+does not add a serialized bytecode format, a Strata lowering target, new source
+semantics, new fuzz decoder seeds, or new unsafe indexing assumptions; it
+remains bounded machine-checked assurance.
 
 Runtime trace observability is recorded as a Mantle-owned runtime feature:
 runtime events are strongly typed before rendering, JSONL output carries the

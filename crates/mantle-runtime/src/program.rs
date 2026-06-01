@@ -29,15 +29,15 @@ mod values;
 use mantle_artifact::{
     ArtifactAction, ArtifactAuthority, ArtifactCapabilityDescriptor, ArtifactComponent,
     ArtifactEnumVariant, ArtifactMessageVariant, ArtifactPort, ArtifactProcess, ArtifactProcessRef,
-    ArtifactProtocol, ArtifactScalarType, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite,
-    ArtifactSupervisorChildMode, ArtifactSupervisorStrategy, ArtifactTargetRequirements,
-    ArtifactTransition, ArtifactType, ArtifactTypeField, ArtifactTypeKind, ArtifactValueShape,
-    AuthorityId, ComponentId, EffectOutcomeId, EnumVariantId, Error, LoopElementId,
-    MAX_ACTIONS_PER_PROCESS, MAX_AUTHORITIES_PER_PROCESS, MAX_COMPONENT_COUNT,
-    MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_MAILBOX_BOUND,
-    MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH, MAX_OUTPUT_LITERALS,
-    MAX_PORT_COUNT, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS, MAX_PROTOCOL_COUNT,
-    MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
+    ArtifactProtocol, ArtifactRecordField, ArtifactScalarType, ArtifactSendTarget,
+    ArtifactSpawnKind, ArtifactSpawnSite, ArtifactSupervisorChildMode, ArtifactSupervisorStrategy,
+    ArtifactTargetRequirements, ArtifactTransition, ArtifactType, ArtifactTypeField,
+    ArtifactTypeKind, ArtifactValueShape, AuthorityId, ComponentId, EffectOutcomeId, EnumVariantId,
+    Error, LoopElementId, MAX_ACTIONS_PER_PROCESS, MAX_AUTHORITIES_PER_PROCESS,
+    MAX_COMPONENT_COUNT, MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE,
+    MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_NEXT_STATE_IF_ELSE_DEPTH,
+    MAX_OUTPUT_LITERALS, MAX_PORT_COUNT, MAX_PROCESS_COUNT, MAX_PROCESS_REFS_PER_PROCESS,
+    MAX_PROTOCOL_COUNT, MAX_SPAWN_SITES_PER_PROCESS, MAX_STATE_VALUES_PER_PROCESS,
     MAX_SUPERVISOR_CHILDREN_PER_SUPERVISOR, MAX_SUPERVISORS_PER_PROCESS,
     MAX_TRANSITIONS_PER_PROCESS, MAX_TYPE_COUNT, MAX_VALUE_TEMPLATE_DEPTH,
     MAX_VALUE_TEMPLATE_FIELDS, MantleArtifact, MessageId, NextState, OutputId, PortId, ProcessId,
@@ -237,6 +237,108 @@ impl LoadedProgram {
 
     pub(crate) fn record_field_name(&self, ty: TypeId, field: RecordFieldId) -> Result<&str> {
         Ok(self.record_field(ty, field)?.name.as_str())
+    }
+
+    pub(crate) fn project_enum_payload_by_id(
+        &self,
+        field: &str,
+        source_ty: TypeId,
+        variant: EnumVariantId,
+        value: &RuntimeValue,
+    ) -> Result<RuntimeValue> {
+        let expected_variant = self.enum_variant_label(source_ty, variant)?;
+        let RuntimeValue::EnumVariant {
+            variant: actual_variant,
+            payload,
+        } = value
+        else {
+            return Err(Error::new(format!(
+                "{field} requires enum type id {} variant id {}, got {}",
+                source_ty.as_u32(),
+                variant.as_u32(),
+                value.label()
+            )));
+        };
+        if actual_variant != expected_variant {
+            return Err(Error::new(format!(
+                "{field} expected type id {} variant id {}, found variant {actual_variant}",
+                source_ty.as_u32(),
+                variant.as_u32()
+            )));
+        }
+        Ok((**payload).clone())
+    }
+
+    pub(crate) fn project_record_field_by_id(
+        &self,
+        field: &str,
+        source_ty: TypeId,
+        field_id: RecordFieldId,
+        value: &RuntimeValue,
+    ) -> Result<RuntimeValue> {
+        let expected_field = self.record_field(source_ty, field_id)?;
+        let RuntimeValue::Record { fields, .. } = value else {
+            return Err(Error::new(format!(
+                "{field} requires record type id {} field id {}, got {}",
+                source_ty.as_u32(),
+                field_id.as_u32(),
+                value.label()
+            )));
+        };
+        fields
+            .iter()
+            .find(|entry| entry.name == expected_field.name)
+            .map(|entry| entry.value.clone())
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "{field} field id {} is not present in record value for type id {}",
+                    field_id.as_u32(),
+                    source_ty.as_u32()
+                ))
+            })
+    }
+
+    pub(crate) fn runtime_enum_variant_payload(
+        &self,
+        field: &str,
+        ty: TypeId,
+        variant: EnumVariantId,
+        payload: RuntimeValue,
+    ) -> Result<RuntimePayload> {
+        let variant_label = self.enum_variant_label(ty, variant)?;
+        self.runtime_payload_value(
+            field,
+            ty,
+            RuntimeValue::EnumVariant {
+                variant: variant_label.to_string(),
+                payload: Box::new(payload),
+            },
+        )
+    }
+
+    pub(crate) fn runtime_record_payload(
+        &self,
+        field: &str,
+        ty: TypeId,
+        fields: impl IntoIterator<Item = (RecordFieldId, RuntimeValue)>,
+    ) -> Result<RuntimePayload> {
+        let constructor = self.type_label(ty)?.to_string();
+        let iter = fields.into_iter();
+        let mut values = Vec::with_capacity(iter.size_hint().0);
+        for (field_id, value) in iter {
+            values.push(ArtifactRecordField {
+                name: self.record_field_name(ty, field_id)?.to_string(),
+                value,
+            });
+        }
+        self.runtime_payload_value(
+            field,
+            ty,
+            RuntimeValue::Record {
+                constructor,
+                fields: values,
+            },
+        )
     }
 
     pub(crate) fn validate_value_type(&self, field: &str, ty: TypeId) -> Result<()> {

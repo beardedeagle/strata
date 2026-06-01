@@ -227,7 +227,7 @@ fn runtime_rejects_unhandled_messages_after_stopped_process_drain() {
 
 #[test]
 fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluation() {
-    let artifact = artifact_with_worker_job_payload();
+    let (artifact, job_list) = artifact_with_worker_job_payload();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
 
@@ -246,7 +246,7 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
 
         let mut process_refs = worker_ref_binding(worker_pid);
         let step = main_step(main_pid);
-        let action = failing_current_state_payload_send();
+        let action = failing_list_element_payload_send(job_list);
         let err = run
             .execute_action(
                 &mut process_refs,
@@ -269,7 +269,7 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
 
 #[test]
 fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation() {
-    let artifact = artifact_with_worker_job_payload();
+    let (artifact, job_list) = artifact_with_worker_job_payload();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
 
@@ -288,7 +288,7 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
 
         let mut process_refs = worker_ref_binding(worker_pid);
         let step = main_step(main_pid);
-        let action = failing_current_state_payload_send();
+        let action = failing_list_element_payload_send(job_list);
         let err = run
             .execute_action(
                 &mut process_refs,
@@ -311,7 +311,7 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
 
 #[test]
 fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation() {
-    let artifact = artifact_with_worker_job_payload();
+    let (artifact, job_list) = artifact_with_worker_job_payload();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
 
@@ -336,7 +336,7 @@ fn runtime_action_send_rejects_full_mailbox_before_payload_template_evaluation()
 
         let mut process_refs = worker_ref_binding(worker_pid);
         let step = main_step(main_pid);
-        let action = failing_current_state_payload_send();
+        let action = failing_list_element_payload_send(job_list);
         let err = run
             .execute_action(
                 &mut process_refs,
@@ -548,14 +548,16 @@ fn artifact_with_nested_worker_bool_branch() -> MantleArtifact {
     artifact
 }
 
-fn artifact_with_worker_job_payload() -> MantleArtifact {
+fn artifact_with_worker_job_payload() -> (MantleArtifact, TypeId) {
     let mut artifact = artifact_with_unbound_worker_process_ref();
+    let job_list = TypeId::from_index(artifact.types.len()).expect("test type id should fit");
+    artifact.types.push(ArtifactType::list("JobList", JOB, 1));
     replace_process_message_variants(
         &mut artifact,
         1,
         vec![ArtifactMessageVariant::payload("Ping", JOB)],
     );
-    artifact
+    (artifact, job_list)
 }
 
 fn worker_process_ref_payload(pid: u64) -> RuntimePayload {
@@ -584,14 +586,20 @@ fn bool_payload(value: bool) -> RuntimePayload {
     )
 }
 
-fn failing_current_state_payload_send() -> LoadedAction {
+fn failing_list_element_payload_send(job_list: TypeId) -> LoadedAction {
     LoadedAction::Send {
         target: LoadedSendTarget::ProcessRef(ProcessRefId::new(0)),
         port: None,
         message: PING_MESSAGE,
-        payload: Some(loaded_template(
-            ArtifactValueTemplate::CurrentStatePayload { ty: JOB },
-        )),
+        payload: Some(loaded_template(ArtifactValueTemplate::ListElement {
+            ty: JOB,
+            list: Box::new(ArtifactValueTemplate::Literal {
+                ty: job_list,
+                value: artifact_value("List[]"),
+            }),
+            index: 0,
+            len: 1,
+        })),
     }
 }
 

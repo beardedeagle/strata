@@ -60,8 +60,11 @@ Mantle must validate artifacts before execution. Runtime dispatch uses loaded
 typed IDs, not source strings. Payload and state type identity is admitted
 through Mantle type-table IDs; source type labels are metadata only. The
 executable plan is an internal Mantle structure built from the admitted
-`LoadedProgram`; it pre-resolves typed dispatch and action references but is not
-serialized bytecode and is not emitted by Strata lowering.
+`LoadedProgram`; it pre-resolves typed dispatch, action, and executable value
+template references but is not serialized bytecode and is not emitted by Strata
+lowering. Strata still emits typed `.mta` value templates at the boundary;
+Mantle owns only the internal executable template program derived from admitted
+artifact data.
 
 ## Important Boundaries
 

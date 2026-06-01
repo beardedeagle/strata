@@ -112,6 +112,16 @@ impl<T> CompactListBuilder<T> {
         }
     }
 
+    pub(super) fn get(&self, index: usize) -> Option<&T> {
+        match self {
+            Self::Empty => None,
+            Self::One(value) => (index == 0).then_some(value),
+            Self::Two(values) => values.get(index),
+            Self::Three(values) => values.get(index),
+            Self::Many(values) => values.get(index),
+        }
+    }
+
     pub(super) fn append_from(&mut self, values: Self) {
         match values {
             Self::Empty => {}

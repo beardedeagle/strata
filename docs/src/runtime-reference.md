@@ -29,11 +29,14 @@ Current implementation limits are reported as runtime implementation limits, not
 Strata language law. Remote send, remote spawn, distributed transport, cluster
 membership, package management, hot upgrade, generated stubs, native output,
 and serialized execution-plan bytecode remain unsupported. Mantle may compile
-an admitted `LoadedProgram` into an internal executable plan for dispatch, but
-the `.mta` remains the language-neutral boundary. Unsupported required features
-or malformed source-language metadata fail before runtime execution. Mantle
-treats source language as opaque artifact metadata and does not dispatch on
-source names.
+an admitted `LoadedProgram` into an internal executable plan for dispatch and an
+internal executable template program for value-template evaluation, but the
+`.mta` remains the language-neutral boundary. Strata does not emit bytecode or
+executable template programs. Unsupported required features, malformed
+source-language metadata, or invalid loaded template references fail before
+`ArtifactLoaded` and before runtime side effects. Mantle treats source language
+as opaque artifact metadata and does not dispatch or execute templates on source
+names.
 
 ## Runtime Branching
 

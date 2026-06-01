@@ -1,24 +1,25 @@
 use mantle_artifact::{
-    ArtifactBranch, ArtifactValue, Error, LoopElementId, MantleArtifact, OutputId, ProcessId,
-    Result, StateId, StepResult,
+    ArtifactBranch, ArtifactValue, Error, MantleArtifact, OutputId, ProcessId, Result, StateId,
+    StepResult,
 };
 
 use accounting::{checked_output_bytes, checked_trace_event_bytes};
-use model::{ActiveStep, ProcessInstance, RuntimeMessageEnvelope};
+use model::{ActiveStep, ProcessInstance, RuntimeLoopElement, RuntimeMessageEnvelope};
 use process_refs::LocalProcessRefs;
-use templates::evaluate_runtime_template;
+use templates::{RuntimeTemplateContext, evaluate_runtime_template};
 
 use crate::event::{
     RuntimeAuthorityResult, RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope,
     RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
     RuntimeSpawnKind, RuntimeStepResult, RuntimeStopReason, RuntimeSupervisorExitReason,
 };
-use crate::executable::{ExecutableActionPlan, ExecutableProgram, ExecutableSpawnSite};
+use crate::executable::{
+    ExecutableActionPlan, ExecutableNextState, ExecutableProgram, ExecutableSpawnSite,
+    ExecutableValueTemplateRef,
+};
 use crate::host::RuntimeHost;
 use crate::limits::{RunLimits, SpawnAuthorityPolicy};
-use crate::program::{
-    LoadedNextState, LoadedProgram, LoadedSpawnKind, LoadedValueTemplate, RuntimePayload,
-};
+use crate::program::{LoadedProgram, LoadedSpawnKind, RuntimePayload};
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
 mod accounting;
@@ -36,13 +37,6 @@ mod templates;
 use action_scope::{BranchSelection, RuntimeActionScope};
 use boundaries::BoundarySendContext;
 use effect_outcomes::RuntimeEffectOutcome;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct RuntimeLoopElement<'a> {
-    id: LoopElementId,
-    index: usize,
-    payload: &'a RuntimePayload,
-}
 
 pub fn run_artifact_with_host<H: RuntimeHost>(
     artifact: &MantleArtifact,
@@ -241,6 +235,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 &mut local_process_refs,
                 &step,
                 action,
+                executable.templates(),
                 &mut effect_outcomes,
             )?;
         }
@@ -261,6 +256,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 RuntimeBranchPath::root().child(RuntimeBranchPathSegment::action(action_index)?)?,
                 RuntimeActionScope {
                     executable_actions,
+                    executable_templates: executable.templates(),
                     loop_elements: &[],
                     effect_outcomes: &effect_outcomes,
                 },
@@ -271,38 +267,13 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         self.record_step_completion(process_index, &step, step_result)
     }
 
-    #[cfg(test)]
-    fn execute_action(
+    fn execute_action_plan<'template>(
         &mut self,
         local_process_refs: &mut LocalProcessRefs,
         step: &ActiveStep,
-        action: &crate::program::LoadedAction,
+        action: &ExecutableActionPlan<'template>,
         branch_path: RuntimeBranchPath,
-        loop_elements: &[RuntimeLoopElement<'_>],
-        effect_outcomes: &[RuntimeEffectOutcome],
-    ) -> Result<()> {
-        let process = self.program.process(step.process_id)?;
-        let plan = ExecutableActionPlan::from_loaded_for_test(process, action)?;
-        self.execute_action_plan(
-            local_process_refs,
-            step,
-            plan.action(),
-            branch_path,
-            RuntimeActionScope {
-                executable_actions: plan.actions(),
-                loop_elements,
-                effect_outcomes,
-            },
-        )
-    }
-
-    fn execute_action_plan(
-        &mut self,
-        local_process_refs: &mut LocalProcessRefs,
-        step: &ActiveStep,
-        action: &ExecutableActionPlan<'_>,
-        branch_path: RuntimeBranchPath,
-        scope: RuntimeActionScope<'_, '_>,
+        scope: RuntimeActionScope<'_, 'template>,
     ) -> Result<()> {
         match action {
             ExecutableActionPlan::Emit { output } => self.emit_output(step, *output),
@@ -358,13 +329,16 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 }
                 let prepared_payload = match payload {
                     Some(payload) => Some(evaluate_runtime_template(
-                        self.program,
-                        payload,
-                        step.payload.as_ref(),
-                        step,
-                        local_process_refs,
-                        scope.loop_elements,
-                        scope.effect_outcomes,
+                        RuntimeTemplateContext {
+                            program: self.program,
+                            templates: scope.executable_templates,
+                            received_payload: step.payload.as_ref(),
+                            step,
+                            process_refs: local_process_refs,
+                            loop_elements: scope.loop_elements,
+                            effect_outcomes: scope.effect_outcomes,
+                        },
+                        *payload,
                     )?),
                     None => None,
                 };
@@ -391,7 +365,8 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                     step,
                     scope: RuntimeBranchScope::Action,
                     branch_path,
-                    condition,
+                    condition: *condition,
+                    executable_templates: scope.executable_templates,
                     local_process_refs,
                     loop_elements: scope.loop_elements,
                     effect_outcomes: scope.effect_outcomes,
@@ -422,13 +397,16 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 body,
             } => {
                 let collection = evaluate_runtime_template(
-                    self.program,
-                    collection,
-                    step.payload.as_ref(),
-                    step,
-                    local_process_refs,
-                    scope.loop_elements,
-                    scope.effect_outcomes,
+                    RuntimeTemplateContext {
+                        program: self.program,
+                        templates: scope.executable_templates,
+                        received_payload: step.payload.as_ref(),
+                        step,
+                        process_refs: local_process_refs,
+                        loop_elements: scope.loop_elements,
+                        effect_outcomes: scope.effect_outcomes,
+                    },
+                    *collection,
                 )?;
                 let collection_type = collection.ty;
                 let items = match collection.value {
@@ -489,6 +467,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                     }];
                     let active_scope = RuntimeActionScope {
                         executable_actions: scope.executable_actions,
+                        executable_templates: scope.executable_templates,
                         loop_elements: &active,
                         effect_outcomes: scope.effect_outcomes,
                     };
@@ -536,7 +515,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
     fn resolve_template_state(
         &self,
         step: &ActiveStep,
-        template: &LoadedValueTemplate,
+        template: ExecutableValueTemplateRef,
         effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<StateId> {
         let value = self.evaluate_state_template(template, step, effect_outcomes)?;
@@ -557,18 +536,22 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
 
     fn evaluate_state_template(
         &self,
-        template: &LoadedValueTemplate,
+        template: ExecutableValueTemplateRef,
         step: &ActiveStep,
         effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<RuntimePayload> {
+        let process_refs = LocalProcessRefs::empty();
         evaluate_runtime_template(
-            self.program,
+            RuntimeTemplateContext {
+                program: self.program,
+                templates: self.executable.templates(),
+                received_payload: step.payload.as_ref(),
+                step,
+                process_refs: &process_refs,
+                loop_elements: &[],
+                effect_outcomes,
+            },
             template,
-            step.payload.as_ref(),
-            step,
-            &LocalProcessRefs::empty(),
-            &[],
-            effect_outcomes,
         )
     }
 
@@ -576,17 +559,17 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         &mut self,
         process_index: usize,
         step: &ActiveStep,
-        next_state: &LoadedNextState,
+        next_state: &ExecutableNextState,
         branch_path: RuntimeBranchPath,
         effect_outcomes: &[RuntimeEffectOutcome],
     ) -> Result<StateId> {
         match next_state {
-            LoadedNextState::Current => Ok(self.processes[process_index].state),
-            LoadedNextState::Value(state) => Ok(*state),
-            LoadedNextState::Template(template) => {
-                self.resolve_template_state(step, template, effect_outcomes)
+            ExecutableNextState::Current => Ok(self.processes[process_index].state),
+            ExecutableNextState::Value(state) => Ok(*state),
+            ExecutableNextState::Template(template) => {
+                self.resolve_template_state(step, *template, effect_outcomes)
             }
-            LoadedNextState::IfElse {
+            ExecutableNextState::IfElse {
                 condition,
                 then_state,
                 else_state,
@@ -596,7 +579,8 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                     step,
                     scope: RuntimeBranchScope::NextState,
                     branch_path,
-                    condition,
+                    condition: *condition,
+                    executable_templates: self.executable.templates(),
                     local_process_refs: &empty_process_refs,
                     loop_elements: &[],
                     effect_outcomes,

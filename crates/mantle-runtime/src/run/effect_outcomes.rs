@@ -7,13 +7,16 @@ use super::RuntimeRun;
 use super::boundaries::BoundarySendContext;
 use super::model::{ActiveStep, RuntimeMessageEnvelope};
 use super::process_refs::{LocalProcessRefs, SendOutcomeTarget};
-use super::templates::evaluate_runtime_template;
+use super::templates::{RuntimeTemplateContext, evaluate_runtime_template};
 use crate::event::RuntimeProcessId;
-use crate::executable::{ExecutableActionPlan, ExecutableSendTarget, ExecutableSpawnSite};
+use crate::executable::{
+    ExecutableActionPlan, ExecutableSendTarget, ExecutableSpawnSite, ExecutableTemplateProgram,
+    ExecutableValueTemplateRef,
+};
 use crate::host::RuntimeHost;
 #[cfg(test)]
 use crate::program::LoadedAction;
-use crate::program::{LoadedValueTemplate, RuntimePayload};
+use crate::program::RuntimePayload;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeEffectOutcome {
@@ -21,14 +24,15 @@ pub(super) struct RuntimeEffectOutcome {
     pub(super) payload: RuntimePayload,
 }
 
-struct SendOutcomeExecution<'a> {
+struct SendOutcomeExecution<'a, 'program> {
     local_process_refs: &'a LocalProcessRefs,
     step: &'a ActiveStep,
     outcome_ty: TypeId,
     target: &'a ExecutableSendTarget,
     port: Option<PortId>,
     message: MessageId,
-    payload: Option<&'a LoadedValueTemplate>,
+    payload: Option<ExecutableValueTemplateRef>,
+    executable_templates: &'a ExecutableTemplateProgram<'program>,
     effect_outcomes: &'a [RuntimeEffectOutcome],
 }
 
@@ -42,15 +46,28 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         effect_outcomes: &mut Vec<RuntimeEffectOutcome>,
     ) -> Result<bool> {
         let process = self.program.process(step.process_id)?;
-        let plan = ExecutableActionPlan::from_loaded_for_test(process, action)?;
-        self.execute_prestate_plan_action(local_process_refs, step, plan.action(), effect_outcomes)
+        let spawned_refs = local_process_refs.binding_flags();
+        let plan = ExecutableActionPlan::from_loaded_for_test_with_spawned_refs(
+            self.program,
+            process,
+            action,
+            &spawned_refs,
+        )?;
+        self.execute_prestate_plan_action(
+            local_process_refs,
+            step,
+            plan.action(),
+            plan.templates(),
+            effect_outcomes,
+        )
     }
 
-    pub(super) fn execute_prestate_plan_action(
+    pub(super) fn execute_prestate_plan_action<'template>(
         &mut self,
         local_process_refs: &mut LocalProcessRefs,
         step: &ActiveStep,
-        action: &ExecutableActionPlan<'_>,
+        action: &ExecutableActionPlan<'template>,
+        executable_templates: &ExecutableTemplateProgram<'template>,
         effect_outcomes: &mut Vec<RuntimeEffectOutcome>,
     ) -> Result<bool> {
         match action {
@@ -106,6 +123,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                     port: *port,
                     message: *message,
                     payload: *payload,
+                    executable_templates,
                     effect_outcomes,
                 })?;
                 bind_effect_outcome(effect_outcomes, *outcome, payload)?;
@@ -134,9 +152,9 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         self.ok_process_ref_outcome(outcome_ty, target, pid)
     }
 
-    fn execute_send_outcome(
+    fn execute_send_outcome<'template>(
         &mut self,
-        request: SendOutcomeExecution<'_>,
+        request: SendOutcomeExecution<'_, 'template>,
     ) -> Result<RuntimePayload> {
         let target = self.resolve_send_outcome_target(
             request.local_process_refs,
@@ -179,13 +197,16 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             }
             (Some(payload_type), Some(payload)) => {
                 let payload = evaluate_runtime_template(
-                    self.program,
+                    RuntimeTemplateContext {
+                        program: self.program,
+                        templates: request.executable_templates,
+                        received_payload: request.step.payload.as_ref(),
+                        step: request.step,
+                        process_refs: request.local_process_refs,
+                        loop_elements: &[],
+                        effect_outcomes: request.effect_outcomes,
+                    },
                     payload,
-                    request.step.payload.as_ref(),
-                    request.step,
-                    request.local_process_refs,
-                    &[],
-                    request.effect_outcomes,
                 )?;
                 self.program.validate_runtime_payload_matches_type(
                     "send outcome payload",
