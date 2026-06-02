@@ -63,16 +63,27 @@ component-instance IDs, typed port-binding edges, direct-import validation,
 duplicate and unbound import rejection, unimported-port binding rejection,
 protocol mismatch rejection, deterministic graph lowering, Mantle
 composition-table admission, Strata-owned composition admission report emission,
-source-to-runtime execution, fuzz seeds, performance-smoke evidence, diagnostics,
-and docs are tracked together. The report records the diagnostic FNV-1a source
-fingerprint, typed component-instance IDs, typed port-binding IDs, admitted
+Strata-owned `strata.checked_component_composition` artifact build/admit
+coverage, source-to-runtime execution, fuzz seeds, performance-smoke evidence,
+diagnostics, and docs are tracked together. The report and the durable artifact
+record the diagnostic FNV-1a source fingerprint, typed component-instance IDs,
+component import/export port obligations, typed port-binding IDs, admitted
 binding results, empty unsatisfied imports for admitted compositions, endpoint
-port authority requirements, and cross-component authority edges for review.
-The report is evidence for the Strata-owned review surface; checked IR lowering
-and Mantle artifact admission remain the evidence classes that satisfy the
-Strata/Mantle boundary obligation. Mantle admits typed composition metadata but
-does not resolve source component names, source-unit imports, source strings, or
-report data at runtime.
+port authority requirements, and cross-component authority edges for
+review/admission. The artifact is emitted as
+`target/strata/<stem>.component-composition.json`, self-identifies with schema
+ID/version/source-language fields, and fails closed when typed IDs are missing,
+duplicated, malformed, stripped of required binding evidence, internally
+inconsistent with authority descriptors, or inconsistent with admission results.
+It validates the artifact schema and internal typed-ID consistency; it is not a
+source re-check, not a tamperproof attestation for a coherently rewritten JSON
+file, and not the canonical `strata.component_composition` deployment artifact.
+It is Strata-owned and not `.mta`; checked IR lowering and Mantle artifact
+admission remain the evidence classes that satisfy the Strata/Mantle runtime
+boundary obligation. Mantle
+admits typed composition metadata inside `.mta` but does not resolve source
+component names, source-unit imports, source strings, Strata composition
+artifacts, or report data at runtime.
 
 Runtime feature declaration and target binding are recorded as a
 runtime-bearing boundary feature: Strata derives canonical typed target

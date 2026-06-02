@@ -33,7 +33,10 @@ pub use ids::{
     MessageId, OutputId, PortBindingId, PortId, ProcessId, ProcessRefId, ProtocolId, RecordFieldId,
     SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
 };
-pub use io::{SourceHashFnv1a64, read_artifact, source_hash_fnv1a64, write_artifact};
+pub use io::{
+    SourceHashFnv1a64, read_artifact, read_text_artifact, source_hash_fnv1a64, write_artifact,
+    write_text_artifact,
+};
 pub use runtime_features::{
     ArtifactTargetRequirements, RuntimeFeature, TargetRequirementsFormat,
     render_artifact_target_requirements,

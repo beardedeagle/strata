@@ -12,6 +12,14 @@ pub(super) const REPORT_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "component_composition_main.composition_report",
     label: "component_composition_main composition-report render",
 };
+pub(super) const ARTIFACT_BUILD_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "component_composition_main.composition_artifact_build",
+    label: "component_composition_main composition artifact build",
+};
+pub(super) const ARTIFACT_ADMIT_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "component_composition_main.composition_artifact_admit",
+    label: "component_composition_main composition artifact admit",
+};
 pub(super) const TARGET_REQUIREMENTS_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "component_composition_main.target_requirements",
     label: "component_composition_main target-requirements render",
@@ -48,6 +56,50 @@ pub(super) fn run_report_profile() {
             strata::language::CompositionAdmissionReportFormat::Json,
         );
         black_box(report);
+    });
+    assert_within_budget(budget, metrics);
+}
+
+pub(super) fn run_artifact_build_profile() {
+    let budget = PerformanceBudget::load(ARTIFACT_BUILD_PROFILE);
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(SOURCE_PATH);
+    let loaded = strata::load_root_source_program(&source_path)
+        .expect("component composition artifact performance smoke source should load");
+    let (program, source_hash) = loaded.into_parts();
+    let checked = strata::language::check_source_program(program)
+        .expect("component composition artifact performance smoke source should check");
+    let metrics = measure_for(budget.iterations, || {
+        let artifact = strata::language::render_component_composition_artifact(
+            black_box(&checked),
+            SOURCE_PATH,
+            black_box(&source_hash),
+            None,
+        )
+        .expect("component composition artifact should render");
+        black_box(artifact);
+    });
+    assert_within_budget(budget, metrics);
+}
+
+pub(super) fn run_artifact_admit_profile() {
+    let budget = PerformanceBudget::load(ARTIFACT_ADMIT_PROFILE);
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(SOURCE_PATH);
+    let loaded = strata::load_root_source_program(&source_path)
+        .expect("component composition artifact admit performance smoke source should load");
+    let (program, source_hash) = loaded.into_parts();
+    let checked = strata::language::check_source_program(program)
+        .expect("component composition artifact admit performance smoke source should check");
+    let artifact = strata::language::render_component_composition_artifact(
+        &checked,
+        SOURCE_PATH,
+        &source_hash,
+        None,
+    )
+    .expect("component composition artifact should render");
+    let metrics = measure_for(budget.iterations, || {
+        let summary = strata::language::admit_component_composition_artifact(black_box(&artifact))
+            .expect("component composition artifact should admit");
+        black_box(summary);
     });
     assert_within_budget(budget, metrics);
 }

@@ -287,10 +287,32 @@ requirements, component export authority surfaces, and cross-component authority
 edges. Mantle does not read this report; it executes only admitted `.mta`
 artifacts.
 
-In this checkout, use `just strata-authority-summary <path.str>` and
-`just strata-composition-report <path.str>` for source-side reports, and
-`just mantle-inspect-authority <path.mta>` to run artifact-side inspection
-through the pinned toolchain recipes.
+`strata composition build` is the durable artifact surface for the same checked
+composition graph. By default it writes
+`target/strata/<stem>.component-composition.json` with the checked-subset
+`schema_id: strata.checked_component_composition`, schema version `1.0`,
+`hash_alg: fnv1a64-diagnostic`, canonical 16-character lowercase hexadecimal
+source fingerprint provenance, component instances with their import/export port
+obligations, implemented port bindings, empty fail-closed arrays for
+not-yet-expressible binding classes, unsatisfied imports, cross-component
+authority-flow edges, nullable policy/diagnostic hash slots, and a global
+admission result. `strata composition admit` validates that checked subset
+fail-closed: every declared component import must be either bound exactly once or
+listed once as unsatisfied in a rejected artifact, and the diagnostic source
+fingerprint must match the declared fingerprint algorithm's canonical shape.
+This JSON artifact is Strata-owned checked-subset validation evidence, not the canonical
+`strata.component_composition` deployment artifact and not `.mta`; Mantle does
+not execute it in this slice. Source names in the artifact are metadata only;
+typed component-instance, port-binding, port, protocol, and authority descriptor
+IDs carry admission meaning.
+
+In this checkout, use source-side recipes such as
+`just strata-authority-summary <path.str>`,
+`just strata-composition-report <path.str>`,
+`just strata-composition-build <path.str>`, and
+`just strata-composition-admit <path.json>` for reports and validation artifacts.
+Use `just mantle-inspect-authority <path.mta>` to run artifact-side inspection
+through the pinned toolchain recipe.
 
 ### Records, Enums, And Payloads
 

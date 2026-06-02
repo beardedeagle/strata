@@ -183,6 +183,23 @@ binding results, empty unsatisfied imports for admitted compositions, and
 endpoint authority edges for review, but it is not an executable artifact and
 Mantle does not read it.
 
+The component-composition validation artifact is also Strata-owned and is emitted
+by `strata composition build` as
+`target/strata/<stem>.component-composition.json` by default. It self-identifies
+as the checked-subset `strata.checked_component_composition` schema version `1.0`
+with `hash_alg=fnv1a64-diagnostic`, carries source provenance as metadata whose
+diagnostic source fingerprint must have the declared canonical lowercase
+hexadecimal shape, and admits or rejects the checked local composition graph with
+typed component-instance, component import/export port, port-binding, port,
+protocol, and authority descriptor IDs. This is not the canonical
+`strata.component_composition` deployment artifact described in
+`docs/architecture`; it is deliberately not `.mta`, and Mantle does not execute
+it in this slice. Binding classes that the current source subset cannot express
+are present as empty arrays and fail closed if forged non-empty, keeping the
+Strata-owned source evidence boundary explicit without inventing capability,
+interface, runtime-feature, archive-format, crypto-policy, policy-hash, or
+diagnostic-set facts.
+
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect usage, and must exactly match the action effects that execute.
 Runtime `if` conditions are admitted as typed `Bool` value templates. Mantle
@@ -249,8 +266,11 @@ artifacts. It validates the `.mta` through the same artifact reader used before
 execution, then prints the typed authority and spawn-site tables. It does not
 dispatch by source names, execute runtime actions, or generate a mandatory
 report; JSON output is available only when explicitly requested by the caller.
-The source-side composition report is emitted by `strata composition-report`;
-it is separate from `mantle inspect-authority` and from `.mta` admission.
+The source-side composition report is emitted by `strata composition-report`.
+The durable checked-subset source-side component-composition artifact is emitted
+by `strata composition build` and validated by `strata composition admit`. Both
+are separate from `mantle inspect-authority`, canonical deployment-composition
+artifacts, and `.mta` admission.
 
 Target binding inspection is split along the same boundary:
 

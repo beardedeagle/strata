@@ -87,18 +87,23 @@ just run-example component_composition_main
 ```
 
 Current implementation limits: the source `composition` form is a local typed
-graph admission input for component instances and port bindings. It is not the
-canonical `strata.component_composition` build/deployment artifact, and it does
-not add remote send, distributed transport, capability binding syntax,
+graph admission input for component instances and port bindings. `strata
+composition build` checks that graph and emits the Strata-owned checked-subset
+`strata.checked_component_composition` validation artifact; it is not the
+canonical `strata.component_composition` deployment artifact, not `.mta`, and it
+does not add remote send, distributed transport, capability binding syntax,
 deployment manifests, package resolution, hot upgrade, or generated port stubs.
+Binding classes outside the current source subset are emitted as empty arrays
+and fail closed if forged non-empty.
 Use `just strata-composition-report examples/component_composition_main.str json`
-when review or CI needs the Strata-owned checked graph, diagnostic FNV-1a source
-fingerprint, typed component-instance IDs, port-binding IDs, admitted binding
-results, empty unsatisfied imports for admitted compositions, and endpoint
-authority edges. Use `just strata-target-requirements
-examples/component_composition_main.str json` to inspect the typed Mantle
-runtime features Strata requires for the checked program. `strata
-authority-summary ... --format json` also reports the checked
+for review evidence, and `just strata-composition-build
+examples/component_composition_main.str` plus `just strata-composition-admit
+target/strata/component_composition_main.component-composition.json json` when
+CI needs fail-closed Strata-owned checked-subset validation evidence. Use `just
+strata-target-requirements examples/component_composition_main.str json` to
+inspect the typed Mantle runtime features Strata requires for the checked
+program. `strata authority-summary ... --format json` also reports the checked
 component-boundary authority edge summary for the same checked IR. Mantle admits
 the lowered `.mta` by comparing embedded typed requirements against `mantle
-feature-declaration`; it does not consume either source-side report.
+feature-declaration`; it does not consume source-side reports or composition
+validation artifacts.

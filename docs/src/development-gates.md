@@ -102,6 +102,22 @@ For local Linux CI parity through `act`:
 just ci-local
 ```
 
+## Focused Component-Composition Artifact Gate
+
+Run the focused Strata-owned composition artifact gate when changing checked
+composition artifact generation or admission:
+
+```sh
+just composition-artifact-gates
+```
+
+It checks `examples/component_composition_main.str`, writes the default
+`target/strata/component_composition_main.component-composition.json`
+checked-subset validation artifact, and validates it with `strata composition
+admit --format json`. This gate is not a substitute for `.mta` source-to-runtime
+execution or for the canonical `strata.component_composition` deployment
+artifact.
+
 ## Performance Smoke
 
 `just performance-smoke` runs stable source-to-runtime resource smoke profiles
@@ -109,9 +125,11 @@ over `examples/collection_state.str`, the multi-file source-unit import example,
 the typed boundary-contract example, the checked component-composition example,
 and the local supervision restart example. It measures repeated Strata checking
 and lowering for collection state, source-unit imports, boundary contracts, and
-component composition; repeated checked composition report rendering and target
-requirement rendering from a prechecked composition input; Mantle admission
-comparison through the runtime profiles; Mantle
+component composition; repeated checked composition report rendering,
+Strata-owned composition artifact build/rendering, Strata-owned composition
+artifact admission/validation, and target requirement rendering from a
+prechecked composition input; Mantle admission comparison through the runtime
+profiles; Mantle
 artifact encode/decode; repeated Mantle in-memory execution of the
 collection-state and boundary-contract artifacts; repeated
 Mantle JSONL-trace execution of the collection-state artifact; and repeated
@@ -241,9 +259,11 @@ just fuzz-ci
 ## Miri
 
 Miri runs on nightly Rust. The Miri gate is a smoke suite focused on pure or
-in-memory paths rather than filesystem-specific CLI behavior. It includes a
-targeted immutable source-local binding check/lower smoke for the source
-resolution path; this surface does not add a new unsafe-adjacent runtime path.
+in-memory paths rather than filesystem-specific CLI behavior. It includes
+targeted immutable source-local binding check/lower coverage for the source
+resolution path and `composition_artifact` coverage for the pure
+component-composition artifact renderer/admission validator. Filesystem-specific
+CLI behavior remains covered by unit and acceptance tests instead.
 
 Useful local commands:
 

@@ -6,8 +6,8 @@ mdbook_version := "0.5.2"
 mdbook_mermaid_version := "0.17.0"
 cargo_fuzz_version := "0.13.1"
 cfg_check_targets := "x86_64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc"
-fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower mantle_artifact_decode mantle_runtime_from_source mantle_trace_validate"
-fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_trace_validate:128"
+fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower strata_composition_artifact_admit mantle_artifact_decode mantle_runtime_from_source mantle_trace_validate"
+fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 strata_composition_artifact_admit:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_trace_validate:128"
 
 default:
     @just --list
@@ -137,6 +137,12 @@ strata-authority-summary source format="text":
 strata-composition-report source format="text":
     cargo +{{stable_toolchain}} run -p strata --bin strata -- composition-report "{{source}}" --format "{{format}}"
 
+strata-composition-build source:
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- composition build "{{source}}"
+
+strata-composition-admit artifact format="text":
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- composition admit "{{artifact}}" --format "{{format}}"
+
 mantle-inspect-authority artifact format="text":
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- inspect-authority "{{artifact}}" --format "{{format}}"
 
@@ -153,6 +159,10 @@ run-example name:
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check "examples/{{name}}.str"
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build "examples/{{name}}.str"
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "target/strata/{{name}}.mta"
+
+composition-artifact-gates: build
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- composition build examples/component_composition_main.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- composition admit target/strata/component_composition_main.component-composition.json --format json
 
 metadata-check:
     #!/usr/bin/env bash
@@ -310,6 +320,8 @@ source-to-runtime-success-gates: build
     done
 
     "${cargo_run[@]}" -p strata --bin strata -- composition-report examples/component_composition_main.str --format json >/dev/null
+    "${cargo_run[@]}" -p strata --bin strata -- composition build examples/component_composition_main.str
+    "${cargo_run[@]}" -p strata --bin strata -- composition admit target/strata/component_composition_main.component-composition.json --format json >/dev/null
     "${cargo_run[@]}" -p strata --bin strata -- target-requirements examples/component_composition_main.str --format json >/dev/null
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- feature-declaration --format json >/dev/null
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- admit target/strata/component_composition_main.mta --format json >/dev/null
@@ -534,6 +546,7 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p strata parses_checks_and_lowers_immutable_source_local_bindings
     cargo +{{nightly_toolchain}} miri test -p strata source_program_checks_lowers_cross_unit_records_functions_and_processes
     cargo +{{nightly_toolchain}} miri test -p strata accepts_typed_local_one_for_one_supervision
+    cargo +{{nightly_toolchain}} miri test -p strata composition_artifact
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_uniform_arm_prefix_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_selected_arm_action_block_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p mantle-artifact validate_admits_lexical_supervisor_child_spawn_site

@@ -4,6 +4,7 @@ mod checked;
 mod checked_render;
 mod checker;
 mod component_authority_edges;
+mod composition_artifact;
 mod composition_report;
 mod diagnostic;
 mod import_access;
@@ -30,6 +31,14 @@ pub use ast::{
 pub use authority_summary::{AuthoritySummaryFormat, render_authority_summary};
 pub use checked::CheckedProgram;
 pub use checker::check_module;
+pub use composition_artifact::{
+    COMPONENT_COMPOSITION_ARTIFACT_EXTENSION, COMPONENT_COMPOSITION_HASH_ALG,
+    COMPONENT_COMPOSITION_SCHEMA_ID, COMPONENT_COMPOSITION_SCHEMA_VERSION_MAJOR,
+    COMPONENT_COMPOSITION_SCHEMA_VERSION_MINOR, ComponentCompositionAdmissionResult,
+    ComponentCompositionAdmissionSummary, ComponentCompositionArtifactAdmitFormat,
+    MAX_COMPONENT_COMPOSITION_ARTIFACT_BYTES, admit_component_composition_artifact,
+    render_component_composition_admission_summary, render_component_composition_artifact,
+};
 pub use composition_report::{
     CompositionAdmissionReport, CompositionAdmissionReportFormat,
     render_composition_admission_report,

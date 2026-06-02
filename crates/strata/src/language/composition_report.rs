@@ -10,7 +10,7 @@ use super::checked_render::{
 use super::diagnostic::Result;
 use super::source_program::{SourceProgram, SourceProvenanceHash, check_source_program};
 
-const REPORT_FORMAT: &str = "strata.component_composition_admission_report";
+const REPORT_FORMAT: &str = "strata.checked_component_composition_admission_report";
 const REPORT_VERSION: u32 = 1;
 const SOURCE_LANGUAGE: &str = "strata";
 const SOURCE_HASH_ALGORITHM: &str = "fnv1a64-diagnostic";
