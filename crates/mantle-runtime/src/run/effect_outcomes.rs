@@ -1,6 +1,6 @@
 use mantle_artifact::{
     ArtifactProcessRefPayload, ArtifactValue, ArtifactValueShape, EffectOutcomeId, Error,
-    MessageId, PortId, ProcessId, Result, TypeId,
+    MessageId, PortId, ProcessId, Result, SpawnSiteId, TypeId,
 };
 
 use super::RuntimeRun;
@@ -8,7 +8,9 @@ use super::boundaries::BoundarySendContext;
 use super::model::{ActiveStep, RuntimeMessageEnvelope};
 use super::process_refs::{LocalProcessRefs, SendOutcomeTarget};
 use super::templates::{RuntimeTemplateContext, evaluate_runtime_template};
-use crate::event::RuntimeProcessId;
+use crate::event::{
+    RuntimeEffectOutcomeAction, RuntimeEffectOutcomeResult, RuntimeEvent, RuntimeProcessId,
+};
 use crate::executable::{
     ExecutableActionPlan, ExecutableSendTarget, ExecutableSpawnSite, ExecutableTemplateProgram,
     ExecutableValueTemplateRef,
@@ -34,6 +36,53 @@ struct SendOutcomeExecution<'a, 'program> {
     payload: Option<ExecutableValueTemplateRef>,
     executable_templates: &'a ExecutableTemplateProgram<'program>,
     effect_outcomes: &'a [RuntimeEffectOutcome],
+}
+
+struct RuntimeEffectOutcomeExecution {
+    payload: RuntimePayload,
+    trace: RuntimeEffectOutcomeTrace,
+}
+
+struct RuntimeEffectOutcomeTrace {
+    action: RuntimeEffectOutcomeAction,
+    target_process_id: ProcessId,
+    spawn_site_id: Option<SpawnSiteId>,
+    message_id: Option<MessageId>,
+    port_id: Option<PortId>,
+    result: RuntimeEffectOutcomeResult,
+}
+
+impl RuntimeEffectOutcomeTrace {
+    const fn spawn(
+        target_process_id: ProcessId,
+        spawn_site_id: SpawnSiteId,
+        result: RuntimeEffectOutcomeResult,
+    ) -> Self {
+        Self {
+            action: RuntimeEffectOutcomeAction::Spawn,
+            target_process_id,
+            spawn_site_id: Some(spawn_site_id),
+            message_id: None,
+            port_id: None,
+            result,
+        }
+    }
+
+    const fn send(
+        target_process_id: ProcessId,
+        message_id: MessageId,
+        port_id: Option<PortId>,
+        result: RuntimeEffectOutcomeResult,
+    ) -> Self {
+        Self {
+            action: RuntimeEffectOutcomeAction::Send,
+            target_process_id,
+            spawn_site_id: None,
+            message_id: Some(message_id),
+            port_id,
+            result,
+        }
+    }
 }
 
 impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
@@ -103,8 +152,9 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 target,
                 spawn,
             } => {
-                let payload = self.execute_spawn_outcome(step, *outcome_ty, *target, *spawn)?;
-                bind_effect_outcome(effect_outcomes, *outcome, payload)?;
+                let execution = self.execute_spawn_outcome(step, *outcome_ty, *target, *spawn)?;
+                bind_effect_outcome(effect_outcomes, *outcome, execution.payload)?;
+                self.record_effect_outcome_bound(step, *outcome, execution.trace)?;
                 Ok(true)
             }
             ExecutableActionPlan::SendOutcome {
@@ -115,7 +165,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 message,
                 payload,
             } => {
-                let payload = self.execute_send_outcome(SendOutcomeExecution {
+                let execution = self.execute_send_outcome(SendOutcomeExecution {
                     local_process_refs,
                     step,
                     outcome_ty: *outcome_ty,
@@ -126,7 +176,8 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                     executable_templates,
                     effect_outcomes,
                 })?;
-                bind_effect_outcome(effect_outcomes, *outcome, payload)?;
+                bind_effect_outcome(effect_outcomes, *outcome, execution.payload)?;
+                self.record_effect_outcome_bound(step, *outcome, execution.trace)?;
                 Ok(true)
             }
             ExecutableActionPlan::IfElse { .. } | ExecutableActionPlan::ForEach { .. } => Ok(false),
@@ -140,22 +191,48 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         outcome_ty: TypeId,
         target: ProcessId,
         spawn: ExecutableSpawnSite,
-    ) -> Result<RuntimePayload> {
+    ) -> Result<RuntimeEffectOutcomeExecution> {
         self.program.process(target)?;
         if !self.record_spawn_authority(step, target, spawn)? {
-            return self.spawn_error_outcome(outcome_ty, "Denied");
+            return self
+                .spawn_error_outcome(outcome_ty, "Denied")
+                .map(|payload| RuntimeEffectOutcomeExecution {
+                    payload,
+                    trace: RuntimeEffectOutcomeTrace::spawn(
+                        target,
+                        spawn.id,
+                        RuntimeEffectOutcomeResult::Denied,
+                    ),
+                });
         }
         if !self.spawn_capacity_available(target)? {
-            return self.spawn_error_outcome(outcome_ty, "Exhausted");
+            return self
+                .spawn_error_outcome(outcome_ty, "Exhausted")
+                .map(|payload| RuntimeEffectOutcomeExecution {
+                    payload,
+                    trace: RuntimeEffectOutcomeTrace::spawn(
+                        target,
+                        spawn.id,
+                        RuntimeEffectOutcomeResult::Exhausted,
+                    ),
+                });
         }
         let pid = self.spawn_process(target, Some(step.pid))?;
         self.ok_process_ref_outcome(outcome_ty, target, pid)
+            .map(|payload| RuntimeEffectOutcomeExecution {
+                payload,
+                trace: RuntimeEffectOutcomeTrace::spawn(
+                    target,
+                    spawn.id,
+                    RuntimeEffectOutcomeResult::Ok,
+                ),
+            })
     }
 
     fn execute_send_outcome<'template>(
         &mut self,
         request: SendOutcomeExecution<'_, 'template>,
-    ) -> Result<RuntimePayload> {
+    ) -> Result<RuntimeEffectOutcomeExecution> {
         let target = self.resolve_send_outcome_target(
             request.local_process_refs,
             request.step,
@@ -232,7 +309,17 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                         )?,
                         None => self.send_message(pid, envelope, Some(request.step.pid))?,
                     }
-                    self.ok_unit_outcome(request.outcome_ty)
+                    self.ok_unit_outcome(request.outcome_ty).map(|payload| {
+                        RuntimeEffectOutcomeExecution {
+                            payload,
+                            trace: RuntimeEffectOutcomeTrace::send(
+                                target_process_id,
+                                request.message,
+                                request.port,
+                                RuntimeEffectOutcomeResult::Ok,
+                            ),
+                        }
+                    })
                 }
                 Err(failure) => {
                     let original_message = self.runtime_message_payload(
@@ -245,6 +332,15 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                         failure.send_error_variant(),
                         original_message,
                     )
+                    .map(|payload| RuntimeEffectOutcomeExecution {
+                        payload,
+                        trace: RuntimeEffectOutcomeTrace::send(
+                            target_process_id,
+                            request.message,
+                            request.port,
+                            effect_outcome_result_for_delivery_failure(failure),
+                        ),
+                    })
                 }
             },
             SendOutcomeTarget::InactiveSupervisorChild { failure, .. } => {
@@ -258,8 +354,37 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                     failure.send_error_variant(),
                     original_message,
                 )
+                .map(|payload| RuntimeEffectOutcomeExecution {
+                    payload,
+                    trace: RuntimeEffectOutcomeTrace::send(
+                        target_process_id,
+                        request.message,
+                        request.port,
+                        effect_outcome_result_for_delivery_failure(failure),
+                    ),
+                })
             }
         }
+    }
+
+    fn record_effect_outcome_bound(
+        &mut self,
+        step: &ActiveStep,
+        outcome: EffectOutcomeId,
+        trace: RuntimeEffectOutcomeTrace,
+    ) -> Result<()> {
+        self.record_event(RuntimeEvent::EffectOutcomeBound {
+            pid: step.pid,
+            process_id: step.process_id,
+            process: step.process_name.clone(),
+            outcome_id: outcome,
+            action: trace.action,
+            target_process_id: trace.target_process_id,
+            spawn_site_id: trace.spawn_site_id,
+            message_id: trace.message_id,
+            port_id: trace.port_id,
+            outcome_result: trace.result,
+        })
     }
 
     fn ok_unit_outcome(&self, outcome_ty: TypeId) -> Result<RuntimePayload> {
@@ -444,6 +569,16 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 enum_ty.as_u32()
             ))
         })
+    }
+}
+
+const fn effect_outcome_result_for_delivery_failure(
+    failure: super::delivery::DeliveryPreflightFailure,
+) -> RuntimeEffectOutcomeResult {
+    match failure {
+        super::delivery::DeliveryPreflightFailure::Full => RuntimeEffectOutcomeResult::Full,
+        super::delivery::DeliveryPreflightFailure::Stopped => RuntimeEffectOutcomeResult::Stopped,
+        super::delivery::DeliveryPreflightFailure::Crashed => RuntimeEffectOutcomeResult::Crashed,
     }
 }
 

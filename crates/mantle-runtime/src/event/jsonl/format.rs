@@ -77,6 +77,26 @@ impl fmt::Display for LoopContextJson {
     }
 }
 
+pub(super) struct OptionalU32Field<'a> {
+    field: &'a str,
+    value: Option<u32>,
+}
+
+impl<'a> OptionalU32Field<'a> {
+    pub(super) const fn new(field: &'a str, value: Option<u32>) -> Self {
+        Self { field, value }
+    }
+}
+
+impl fmt::Display for OptionalU32Field<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(value) = self.value {
+            write!(formatter, ",\"{}\":{}", self.field, value)?;
+        }
+        Ok(())
+    }
+}
+
 pub(super) struct PayloadJson<'a>(pub(super) &'a Option<crate::program::RuntimePayload>);
 
 impl fmt::Display for PayloadJson<'_> {

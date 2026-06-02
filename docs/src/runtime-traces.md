@@ -70,6 +70,8 @@ IDs are for stable runtime identity:
 - `message_id`, the admitted message case ID;
 - `state_id`, the admitted typed state value ID;
 - `payload_type_id`, the admitted artifact type ID when a payload is present;
+- `outcome_id`, the admitted effect-outcome binding ID for a pre-state
+  outcome action;
 - `output_id`, the admitted output literal ID.
 
 Do not treat labels as runtime dispatch keys. Runtime execution uses admitted
@@ -87,6 +89,7 @@ instances share `process_id` and label metadata but have different `pid` values.
 | `process_spawned` | Mantle creates a runtime process instance. |
 | `spawn_authority_checked` | Mantle checked an admitted spawn-site authority before spawn acceptance. |
 | `boundary_send_checked` | Mantle accepted a typed-port boundary send on the mailbox acceptance path. |
+| `effect_outcome_bound` | Mantle bound a typed effect outcome and recorded its source-visible result category. |
 | `message_accepted` | Mantle accepts a message into a process mailbox. |
 | `message_dequeued` | A process dequeued a message for handling. |
 | `branch_selected` | Mantle selected a typed runtime control-flow branch. |
@@ -156,6 +159,27 @@ on the same runtime path as mailbox acceptance. A typed send outcome that return
 `Full`, `Stopped`, or `Crashed` before mailbox acceptance does not emit an
 accepted boundary event. Invalid or denied boundary shapes fail artifact or
 loaded-program admission before runtime dispatch.
+
+## Effect Outcome Bound
+
+Example shapes:
+
+```json
+{"event":"effect_outcome_bound","pid":1,"process_id":0,"process":"Main","outcome_id":0,"action":"spawn","target_process_id":1,"spawn_site_id":0,"outcome_result":"exhausted","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"effect_outcome_bound","pid":1,"process_id":0,"process":"Main","outcome_id":1,"action":"send","target_process_id":1,"message_id":0,"outcome_result":"crashed","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+```
+
+`outcome_id`, `target_process_id`, `spawn_site_id`, `message_id`, and
+`port_id` are admitted typed IDs. `action` is `spawn` or `send`.
+`outcome_result` is a closed Mantle result category: `ok`, `denied`, or
+`exhausted` for spawn outcomes, and `ok`, `full`, `stopped`, or `crashed` for
+send outcomes. Spawn outcome events require `spawn_site_id` and do not carry a
+message or port ID. Send outcome events require `message_id` and may carry
+`port_id` when the outcome action was tied to an admitted typed port.
+
+This event records the Mantle-owned cause of the immutable source-visible
+`Result` value. It does not add executable source bindings, does not dispatch
+from labels, and does not turn trace JSON into a Strata or `.mta` input.
 
 ## Message Accepted And Dequeued
 

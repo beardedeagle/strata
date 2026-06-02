@@ -128,14 +128,19 @@ Read them in this order:
    crash as a source-visible send outcome.
 62. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
    denial before process acceptance.
-63. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+63. `effect_outcome_spawn_exhausted.str` for source-visible local spawn capacity
+   exhaustion before process acceptance under `--max-runtime-processes 1`.
+64. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
-64. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
+65. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
    `local_supervision_temporary.str`, `local_supervision_transient_restart.str`,
    `local_supervision_transient.str`, and
    `local_supervision_inactive_send_outcome.str` for local `one_for_one`
    supervision, lexical child sends, restart modes, stopped-child send outcomes,
    and restart observability.
+66. `local_supervision_inactive_crashed_send_outcome.str` for source-visible
+   `Err(Crashed(message))` when an inactive temporary supervised child failed
+   before the send was accepted.
 
 Detailed notes are grouped by topic:
 

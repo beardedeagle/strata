@@ -29,6 +29,14 @@ const NULLABLE_TYPED_ID_FIELDS: &[&str] = &["new_child_pid"];
 const AUTHORITY_RESULT_VALUES: &[&str] = &["accepted", "denied"];
 const BRANCH_VALUES: &[&str] = &["then", "else"];
 const BRANCH_SCOPE_VALUES: &[&str] = &["next_state", "action"];
+const EFFECT_OUTCOME_ACTION_SPAWN: &str = "spawn";
+const EFFECT_OUTCOME_ACTION_SEND: &str = "send";
+const EFFECT_OUTCOME_ACTION_VALUES: &[&str] =
+    &[EFFECT_OUTCOME_ACTION_SPAWN, EFFECT_OUTCOME_ACTION_SEND];
+const EFFECT_OUTCOME_RESULT_VALUES: &[&str] =
+    &["ok", "denied", "exhausted", "full", "stopped", "crashed"];
+const SPAWN_EFFECT_OUTCOME_RESULT_VALUES: &[&str] = &["ok", "denied", "exhausted"];
+const SEND_EFFECT_OUTCOME_RESULT_VALUES: &[&str] = &["ok", "full", "stopped", "crashed"];
 const FAILURE_REASON_VALUES: &[&str] = &[
     "panic",
     "supervisor_restart_capacity_exceeded",
@@ -356,6 +364,9 @@ fn validate_coupled_fields(kind: RuntimeTraceEventKind, line: &JsonLine<'_>) -> 
     if kind == RuntimeTraceEventKind::SupervisorRestartDecision {
         validate_supervisor_restart_decision_fields(line)?;
     }
+    if kind == RuntimeTraceEventKind::EffectOutcomeBound {
+        validate_effect_outcome_fields(line)?;
+    }
     Ok(())
 }
 
@@ -370,6 +381,10 @@ fn validate_runtime_value_domains(kind: RuntimeTraceEventKind, line: &JsonLine<'
         }
         RuntimeTraceEventKind::BoundarySendChecked => {
             validate_value_domain(line, "boundary_result", AUTHORITY_RESULT_VALUES)
+        }
+        RuntimeTraceEventKind::EffectOutcomeBound => {
+            validate_value_domain(line, "action", EFFECT_OUTCOME_ACTION_VALUES)?;
+            validate_value_domain(line, "outcome_result", EFFECT_OUTCOME_RESULT_VALUES)
         }
         RuntimeTraceEventKind::BranchSelected => {
             validate_value_domain(line, "branch", BRANCH_VALUES)?;
@@ -400,6 +415,38 @@ fn validate_runtime_value_domains(kind: RuntimeTraceEventKind, line: &JsonLine<'
         | RuntimeTraceEventKind::LoopCompleted
         | RuntimeTraceEventKind::StateUpdated => Ok(()),
     }
+}
+
+fn validate_effect_outcome_fields(line: &JsonLine<'_>) -> Result<()> {
+    let action = line.required_string("action")?;
+    match action {
+        EFFECT_OUTCOME_ACTION_SPAWN => {
+            require_present(line, "spawn_site_id", "spawn effect outcome")?;
+            require_absent(line, "message_id", "spawn effect outcome")?;
+            require_absent(line, "port_id", "spawn effect outcome")?;
+            validate_value_domain(line, "outcome_result", SPAWN_EFFECT_OUTCOME_RESULT_VALUES)
+        }
+        EFFECT_OUTCOME_ACTION_SEND => {
+            require_present(line, "message_id", "send effect outcome")?;
+            require_absent(line, "spawn_site_id", "send effect outcome")?;
+            validate_value_domain(line, "outcome_result", SEND_EFFECT_OUTCOME_RESULT_VALUES)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn require_present(line: &JsonLine<'_>, field: &str, context: &str) -> Result<()> {
+    if line.value(field)?.is_none() {
+        return Err(line.error(format!("runtime trace {context} requires {field}")));
+    }
+    Ok(())
+}
+
+fn require_absent(line: &JsonLine<'_>, field: &str, context: &str) -> Result<()> {
+    if line.value(field)?.is_some() {
+        return Err(line.error(format!("runtime trace {context} must not include {field}")));
+    }
+    Ok(())
 }
 
 fn validate_value_domain(line: &JsonLine<'_>, field: &str, allowed: &[&str]) -> Result<()> {
@@ -569,6 +616,8 @@ fn validate_loop_context_fields(line: &JsonLine<'_>) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod effect_outcome_tests;
 #[cfg(test)]
 mod json_tests;
 #[cfg(test)]

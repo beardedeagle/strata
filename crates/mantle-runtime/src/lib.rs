@@ -17,10 +17,10 @@ mod run;
 pub use cli::{mantle_main, run_mantle_from_env};
 pub use event::{
     RUNTIME_TRACE_SCHEMA_ID, RUNTIME_TRACE_SCHEMA_VERSION, RuntimeBranchPath, RuntimeBranchScope,
-    RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeLoopContext,
-    RuntimeOutputStream, RuntimeProcessId, RuntimeStepResult, RuntimeStopReason,
-    RuntimeTraceEventContract, RuntimeTraceEventKind, RuntimeTraceSummary,
-    RuntimeTraceValidationLimits, validate_runtime_trace_jsonl,
+    RuntimeEffectOutcomeAction, RuntimeEffectOutcomeResult, RuntimeEvent, RuntimeEventRecord,
+    RuntimeFailureReason, RuntimeLoopContext, RuntimeOutputStream, RuntimeProcessId,
+    RuntimeStepResult, RuntimeStopReason, RuntimeTraceEventContract, RuntimeTraceEventKind,
+    RuntimeTraceSummary, RuntimeTraceValidationLimits, validate_runtime_trace_jsonl,
     validate_runtime_trace_jsonl_with_limits,
 };
 pub use feature_declaration::{

@@ -169,9 +169,14 @@ Key source ideas:
   failed targets, and the current fail-closed source-created panic boundary.
 - `effect_outcome_spawn_denied` covers denied admitted spawn authority before a
   `Worker` instance is accepted.
+- `effect_outcome_spawn_exhausted` covers process-capacity exhaustion before a
+  `Worker` is accepted under `--max-runtime-processes 1`; the exhausted branch
+  emits without admitting or executing the child. The runtime trace records
+  `effect_outcome_bound` with `outcome_result:"exhausted"`.
 - The local supervision examples cover lexical child sends, explicit restart
-  intensity, child modes, stopped-child send outcomes, and restart traces without
-  replaying consumed messages.
+  intensity, child modes, stopped- and crashed-child send outcomes, and restart
+  traces without replaying consumed messages; crashed-child send outcomes
+  record `effect_outcome_bound` with `outcome_result:"crashed"`.
 
 ## Runtime If Else
 

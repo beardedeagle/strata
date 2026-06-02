@@ -1,0 +1,91 @@
+module local_supervision_inactive_crashed_send_outcome;
+
+record DriverState;
+record MainState;
+record WorkerState;
+record DelayerState;
+enum DriverMsg { Start }
+enum MainMsg { Boot(ProcessRef<Supervisor>), Check }
+enum WorkerMsg { Crash, Work }
+enum DelayerMsg { Tick(ProcessRef<Supervisor>) }
+enum Bool { False, True }
+
+proc Main mailbox bounded(1) {
+    type State = DriverState;
+    type Msg = DriverMsg;
+
+    authority spawn_supervisor: Cap<Spawn<Supervisor>>;
+
+    fn init() -> DriverState ! [] ~ [] @det {
+        return DriverState;
+    }
+
+    fn step(state: DriverState, Start) -> ProcResult<DriverState> ! [spawn, send] ~ [] @det {
+        let supervisor: ProcessRef<Supervisor> = spawn Supervisor;
+        send supervisor Boot(supervisor);
+        return Stop(state);
+    }
+}
+
+proc Supervisor mailbox bounded(2) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_delayer: Cap<Spawn<Delayer>>;
+
+    supervise local one_for_one(max_restarts: 2_u32, within_ms: 1000_u64) {
+        child worker: Worker = spawn Worker as temporary;
+    }
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Boot(self_ref: ProcessRef<Supervisor>)) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let delayer: ProcessRef<Delayer> = spawn Delayer;
+        send worker Crash;
+        send delayer Tick(self_ref);
+        return Continue(state);
+    }
+
+    fn step(state: MainState, Check) -> ProcResult<MainState> ! [send, emit] ~ [] @det {
+        let sent: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+        if (sent == Err(Crashed(Work))) {
+            emit "inactive child crashed";
+        } else {
+            emit "unexpected inactive child outcome";
+        }
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Crash) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Panic(state);
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Continue(state);
+    }
+}
+
+proc Delayer mailbox bounded(1) {
+    type State = DelayerState;
+    type Msg = DelayerMsg;
+
+    fn init() -> DelayerState ! [] ~ [] @det {
+        return DelayerState;
+    }
+
+    fn step(state: DelayerState, Tick(reply_to: ProcessRef<Supervisor>)) -> ProcResult<DelayerState> ! [send] ~ [] @det {
+        send reply_to Check;
+        return Stop(state);
+    }
+}

@@ -127,3 +127,54 @@ fn local_supervision_inactive_child_send_outcome_returns_stopped() {
     assert!(trace.contains(r#""reason":"normal","decision":"not_restarted""#));
     assert!(!trace.contains(r#""new_child_pid":4"#));
 }
+
+#[test]
+fn local_supervision_inactive_failed_child_send_outcome_returns_crashed() {
+    let gate = GateHarness::new();
+    let stem = "local_supervision_inactive_crashed_send_outcome";
+    let artifact_path = "target/strata/local_supervision_inactive_crashed_send_outcome.mta";
+    gate.remove_trace(stem);
+    let run = gate.check_build_run(
+        "examples/local_supervision_inactive_crashed_send_outcome.str",
+        artifact_path,
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("inactive child crashed"));
+    assert!(!stdout.contains("unexpected inactive child outcome"));
+
+    let artifact = gate.read_artifact(artifact_path);
+    let supervisor = artifact_process(&artifact, "Supervisor");
+    assert!(supervisor.transitions.iter().any(|transition| {
+        transition.actions.iter().any(|action| {
+            matches!(
+                action,
+                ArtifactAction::SendOutcome {
+                    target: ArtifactSendTarget::SupervisorChild {
+                        target_process,
+                        ..
+                    },
+                    ..
+                } if *target_process == ProcessId::new(2)
+            )
+        })
+    }));
+
+    let trace = gate.read_trace(stem);
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"effect_outcome_bound""#,
+            r#""outcome_id":0"#,
+            r#""action":"send""#,
+            r#""target_process_id":2"#,
+            r#""message_id":1"#,
+            r#""outcome_result":"crashed""#,
+        ],
+    );
+    assert!(trace.contains(r#""event":"process_failed","pid":3"#));
+    assert!(trace.contains(r#""reason":"panic","decision":"not_restarted""#));
+    assert!(trace.contains(r#""text":"inactive child crashed""#));
+    assert!(!trace.contains(r#""decision":"restarted""#));
+    assert!(!trace.contains(r#""message":"Work""#));
+}

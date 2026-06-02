@@ -2,7 +2,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 use mantle_artifact::{
-    ArtifactBranch, AuthorityId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
+    ArtifactBranch, AuthorityId, EffectOutcomeId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
     MAX_VALUE_TEMPLATE_DEPTH, MessageId, OutputId, PortId, ProcessId, ProtocolId, Result,
     SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId, TypeId,
 };
@@ -241,6 +241,18 @@ pub enum RuntimeEvent {
         message: String,
         boundary_result: RuntimeAuthorityResult,
     },
+    EffectOutcomeBound {
+        pid: RuntimeProcessId,
+        process_id: ProcessId,
+        process: String,
+        outcome_id: EffectOutcomeId,
+        action: RuntimeEffectOutcomeAction,
+        target_process_id: ProcessId,
+        spawn_site_id: Option<SpawnSiteId>,
+        message_id: Option<MessageId>,
+        port_id: Option<PortId>,
+        outcome_result: RuntimeEffectOutcomeResult,
+    },
     BranchSelected {
         pid: RuntimeProcessId,
         process_id: ProcessId,
@@ -362,6 +374,7 @@ impl RuntimeEvent {
             Self::ProgramOutput { .. } => RuntimeTraceEventKind::ProgramOutput,
             Self::SpawnAuthorityChecked { .. } => RuntimeTraceEventKind::SpawnAuthorityChecked,
             Self::BoundarySendChecked { .. } => RuntimeTraceEventKind::BoundarySendChecked,
+            Self::EffectOutcomeBound { .. } => RuntimeTraceEventKind::EffectOutcomeBound,
             Self::BranchSelected { .. } => RuntimeTraceEventKind::BranchSelected,
             Self::LoopStarted { .. } => RuntimeTraceEventKind::LoopStarted,
             Self::LoopIteration { .. } => RuntimeTraceEventKind::LoopIteration,
@@ -374,6 +387,44 @@ impl RuntimeEvent {
             Self::SupervisorRestartDecision { .. } => {
                 RuntimeTraceEventKind::SupervisorRestartDecision
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeEffectOutcomeAction {
+    Spawn,
+    Send,
+}
+
+impl RuntimeEffectOutcomeAction {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Spawn => "spawn",
+            Self::Send => "send",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeEffectOutcomeResult {
+    Ok,
+    Denied,
+    Exhausted,
+    Full,
+    Stopped,
+    Crashed,
+}
+
+impl RuntimeEffectOutcomeResult {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Denied => "denied",
+            Self::Exhausted => "exhausted",
+            Self::Full => "full",
+            Self::Stopped => "stopped",
+            Self::Crashed => "crashed",
         }
     }
 }

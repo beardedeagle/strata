@@ -152,13 +152,21 @@ just run-example runtime_loop_element_projection
 just run-example effect_outcomes
 just run-example effect_outcome_mailbox_full
 just run-example effect_outcome_stopped_target
+# Default-limit acceptance only; the exhausted branch uses the dedicated gate below.
+just run-example effect_outcome_spawn_exhausted
 just run-example local_supervision_restart
 just run-example local_supervision_permanent_stop
 just run-example local_supervision_temporary
 just run-example local_supervision_transient_restart
 just run-example local_supervision_transient
 just run-example local_supervision_inactive_send_outcome
+just run-example local_supervision_inactive_crashed_send_outcome
 ```
+
+`run-example` uses default runtime limits and policies. For
+`effect_outcome_spawn_exhausted`, it proves the checked source still runs with
+available capacity; the source-visible exhausted branch uses the dedicated
+command below.
 
 The local spawn authority denial gate uses the same check/build path and then
 runs Mantle with denied admitted spawn authority:
@@ -168,6 +176,21 @@ just strata-check examples/effect_outcome_spawn_denied.str
 just strata-build examples/effect_outcome_spawn_denied.str
 just mantle-run-deny-spawn-authority target/strata/effect_outcome_spawn_denied.mta
 ```
+
+The local spawn capacity exhaustion gate uses the same check/build path and then
+runs Mantle with a deliberately exhausted process limit:
+
+```sh
+just strata-check examples/effect_outcome_spawn_exhausted.str
+just strata-build examples/effect_outcome_spawn_exhausted.str
+just mantle-run-max-runtime-processes target/strata/effect_outcome_spawn_exhausted.mta 1
+```
+
+The exhausted-spawn and inactive-crashed-child send gates also assert
+`effect_outcome_bound` trace events. Those events carry the numeric
+`outcome_id`, the `spawn` or `send` action kind, and the closed
+`outcome_result` category so the branch result is attributable to Mantle
+runtime cause rather than inferred only from output text.
 
 A source rejection gate must fail during checking and must not create a target
 artifact:

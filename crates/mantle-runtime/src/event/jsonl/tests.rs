@@ -5,7 +5,8 @@ use mantle_artifact::{
 
 use super::*;
 use crate::event::{
-    RuntimeAuthorityResult, RuntimeLoopContext, RuntimeSpawnKind, RuntimeSupervisorExitReason,
+    RuntimeAuthorityResult, RuntimeEffectOutcomeAction, RuntimeEffectOutcomeResult,
+    RuntimeLoopContext, RuntimeSpawnKind, RuntimeSupervisorExitReason,
     RuntimeSupervisorRestartDecision,
 };
 use crate::{
@@ -87,6 +88,31 @@ fn supervisor_child_started_trace_includes_spawn_kind() {
     };
     let line = encode_json_line(&event);
     assert!(line.contains(r#""spawn_kind":"lexical_supervisor_child""#));
+}
+
+#[test]
+fn effect_outcome_bound_trace_includes_action_result_and_optional_ids() {
+    let event = RuntimeEvent::EffectOutcomeBound {
+        pid: RuntimeProcessId::FIRST,
+        process_id: ProcessId::new(0),
+        process: "Main".to_string(),
+        outcome_id: mantle_artifact::EffectOutcomeId::new(2),
+        action: RuntimeEffectOutcomeAction::Spawn,
+        target_process_id: ProcessId::new(1),
+        spawn_site_id: Some(SpawnSiteId::new(3)),
+        message_id: None,
+        port_id: None,
+        outcome_result: RuntimeEffectOutcomeResult::Exhausted,
+    };
+    let line = encode_json_line(&event);
+
+    assert!(line.contains(r#""event":"effect_outcome_bound""#));
+    assert!(line.contains(r#""outcome_id":2"#));
+    assert!(line.contains(r#""action":"spawn""#));
+    assert!(line.contains(r#""target_process_id":1"#));
+    assert!(line.contains(r#""spawn_site_id":3"#));
+    assert!(line.contains(r#""outcome_result":"exhausted""#));
+    assert!(!line.contains(r#""message_id":"#));
 }
 
 #[test]
@@ -289,6 +315,18 @@ fn all_event_trace_events() -> Vec<RuntimeEvent> {
             message_id: MessageId::new(0),
             message: "Work".to_string(),
             boundary_result: RuntimeAuthorityResult::Accepted,
+        },
+        RuntimeEvent::EffectOutcomeBound {
+            pid: main_pid,
+            process_id: ProcessId::new(0),
+            process: "Main".to_string(),
+            outcome_id: mantle_artifact::EffectOutcomeId::new(0),
+            action: RuntimeEffectOutcomeAction::Send,
+            target_process_id: ProcessId::new(1),
+            spawn_site_id: None,
+            message_id: Some(MessageId::new(0)),
+            port_id: Some(PortId::new(0)),
+            outcome_result: RuntimeEffectOutcomeResult::Ok,
         },
         RuntimeEvent::BranchSelected {
             pid: worker_pid,

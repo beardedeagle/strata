@@ -240,27 +240,9 @@ variant shape, not process-reference identity. Top-level pre-state effect
 bindings are declaration ordered: an outcome is usable only after its `let`
 statement, and outcome bindings must appear before ordinary non-prefix effects
 that would otherwise cross the commit-or-return boundary.
-`SendError<M>` preserves the original message value for pre-acceptance failures,
-including metadata for a direct `ProcessRef<T>` message payload. That authority
-remains a send/message boundary value and is not admitted into ordinary process
-state. The admitted variants are `Full(M)`, `Stopped(M)`, `Crashed(M)`, and
-`MailboxClosed(M)`. The current
-runtime distinguishes full, stopped, and targets already failed before
-acceptance in direct runtime execution. It does not yet expose a distinct
-source-created closed-mailbox lifecycle, but the typed shape is admitted at
-source, artifact, and runtime-loaded boundaries. A source transition that
-creates the crash with `Panic(...)` still fails the run after recording no-replay
-evidence before a later source sender can observe the target as crashed.
-`SpawnError<A>`
-admits `Denied(A)`, `Exhausted(A)`, and
-`BackendUnavailable(A)`. The current local runtime reports denied admitted
-authority as `Err(Denied(Unit))` before acceptance and exhausted process capacity
-as `Err(Exhausted(Unit))`.
+`SendError<M>` preserves the original message for pre-acceptance failures, including direct `ProcessRef<T>` payload metadata; that authority remains a send/message boundary value, not ordinary process state. Admitted variants are `Full(M)`, `Stopped(M)`, `Crashed(M)`, and `MailboxClosed(M)`. Current runtime handles full, stopped, and failed-target crashed outcomes; checked source currently exposes `Crashed(M)` through inactive supervised children, while ordinary source-created `Panic(...)` still records no-replay evidence and fails before a later sender can observe a crashed target. Closed-mailbox lifecycle is not yet source-exposed, but its typed shape is admitted at source, artifact, and runtime boundaries. `SpawnError<A>` admits `Denied(A)`, `Exhausted(A)`, and `BackendUnavailable(A)`; current local runtime reports denied authority and exhausted capacity as `Err(Denied(Unit))` / `Err(Exhausted(Unit))` before acceptance, with `--max-runtime-processes 1` proving exhaustion without admitting or executing the rejected child.
 
-Bare statement `send` and `spawn` remain fail-closed runtime effects: Mantle
-rejects pre-acceptance delivery and process-limit failures instead of silently
-dropping them. Outcome-form `send` returns the typed failure result before message
-acceptance and commits the message only on `Ok(Unit)`.
+Bare statement `send` and `spawn` remain fail-closed runtime effects: Mantle rejects pre-acceptance delivery and process-limit failures instead of silently dropping them. Outcome-form `send` returns the typed failure before acceptance and commits only on `Ok(Unit)`. These outcomes add no source-visible mutation, source-name runtime dispatch, hidden retries, silent drops, or implicit authority grants; Mantle executes the lowered typed artifact templates.
 
 ## Local Spawn Authority
 
