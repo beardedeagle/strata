@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use mantle_runtime::{
-    InMemoryRuntimeHost, RunLimits, SpawnAuthorityPolicy, run_artifact_with_host,
+    InMemoryRuntimeHost, LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy, run_artifact_with_host,
 };
 
 const DEFAULT_FUZZ_RUN_LIMITS: RunLimits = RunLimits {
@@ -11,6 +11,7 @@ const DEFAULT_FUZZ_RUN_LIMITS: RunLimits = RunLimits {
     max_trace_bytes: 256 * 1024,
     max_emitted_output_bytes: 64 * 1024,
     spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
+    local_spawn_backend: LocalSpawnBackend::Available,
 };
 
 const EXHAUSTED_SPAWN_FUZZ_RUN_LIMITS: RunLimits = RunLimits {
@@ -19,9 +20,23 @@ const EXHAUSTED_SPAWN_FUZZ_RUN_LIMITS: RunLimits = RunLimits {
     max_trace_bytes: 256 * 1024,
     max_emitted_output_bytes: 64 * 1024,
     spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
+    local_spawn_backend: LocalSpawnBackend::Available,
 };
 
-const FUZZ_RUN_LIMITS: &[RunLimits] = &[DEFAULT_FUZZ_RUN_LIMITS, EXHAUSTED_SPAWN_FUZZ_RUN_LIMITS];
+const BACKEND_UNAVAILABLE_SPAWN_FUZZ_RUN_LIMITS: RunLimits = RunLimits {
+    max_dispatches: 128,
+    max_runtime_processes: 512,
+    max_trace_bytes: 256 * 1024,
+    max_emitted_output_bytes: 64 * 1024,
+    spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
+    local_spawn_backend: LocalSpawnBackend::Unavailable,
+};
+
+const FUZZ_RUN_LIMITS: &[RunLimits] = &[
+    DEFAULT_FUZZ_RUN_LIMITS,
+    EXHAUSTED_SPAWN_FUZZ_RUN_LIMITS,
+    BACKEND_UNAVAILABLE_SPAWN_FUZZ_RUN_LIMITS,
+];
 
 fuzz_target!(|data: &[u8]| {
     let Ok(source) = std::str::from_utf8(data) else {

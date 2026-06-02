@@ -4,7 +4,7 @@ use mantle_artifact::{
     Error, LoopElementId, MessageId, ProcessId, Result, StateId, SupervisorChildId, SupervisorId,
 };
 
-use crate::event::RuntimeProcessId;
+use crate::event::{RuntimeProcessId, RuntimeStopReason};
 use crate::program::{LoadedProgram, LoadedSupervisorPlan, RuntimePayload};
 use crate::report::ProcessStatus;
 
@@ -46,13 +46,37 @@ pub(super) struct ProcessInstance {
     pub(super) process_id: ProcessId,
     pub(super) state: StateId,
     pub(super) status: ProcessStatus,
+    pub(super) stop_reason: Option<RuntimeStopReason>,
+    pub(super) mailbox_state: RuntimeMailboxState,
     pub(super) supervisor_parent: Option<(RuntimeProcessId, RuntimeSupervisorRef)>,
     pub(super) supervisors: Vec<RuntimeSupervisorState>,
     pub(super) mailbox_bound: usize,
     pub(super) mailbox: VecDeque<RuntimeMessageEnvelope>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RuntimeMailboxState {
+    Open,
+    Closed,
+}
+
 impl ProcessInstance {
+    pub(super) fn close_mailbox(&mut self) {
+        self.mailbox_state = RuntimeMailboxState::Closed;
+    }
+
+    pub(super) fn stop(&mut self, reason: RuntimeStopReason) {
+        self.status = ProcessStatus::Stopped;
+        self.stop_reason = Some(reason);
+        self.close_mailbox();
+    }
+
+    pub(super) fn fail(&mut self) {
+        self.status = ProcessStatus::Failed;
+        self.stop_reason = None;
+        self.close_mailbox();
+    }
+
     pub(super) fn dequeue(&mut self, program: &LoadedProgram) -> Result<DequeuedMessage> {
         if self.mailbox.is_empty() {
             return Err(Error::new(format!(

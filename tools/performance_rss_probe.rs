@@ -7,7 +7,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use mantle_runtime::{
-    run_artifact_with_host, InMemoryRuntimeHost, RunLimits, SpawnAuthorityPolicy,
+    InMemoryRuntimeHost, LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy,
+    run_artifact_with_host,
 };
 
 const PROFILE_ENV: &str = "STRATA_RSS_PROBE_PROFILE";
@@ -60,13 +61,16 @@ const RESOURCE_METRICS_REQUIRED: bool = true;
     target_os = "openbsd"
 )))]
 const RESOURCE_METRICS_REQUIRED: bool = false;
-const PERF_RUN_LIMITS: RunLimits = RunLimits {
-    max_dispatches: 128,
-    max_runtime_processes: 128,
-    max_trace_bytes: 256 * 1024,
-    max_emitted_output_bytes: 64 * 1024,
-    spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
-};
+fn perf_run_limits() -> RunLimits {
+    RunLimits {
+        max_dispatches: 128,
+        max_runtime_processes: 128,
+        max_trace_bytes: 256 * 1024,
+        max_emitted_output_bytes: 64 * 1024,
+        spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
+        local_spawn_backend: LocalSpawnBackend::Available,
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct BenchmarkProfile {
@@ -202,7 +206,7 @@ fn run_collection_state_artifact(
     artifact: &mantle_artifact::MantleArtifact,
 ) -> mantle_runtime::RuntimeReport {
     let mut host = InMemoryRuntimeHost::default();
-    let report = run_artifact_with_host(artifact, &mut host, PERF_RUN_LIMITS)
+    let report = run_artifact_with_host(artifact, &mut host, perf_run_limits())
         .expect("RSS probe artifact should run");
     assert_eq!(report.spawned_processes.len(), 3);
     assert_eq!(report.delivered_messages.len(), 3);
@@ -214,7 +218,7 @@ fn run_local_supervision_artifact(
     artifact: &mantle_artifact::MantleArtifact,
 ) -> mantle_runtime::RuntimeReport {
     let mut host = InMemoryRuntimeHost::default();
-    let report = run_artifact_with_host(artifact, &mut host, PERF_RUN_LIMITS)
+    let report = run_artifact_with_host(artifact, &mut host, perf_run_limits())
         .expect("RSS probe local supervision artifact should run");
     assert!(!report.spawned_processes.is_empty());
     assert!(!report.processes.is_empty());
@@ -225,7 +229,7 @@ fn run_boundary_contracts_artifact(
     artifact: &mantle_artifact::MantleArtifact,
 ) -> mantle_runtime::RuntimeReport {
     let mut host = InMemoryRuntimeHost::default();
-    let report = run_artifact_with_host(artifact, &mut host, PERF_RUN_LIMITS)
+    let report = run_artifact_with_host(artifact, &mut host, perf_run_limits())
         .expect("RSS probe boundary-contract artifact should run");
     assert_eq!(report.spawned_processes.len(), 2);
     assert_eq!(report.delivered_messages.len(), 2);

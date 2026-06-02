@@ -33,10 +33,20 @@ const EFFECT_OUTCOME_ACTION_SPAWN: &str = "spawn";
 const EFFECT_OUTCOME_ACTION_SEND: &str = "send";
 const EFFECT_OUTCOME_ACTION_VALUES: &[&str] =
     &[EFFECT_OUTCOME_ACTION_SPAWN, EFFECT_OUTCOME_ACTION_SEND];
-const EFFECT_OUTCOME_RESULT_VALUES: &[&str] =
-    &["ok", "denied", "exhausted", "full", "stopped", "crashed"];
-const SPAWN_EFFECT_OUTCOME_RESULT_VALUES: &[&str] = &["ok", "denied", "exhausted"];
-const SEND_EFFECT_OUTCOME_RESULT_VALUES: &[&str] = &["ok", "full", "stopped", "crashed"];
+const EFFECT_OUTCOME_RESULT_VALUES: &[&str] = &[
+    "ok",
+    "denied",
+    "exhausted",
+    "backend_unavailable",
+    "full",
+    "stopped",
+    "crashed",
+    "mailbox_closed",
+];
+const SPAWN_EFFECT_OUTCOME_RESULT_VALUES: &[&str] =
+    &["ok", "denied", "exhausted", "backend_unavailable"];
+const SEND_EFFECT_OUTCOME_RESULT_VALUES: &[&str] =
+    &["ok", "full", "stopped", "crashed", "mailbox_closed"];
 const FAILURE_REASON_VALUES: &[&str] = &[
     "panic",
     "supervisor_restart_capacity_exceeded",

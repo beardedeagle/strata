@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use super::supervision::StaticSupervisorChildKey;
 use super::{
-    StaticProcessId, StaticProcessInstance, StaticProcessStatus, resolve_static_process_ref,
+    StaticMailboxState, StaticProcessId, StaticProcessInstance, StaticProcessStatus,
+    StaticStopReason, resolve_static_process_ref,
 };
 use crate::language::checked::{
     CheckedPayloadValue, CheckedProcess, CheckedProcessId, CheckedProcessRefId, CheckedSendTarget,
@@ -15,8 +16,27 @@ pub(super) enum StaticSendOutcomeTarget {
     Active(StaticProcessId),
     InactiveSupervisorChild {
         target_process: CheckedProcessId,
-        status: StaticProcessStatus,
+        failure: StaticSendOutcomeFailure,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StaticSendOutcomeFailure {
+    Full,
+    Stopped,
+    Crashed,
+    MailboxClosed,
+}
+
+impl StaticSendOutcomeFailure {
+    pub(super) const fn send_error_variant(self) -> &'static str {
+        match self {
+            Self::Full => "Full",
+            Self::Stopped => "Stopped",
+            Self::Crashed => "Crashed",
+            Self::MailboxClosed => "MailboxClosed",
+        }
+    }
 }
 
 pub(super) fn resolve_static_send_target(
@@ -100,7 +120,7 @@ pub(super) fn resolve_static_send_outcome_target(
                 Some(pid) => Ok(StaticSendOutcomeTarget::Active(pid)),
                 None => Ok(StaticSendOutcomeTarget::InactiveSupervisorChild {
                     target_process: *target,
-                    status: inactive_static_supervisor_child_status(instances, key, *target)?,
+                    failure: inactive_static_supervisor_child_failure(instances, key, *target)?,
                 }),
             }
         }
@@ -149,17 +169,17 @@ fn validate_static_supervisor_child_target(
     Ok(())
 }
 
-fn inactive_static_supervisor_child_status(
+fn inactive_static_supervisor_child_failure(
     instances: &[StaticProcessInstance],
     key: StaticSupervisorChildKey,
     target: CheckedProcessId,
-) -> Result<StaticProcessStatus> {
+) -> Result<StaticSendOutcomeFailure> {
     let Some(instance) = instances
         .iter()
         .rev()
         .find(|instance| instance.supervisor_parent == Some(key))
     else {
-        return Ok(StaticProcessStatus::Stopped);
+        return Ok(StaticSendOutcomeFailure::Stopped);
     };
     if instance.process_id != target {
         return Err(Error::new(format!(
@@ -175,6 +195,24 @@ fn inactive_static_supervisor_child_status(
             key.2.as_u32(),
             instance.pid.as_u32()
         ))),
-        StaticProcessStatus::Stopped | StaticProcessStatus::Failed => Ok(instance.status),
+        StaticProcessStatus::Stopped => Ok(static_stopped_process_failure(
+            instance.stop_reason,
+            instance.mailbox_state,
+        )),
+        StaticProcessStatus::Failed => Ok(StaticSendOutcomeFailure::Crashed),
+    }
+}
+
+pub(super) const fn static_stopped_process_failure(
+    stop_reason: Option<StaticStopReason>,
+    mailbox_state: StaticMailboxState,
+) -> StaticSendOutcomeFailure {
+    match stop_reason {
+        Some(StaticStopReason::Normal) => StaticSendOutcomeFailure::Stopped,
+        Some(StaticStopReason::SupervisorAction) => StaticSendOutcomeFailure::MailboxClosed,
+        None if matches!(mailbox_state, StaticMailboxState::Closed) => {
+            StaticSendOutcomeFailure::MailboxClosed
+        }
+        None => StaticSendOutcomeFailure::Stopped,
     }
 }

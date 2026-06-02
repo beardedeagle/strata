@@ -67,9 +67,44 @@ fn runtime_send_outcome_returns_full_and_preserves_process_ref_message_payload()
 }
 
 #[test]
-fn runtime_send_outcome_returns_stopped_before_acceptance_and_preserves_message() {
+fn runtime_send_outcome_returns_stopped_after_normal_lifecycle_stop_and_preserves_message() {
     assert_direct_send_outcome_failure(
         ProcessStatus::Stopped,
+        Some(RuntimeStopReason::Normal),
+        true,
+        "Err(Stopped(Ping))",
+        RuntimeEffectOutcomeResult::Stopped,
+    );
+}
+
+#[test]
+fn runtime_send_outcome_returns_mailbox_closed_after_supervisor_lifecycle_close() {
+    assert_direct_send_outcome_failure(
+        ProcessStatus::Stopped,
+        Some(RuntimeStopReason::SupervisorShutdown),
+        true,
+        "Err(MailboxClosed(Ping))",
+        RuntimeEffectOutcomeResult::MailboxClosed,
+    );
+}
+
+#[test]
+fn runtime_send_outcome_returns_mailbox_closed_for_running_closed_mailbox() {
+    assert_direct_send_outcome_failure(
+        ProcessStatus::Running,
+        None,
+        true,
+        "Err(MailboxClosed(Ping))",
+        RuntimeEffectOutcomeResult::MailboxClosed,
+    );
+}
+
+#[test]
+fn runtime_send_outcome_returns_stopped_for_stopped_process_with_open_mailbox() {
+    assert_direct_send_outcome_failure(
+        ProcessStatus::Stopped,
+        Some(RuntimeStopReason::Normal),
+        false,
         "Err(Stopped(Ping))",
         RuntimeEffectOutcomeResult::Stopped,
     );
@@ -79,6 +114,8 @@ fn runtime_send_outcome_returns_stopped_before_acceptance_and_preserves_message(
 fn runtime_send_outcome_returns_crashed_before_acceptance_and_preserves_message() {
     assert_direct_send_outcome_failure(
         ProcessStatus::Failed,
+        None,
+        true,
         "Err(Crashed(Ping))",
         RuntimeEffectOutcomeResult::Crashed,
     );

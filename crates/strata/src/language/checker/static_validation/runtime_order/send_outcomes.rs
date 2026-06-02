@@ -1,11 +1,14 @@
 use super::effect_outcomes::{
     bind_static_effect_outcome, ok_unit_outcome, send_error_outcome, static_original_message,
 };
-use super::send_targets::{StaticSendOutcomeTarget, resolve_static_send_outcome_target};
+use super::send_targets::{
+    StaticSendOutcomeFailure, StaticSendOutcomeTarget, resolve_static_send_outcome_target,
+    static_stopped_process_failure,
+};
 use super::templates::evaluate_checked_runtime_template;
 use super::{
-    StaticActionContext, StaticActionState, StaticMessageEnvelope, StaticProcessStatus,
-    static_process_index_for_pid,
+    StaticActionContext, StaticActionState, StaticMailboxState, StaticMessageEnvelope,
+    StaticProcessStatus, static_process_index_for_pid,
 };
 use crate::language::checked::{
     CheckedEffectOutcomeId, CheckedMessageId, CheckedSendTarget, CheckedTypeRef,
@@ -78,20 +81,16 @@ pub(super) fn execute_static_send_outcome(
         )?),
         None => None,
     };
-    let failure_variant = match target_index {
-        Some(index) => match state.instances[index].status {
-            StaticProcessStatus::Running => None,
-            StaticProcessStatus::Stopped => Some("Stopped"),
-            StaticProcessStatus::Failed => Some("Crashed"),
-        }
-        .or_else(|| {
-            (state.instances[index].mailbox.len() >= target_process.mailbox_bound())
-                .then_some("Full")
-        }),
+    let failure = match target_index {
+        Some(index) => active_static_send_failure(
+            state.instances[index].status,
+            state.instances[index].stop_reason,
+            state.instances[index].mailbox_state,
+            state.instances[index].mailbox.len(),
+            target_process.mailbox_bound(),
+        ),
         None => match target_resolution {
-            StaticSendOutcomeTarget::InactiveSupervisorChild { status, .. } => {
-                Some(static_status_send_error_variant(status)?)
-            }
+            StaticSendOutcomeTarget::InactiveSupervisorChild { failure, .. } => Some(failure),
             StaticSendOutcomeTarget::Active(_) => {
                 return Err(Error::new(format!(
                     "process {} active send target lost its static process",
@@ -100,7 +99,7 @@ pub(super) fn execute_static_send_outcome(
             }
         },
     };
-    if let Some(error_variant) = failure_variant {
+    if let Some(error) = failure {
         let original_message =
             static_original_message(target_process, message, prepared_payload.as_ref())?;
         return bind_static_effect_outcome(
@@ -108,7 +107,7 @@ pub(super) fn execute_static_send_outcome(
             state,
             outcome,
             outcome_ty,
-            send_error_outcome(outcome_ty, error_variant, original_message)?,
+            send_error_outcome(outcome_ty, error.send_error_variant(), original_message)?,
         );
     }
     let target_index = target_index.ok_or_else(|| {
@@ -130,12 +129,24 @@ pub(super) fn execute_static_send_outcome(
     )
 }
 
-fn static_status_send_error_variant(status: StaticProcessStatus) -> Result<&'static str> {
+fn active_static_send_failure(
+    status: StaticProcessStatus,
+    stop_reason: Option<super::StaticStopReason>,
+    mailbox_state: StaticMailboxState,
+    mailbox_len: usize,
+    mailbox_bound: usize,
+) -> Option<StaticSendOutcomeFailure> {
     match status {
-        StaticProcessStatus::Stopped => Ok("Stopped"),
-        StaticProcessStatus::Failed => Ok("Crashed"),
-        StaticProcessStatus::Running => Err(Error::new(
-            "running static send target cannot be represented as a send error",
-        )),
+        StaticProcessStatus::Running if mailbox_state == StaticMailboxState::Closed => {
+            Some(StaticSendOutcomeFailure::MailboxClosed)
+        }
+        StaticProcessStatus::Running if mailbox_len >= mailbox_bound => {
+            Some(StaticSendOutcomeFailure::Full)
+        }
+        StaticProcessStatus::Running => None,
+        StaticProcessStatus::Stopped => {
+            Some(static_stopped_process_failure(stop_reason, mailbox_state))
+        }
+        StaticProcessStatus::Failed => Some(StaticSendOutcomeFailure::Crashed),
     }
 }

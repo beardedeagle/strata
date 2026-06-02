@@ -125,6 +125,9 @@ mantle-run artifact:
 mantle-run-deny-spawn-authority artifact:
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "{{artifact}}" --deny-spawn-authority
 
+mantle-run-disable-local-spawn-backend artifact:
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "{{artifact}}" --disable-local-spawn-backend
+
 mantle-run-max-runtime-processes artifact max_runtime_processes:
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "{{artifact}}" --max-runtime-processes "{{max_runtime_processes}}"
 
@@ -289,6 +292,7 @@ source-to-runtime-success-gates: build
         effect_outcome_stopped_target
         effect_outcome_spawn_denied
         effect_outcome_spawn_exhausted
+        effect_outcome_spawn_backend_unavailable
         local_supervision_restart
         local_supervision_permanent_stop
         local_supervision_temporary
@@ -311,6 +315,7 @@ source-to-runtime-success-gates: build
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- admit target/strata/component_composition_main.mta --format json >/dev/null
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_spawn_denied.mta --deny-spawn-authority
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_spawn_exhausted.mta --max-runtime-processes 1
+    "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_spawn_backend_unavailable.mta --disable-local-spawn-backend
     "${cargo_run[@]}" -p strata --bin strata -- check examples/effect_outcome_crashed_target.str
     "${cargo_run[@]}" -p strata --bin strata -- build examples/effect_outcome_crashed_target.str
 

@@ -7,12 +7,11 @@ use mantle_artifact::{
 
 use crate::feature_declaration::validate_artifact_runtime_requirements;
 use crate::{
-    ProcessStatus, RunLimits, RuntimeFeatureDeclarationFormat, SpawnAuthorityPolicy,
-    render_runtime_feature_declaration, run_artifact_path_with_limits,
+    LocalSpawnBackend, ProcessStatus, RunLimits, RuntimeFeatureDeclarationFormat,
+    SpawnAuthorityPolicy, render_runtime_feature_declaration, run_artifact_path_with_limits,
 };
 
-const MANTLE_RUN_USAGE: &str =
-    "mantle run <artifact.mta> [--deny-spawn-authority] [--max-runtime-processes N]";
+const MANTLE_RUN_USAGE: &str = "mantle run <artifact.mta> [--deny-spawn-authority] [--disable-local-spawn-backend] [--max-runtime-processes N]";
 
 pub fn mantle_main<I>(args: I) -> Result<()>
 where
@@ -120,6 +119,9 @@ fn run_limits_from_args(args: impl IntoIterator<Item = String>) -> Result<RunLim
         match arg.as_str() {
             "--deny-spawn-authority" => {
                 limits.spawn_authority_policy = SpawnAuthorityPolicy::DenyDeclared;
+            }
+            "--disable-local-spawn-backend" => {
+                limits.local_spawn_backend = LocalSpawnBackend::Unavailable;
             }
             "--max-runtime-processes" => {
                 if max_runtime_processes_seen {
@@ -384,6 +386,7 @@ mod tests {
             "--max-runtime-processes".to_string(),
             "1".to_string(),
             "--deny-spawn-authority".to_string(),
+            "--disable-local-spawn-backend".to_string(),
         ])
         .expect("run limits should parse");
 
@@ -392,6 +395,7 @@ mod tests {
             limits.spawn_authority_policy,
             SpawnAuthorityPolicy::DenyDeclared
         );
+        assert_eq!(limits.local_spawn_backend, LocalSpawnBackend::Unavailable);
     }
 
     #[test]

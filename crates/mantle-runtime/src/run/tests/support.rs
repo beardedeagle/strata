@@ -2,7 +2,7 @@ pub(super) use super::super::model::RuntimeMessageEnvelope;
 pub(super) use super::super::*;
 pub(super) use crate::executable::ExecutableProgram;
 pub(super) use crate::host::InMemoryRuntimeHost;
-pub(super) use crate::limits::RunLimits;
+pub(super) use crate::limits::{LocalSpawnBackend, RunLimits};
 pub(super) use crate::program::{
     LoadedAction, LoadedAuthority, LoadedCapabilityDescriptor, LoadedEffectAuthority,
     LoadedNextState, LoadedProgram, LoadedSendTarget, LoadedSpawnKind, LoadedSpawnSite,

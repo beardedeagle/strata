@@ -19,6 +19,11 @@ const VALID_EFFECT_OUTCOME_TRACE: &str = concat!(
 fn validates_effect_outcome_bound_trace() {
     validate_runtime_trace_jsonl(VALID_EFFECT_OUTCOME_TRACE)
         .expect("effect outcome trace should validate");
+    validate_runtime_trace_jsonl(&VALID_EFFECT_OUTCOME_TRACE.replace(
+        "\"outcome_result\":\"exhausted\"",
+        "\"outcome_result\":\"backend_unavailable\"",
+    ))
+    .expect("backend-unavailable spawn outcome trace should validate");
 }
 
 #[test]
@@ -51,13 +56,28 @@ fn rejects_effect_outcome_action_field_mismatches() {
         .replace("\"spawn_site_id\":0,", "\"message_id\":0,")
         .replace(
             "\"outcome_result\":\"exhausted\"",
-            "\"outcome_result\":\"crashed\"",
+            "\"outcome_result\":\"mailbox_closed\"",
         );
     validate_runtime_trace_jsonl(&send_trace).expect("send outcome trace should validate");
 
     assert_rejects(
         &send_trace.replace("\"message_id\":0,", "\"message_id\":0,\"spawn_site_id\":0,"),
         "send effect outcome must not include spawn_site_id",
+    );
+
+    assert_rejects(
+        &VALID_EFFECT_OUTCOME_TRACE.replace(
+            "\"outcome_result\":\"exhausted\"",
+            "\"outcome_result\":\"mailbox_closed\"",
+        ),
+        "value \"mailbox_closed\" is not supported",
+    );
+    assert_rejects(
+        &send_trace.replace(
+            "\"outcome_result\":\"mailbox_closed\"",
+            "\"outcome_result\":\"backend_unavailable\"",
+        ),
+        "value \"backend_unavailable\" is not supported",
     );
 }
 

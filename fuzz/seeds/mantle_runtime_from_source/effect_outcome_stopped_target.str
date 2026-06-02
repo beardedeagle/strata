@@ -1,0 +1,62 @@
+module effect_outcome_stopped_target;
+
+record SenderState { sent: Result<Unit,SendError<WorkerMsg>> }
+
+enum MainState { Booted }
+enum MainMsg { Start }
+enum Bool { False, True }
+enum WorkerState { Idle, Done }
+enum WorkerMsg { Work }
+enum SenderMsg { Target(ProcessRef<Worker>) }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+    authority spawn_sender: Cap<Spawn<Sender>>;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return Booted;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sender: ProcessRef<Sender> = spawn Sender;
+        send worker Work;
+        send sender Target(worker);
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return Idle;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(Done);
+    }
+}
+
+proc Sender mailbox bounded(1) {
+    type State = SenderState;
+    type Msg = SenderMsg;
+
+    fn init() -> SenderState ! [] ~ [] @det {
+        return SenderState { sent: Err(Full(Work)) };
+    }
+
+    fn step(state: SenderState, Target(worker: ProcessRef<Worker>)) -> ProcResult<SenderState> ! [emit, send] ~ [] @det {
+        let sent: Result<Unit,SendError<WorkerMsg>> = send worker Work;
+        if (sent == Err(Stopped(Work))) {
+            emit "target stopped";
+        } else {
+            emit "unexpected stopped outcome";
+        }
+        return Stop(SenderState { sent: sent });
+    }
+}

@@ -12,7 +12,8 @@ use super::supervision::{
     static_spawn_capacity_available,
 };
 use super::{
-    StaticProcessId, StaticProcessInstance, StaticProcessStatus, static_process_index_for_pid,
+    StaticMailboxState, StaticProcessId, StaticProcessInstance, StaticProcessStatus,
+    StaticStopReason, static_process_index_for_pid,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,8 +42,16 @@ pub(super) fn apply_static_step_result(
         CheckedStepResult::Continue => Ok(true),
         CheckedStepResult::Stop => {
             let pid = instances[process_index].pid;
-            stop_static_supervised_children(processes, instances, supervisor_children, pid)?;
+            stop_static_supervised_children(
+                processes,
+                instances,
+                supervisor_children,
+                pid,
+                StaticStopReason::SupervisorAction,
+            )?;
             instances[process_index].status = StaticProcessStatus::Stopped;
+            instances[process_index].stop_reason = Some(StaticStopReason::Normal);
+            instances[process_index].mailbox_state = StaticMailboxState::Closed;
             handle_static_supervised_exit(
                 processes,
                 instances,
@@ -55,8 +64,16 @@ pub(super) fn apply_static_step_result(
         }
         CheckedStepResult::Panic => {
             let pid = instances[process_index].pid;
-            stop_static_supervised_children(processes, instances, supervisor_children, pid)?;
+            stop_static_supervised_children(
+                processes,
+                instances,
+                supervisor_children,
+                pid,
+                StaticStopReason::SupervisorAction,
+            )?;
             instances[process_index].status = StaticProcessStatus::Failed;
+            instances[process_index].stop_reason = None;
+            instances[process_index].mailbox_state = StaticMailboxState::Closed;
             handle_static_supervised_exit(
                 processes,
                 instances,
@@ -75,6 +92,7 @@ fn stop_static_supervised_children(
     instances: &mut [StaticProcessInstance],
     supervisor_children: &BTreeMap<StaticSupervisorChildKey, StaticProcessId>,
     supervisor_pid: StaticProcessId,
+    stop_reason: StaticStopReason,
 ) -> Result<()> {
     let supervisor_index = static_process_index_for_pid(instances, supervisor_pid)?;
     if instances[supervisor_index].status != StaticProcessStatus::Running {
@@ -100,8 +118,16 @@ fn stop_static_supervised_children(
             if instances[child_index].status != StaticProcessStatus::Running {
                 continue;
             }
-            stop_static_supervised_children(processes, instances, supervisor_children, child_pid)?;
+            stop_static_supervised_children(
+                processes,
+                instances,
+                supervisor_children,
+                child_pid,
+                stop_reason,
+            )?;
             instances[child_index].status = StaticProcessStatus::Stopped;
+            instances[child_index].stop_reason = Some(stop_reason);
+            instances[child_index].mailbox_state = StaticMailboxState::Closed;
         }
     }
     Ok(())

@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, VecDeque};
 use mantle_artifact::MAX_PROCESS_COUNT;
 
 use super::{
-    StaticProcessId, StaticProcessInstance, StaticProcessStatus, ensure_static_process_capacity,
+    StaticMailboxState, StaticProcessId, StaticProcessInstance, StaticProcessStatus,
+    ensure_static_process_capacity,
 };
 use crate::language::checked::{
     CheckedProcess, CheckedProcessId, CheckedSupervisorChildId, CheckedSupervisorId,
@@ -48,6 +49,8 @@ pub(super) fn spawn_static_instance(
         process_id,
         state: process.init_state(),
         status: StaticProcessStatus::Running,
+        stop_reason: None,
+        mailbox_state: StaticMailboxState::Open,
         supervisor_parent,
         mailbox: VecDeque::new(),
     });

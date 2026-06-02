@@ -1,11 +1,14 @@
 use super::boundaries::BoundarySendContext;
+use super::model::RuntimeMailboxState;
 use super::*;
+use crate::event::RuntimeStopReason;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DeliveryPreflightFailure {
     Full,
     Stopped,
     Crashed,
+    MailboxClosed,
 }
 
 impl DeliveryPreflightFailure {
@@ -14,6 +17,7 @@ impl DeliveryPreflightFailure {
             Self::Full => "Full",
             Self::Stopped => "Stopped",
             Self::Crashed => "Crashed",
+            Self::MailboxClosed => "MailboxClosed",
         }
     }
 }
@@ -152,11 +156,19 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         match process.status {
             ProcessStatus::Running => {}
             ProcessStatus::Stopped => {
-                return Ok(DeliveryPreflight::Failed(DeliveryPreflightFailure::Stopped));
+                return Ok(DeliveryPreflight::Failed(stopped_process_failure(
+                    process.stop_reason,
+                    process.mailbox_state,
+                )));
             }
             ProcessStatus::Failed => {
                 return Ok(DeliveryPreflight::Failed(DeliveryPreflightFailure::Crashed));
             }
+        }
+        if process.mailbox_state == RuntimeMailboxState::Closed {
+            return Ok(DeliveryPreflight::Failed(
+                DeliveryPreflightFailure::MailboxClosed,
+            ));
         }
         let projected_depth = process
             .mailbox
@@ -225,6 +237,22 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
     }
 }
 
+pub(super) fn stopped_process_failure(
+    stop_reason: Option<RuntimeStopReason>,
+    mailbox_state: RuntimeMailboxState,
+) -> DeliveryPreflightFailure {
+    match stop_reason {
+        Some(RuntimeStopReason::Normal) => DeliveryPreflightFailure::Stopped,
+        Some(RuntimeStopReason::SupervisorShutdown | RuntimeStopReason::SupervisorFailure) => {
+            DeliveryPreflightFailure::MailboxClosed
+        }
+        None if mailbox_state == RuntimeMailboxState::Closed => {
+            DeliveryPreflightFailure::MailboxClosed
+        }
+        None => DeliveryPreflightFailure::Stopped,
+    }
+}
+
 fn delivery_preflight_error(process_label: &str, failure: DeliveryPreflightFailure) -> Error {
     match failure {
         DeliveryPreflightFailure::Full => Error::new(format!(
@@ -236,6 +264,10 @@ fn delivery_preflight_error(process_label: &str, failure: DeliveryPreflightFailu
         )),
         DeliveryPreflightFailure::Crashed => Error::new(format!(
             "send to process {process_label} failed because it has failed"
+        )),
+        DeliveryPreflightFailure::MailboxClosed => Error::new(format!(
+            "mailbox for process {} is closed; message was not accepted",
+            process_label
         )),
     }
 }

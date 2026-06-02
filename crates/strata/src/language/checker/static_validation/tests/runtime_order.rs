@@ -34,6 +34,8 @@ fn static_process_lookup_indexes_by_pid() {
             process_id: checked_process_id(0),
             state: checked_state_id(0),
             status: StaticProcessStatus::Running,
+            stop_reason: None,
+            mailbox_state: StaticMailboxState::Open,
             supervisor_parent: None,
             mailbox: VecDeque::new(),
         },
@@ -44,6 +46,8 @@ fn static_process_lookup_indexes_by_pid() {
             process_id: checked_process_id(1),
             state: checked_state_id(0),
             status: StaticProcessStatus::Running,
+            stop_reason: None,
+            mailbox_state: StaticMailboxState::Open,
             supervisor_parent: None,
             mailbox: VecDeque::new(),
         },
@@ -68,6 +72,8 @@ fn static_process_lookup_rejects_unspawned_pid() {
         process_id: checked_process_id(0),
         state: checked_state_id(0),
         status: StaticProcessStatus::Running,
+        stop_reason: None,
+        mailbox_state: StaticMailboxState::Open,
         supervisor_parent: None,
         mailbox: VecDeque::new(),
     }];
@@ -158,6 +164,60 @@ fn static_spawn_outcome_capacity_exhaustion_binds_error_without_partial_subtree_
     );
     assert_eq!(execution.outcome.ty(), &outcome_ty);
     assert_eq!(execution.outcome.label(), "Err(Exhausted(Unit))");
+}
+
+#[test]
+fn static_send_outcome_running_closed_process_ref_returns_mailbox_closed() {
+    let processes = vec![
+        checked_process_with_declared_refs(1),
+        checked_process_with_supervised_targets(1, &[]),
+    ];
+    let execution = static_process_ref_send_outcome_for_test(
+        &processes,
+        StaticProcessStatus::Running,
+        None,
+        StaticMailboxState::Closed,
+    )
+    .expect("closed running mailbox should bind a typed send failure");
+
+    assert_eq!(execution.target_mailbox_len, 0);
+    assert_eq!(execution.outcome.label(), "Err(MailboxClosed(Start))");
+}
+
+#[test]
+fn static_send_outcome_normal_stop_returns_stopped() {
+    let processes = vec![
+        checked_process_with_declared_refs(1),
+        checked_process_with_supervised_targets(1, &[]),
+    ];
+    let execution = static_process_ref_send_outcome_for_test(
+        &processes,
+        StaticProcessStatus::Stopped,
+        Some(StaticStopReason::Normal),
+        StaticMailboxState::Closed,
+    )
+    .expect("normal stop should bind a typed stopped send failure");
+
+    assert_eq!(execution.target_mailbox_len, 0);
+    assert_eq!(execution.outcome.label(), "Err(Stopped(Start))");
+}
+
+#[test]
+fn static_supervisor_action_stop_returns_mailbox_closed() {
+    let processes = vec![
+        checked_process_with_supervised_targets(0, &[1]),
+        checked_process_with_supervised_targets(1, &[]),
+    ];
+    let execution = static_supervisor_child_send_outcome_for_test(
+        &processes,
+        StaticProcessStatus::Stopped,
+        Some(StaticStopReason::SupervisorAction),
+        StaticMailboxState::Closed,
+    )
+    .expect("supervisor-driven stop should bind a typed closed-mailbox send failure");
+
+    assert_eq!(execution.target_mailbox_len, 0);
+    assert_eq!(execution.outcome.label(), "Err(MailboxClosed(Start))");
 }
 
 #[test]

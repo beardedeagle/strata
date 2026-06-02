@@ -141,6 +141,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                         target.as_u32()
                     )));
                 }
+                self.ensure_local_spawn_backend_available(&step.process_name, *target)?;
                 self.ensure_process_ref_unbound(local_process_refs, step, process_ref.id)?;
                 let pid = self.spawn_process(*target, Some(step.pid))?;
                 self.bind_process_ref(local_process_refs, step, process_ref.id, pid)?;
@@ -202,6 +203,18 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                         target,
                         spawn.id,
                         RuntimeEffectOutcomeResult::Denied,
+                    ),
+                });
+        }
+        if !self.is_local_spawn_backend_available() {
+            return self
+                .spawn_error_outcome(outcome_ty, "BackendUnavailable")
+                .map(|payload| RuntimeEffectOutcomeExecution {
+                    payload,
+                    trace: RuntimeEffectOutcomeTrace::spawn(
+                        target,
+                        spawn.id,
+                        RuntimeEffectOutcomeResult::BackendUnavailable,
                     ),
                 });
         }
@@ -579,6 +592,9 @@ const fn effect_outcome_result_for_delivery_failure(
         super::delivery::DeliveryPreflightFailure::Full => RuntimeEffectOutcomeResult::Full,
         super::delivery::DeliveryPreflightFailure::Stopped => RuntimeEffectOutcomeResult::Stopped,
         super::delivery::DeliveryPreflightFailure::Crashed => RuntimeEffectOutcomeResult::Crashed,
+        super::delivery::DeliveryPreflightFailure::MailboxClosed => {
+            RuntimeEffectOutcomeResult::MailboxClosed
+        }
     }
 }
 

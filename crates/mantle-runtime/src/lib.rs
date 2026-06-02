@@ -30,7 +30,7 @@ pub use feature_declaration::{
 pub use host::{InMemoryRuntimeHost, RuntimeHost};
 pub use limits::{
     DEFAULT_MAX_DISPATCHES, DEFAULT_MAX_EMITTED_OUTPUT_BYTES, DEFAULT_MAX_RUNTIME_PROCESSES,
-    DEFAULT_MAX_TRACE_BYTES, RunLimits, SpawnAuthorityPolicy,
+    DEFAULT_MAX_TRACE_BYTES, LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy,
 };
 pub use program::RuntimePayload;
 pub use report::{

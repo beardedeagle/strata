@@ -1,8 +1,10 @@
+use super::super::model::RuntimeMailboxState;
 use super::support::*;
 use crate::host::RuntimeHost;
 use crate::program::LoadedAction;
 use crate::{
     RuntimeEffectOutcomeAction, RuntimeEffectOutcomeResult, RuntimeEvent, RuntimeProcessId,
+    RuntimeStopReason,
 };
 use mantle_artifact::{
     ArtifactEnumVariant, ArtifactSupervisorChild, ArtifactSupervisorChildMode,
@@ -23,15 +25,101 @@ const CRASH_MESSAGE: MessageId = MessageId::new(0);
 
 #[test]
 fn send_outcome_to_inactive_stopped_supervisor_child_returns_stopped() {
-    assert_inactive_supervisor_child_send_outcome(StepResult::Stop, "Err(Stopped(Crash))");
+    assert_inactive_supervisor_child_send_outcome(
+        StepResult::Stop,
+        "Err(Stopped(Crash))",
+        RuntimeEffectOutcomeResult::Stopped,
+    );
+}
+
+#[test]
+fn send_outcome_to_supervisor_shutdown_child_returns_mailbox_closed() {
+    let artifact = supervisor_send_outcome_artifact(StepResult::Stop);
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let mut host = InMemoryRuntimeHost::default();
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
+
+    let main_pid = run
+        .spawn_process(MAIN_PROCESS, None)
+        .expect("main process should spawn with temporary child");
+    let child_pid = current_child_pid(&run, main_pid);
+    run.stop_supervised_children(main_pid, RuntimeStopReason::SupervisorShutdown)
+        .expect("supervisor shutdown should close the child mailbox");
+    let child_index = run
+        .process_index_for_pid(child_pid)
+        .expect("stopped child pid should remain recorded");
+    assert_eq!(run.processes[child_index].status, ProcessStatus::Stopped);
+    assert_eq!(
+        run.processes[child_index].stop_reason,
+        Some(RuntimeStopReason::SupervisorShutdown)
+    );
+    assert_eq!(
+        run.processes[child_index].mailbox_state,
+        RuntimeMailboxState::Closed
+    );
+    let deliveries_before = run.delivered_messages.len();
+
+    assert_supervisor_child_send_outcome(
+        &mut run,
+        main_pid,
+        deliveries_before,
+        "Err(MailboxClosed(Crash))",
+        RuntimeEffectOutcomeResult::MailboxClosed,
+    );
+}
+
+#[test]
+fn bare_send_to_supervisor_shutdown_child_fails_before_acceptance() {
+    let artifact = supervisor_send_outcome_artifact(StepResult::Stop);
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let mut host = InMemoryRuntimeHost::default();
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, RunLimits::default());
+
+    let main_pid = run
+        .spawn_process(MAIN_PROCESS, None)
+        .expect("main process should spawn with temporary child");
+    let child_pid = current_child_pid(&run, main_pid);
+    run.stop_supervised_children(main_pid, RuntimeStopReason::SupervisorShutdown)
+        .expect("supervisor shutdown should close the child mailbox");
+    let child_index = run
+        .process_index_for_pid(child_pid)
+        .expect("stopped child pid should remain recorded");
+    let deliveries_before = run.delivered_messages.len();
+
+    let err = run
+        .send_message(
+            child_pid,
+            RuntimeMessageEnvelope::new(CRASH_MESSAGE, None),
+            Some(main_pid),
+        )
+        .expect_err("bare send to supervisor-shutdown child should fail before acceptance");
+
+    assert_eq!(
+        err.to_string(),
+        "mailbox for process Worker is closed; message was not accepted"
+    );
+    assert_eq!(run.processes[child_index].mailbox.len(), 0);
+    assert_eq!(run.delivered_messages.len(), deliveries_before);
 }
 
 #[test]
 fn send_outcome_to_inactive_failed_supervisor_child_returns_crashed() {
-    assert_inactive_supervisor_child_send_outcome(StepResult::Panic, "Err(Crashed(Crash))");
+    assert_inactive_supervisor_child_send_outcome(
+        StepResult::Panic,
+        "Err(Crashed(Crash))",
+        RuntimeEffectOutcomeResult::Crashed,
+    );
 }
 
-fn assert_inactive_supervisor_child_send_outcome(exit: StepResult, expected: &str) {
+fn assert_inactive_supervisor_child_send_outcome(
+    exit: StepResult,
+    expected: &str,
+    expected_result: RuntimeEffectOutcomeResult,
+) {
     let artifact = supervisor_send_outcome_artifact(exit);
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
@@ -54,6 +142,22 @@ fn assert_inactive_supervisor_child_send_outcome(exit: StepResult, expected: &st
     assert_eq!(current_child_pid_opt(&run, main_pid), None);
     let deliveries_before = run.delivered_messages.len();
 
+    assert_supervisor_child_send_outcome(
+        &mut run,
+        main_pid,
+        deliveries_before,
+        expected,
+        expected_result,
+    );
+}
+
+fn assert_supervisor_child_send_outcome(
+    run: &mut RuntimeRun<'_, '_, '_, InMemoryRuntimeHost>,
+    main_pid: RuntimeProcessId,
+    deliveries_before: usize,
+    expected: &str,
+    expected_result: RuntimeEffectOutcomeResult,
+) {
     let step = main_step(main_pid);
     let action = LoadedAction::SendOutcome {
         outcome: EffectOutcomeId::new(0),
@@ -72,7 +176,7 @@ fn assert_inactive_supervisor_child_send_outcome(exit: StepResult, expected: &st
 
     let handled = run
         .execute_prestate_action(&mut refs, &step, &action, &mut outcomes)
-        .expect("inactive supervisor child should bind typed send failure");
+        .expect("supervisor child should bind typed send failure");
 
     assert!(handled);
     assert_eq!(outcomes[0].payload.label(), expected);
@@ -88,17 +192,8 @@ fn assert_inactive_supervisor_child_send_outcome(exit: StepResult, expected: &st
             port_id: None,
             outcome_result,
             ..
-        } if *outcome_id == EffectOutcomeId::new(0)
-            && *outcome_result == expected_inactive_child_result(exit)
+        } if *outcome_id == EffectOutcomeId::new(0) && *outcome_result == expected_result
     )));
-}
-
-const fn expected_inactive_child_result(exit: StepResult) -> RuntimeEffectOutcomeResult {
-    match exit {
-        StepResult::Stop => RuntimeEffectOutcomeResult::Stopped,
-        StepResult::Panic => RuntimeEffectOutcomeResult::Crashed,
-        StepResult::Continue => RuntimeEffectOutcomeResult::Ok,
-    }
 }
 
 fn supervisor_send_outcome_artifact(exit: StepResult) -> MantleArtifact {

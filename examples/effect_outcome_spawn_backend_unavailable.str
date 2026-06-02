@@ -1,0 +1,41 @@
+module effect_outcome_spawn_backend_unavailable;
+
+record MainState;
+record WorkerState;
+enum MainMsg { Start }
+enum WorkerMsg { Work }
+enum Bool { False, True }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn] ~ [] @det {
+        let spawn_result: Result<ProcessRef<Worker>,SpawnError<Unit>> = spawn Worker;
+        if (spawn_result == Err(BackendUnavailable(Unit))) {
+            emit "spawn backend unavailable";
+        } else {
+            emit "spawn backend available";
+        }
+        return Stop(state);
+    }
+}
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

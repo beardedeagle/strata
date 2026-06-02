@@ -1,12 +1,13 @@
 use super::support::*;
 use crate::{
     ProcessStatus, RuntimeEffectOutcomeAction, RuntimeEffectOutcomeResult, RuntimeEvent,
-    RuntimeProcessId,
+    RuntimeProcessId, RuntimeStopReason,
 };
 use mantle_artifact::{ArtifactAction, ArtifactSendTarget, EffectOutcomeId};
 
 mod boundary;
 mod direct_send_failures;
+mod spawn_failures;
 
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
 const WORKER_PROCESS: ProcessId = ProcessId::new(1);
@@ -396,6 +397,8 @@ fn loaded_admission_rejects_spawn_outcome_type_without_process_ref_success() {
 
 fn assert_direct_send_outcome_failure(
     status: ProcessStatus,
+    stop_reason: Option<RuntimeStopReason>,
+    close_mailbox: bool,
     expected: &str,
     expected_result: RuntimeEffectOutcomeResult,
 ) {
@@ -416,6 +419,10 @@ fn assert_direct_send_outcome_failure(
         .process_index_for_pid(worker_pid)
         .expect("worker pid should resolve");
     run.processes[worker_index].status = status;
+    run.processes[worker_index].stop_reason = stop_reason;
+    if close_mailbox {
+        run.processes[worker_index].close_mailbox();
+    }
 
     let mut process_refs = LocalProcessRefs::new(1);
     process_refs

@@ -256,13 +256,15 @@ let send_result: Result<Unit,SendError<WorkerMsg>> = send worker Work;
 Send outcomes commit accepted messages as `Ok(Unit)` and return typed
 pre-acceptance failures such as `Full(message)`, `Stopped(message)`,
 `Crashed(message)`, or `MailboxClosed(message)` while preserving the original
-message value. The current local runtime can produce `Full`, `Stopped`, and
-already-failed `Crashed`; `MailboxClosed` remains part of the typed contract for
-closed mailbox boundaries. Local spawn outcomes return
+message value. `Stopped` is produced for a receiver whose normal stop remains
+observable; `MailboxClosed` is reserved for explicit mailbox closure,
+supervisor-driven shutdown, policy closure, or indistinguishable closed-state
+rejection. Local spawn outcomes return
 `Result<ProcessRef<Target>,SpawnError<Unit>>`: accepted spawns commit the new
 process and return its typed process reference. If Mantle denies admitted spawn
 authority before acceptance, the outcome is `Err(Denied(Unit))`; process
-capacity exhaustion returns `Err(Exhausted(Unit))`. Outcome values are immutable
+capacity exhaustion returns `Err(Exhausted(Unit))`; an unavailable local spawn
+backend returns `Err(BackendUnavailable(Unit))` before a child is admitted. Outcome values are immutable
 and step-local; process references remain authority values and are not storable
 source state.
 

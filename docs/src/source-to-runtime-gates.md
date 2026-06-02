@@ -152,8 +152,9 @@ just run-example runtime_loop_element_projection
 just run-example effect_outcomes
 just run-example effect_outcome_mailbox_full
 just run-example effect_outcome_stopped_target
-# Default-limit acceptance only; the exhausted branch uses the dedicated gate below.
+# Default-limit acceptance only; the exhausted/backend-unavailable branches use dedicated gates below.
 just run-example effect_outcome_spawn_exhausted
+just run-example effect_outcome_spawn_backend_unavailable
 just run-example local_supervision_restart
 just run-example local_supervision_permanent_stop
 just run-example local_supervision_temporary
@@ -164,9 +165,10 @@ just run-example local_supervision_inactive_crashed_send_outcome
 ```
 
 `run-example` uses default runtime limits and policies. For
-`effect_outcome_spawn_exhausted`, it proves the checked source still runs with
-available capacity; the source-visible exhausted branch uses the dedicated
-command below.
+`effect_outcome_spawn_exhausted` and
+`effect_outcome_spawn_backend_unavailable`, it proves the checked source still
+runs with available local spawn capacity/backend; the source-visible failure
+branches use the dedicated commands below.
 
 The local spawn authority denial gate uses the same check/build path and then
 runs Mantle with denied admitted spawn authority:
@@ -186,8 +188,22 @@ just strata-build examples/effect_outcome_spawn_exhausted.str
 just mantle-run-max-runtime-processes target/strata/effect_outcome_spawn_exhausted.mta 1
 ```
 
-The exhausted-spawn and inactive-crashed-child send gates also assert
-`effect_outcome_bound` trace events. Those events carry the numeric
+The local spawn backend-unavailable gate uses the same check/build path and then
+runs Mantle with the bounded local backend disabled before acceptance:
+
+```sh
+just strata-check examples/effect_outcome_spawn_backend_unavailable.str
+just strata-build examples/effect_outcome_spawn_backend_unavailable.str
+just mantle-run-disable-local-spawn-backend target/strata/effect_outcome_spawn_backend_unavailable.mta
+```
+
+The exhausted-spawn, backend-unavailable-spawn, stopped-target send, and
+inactive-crashed-child send gates also assert `effect_outcome_bound` trace
+events. Runtime-unit and trace-validation coverage separately exercise
+`MailboxClosed` for closed-mailbox send outcomes; the current source surface
+keeps lexical supervisor children from becoming first-class `ProcessRef`
+payloads, so that closed-mailbox runtime path is not presented as a
+source-to-runtime gate. These trace events carry the numeric
 `outcome_id`, the `spawn` or `send` action kind, and the closed
 `outcome_result` category so the branch result is attributable to Mantle
 runtime cause rather than inferred only from output text.

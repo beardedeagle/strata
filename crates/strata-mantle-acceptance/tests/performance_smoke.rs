@@ -6,8 +6,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use mantle_runtime::{
-    InMemoryRuntimeHost, RunLimits, SpawnAuthorityPolicy, run_artifact_with_host,
-    run_artifact_with_limits,
+    InMemoryRuntimeHost, LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy,
+    run_artifact_with_host, run_artifact_with_limits,
 };
 
 const PERFORMANCE_BASELINE: &str = include_str!("../../../benchmarks/performance-smoke.baseline");
@@ -75,6 +75,7 @@ const PERF_RUN_LIMITS: RunLimits = RunLimits {
     max_trace_bytes: 256 * 1024,
     max_emitted_output_bytes: 64 * 1024,
     spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
+    local_spawn_backend: LocalSpawnBackend::Available,
 };
 #[test]
 #[ignore = "run through `just performance-smoke` so timing checks stay explicit"]
