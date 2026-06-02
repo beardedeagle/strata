@@ -646,25 +646,17 @@ before state resolution so outcome sends can target them. Process-reference
 spawns after ordinary effects execute in ordinary source order and cannot be
 used by later outcome bindings.
 
-For local send outcomes, Mantle checks the target process, status, and mailbox
-capacity before accepting the message. Accepted sends are committed and return
-`Ok(Unit)`. Pre-acceptance local failures return `Err(Full(message))`,
-`Err(Stopped(message))`, `Err(Crashed(message))`, or
-`Err(MailboxClosed(message))` with the original message value preserved. The
-current local runtime can produce full, stopped, and crashed outcomes,
-including inactive supervisor-child slots; it does not yet expose a distinct
-source-created closed-mailbox lifecycle. If the message carries a direct
-`ProcessRef<T>` payload, the failure outcome preserves the runtime
-process-reference metadata with the message value;
-it does not turn that authority into storable source state.
+For local send outcomes, Mantle checks target process, status, and mailbox capacity before accepting the message. Accepted sends commit and return `Ok(Unit)`; pre-acceptance failures return `Err(Full(message))`, `Err(Stopped(message))`, `Err(Crashed(message))`, or `Err(MailboxClosed(message))` with the original message preserved. Current runtime handles full, stopped, and failed-target crashed outcomes; checked source currently exposes `Crashed(M)` through inactive supervisor children. Ordinary source-created `Panic(...)` fails before a later sender can recover the target; closed-mailbox lifecycle remains unexposed, and direct `ProcessRef<T>` message metadata does not become storable source state.
 
-For local spawn outcomes, accepted spawns commit the new process and return
-`Ok(process_ref)` with a typed `ProcessRef<TargetProcess>` payload. If process
-authority is denied by the admitted runtime policy before acceptance, Mantle
-returns `Err(Denied(Unit))`. If process capacity is exhausted before the spawn is
-accepted, Mantle returns `Err(Exhausted(Unit))`. Bare statement `send` and
-`spawn` still fail closed: pre-acceptance failure is reported as a runtime error
-instead of being silently dropped.
+For local spawn outcomes, accepted spawns commit the new process and return `Ok(process_ref)` with a typed `ProcessRef<TargetProcess>` payload. If process authority is denied by the admitted runtime policy before acceptance, Mantle returns `Err(Denied(Unit))`; if process capacity is exhausted before acceptance, Mantle returns `Err(Exhausted(Unit))`. Bare statement `send` and `spawn` still fail closed: pre-acceptance failure is reported as a runtime error instead of being silently dropped.
+
+The `mantle run` CLI accepts `--max-runtime-processes N` for bounded local execution and rejects missing, zero, non-integer, and overflowed values before execution. With `--max-runtime-processes 1`, the exhausted-spawn example observes `Err(Exhausted(Unit))` after the entry process consumes capacity; no `Worker` is admitted or executed.
+Mantle records each typed outcome binding as `effect_outcome_bound` trace
+evidence with the numeric `outcome_id`, outcome action, target process ID, and
+closed result category. The event proves whether a source-visible outcome came
+from accepted runtime work, denied spawn authority, exhausted process capacity,
+or a pre-acceptance send failure without using source binding names as runtime
+dispatch keys.
 
 Outcome values can also drive follow-up effects through ordinary immutable
 branching:
@@ -687,15 +679,7 @@ These conditions branch on a typed built-in variant pattern. They do not add
 structural equality for preserved message payloads, and they do not compare
 process-reference identities from `Ok(process_ref)` spawn outcomes.
 
-`examples/effect_outcome_mailbox_full.str` and
-`examples/effect_outcome_stopped_target.str` exercise source-to-runtime
-pre-acceptance send failure outcomes. `examples/effect_outcome_spawn_denied.str`
-checks and builds an authorized local spawn site, then runs Mantle with denied
-spawn admission to observe `Err(Denied(Unit))` before process acceptance. Direct
-Mantle runtime tests exercise `Crashed(M)` for targets already failed before
-acceptance, and admission tests cover the required `MailboxClosed(M)` send-error
-shape. A source-created `Panic(...)` currently records failure evidence and
-fails the run before a later source sender can observe that crashed target.
+`examples/effect_outcome_mailbox_full.str`, `examples/effect_outcome_stopped_target.str`, and `examples/local_supervision_inactive_crashed_send_outcome.str` exercise source-to-runtime pre-acceptance send failure outcomes; the crashed-child gate sends to an inactive temporary supervised child and observes `Err(Crashed(message))` without replaying the consumed crash message. The denied- and exhausted-spawn examples check/build the same typed local spawn outcome shape, then run Mantle with denied admission or an exhausted process limit. Admission tests cover the required `MailboxClosed(M)` send-error shape, while mailbox-close lifecycle and backend-unavailable source behavior remain unexposed.
 
 Current pattern-matching closure boundaries:
 

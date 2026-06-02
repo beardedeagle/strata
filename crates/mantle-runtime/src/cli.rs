@@ -11,6 +11,9 @@ use crate::{
     render_runtime_feature_declaration, run_artifact_path_with_limits,
 };
 
+const MANTLE_RUN_USAGE: &str =
+    "mantle run <artifact.mta> [--deny-spawn-authority] [--max-runtime-processes N]";
+
 pub fn mantle_main<I>(args: I) -> Result<()>
 where
     I: IntoIterator<Item = String>,
@@ -19,7 +22,7 @@ where
     let _program = args.next();
     match args.next().as_deref() {
         Some("run") => {
-            let path = required_path(args.next(), "mantle run <artifact.mta>")?;
+            let path = required_path(args.next(), MANTLE_RUN_USAGE)?;
             let limits = run_limits_from_args(args)?;
             let report = run_artifact_path_with_limits(&path, limits)?;
             println!("mantle: loaded {}", report.artifact_path.display());
@@ -111,15 +114,55 @@ fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
 
 fn run_limits_from_args(args: impl IntoIterator<Item = String>) -> Result<RunLimits> {
     let mut limits = RunLimits::default();
-    for arg in args {
+    let mut max_runtime_processes_seen = false;
+    let mut rest = args.into_iter();
+    while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--deny-spawn-authority" => {
                 limits.spawn_authority_policy = SpawnAuthorityPolicy::DenyDeclared;
             }
+            "--max-runtime-processes" => {
+                if max_runtime_processes_seen {
+                    return Err(Error::new("duplicate --max-runtime-processes argument"));
+                }
+                max_runtime_processes_seen = true;
+                let value =
+                    required_positive_integer_flag_value(&mut rest, "--max-runtime-processes")?;
+                limits.max_runtime_processes =
+                    parse_positive_usize_flag("--max-runtime-processes", &value)?;
+            }
             other => return Err(Error::new(format!("unexpected argument: {other}"))),
         }
     }
+    limits.validate()?;
     Ok(limits)
+}
+
+fn required_positive_integer_flag_value(
+    rest: &mut impl Iterator<Item = String>,
+    flag: &str,
+) -> Result<String> {
+    let value = rest.next().ok_or_else(|| missing_flag_value_error(flag))?;
+    if value.starts_with("--") {
+        return Err(missing_flag_value_error(flag));
+    }
+    Ok(value)
+}
+
+fn missing_flag_value_error(flag: &str) -> Error {
+    Error::new(format!("missing {flag} value; usage: {MANTLE_RUN_USAGE}"))
+}
+
+fn parse_positive_usize_flag(flag: &str, value: &str) -> Result<usize> {
+    let parsed = value.parse::<usize>().map_err(|_| {
+        Error::new(format!(
+            "invalid {flag} value {value:?}; expected a positive integer fitting usize"
+        ))
+    })?;
+    if parsed == 0 {
+        return Err(Error::new(format!("{flag} must be greater than zero")));
+    }
+    Ok(parsed)
 }
 
 fn authority_summary_format_from_args(
@@ -321,7 +364,7 @@ fn print_summary(summary: &str) {
 
 fn print_mantle_usage() {
     println!("usage:");
-    println!("  mantle run <path.mta> [--deny-spawn-authority]");
+    println!("  {MANTLE_RUN_USAGE}");
     println!("  mantle inspect-authority <path.mta> [--format text|json]");
     println!("  mantle feature-declaration [--format text|json]");
     println!("  mantle admit <path.mta> [--format text|json]");
@@ -334,6 +377,99 @@ pub fn run_mantle_from_env() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_limits_parser_accepts_runtime_process_limit() {
+        let limits = run_limits_from_args([
+            "--max-runtime-processes".to_string(),
+            "1".to_string(),
+            "--deny-spawn-authority".to_string(),
+        ])
+        .expect("run limits should parse");
+
+        assert_eq!(limits.max_runtime_processes, 1);
+        assert_eq!(
+            limits.spawn_authority_policy,
+            SpawnAuthorityPolicy::DenyDeclared
+        );
+    }
+
+    #[test]
+    fn run_limits_parser_rejects_missing_runtime_process_limit_value() {
+        let err = run_limits_from_args(["--max-runtime-processes".to_string()])
+            .expect_err("missing runtime process limit should fail");
+
+        assert!(
+            err.to_string()
+                .contains("missing --max-runtime-processes value")
+        );
+    }
+
+    #[test]
+    fn run_limits_parser_rejects_flag_token_as_missing_runtime_process_limit_value() {
+        let err = run_limits_from_args([
+            "--max-runtime-processes".to_string(),
+            "--deny-spawn-authority".to_string(),
+        ])
+        .expect_err("flag token cannot stand in for runtime process limit");
+
+        assert!(
+            err.to_string()
+                .contains("missing --max-runtime-processes value")
+        );
+    }
+
+    #[test]
+    fn run_limits_parser_rejects_duplicate_runtime_process_limit() {
+        let err = run_limits_from_args([
+            "--max-runtime-processes".to_string(),
+            "1".to_string(),
+            "--max-runtime-processes".to_string(),
+            "2".to_string(),
+        ])
+        .expect_err("duplicate runtime process limit should fail");
+
+        assert!(
+            err.to_string()
+                .contains("duplicate --max-runtime-processes argument")
+        );
+    }
+
+    #[test]
+    fn run_limits_parser_rejects_zero_runtime_process_limit() {
+        let err = run_limits_from_args(["--max-runtime-processes".to_string(), "0".to_string()])
+            .expect_err("zero runtime process limit should fail");
+
+        assert!(
+            err.to_string()
+                .contains("--max-runtime-processes must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn run_limits_parser_rejects_invalid_runtime_process_limit() {
+        let err = run_limits_from_args(["--max-runtime-processes".to_string(), "many".to_string()])
+            .expect_err("invalid runtime process limit should fail");
+
+        assert!(
+            err.to_string()
+                .contains("invalid --max-runtime-processes value \"many\"")
+        );
+    }
+
+    #[test]
+    fn run_limits_parser_rejects_overflowed_runtime_process_limit() {
+        let err = run_limits_from_args([
+            "--max-runtime-processes".to_string(),
+            "184467440737095516160".to_string(),
+        ])
+        .expect_err("overflowed runtime process limit should fail");
+
+        assert!(
+            err.to_string()
+                .contains("invalid --max-runtime-processes value")
+        );
+    }
 
     #[test]
     fn authority_summary_format_parser_accepts_json() {

@@ -1,5 +1,7 @@
 use super::support::*;
-use crate::RuntimeProcessId;
+use crate::{
+    RuntimeEffectOutcomeAction, RuntimeEffectOutcomeResult, RuntimeEvent, RuntimeProcessId,
+};
 use mantle_artifact::{
     ArtifactAction, ArtifactSupervisorChild, ArtifactSupervisorChildMode, ArtifactSupervisorPlan,
     ArtifactSupervisorRestartIntensity, ArtifactSupervisorStrategy, EffectOutcomeId,
@@ -47,6 +49,19 @@ fn runtime_spawn_outcome_returns_exhausted_before_supervised_subtree_partial_spa
     assert_eq!(effect_outcomes[0].payload.label(), "Err(Exhausted(Unit))");
     assert_eq!(run.processes.len(), 1);
     assert_eq!(run.spawned_processes.len(), 1);
+    assert!(run.host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::EffectOutcomeBound {
+            outcome_id,
+            action: RuntimeEffectOutcomeAction::Spawn,
+            target_process_id: WORKER_PROCESS,
+            spawn_site_id: Some(SPAWN_SITE),
+            message_id: None,
+            port_id: None,
+            outcome_result: RuntimeEffectOutcomeResult::Exhausted,
+            ..
+        } if *outcome_id == EffectOutcomeId::new(0)
+    )));
 }
 
 fn spawn_outcome_artifact() -> MantleArtifact {

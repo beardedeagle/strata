@@ -1,7 +1,9 @@
 use super::support::*;
-use crate::RuntimeProcessId;
 use crate::host::RuntimeHost;
 use crate::program::LoadedAction;
+use crate::{
+    RuntimeEffectOutcomeAction, RuntimeEffectOutcomeResult, RuntimeEvent, RuntimeProcessId,
+};
 use mantle_artifact::{
     ArtifactEnumVariant, ArtifactSupervisorChild, ArtifactSupervisorChildMode,
     ArtifactSupervisorPlan, ArtifactSupervisorRestartIntensity, ArtifactSupervisorStrategy,
@@ -75,6 +77,28 @@ fn assert_inactive_supervisor_child_send_outcome(exit: StepResult, expected: &st
     assert!(handled);
     assert_eq!(outcomes[0].payload.label(), expected);
     assert_eq!(run.delivered_messages.len(), deliveries_before);
+    assert!(run.host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::EffectOutcomeBound {
+            outcome_id,
+            action: RuntimeEffectOutcomeAction::Send,
+            target_process_id: WORKER_PROCESS,
+            spawn_site_id: None,
+            message_id: Some(CRASH_MESSAGE),
+            port_id: None,
+            outcome_result,
+            ..
+        } if *outcome_id == EffectOutcomeId::new(0)
+            && *outcome_result == expected_inactive_child_result(exit)
+    )));
+}
+
+const fn expected_inactive_child_result(exit: StepResult) -> RuntimeEffectOutcomeResult {
+    match exit {
+        StepResult::Stop => RuntimeEffectOutcomeResult::Stopped,
+        StepResult::Panic => RuntimeEffectOutcomeResult::Crashed,
+        StepResult::Continue => RuntimeEffectOutcomeResult::Ok,
+    }
 }
 
 fn supervisor_send_outcome_artifact(exit: StepResult) -> MantleArtifact {

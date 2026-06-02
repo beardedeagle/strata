@@ -25,6 +25,7 @@ result of the first invalid shape.
 | `target requirements do not declare required runtime feature ...` | The artifact uses a typed runtime construct that is missing from its target-requirement block. | Rebuild the artifact from checked source; Mantle derives required features from decoded `.mta` tables and fails closed on underdeclared requirements. |
 | `target runtime feature ... is not supported by this Mantle runtime` | The artifact requires a runtime feature outside the current Mantle declaration, such as remote spawn/send or distributed transport. | Use only currently implemented local runtime features or run on a Mantle runtime that declares the required feature. |
 | `target requirement runtime features must be sorted` / `duplicate target requirement runtime feature` | A malformed artifact target-requirement block is not canonical. | Rebuild the artifact from checked source; Mantle fails closed on malformed requirement fields. |
+| `missing --max-runtime-processes value` / `invalid --max-runtime-processes value` / `--max-runtime-processes must be greater than zero` | `mantle run` received a missing, non-integer, overflowed, or zero runtime process limit. | Pass a positive integer, for example `mantle run target/strata/effect_outcome_spawn_exhausted.mta --max-runtime-processes 1`. |
 
 ## Common Source Errors
 

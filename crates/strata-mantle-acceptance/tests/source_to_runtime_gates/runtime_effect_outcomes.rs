@@ -148,6 +148,17 @@ fn effect_outcomes_check_build_run_and_return_denied_before_spawn_acceptance() {
     assert_trace_event(
         &trace,
         &[
+            r#""event":"effect_outcome_bound""#,
+            r#""outcome_id":0"#,
+            r#""action":"spawn""#,
+            r#""target_process_id":1"#,
+            r#""spawn_site_id":0"#,
+            r#""outcome_result":"denied""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
             r#""event":"spawn_authority_checked""#,
             r#""target_process_id":1"#,
             r#""spawn_site_id":0"#,
@@ -156,6 +167,77 @@ fn effect_outcomes_check_build_run_and_return_denied_before_spawn_acceptance() {
             r#""authority_result":"denied""#,
         ],
     );
+    assert!(!trace.contains(r#""event":"process_spawned","pid":2"#));
+}
+
+#[test]
+fn effect_outcomes_check_build_run_and_return_exhausted_before_spawn_acceptance() {
+    let gate = GateHarness::new();
+    gate.check("examples/effect_outcome_spawn_exhausted.str");
+    gate.build(
+        "examples/effect_outcome_spawn_exhausted.str",
+        "target/strata/effect_outcome_spawn_exhausted.mta",
+    );
+    gate.remove_trace("effect_outcome_spawn_exhausted");
+
+    let run = gate.run_mantle_success_with_args(
+        "target/strata/effect_outcome_spawn_exhausted.mta",
+        &["--max-runtime-processes", "1"],
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("spawn exhausted"));
+    assert!(!stdout.contains("spawn accepted"));
+    assert!(!stdout.contains("mantle: spawned Worker pid=2"));
+
+    let artifact = gate.read_artifact("target/strata/effect_outcome_spawn_exhausted.mta");
+    let encoded = artifact.encode();
+    let main = artifact_process(&artifact, "Main");
+    let transition = main
+        .transitions
+        .first()
+        .expect("Main should have a Start transition");
+    assert!(matches!(
+        transition.actions.as_slice(),
+        [
+            ArtifactAction::SpawnOutcome {
+                outcome,
+                target,
+                ..
+            },
+            ArtifactAction::IfElse { .. }
+        ] if *outcome == EffectOutcomeId::new(0) && *target == ProcessId::new(1)
+    ));
+    assert!(
+        !encoded.contains("spawn_result"),
+        "effect outcome binding names must not lower as runtime dispatch meaning"
+    );
+
+    let trace = gate.read_trace("effect_outcome_spawn_exhausted");
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"spawn_authority_checked""#,
+            r#""target_process_id":1"#,
+            r#""spawn_site_id":0"#,
+            r#""authority_id":0"#,
+            r#""spawn_kind":"dynamic_local""#,
+            r#""authority_result":"accepted""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"effect_outcome_bound""#,
+            r#""outcome_id":0"#,
+            r#""action":"spawn""#,
+            r#""target_process_id":1"#,
+            r#""spawn_site_id":0"#,
+            r#""outcome_result":"exhausted""#,
+        ],
+    );
+    assert!(trace.contains(r#""event":"branch_selected""#));
+    assert!(trace.contains(r#""branch":"then""#));
+    assert!(trace.contains(r#""text":"spawn exhausted""#));
     assert!(!trace.contains(r#""event":"process_spawned","pid":2"#));
 }
 

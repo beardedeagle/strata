@@ -1,7 +1,7 @@
 use super::RuntimeEvent;
 use format::{
     BranchPathJson, IoFmtWriter, JsonLenCounter, JsonStr, LoopContextJson, NullableProcessId,
-    NullableU64, PayloadJson, TraceSchemaJson,
+    NullableU64, OptionalU32Field, PayloadJson, TraceSchemaJson,
 };
 use mantle_artifact::{Error, Result};
 use std::fmt;
@@ -217,6 +217,32 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             message_id.as_u32(),
             JsonStr(message),
             boundary_result.as_str(),
+            TraceSchemaJson
+        ),
+        RuntimeEvent::EffectOutcomeBound {
+            pid,
+            process_id,
+            process,
+            outcome_id,
+            action,
+            target_process_id,
+            spawn_site_id,
+            message_id,
+            port_id,
+            outcome_result,
+        } => write!(
+            output,
+            "{{\"event\":\"effect_outcome_bound\",\"pid\":{},\"process_id\":{},\"process\":\"{}\",\"outcome_id\":{},\"action\":\"{}\",\"target_process_id\":{}{}{}{},\"outcome_result\":\"{}\"{}",
+            pid.as_u64(),
+            process_id.as_u32(),
+            JsonStr(process),
+            outcome_id.as_u32(),
+            action.as_str(),
+            target_process_id.as_u32(),
+            OptionalU32Field::new("spawn_site_id", spawn_site_id.map(|id| id.as_u32())),
+            OptionalU32Field::new("message_id", message_id.map(|id| id.as_u32())),
+            OptionalU32Field::new("port_id", port_id.map(|id| id.as_u32())),
+            outcome_result.as_str(),
             TraceSchemaJson
         ),
         RuntimeEvent::BranchSelected {

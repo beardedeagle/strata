@@ -226,7 +226,10 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
     ProofDomain {
         id: "typed-effect-outcomes",
         title: "Typed effect outcomes and commit-or-return behavior",
-        feature_ids: &["typed-effect-outcomes"],
+        feature_ids: &[
+            "typed-effect-outcomes",
+            "source-visible-local-effect-failure-outcomes",
+        ],
         obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
     },
     ProofDomain {

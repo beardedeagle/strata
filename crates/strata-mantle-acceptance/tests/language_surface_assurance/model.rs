@@ -283,6 +283,7 @@ pub(crate) mod expected {
         "return-match-action-blocks",
         "typed-scalar-value-operators",
         "typed-effect-outcomes",
+        "source-visible-local-effect-failure-outcomes",
         "typed-component-protocol-port-boundaries",
         "checked-component-composition-admission",
         "checked-ir-and-typed-id-boundary",
