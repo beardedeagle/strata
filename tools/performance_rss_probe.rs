@@ -7,7 +7,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use mantle_runtime::{
-    InMemoryRuntimeHost, RunLimits, SpawnAuthorityPolicy, run_artifact_with_host,
+    InMemoryRuntimeHost, LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy,
+    run_artifact_with_host,
 };
 
 const PROFILE_ENV: &str = "STRATA_RSS_PROBE_PROFILE";
@@ -67,7 +68,7 @@ fn perf_run_limits() -> RunLimits {
         max_trace_bytes: 256 * 1024,
         max_emitted_output_bytes: 64 * 1024,
         spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
-        ..RunLimits::default()
+        local_spawn_backend: LocalSpawnBackend::Available,
     }
 }
 
