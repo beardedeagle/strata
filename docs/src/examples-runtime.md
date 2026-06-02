@@ -165,14 +165,19 @@ Key source ideas:
 - The artifact uses typed outcome IDs and value templates, not source binding
   names, for runtime meaning.
 - `effect_outcome_mailbox_full`, `effect_outcome_stopped_target`, and
-  `effect_outcome_crashed_target` cover pre-acceptance failure, stopped/already
-  failed targets, and the current fail-closed source-created panic boundary.
+  `effect_outcome_crashed_target` cover pre-acceptance capacity failure,
+  normally stopped targets, and the current fail-closed
+  source-created panic boundary.
 - `effect_outcome_spawn_denied` covers denied admitted spawn authority before a
   `Worker` instance is accepted.
 - `effect_outcome_spawn_exhausted` covers process-capacity exhaustion before a
   `Worker` is accepted under `--max-runtime-processes 1`; the exhausted branch
   emits without admitting or executing the child. The runtime trace records
   `effect_outcome_bound` with `outcome_result:"exhausted"`.
+- `effect_outcome_spawn_backend_unavailable` covers a disabled local spawn
+  backend under `--disable-local-spawn-backend`; the backend-unavailable branch
+  emits without binding a process reference, admitting a child, or dispatching
+  from source names.
 - The local supervision examples cover lexical child sends, explicit restart
   intensity, child modes, stopped- and crashed-child send outcomes, and restart
   traces without replaying consumed messages; crashed-child send outcomes

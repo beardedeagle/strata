@@ -156,8 +156,8 @@ Example shape:
 typed IDs. Labels are diagnostics and trace metadata only. A
 `boundary_result` of `accepted` is emitted only for typed-port sends that proceed
 on the same runtime path as mailbox acceptance. A typed send outcome that returns
-`Full`, `Stopped`, or `Crashed` before mailbox acceptance does not emit an
-accepted boundary event. Invalid or denied boundary shapes fail artifact or
+`Full`, `Stopped`, `Crashed`, or `MailboxClosed` before mailbox acceptance
+does not emit an accepted boundary event. Invalid or denied boundary shapes fail artifact or
 loaded-program admission before runtime dispatch.
 
 ## Effect Outcome Bound
@@ -165,15 +165,15 @@ loaded-program admission before runtime dispatch.
 Example shapes:
 
 ```json
-{"event":"effect_outcome_bound","pid":1,"process_id":0,"process":"Main","outcome_id":0,"action":"spawn","target_process_id":1,"spawn_site_id":0,"outcome_result":"exhausted","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
-{"event":"effect_outcome_bound","pid":1,"process_id":0,"process":"Main","outcome_id":1,"action":"send","target_process_id":1,"message_id":0,"outcome_result":"crashed","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"effect_outcome_bound","pid":1,"process_id":0,"process":"Main","outcome_id":0,"action":"spawn","target_process_id":1,"spawn_site_id":0,"outcome_result":"backend_unavailable","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"effect_outcome_bound","pid":1,"process_id":0,"process":"Main","outcome_id":1,"action":"send","target_process_id":1,"message_id":0,"outcome_result":"mailbox_closed","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
 ```
 
 `outcome_id`, `target_process_id`, `spawn_site_id`, `message_id`, and
 `port_id` are admitted typed IDs. `action` is `spawn` or `send`.
-`outcome_result` is a closed Mantle result category: `ok`, `denied`, or
-`exhausted` for spawn outcomes, and `ok`, `full`, `stopped`, or `crashed` for
-send outcomes. Spawn outcome events require `spawn_site_id` and do not carry a
+`outcome_result` is a closed Mantle result category: `ok`, `denied`,
+`exhausted`, or `backend_unavailable` for spawn outcomes, and `ok`, `full`,
+`stopped`, `crashed`, or `mailbox_closed` for send outcomes. Spawn outcome events require `spawn_site_id` and do not carry a
 message or port ID. Send outcome events require `message_id` and may carry
 `port_id` when the outcome action was tied to an admitted typed port.
 

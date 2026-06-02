@@ -12,12 +12,19 @@ pub enum SpawnAuthorityPolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalSpawnBackend {
+    Available,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunLimits {
     pub max_dispatches: usize,
     pub max_runtime_processes: usize,
     pub max_trace_bytes: usize,
     pub max_emitted_output_bytes: usize,
     pub spawn_authority_policy: SpawnAuthorityPolicy,
+    pub local_spawn_backend: LocalSpawnBackend,
 }
 
 impl Default for RunLimits {
@@ -28,6 +35,7 @@ impl Default for RunLimits {
             max_trace_bytes: DEFAULT_MAX_TRACE_BYTES,
             max_emitted_output_bytes: DEFAULT_MAX_EMITTED_OUTPUT_BYTES,
             spawn_authority_policy: SpawnAuthorityPolicy::AdmitDeclared,
+            local_spawn_backend: LocalSpawnBackend::Available,
         }
     }
 }

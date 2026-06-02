@@ -411,9 +411,11 @@ pub enum RuntimeEffectOutcomeResult {
     Ok,
     Denied,
     Exhausted,
+    BackendUnavailable,
     Full,
     Stopped,
     Crashed,
+    MailboxClosed,
 }
 
 impl RuntimeEffectOutcomeResult {
@@ -422,9 +424,11 @@ impl RuntimeEffectOutcomeResult {
             Self::Ok => "ok",
             Self::Denied => "denied",
             Self::Exhausted => "exhausted",
+            Self::BackendUnavailable => "backend_unavailable",
             Self::Full => "full",
             Self::Stopped => "stopped",
             Self::Crashed => "crashed",
+            Self::MailboxClosed => "mailbox_closed",
         }
     }
 }

@@ -1,6 +1,6 @@
 use super::support::*;
-use crate::SpawnAuthorityPolicy;
 use crate::event::{RuntimeAuthorityResult, RuntimeEvent, RuntimeProcessId, RuntimeSpawnKind};
+use crate::{LocalSpawnBackend, SpawnAuthorityPolicy};
 use mantle_artifact::{ArtifactAction, ArtifactEffect, EffectOutcomeId};
 
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
@@ -100,6 +100,55 @@ fn runtime_bare_spawn_denial_fails_closed_before_acceptance() {
         SPAWN_AUTHORITY,
         RuntimeAuthorityResult::Denied,
     );
+}
+
+#[test]
+fn runtime_bare_spawn_backend_unavailable_fails_closed_before_acceptance() {
+    let mut artifact = artifact_with_unbound_worker_process_ref();
+    grant_main_spawn_authority(&mut artifact);
+    artifact.processes[0].transitions[0].effects = vec![ArtifactEffect::Spawn];
+    artifact.processes[0].transitions[0].actions = vec![ArtifactAction::Spawn {
+        target: WORKER_PROCESS,
+        process_ref: ProcessRefId::new(0),
+        spawn_site: SPAWN_SITE,
+    }];
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let mut host = InMemoryRuntimeHost::default();
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(
+        &program,
+        &executable,
+        &mut host,
+        RunLimits {
+            local_spawn_backend: LocalSpawnBackend::Unavailable,
+            ..RunLimits::default()
+        },
+    );
+    let main_pid = run
+        .spawn_process(MAIN_PROCESS, None)
+        .expect("main should spawn");
+    let step = main_step(main_pid);
+    let action = LoadedAction::Spawn {
+        target: WORKER_PROCESS,
+        process_ref: ProcessRefId::new(0),
+        spawn_site: SPAWN_SITE,
+    };
+    let mut process_refs = LocalProcessRefs::empty();
+    let mut effect_outcomes = Vec::new();
+
+    let err = run
+        .execute_prestate_action(&mut process_refs, &step, &action, &mut effect_outcomes)
+        .expect_err("bare spawn backend unavailability must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("process Main local spawn backend unavailable for process id 1"),
+        "expected backend-unavailable error, got {err}"
+    );
+    assert!(process_refs.get(ProcessRefId::new(0)).is_none());
+    assert!(effect_outcomes.is_empty());
+    assert_eq!(run.processes.len(), 1);
 }
 
 fn spawn_outcome_artifact() -> MantleArtifact {

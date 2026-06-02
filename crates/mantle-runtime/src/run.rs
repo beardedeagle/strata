@@ -18,7 +18,7 @@ use crate::executable::{
     ExecutableValueTemplateRef,
 };
 use crate::host::RuntimeHost;
-use crate::limits::{RunLimits, SpawnAuthorityPolicy};
+use crate::limits::{LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy};
 use crate::program::{LoadedProgram, LoadedSpawnKind, RuntimePayload};
 use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
 
@@ -115,6 +115,7 @@ struct RuntimeRun<'program, 'plan, 'host, H: RuntimeHost> {
     emitted_output_bytes: usize,
     max_emitted_output_bytes: usize,
     spawn_authority_policy: SpawnAuthorityPolicy,
+    local_spawn_backend: LocalSpawnBackend,
     spawned_processes: Vec<SpawnReport>,
     delivered_messages: Vec<MessageDelivery>,
     emitted_outputs: Vec<String>,
@@ -141,6 +142,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             emitted_output_bytes: 0,
             max_emitted_output_bytes: limits.max_emitted_output_bytes,
             spawn_authority_policy: limits.spawn_authority_policy,
+            local_spawn_backend: limits.local_spawn_backend,
             spawned_processes: Vec::new(),
             delivered_messages: Vec::new(),
             emitted_outputs: Vec::new(),
@@ -152,6 +154,25 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             self.spawn_authority_policy,
             SpawnAuthorityPolicy::AdmitDeclared
         )
+    }
+
+    pub(super) fn is_local_spawn_backend_available(&self) -> bool {
+        matches!(self.local_spawn_backend, LocalSpawnBackend::Available)
+    }
+
+    pub(super) fn ensure_local_spawn_backend_available(
+        &self,
+        process_name: &str,
+        target: ProcessId,
+    ) -> Result<()> {
+        if self.is_local_spawn_backend_available() {
+            return Ok(());
+        }
+        Err(Error::new(format!(
+            "process {} local spawn backend unavailable for process id {}",
+            process_name,
+            target.as_u32()
+        )))
     }
 
     fn record_event(&mut self, event: RuntimeEvent) -> Result<()> {
@@ -298,6 +319,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                         target.as_u32()
                     )));
                 }
+                self.ensure_local_spawn_backend_available(&step.process_name, *target)?;
                 self.ensure_process_ref_unbound(local_process_refs, step, process_ref.id)?;
                 let pid = self.spawn_process(*target, Some(step.pid))?;
                 self.bind_process_ref(local_process_refs, step, process_ref.id, pid)?;
@@ -660,7 +682,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                     process: step.process_name.clone(),
                     reason: RuntimeStopReason::Normal,
                 })?;
-                self.processes[process_index].status = ProcessStatus::Stopped;
+                self.processes[process_index].stop(RuntimeStopReason::Normal);
                 self.handle_supervised_exit(
                     process_index,
                     step.pid,
@@ -683,7 +705,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                     state,
                     reason: RuntimeFailureReason::Panic,
                 })?;
-                self.processes[process_index].status = ProcessStatus::Failed;
+                self.processes[process_index].fail();
                 self.stop_supervised_children(step.pid, RuntimeStopReason::SupervisorFailure)?;
                 match self.handle_supervised_exit(
                     process_index,

@@ -36,8 +36,9 @@ use supervision::{
 use templates::{checked_payload_value, evaluate_checked_runtime_template};
 #[cfg(test)]
 pub(in crate::language::checker::static_validation) use test_support::{
-    static_spawn_capacity_available_for_test, static_spawn_outcome_execution_for_test,
-    static_supervised_restart_exit_for_test,
+    static_process_ref_send_outcome_for_test, static_spawn_capacity_available_for_test,
+    static_spawn_outcome_execution_for_test, static_supervised_restart_exit_for_test,
+    static_supervisor_child_send_outcome_for_test,
 };
 use transitions::transition_for_message;
 
@@ -87,6 +88,18 @@ pub(super) enum StaticProcessStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StaticStopReason {
+    Normal,
+    SupervisorAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StaticMailboxState {
+    Open,
+    Closed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(super) struct StaticProcessId(u32);
 
@@ -111,6 +124,8 @@ pub(super) struct StaticProcessInstance {
     pub(super) process_id: CheckedProcessId,
     pub(super) state: CheckedStateId,
     pub(super) status: StaticProcessStatus,
+    pub(super) stop_reason: Option<StaticStopReason>,
+    pub(super) mailbox_state: StaticMailboxState,
     pub(super) supervisor_parent: Option<StaticSupervisorChildKey>,
     pub(super) mailbox: VecDeque<StaticMessageEnvelope>,
 }

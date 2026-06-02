@@ -1,7 +1,7 @@
 use mantle_artifact::{Error, ProcessId, ProcessRefId, Result, SupervisorChildId, SupervisorId};
 
 use super::RuntimeRun;
-use super::delivery::DeliveryPreflightFailure;
+use super::delivery::{DeliveryPreflightFailure, stopped_process_failure};
 use super::model::{ActiveStep, RuntimeMessageEnvelope, RuntimeSupervisorRef};
 use crate::event::RuntimeProcessId;
 use crate::executable::ExecutableSendTarget;
@@ -265,7 +265,10 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 child_ref.child.as_u32(),
                 process.pid
             ))),
-            ProcessStatus::Stopped => Ok(DeliveryPreflightFailure::Stopped),
+            ProcessStatus::Stopped => Ok(stopped_process_failure(
+                process.stop_reason,
+                process.mailbox_state,
+            )),
             ProcessStatus::Failed => Ok(DeliveryPreflightFailure::Crashed),
         }
     }

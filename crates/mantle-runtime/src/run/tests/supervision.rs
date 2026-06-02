@@ -4,7 +4,8 @@ use crate::event::{
 };
 use crate::host::RuntimeHost;
 use crate::{
-    ProcessStatus, RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeProcessId,
+    LocalSpawnBackend, ProcessStatus, RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason,
+    RuntimeProcessId,
 };
 use mantle_artifact::{
     ArtifactSupervisorChild, ArtifactSupervisorChildMode, ArtifactSupervisorPlan,
@@ -455,6 +456,32 @@ fn restart_capacity_denial_records_supervisor_decision() {
             ..
         } if *pid == main_pid
     )));
+}
+
+#[test]
+fn runtime_local_spawn_backend_unavailable_rejects_supervisor_child_start_before_acceptance() {
+    let artifact = supervisor_artifact(2, 1_000);
+    let program = LoadedProgram::from_artifact(&artifact).expect("supervisor artifact should load");
+    let limits = RunLimits {
+        local_spawn_backend: LocalSpawnBackend::Unavailable,
+        ..RunLimits::default()
+    };
+    let mut host = InMemoryRuntimeHost::default();
+    let executable = ExecutableProgram::from_admitted(&program)
+        .expect("executable plan should admit loaded program");
+    let mut run = RuntimeRun::new(&program, &executable, &mut host, limits);
+
+    let err = run
+        .spawn_process(MAIN_PROCESS, None)
+        .expect_err("disabled local spawn backend must fail before supervised child acceptance");
+
+    assert!(
+        err.to_string()
+            .contains("process Main local spawn backend unavailable for process id 0"),
+        "expected backend-unavailable error, got {err}"
+    );
+    assert!(run.processes.is_empty());
+    assert!(host.events().is_empty());
 }
 
 fn supervisor_artifact(max_restarts: u32, within_ms: u64) -> MantleArtifact {

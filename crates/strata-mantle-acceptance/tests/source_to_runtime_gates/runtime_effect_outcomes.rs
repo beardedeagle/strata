@@ -108,7 +108,7 @@ fn effect_outcomes_check_build_run_and_return_mailbox_full_before_acceptance() {
 }
 
 #[test]
-fn effect_outcomes_check_build_run_and_return_stopped_target_before_acceptance() {
+fn effect_outcomes_check_build_run_and_return_stopped_before_acceptance() {
     let gate = GateHarness::new();
     gate.remove_trace("effect_outcome_stopped_target");
     let run = gate.check_build_run(
@@ -123,6 +123,14 @@ fn effect_outcomes_check_build_run_and_return_stopped_target_before_acceptance()
     assert!(
         trace.contains(r#""from":"SenderState{sent:Err(Full(Work))}""#)
             && trace.contains(r#""to":"SenderState{sent:Err(Stopped(Work))}""#)
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"effect_outcome_bound""#,
+            r#""action":"send""#,
+            r#""outcome_result":"stopped""#,
+        ],
     );
 }
 
@@ -238,6 +246,45 @@ fn effect_outcomes_check_build_run_and_return_exhausted_before_spawn_acceptance(
     assert!(trace.contains(r#""event":"branch_selected""#));
     assert!(trace.contains(r#""branch":"then""#));
     assert!(trace.contains(r#""text":"spawn exhausted""#));
+    assert!(!trace.contains(r#""event":"process_spawned","pid":2"#));
+}
+
+#[test]
+fn effect_outcomes_check_build_run_and_return_backend_unavailable_before_spawn_acceptance() {
+    let gate = GateHarness::new();
+    gate.check("examples/effect_outcome_spawn_backend_unavailable.str");
+    gate.build(
+        "examples/effect_outcome_spawn_backend_unavailable.str",
+        "target/strata/effect_outcome_spawn_backend_unavailable.mta",
+    );
+    gate.remove_trace("effect_outcome_spawn_backend_unavailable");
+
+    let run = gate.run_mantle_success_with_args(
+        "target/strata/effect_outcome_spawn_backend_unavailable.mta",
+        &["--disable-local-spawn-backend"],
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("spawn backend unavailable"));
+    assert!(!stdout.contains("mantle: spawned Worker pid=2"));
+
+    let trace = gate.read_trace("effect_outcome_spawn_backend_unavailable");
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"spawn_authority_checked""#,
+            r#""authority_result":"accepted""#,
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"effect_outcome_bound""#,
+            r#""action":"spawn""#,
+            r#""target_process_id":1"#,
+            r#""spawn_site_id":0"#,
+            r#""outcome_result":"backend_unavailable""#,
+        ],
+    );
     assert!(!trace.contains(r#""event":"process_spawned","pid":2"#));
 }
 

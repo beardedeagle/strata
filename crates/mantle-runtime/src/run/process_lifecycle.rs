@@ -1,7 +1,9 @@
 use mantle_artifact::{Error, MAX_PROCESS_COUNT, ProcessId, Result};
 
 use super::RuntimeRun;
-use super::model::{ProcessInstance, RuntimeSupervisorRef, RuntimeSupervisorState};
+use super::model::{
+    ProcessInstance, RuntimeMailboxState, RuntimeSupervisorRef, RuntimeSupervisorState,
+};
 use crate::event::{RuntimeEvent, RuntimeProcessId};
 use crate::host::RuntimeHost;
 use crate::report::{ProcessStatus, SpawnReport};
@@ -21,9 +23,12 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         spawned_by_pid: Option<RuntimeProcessId>,
         supervisor_parent: Option<(RuntimeProcessId, RuntimeSupervisorRef)>,
     ) -> Result<RuntimeProcessId> {
+        let definition = self.program.process(process_id)?;
+        if spawned_by_pid.is_some() || !definition.supervisor_plans.is_empty() {
+            self.ensure_local_spawn_backend_available(&definition.debug_name, process_id)?;
+        }
         self.ensure_spawn_capacity(process_id)?;
 
-        let definition = self.program.process(process_id)?;
         let pid = self.next_pid;
         self.next_pid = self.next_pid.checked_next()?;
         let process = ProcessInstance {
@@ -31,6 +36,8 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             process_id,
             state: definition.init_state,
             status: ProcessStatus::Running,
+            stop_reason: None,
+            mailbox_state: RuntimeMailboxState::Open,
             supervisor_parent,
             supervisors: definition
                 .supervisor_plans

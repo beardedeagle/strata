@@ -114,6 +114,7 @@ fn render_text() -> String {
         "mailbox.logical_capacity_model: {MAILBOX_LOGICAL_CAPACITY_MODEL}"
     )
     .expect("writing to a String cannot fail");
+    out.push_str("mailbox.closed_outcome_supported: true\n");
     writeln!(
         out,
         "scheduler.reduction_window: {SCHEDULER_REDUCTION_WINDOW}"
@@ -139,6 +140,7 @@ fn render_text() -> String {
     out.push_str("component_composition.observability_supported: true\n");
     out.push_str("spawn_observability.kind_supported: true\n");
     out.push_str("spawn_observability.authority_result_supported: true\n");
+    out.push_str("spawn_observability.backend_unavailable_supported: true\n");
     out.push_str("spawn_observability.placement_supported: false\n");
     out.push_str("distributed.itc_retirement.enabled: false\n");
     out.push_str("distributed.itc_retirement.evidence_retention_ms: 0\n");
@@ -242,6 +244,8 @@ fn render_json() -> String {
         MAILBOX_LOGICAL_CAPACITY_MODEL,
     );
     out.push(',');
+    push_json_bool_field(&mut out, "mailbox.closed_outcome_supported", true);
+    out.push(',');
     push_json_u32_field(
         &mut out,
         "scheduler.reduction_window",
@@ -295,6 +299,12 @@ fn render_json() -> String {
     push_json_bool_field(
         &mut out,
         "spawn_observability.authority_result_supported",
+        true,
+    );
+    out.push(',');
+    push_json_bool_field(
+        &mut out,
+        "spawn_observability.backend_unavailable_supported",
         true,
     );
     out.push(',');
@@ -476,6 +486,7 @@ mod tests {
         assert!(declaration.contains("strata_version: 0.16.0"));
         assert!(declaration.contains("non_progress_containment: none"));
         assert!(declaration.contains("mailbox.logical_capacity_model: message_count"));
+        assert!(declaration.contains("mailbox.closed_outcome_supported: true"));
         assert!(declaration.contains("scheduler.reduction_window: 2000"));
         assert!(declaration.contains("wire_format.version: mantle.archive.v1"));
         assert!(declaration.contains("message_observation.capture_model"));
@@ -498,10 +509,12 @@ mod tests {
         assert!(declaration.contains("\"source_language_support\":\"artifact_declared_metadata\""));
         assert!(declaration.contains("\"non_progress_containment\":\"none\""));
         assert!(declaration.contains("\"mailbox.logical_capacity_model\":\"message_count\""));
+        assert!(declaration.contains("\"mailbox.closed_outcome_supported\":true"));
         assert!(declaration.contains("\"scheduler.reduction_window\":2000"));
         assert!(declaration.contains("\"wire_format.version\":\"mantle.archive.v1\""));
         assert!(declaration.contains("\"message_observation.capture_model\""));
         assert!(declaration.contains("\"component_composition.observability_supported\":true"));
+        assert!(declaration.contains("\"spawn_observability.backend_unavailable_supported\":true"));
         assert!(declaration.contains("\"validity_window.defaults.member_none_max_ms\":900000"));
         assert!(declaration.contains("\"local_spawn\""));
         assert!(declaration.ends_with("]}"));

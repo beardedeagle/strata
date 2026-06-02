@@ -353,7 +353,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 state,
                 reason,
             })?;
-            self.processes[supervisor_index].status = ProcessStatus::Failed;
+            self.processes[supervisor_index].fail();
         }
         self.handle_supervised_exit(
             supervisor_index,
@@ -383,7 +383,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             process,
             reason,
         })?;
-        self.processes[index].status = ProcessStatus::Stopped;
+        self.processes[index].stop(reason);
         Ok(())
     }
 

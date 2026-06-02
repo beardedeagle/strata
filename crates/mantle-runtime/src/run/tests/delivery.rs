@@ -1,5 +1,8 @@
 use super::support::*;
-use crate::{ProcessStatus, RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeProcessId};
+use crate::{
+    ProcessStatus, RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeProcessId,
+    RuntimeStopReason,
+};
 use mantle_artifact::ArtifactBranch;
 
 const MAIN_PROCESS: ProcessId = ProcessId::new(0);
@@ -9,7 +12,7 @@ const UNSPAWNED_WORKER_PID: u64 = 99;
 const BOOL: TypeId = TypeId::new(10);
 
 #[test]
-fn runtime_rejects_send_to_stopped_process_before_acceptance() {
+fn runtime_rejects_send_to_normally_stopped_process_before_acceptance() {
     let artifact = artifact_with_worker_process_ref_payload();
     let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
     let mut host = InMemoryRuntimeHost::default();
@@ -38,6 +41,10 @@ fn runtime_rejects_send_to_stopped_process_before_acceptance() {
 
         let worker_index = process_index_for_pid(&run, worker_pid);
         assert_eq!(run.processes[worker_index].status, ProcessStatus::Stopped);
+        assert_eq!(
+            run.processes[worker_index].mailbox_state,
+            super::super::model::RuntimeMailboxState::Closed
+        );
         assert_eq!(run.processes[worker_index].mailbox.len(), 0);
         assert_eq!(run.delivered_messages.len(), 1);
 
@@ -50,7 +57,7 @@ fn runtime_rejects_send_to_stopped_process_before_acceptance() {
                 ),
                 Some(main_pid),
             )
-            .expect_err("send to stopped process should fail closed");
+            .expect_err("send to normally stopped process should fail closed");
 
         assert_eq!(run.processes[worker_index].mailbox.len(), 0);
         assert_eq!(run.delivered_messages.len(), 1);
@@ -243,6 +250,7 @@ fn runtime_action_send_rejects_stopped_process_before_payload_template_evaluatio
             .expect("worker process should spawn");
         let worker_index = process_index_for_pid(&run, worker_pid);
         run.processes[worker_index].status = ProcessStatus::Stopped;
+        run.processes[worker_index].stop_reason = Some(RuntimeStopReason::Normal);
 
         let mut process_refs = worker_ref_binding(worker_pid);
         let step = main_step(main_pid);
@@ -285,6 +293,7 @@ fn runtime_action_send_rejects_failed_process_before_payload_template_evaluation
             .expect("worker process should spawn");
         let worker_index = process_index_for_pid(&run, worker_pid);
         run.processes[worker_index].status = ProcessStatus::Failed;
+        run.processes[worker_index].stop_reason = None;
 
         let mut process_refs = worker_ref_binding(worker_pid);
         let step = main_step(main_pid);

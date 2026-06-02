@@ -113,6 +113,42 @@ fn effect_outcome_bound_trace_includes_action_result_and_optional_ids() {
     assert!(line.contains(r#""spawn_site_id":3"#));
     assert!(line.contains(r#""outcome_result":"exhausted""#));
     assert!(!line.contains(r#""message_id":"#));
+
+    let backend_event = RuntimeEvent::EffectOutcomeBound {
+        pid: RuntimeProcessId::FIRST,
+        process_id: ProcessId::new(0),
+        process: "Main".to_string(),
+        outcome_id: mantle_artifact::EffectOutcomeId::new(2),
+        action: RuntimeEffectOutcomeAction::Spawn,
+        target_process_id: ProcessId::new(1),
+        spawn_site_id: Some(SpawnSiteId::new(3)),
+        message_id: None,
+        port_id: None,
+        outcome_result: RuntimeEffectOutcomeResult::BackendUnavailable,
+    };
+    assert!(encode_json_line(&backend_event).contains(r#""outcome_result":"backend_unavailable""#));
+
+    let mailbox_event = RuntimeEvent::EffectOutcomeBound {
+        pid: RuntimeProcessId::FIRST,
+        process_id: ProcessId::new(0),
+        process: "Main".to_string(),
+        outcome_id: mantle_artifact::EffectOutcomeId::new(3),
+        action: RuntimeEffectOutcomeAction::Send,
+        target_process_id: ProcessId::new(1),
+        spawn_site_id: None,
+        message_id: Some(MessageId::new(0)),
+        port_id: None,
+        outcome_result: RuntimeEffectOutcomeResult::MailboxClosed,
+    };
+    assert!(encode_json_line(&mailbox_event).contains(r#""outcome_result":"mailbox_closed""#));
+    assert_eq!(
+        RuntimeEffectOutcomeResult::BackendUnavailable.as_str(),
+        "backend_unavailable"
+    );
+    assert_eq!(
+        RuntimeEffectOutcomeResult::MailboxClosed.as_str(),
+        "mailbox_closed"
+    );
 }
 
 #[test]
