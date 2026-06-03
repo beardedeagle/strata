@@ -1,4 +1,4 @@
-use super::RuntimeEvent;
+use super::{RuntimeEvent, RuntimeEventCompositionContext};
 use format::{
     BranchPathJson, IoFmtWriter, JsonLenCounter, JsonStr, LoopContextJson, NullableProcessId,
     NullableU64, OptionalU32Field, PayloadJson, TraceSchemaJson,
@@ -11,24 +11,28 @@ mod format;
 
 #[cfg(test)]
 fn encode_json_line(event: &RuntimeEvent) -> String {
-    let mut line = String::with_capacity(encoded_json_line_len(event).unwrap_or(0));
-    let _ = write_json_line(&mut line, event);
+    let mut line = String::with_capacity(encoded_json_line_len(event, None).unwrap_or(0));
+    let _ = write_json_line(&mut line, event, None);
     line
 }
 
-pub(crate) fn encoded_json_line_len(event: &RuntimeEvent) -> Result<usize> {
+pub(crate) fn encoded_json_line_len(
+    event: &RuntimeEvent,
+    composition_context: Option<RuntimeEventCompositionContext>,
+) -> Result<usize> {
     let mut counter = JsonLenCounter::default();
-    write_json_line(&mut counter, event)
+    write_json_line(&mut counter, event, composition_context)
         .map_err(|_| Error::new("runtime trace event size overflowed"))?;
     Ok(counter.len)
 }
 
 pub(crate) fn write_json_line_to_io(
     event: &RuntimeEvent,
+    composition_context: Option<RuntimeEventCompositionContext>,
     writer: &mut impl io::Write,
 ) -> Result<()> {
     let mut writer = IoFmtWriter::new(writer);
-    write_json_line(&mut writer, event).map_err(|_| {
+    write_json_line(&mut writer, event, composition_context).map_err(|_| {
         writer.take_error().map_or_else(
             || Error::new("runtime trace JSON write failed"),
             Error::from,
@@ -36,7 +40,11 @@ pub(crate) fn write_json_line_to_io(
     })
 }
 
-fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::Result {
+fn write_json_line(
+    output: &mut impl fmt::Write,
+    event: &RuntimeEvent,
+    composition_context: Option<RuntimeEventCompositionContext>,
+) -> fmt::Result {
     match event {
         RuntimeEvent::ArtifactLoaded {
             format,
@@ -58,7 +66,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             JsonStr(entry_process),
             entry_message_id.as_u32(),
             process_count,
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::ProcessSpawned {
             pid,
@@ -79,7 +87,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
                 JsonStr(state),
                 mailbox_bound,
                 parent_pid.as_u64(),
-                TraceSchemaJson
+                TraceSchemaJson(composition_context)
             ),
             None => write!(
                 output,
@@ -90,7 +98,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
                 state_id.as_u32(),
                 JsonStr(state),
                 mailbox_bound,
-                TraceSchemaJson
+                TraceSchemaJson(composition_context)
             ),
         },
         RuntimeEvent::MessageAccepted {
@@ -114,7 +122,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
                 PayloadJson(payload),
                 queue_depth,
                 sender_pid.as_u64(),
-                TraceSchemaJson
+                TraceSchemaJson(composition_context)
             ),
             None => write!(
                 output,
@@ -126,7 +134,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
                 JsonStr(message),
                 PayloadJson(payload),
                 queue_depth,
-                TraceSchemaJson
+                TraceSchemaJson(composition_context)
             ),
         },
         RuntimeEvent::MessageDequeued {
@@ -147,7 +155,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             JsonStr(message),
             PayloadJson(payload),
             queue_depth,
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::ProgramOutput {
             pid,
@@ -165,7 +173,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             stream.as_str(),
             output_id.as_u32(),
             JsonStr(text),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::SpawnAuthorityChecked {
             pid,
@@ -187,7 +195,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             authority_id.as_u32(),
             spawn_kind.as_str(),
             authority_result.as_str(),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::BoundarySendChecked {
             pid,
@@ -217,7 +225,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             message_id.as_u32(),
             JsonStr(message),
             boundary_result.as_str(),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::EffectOutcomeBound {
             pid,
@@ -243,7 +251,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             OptionalU32Field::new("message_id", message_id.map(|id| id.as_u32())),
             OptionalU32Field::new("port_id", port_id.map(|id| id.as_u32())),
             outcome_result.as_str(),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::BranchSelected {
             pid,
@@ -271,7 +279,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             LoopContextJson(*loop_context),
             condition_type_id.as_u32(),
             JsonStr(condition),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::LoopStarted {
             pid,
@@ -295,7 +303,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             collection_type_id.as_u32(),
             max_items,
             item_count,
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::LoopIteration {
             pid,
@@ -319,7 +327,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             index,
             element_type_id.as_u32(),
             JsonStr(element),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::LoopCompleted {
             pid,
@@ -339,7 +347,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             JsonStr(message),
             element_id.as_u32(),
             iteration_count,
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::StateUpdated {
             pid,
@@ -359,7 +367,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             JsonStr(from),
             to_state_id.as_u32(),
             JsonStr(to),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::ProcessStepped {
             pid,
@@ -383,7 +391,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             result.as_str(),
             state_id.as_u32(),
             JsonStr(state),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::ProcessStopped {
             pid,
@@ -397,7 +405,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             process_id.as_u32(),
             JsonStr(process),
             reason.as_str(),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::ProcessFailed {
             pid,
@@ -415,7 +423,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             state_id.as_u32(),
             JsonStr(state),
             reason.as_str(),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::SupervisorChildStarted {
             supervisor_pid,
@@ -443,7 +451,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             JsonStr(child_process),
             spawn_site_id.as_u32(),
             spawn_kind.as_str(),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
         RuntimeEvent::SupervisorRestartDecision {
             supervisor_pid,
@@ -481,7 +489,7 @@ fn write_json_line(output: &mut impl fmt::Write, event: &RuntimeEvent) -> fmt::R
             restart_window_limit,
             restart_window_ms,
             NullableProcessId(*new_child_pid),
-            TraceSchemaJson
+            TraceSchemaJson(composition_context)
         ),
     }
 }

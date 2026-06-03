@@ -8,6 +8,7 @@ pub(super) use crate::program::{
     LoadedNextState, LoadedProgram, LoadedSendTarget, LoadedSpawnKind, LoadedSpawnSite,
     LoadedStateValue, LoadedValueTemplate, RuntimePayload, RuntimeValue,
 };
+pub(super) use crate::report::RuntimeReport;
 pub(super) use mantle_artifact::{
     ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, ArtifactAuthority, ArtifactCapabilityDescriptor,
     ArtifactEffect, ArtifactEnumVariant, ArtifactMessageVariant, ArtifactPayload, ArtifactProcess,

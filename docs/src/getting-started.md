@@ -129,8 +129,15 @@ changing the Mantle artifact:
 
 ```sh
 just strata-composition-report examples/component_composition_main.str json
+just strata-build examples/component_composition_main.str
 just strata-composition-build examples/component_composition_main.str
 just strata-composition-admit target/strata/component_composition_main.component-composition.json json
+just strata-composition-bind-runtime \
+  target/strata/component_composition_main.component-composition.json \
+  target/strata/component_composition_main.mta \
+  target/strata/component_composition_main.deployment-composition.json
+mantle run target/strata/component_composition_main.mta \
+  --composition-binding target/strata/component_composition_main.deployment-composition.json
 just strata-target-requirements examples/component_composition_main.str json
 just mantle-feature-declaration json
 just mantle-admit target/strata/component_composition_main.mta json

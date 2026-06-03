@@ -102,6 +102,65 @@ impl GateHarness {
         )
     }
 
+    pub(crate) fn composition_bind_runtime(
+        &self,
+        composition_artifact: &str,
+        runtime_artifact: &str,
+        binding_artifact: &str,
+    ) {
+        self.remove_artifact(binding_artifact);
+        assert_success(
+            self.command(
+                &self.strata,
+                [
+                    "composition",
+                    "bind-runtime",
+                    composition_artifact,
+                    runtime_artifact,
+                    "--output",
+                    binding_artifact,
+                ],
+                "strata composition bind-runtime",
+            ),
+            "strata composition bind-runtime",
+        );
+        assert!(
+            self.root.join(binding_artifact).exists(),
+            "expected {}",
+            self.root.join(binding_artifact).display()
+        );
+    }
+
+    pub(crate) fn composition_bind_runtime_failure(
+        &self,
+        composition_artifact: &str,
+        runtime_artifact: &str,
+        binding_artifact: &str,
+    ) -> Output {
+        self.remove_artifact(binding_artifact);
+        let output = assert_failure(
+            self.command(
+                &self.strata,
+                [
+                    "composition",
+                    "bind-runtime",
+                    composition_artifact,
+                    runtime_artifact,
+                    "--output",
+                    binding_artifact,
+                ],
+                "strata composition bind-runtime",
+            ),
+            "strata composition bind-runtime",
+        );
+        assert!(
+            !self.root.join(binding_artifact).exists(),
+            "failed bind-runtime must not leave {}",
+            self.root.join(binding_artifact).display()
+        );
+        output
+    }
+
     pub(crate) fn target_requirements(&self, source: &str, format: &str) -> Output {
         assert_success(
             self.command(
@@ -184,6 +243,21 @@ impl GateHarness {
     pub(crate) fn run_mantle_failure(&self, artifact: &str) -> Output {
         assert_failure(
             self.command(&self.mantle, ["run", artifact], "mantle run"),
+            "mantle run",
+        )
+    }
+
+    pub(crate) fn run_mantle_failure_with_args(
+        &self,
+        artifact: &str,
+        extra_args: &[&str],
+    ) -> Output {
+        let mut args = Vec::with_capacity(extra_args.len() + 2);
+        args.push("run");
+        args.push(artifact);
+        args.extend(extra_args.iter().copied());
+        assert_failure(
+            self.command_slice(&self.mantle, &args, "mantle run"),
             "mantle run",
         )
     }

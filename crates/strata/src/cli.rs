@@ -354,6 +354,9 @@ fn print_strata_usage() {
     println!("  strata build <path.str> [--output <path.mta>]");
     println!("  strata composition build <path.str> [--composition <name>] [--output <path.json>]");
     println!("  strata composition admit <path.json> [--format text|json]");
+    println!(
+        "  strata composition bind-runtime <composition.json> <artifact.mta> [--output <path.json>]"
+    );
     println!("  strata authority-summary <path.str> [--format text|json]");
     println!("  strata composition-report <path.str> [--format text|json]");
     println!("  strata target-requirements <path.str> [--format text|json]");

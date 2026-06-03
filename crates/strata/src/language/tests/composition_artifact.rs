@@ -1,11 +1,14 @@
 use super::super::{
     COMPONENT_COMPOSITION_HASH_ALG, COMPONENT_COMPOSITION_SCHEMA_ID,
     COMPONENT_COMPOSITION_SCHEMA_VERSION_MAJOR, COMPONENT_COMPOSITION_SCHEMA_VERSION_MINOR,
-    ComponentCompositionAdmissionResult, ComponentCompositionArtifactAdmitFormat, SourceProgram,
-    SourceUnit, SourceUnitId, admit_component_composition_artifact, check_source_program,
+    ComponentCompositionAdmissionResult, ComponentCompositionArtifactAdmitFormat,
+    RUNTIME_COMPOSITION_BINDING_SCHEMA_ID, RUNTIME_COMPOSITION_BINDING_SCHEMA_VERSION_MAJOR,
+    RUNTIME_COMPOSITION_BINDING_SCHEMA_VERSION_MINOR, SourceProgram, SourceUnit, SourceUnitId,
+    admit_component_composition_artifact, check_source_program, lower_to_artifact,
     render_component_composition_admission_summary, render_component_composition_artifact,
+    render_runtime_composition_binding,
 };
-use mantle_artifact::MAX_FIELD_VALUE_BYTES;
+use mantle_artifact::{MAX_FIELD_VALUE_BYTES, MantleArtifact, ProcessId};
 
 #[test]
 fn artifact_emits_required_identity_fields_and_admits() {
@@ -90,6 +93,147 @@ fn artifact_rendering_is_deterministic_for_equivalent_graphs() {
 
     assert_eq!(first, second);
     assert_admitted_property_invariants(&first);
+}
+
+#[test]
+fn runtime_binding_emits_explicit_deployment_identity_and_matches_runtime_artifact() {
+    let (composition, artifact) = example_composition_and_runtime_artifact();
+    let binding = render_runtime_composition_binding(&composition, &artifact)
+        .expect("admitted checked composition should bind to matching runtime artifact");
+
+    assert!(binding.contains(&format!(
+        "\"schema_id\":\"{RUNTIME_COMPOSITION_BINDING_SCHEMA_ID}\""
+    )));
+    assert!(binding.contains(&format!(
+        "\"schema_version_major\":{RUNTIME_COMPOSITION_BINDING_SCHEMA_VERSION_MAJOR}"
+    )));
+    assert!(binding.contains(&format!(
+        "\"schema_version_minor\":{RUNTIME_COMPOSITION_BINDING_SCHEMA_VERSION_MINOR}"
+    )));
+    assert!(binding.contains("\"artifact_kind\":\"runtime_composition_binding\""));
+    assert!(binding.contains("\"deployment_id\":0"));
+    assert!(binding.contains("\"composition_schema_id\":\"strata.checked_component_composition\""));
+    assert!(binding.contains("\"composition_id\":0"));
+    assert!(binding.contains("\"component_instances\":[{"));
+    assert!(binding.contains("\"component_instance_id\":0"));
+    assert!(binding.contains("\"process_id\":"));
+    assert!(binding.contains("\"port_bindings\":[{"));
+    assert!(binding.contains("\"admission_result\":\"admitted\""));
+    assert!(binding.contains("\"extensions\":{}"));
+    assert!(
+        !binding.contains("\"component\":\""),
+        "binding must not carry source component labels as executable references: {binding}"
+    );
+    assert!(
+        !binding.contains("\"port\":\""),
+        "binding must not carry source port labels as executable references: {binding}"
+    );
+}
+
+#[test]
+fn runtime_binding_rejects_rejected_composition_evidence() {
+    let (composition, artifact) = example_composition_and_runtime_artifact();
+    let rejected = composition
+        .replace(
+            "\"binding_result\":\"admitted\",\"rejection_reason\":\"\"",
+            "\"binding_result\":\"rejected\",\"rejection_reason\":\"forged rejection\"",
+        )
+        .replace(
+            "\"admission_result\":\"admitted\"",
+            "\"admission_result\":\"rejected\"",
+        );
+    let err = render_runtime_composition_binding(&rejected, &artifact)
+        .expect_err("rejected composition evidence must not bind a runtime run");
+
+    assert!(
+        err.to_string().contains("requires an admitted"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn runtime_binding_rejects_mismatched_runtime_artifact_identity() {
+    let (composition, mut artifact) = example_composition_and_runtime_artifact();
+    artifact.source_hash_fnv1a64 = "1111111111111111".to_string();
+    let err = render_runtime_composition_binding(&composition, &artifact)
+        .expect_err("mismatched .mta source identity must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("source fingerprint does not match"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn runtime_binding_rejects_runtime_component_process_out_of_bounds() {
+    let (composition, mut artifact) = example_composition_and_runtime_artifact();
+    let component_id = artifact.compositions[0].component_instances[0].component;
+    let export_port_id = artifact.components[component_id.index()].export_port;
+    artifact.ports[export_port_id.index()].target_process =
+        ProcessId::from_index(artifact.processes.len()).expect("test process id should fit");
+
+    let err = render_runtime_composition_binding(&composition, &artifact)
+        .expect_err("out-of-bounds runtime target process must fail closed");
+
+    assert!(
+        err.to_string().contains("target process is out of bounds"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn runtime_binding_rejects_duplicate_component_process_correlation() {
+    let program = duplicate_worker_instance_program()
+        .expect("duplicate worker-instance source should parse as checked composition input");
+    let source_hash = program.source_provenance_hash();
+    let source_hash_input = program.source_hash_input();
+    let checked = check_source_program(program)
+        .expect("duplicate worker-instance composition should check before runtime binding");
+    let composition = render_component_composition_artifact(
+        &checked,
+        "examples/component_composition_main.str",
+        &source_hash,
+        None,
+    )
+    .expect("duplicate worker-instance composition artifact should render");
+    let artifact = lower_to_artifact(&checked, &source_hash_input)
+        .expect("duplicate worker-instance artifact should lower");
+
+    let err = render_runtime_composition_binding(&composition, &artifact)
+        .expect_err("duplicate process correlation must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("duplicate component instances to the same process id"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn runtime_binding_rejects_unbound_runtime_processes() {
+    let (composition, mut artifact) = example_composition_and_runtime_artifact();
+    artifact.processes.push(artifact.processes[0].clone());
+
+    let err = render_runtime_composition_binding(&composition, &artifact)
+        .expect_err("unbound runtime process must fail closed");
+
+    assert!(
+        err.to_string().contains("process_id 2 is unbound"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn runtime_binding_output_is_stable_for_equivalent_checked_graphs() {
+    let (first_composition, first_artifact) = example_composition_and_runtime_artifact();
+    let (second_composition, second_artifact) = example_composition_and_runtime_artifact();
+    let first = render_runtime_composition_binding(&first_composition, &first_artifact)
+        .expect("first binding should render");
+    let second = render_runtime_composition_binding(&second_composition, &second_artifact)
+        .expect("second binding should render");
+
+    assert_eq!(first, second);
 }
 
 #[test]
@@ -506,16 +650,25 @@ fn array_body<'a>(artifact: &'a str, start_marker: &str, end_marker: &str) -> &'
 }
 
 fn example_artifact() -> String {
+    let (composition, _) = example_composition_and_runtime_artifact();
+    composition
+}
+
+fn example_composition_and_runtime_artifact() -> (String, MantleArtifact) {
     let program = example_program().expect("example source program should parse");
     let source_hash = program.source_provenance_hash();
+    let source_hash_input = program.source_hash_input();
     let checked = check_source_program(program).expect("example source program should check");
-    render_component_composition_artifact(
+    let composition = render_component_composition_artifact(
         &checked,
         "examples/component_composition_main.str",
         &source_hash,
         None,
     )
-    .expect("example composition artifact should render")
+    .expect("example composition artifact should render");
+    let artifact = lower_to_artifact(&checked, &source_hash_input)
+        .expect("example runtime artifact should lower");
+    (composition, artifact)
 }
 
 fn example_program() -> crate::language::Result<SourceProgram> {
@@ -526,6 +679,22 @@ fn example_program() -> crate::language::Result<SourceProgram> {
     .into_iter()
     .enumerate()
     .map(|(index, source)| SourceUnit::parse(SourceUnitId::from_index(index)?, source.to_string()))
+    .collect::<crate::language::Result<Vec<_>>>()?;
+    SourceProgram::new(SourceUnitId::from_index(0)?, units)
+}
+
+fn duplicate_worker_instance_program() -> crate::language::Result<SourceProgram> {
+    let root = include_str!("../../../../../examples/component_composition_main.str").replace(
+        "    instance worker component WorkerComponent;",
+        "    instance worker component WorkerComponent;\n    instance worker2 component WorkerComponent;",
+    );
+    let units = [
+        root,
+        include_str!("../../../../../examples/component_composition_worker.str").to_string(),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, source)| SourceUnit::parse(SourceUnitId::from_index(index)?, source))
     .collect::<crate::language::Result<Vec<_>>>()?;
     SourceProgram::new(SourceUnitId::from_index(0)?, units)
 }

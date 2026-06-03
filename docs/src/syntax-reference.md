@@ -76,17 +76,13 @@ target process, and a component exports one port with zero or more imported
 ports. A composition declares local component instances and port binding edges
 from an imported port on one instance to an exported port on another instance.
 This is the current implementation's local source admission input. `strata
-composition build` checks it and emits the Strata-owned checked-subset
-`strata.checked_component_composition` validation artifact at
-`target/strata/<stem>.component-composition.json` by default. The JSON artifact
-is not the canonical `strata.component_composition` deployment artifact and not
-`.mta`; Mantle does not execute it. Source names are metadata only, while typed
-component-instance, component import/export port, port-binding, port, protocol,
-and authority descriptor IDs carry meaning. Binding classes outside the current
-source subset are emitted
-as empty fail-closed arrays. The optional `strata composition-report` command
-still emits Strata-owned review evidence. The required authority annotations
-must be exact:
+composition build` emits Strata-owned checked-subset evidence
+(`strata.checked_component_composition`), not `.mta` or direct Mantle input.
+Runtime correlation requires a separate explicit `mantle.runtime_composition_binding`
+artifact from `strata composition bind-runtime`. Source names are metadata only;
+typed component-instance, import/export port, port-binding, port, protocol, and
+authority descriptor IDs carry meaning. Unsupported binding classes stay empty fail-closed arrays; `strata composition-report` remains Strata-owned review evidence.
+The required authority annotations must be exact:
 `Cap<ProtocolBoundary<ProtocolName>>`, `Cap<PortConnect<PortName>>`, and
 `Cap<ComponentExport<ComponentName>>`. See
 [Boundary Contracts](boundary-contracts.md) for the checked and lowered

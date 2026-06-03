@@ -2,9 +2,9 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 use mantle_artifact::{
-    ArtifactBranch, AuthorityId, EffectOutcomeId, Error, LoopElementId, MAX_ACTIONS_PER_PROCESS,
-    MAX_VALUE_TEMPLATE_DEPTH, MessageId, OutputId, PortId, ProcessId, ProtocolId, Result,
-    SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId, TypeId,
+    ArtifactBranch, AuthorityId, ComponentInstanceId, EffectOutcomeId, Error, LoopElementId,
+    MAX_ACTIONS_PER_PROCESS, MAX_VALUE_TEMPLATE_DEPTH, MessageId, OutputId, PortId, ProcessId,
+    ProtocolId, Result, SpawnSiteId, StateId, StepResult, SupervisorChildId, SupervisorId, TypeId,
 };
 
 use crate::program::RuntimePayload;
@@ -389,6 +389,35 @@ impl RuntimeEvent {
             }
         }
     }
+
+    pub(crate) const fn primary_process_id(&self) -> Option<ProcessId> {
+        match self {
+            Self::ArtifactLoaded { .. } => None,
+            Self::ProcessSpawned { process_id, .. }
+            | Self::MessageAccepted { process_id, .. }
+            | Self::MessageDequeued { process_id, .. }
+            | Self::ProgramOutput { process_id, .. }
+            | Self::SpawnAuthorityChecked { process_id, .. }
+            | Self::BoundarySendChecked { process_id, .. }
+            | Self::EffectOutcomeBound { process_id, .. }
+            | Self::BranchSelected { process_id, .. }
+            | Self::LoopStarted { process_id, .. }
+            | Self::LoopIteration { process_id, .. }
+            | Self::LoopCompleted { process_id, .. }
+            | Self::StateUpdated { process_id, .. }
+            | Self::ProcessStepped { process_id, .. }
+            | Self::ProcessStopped { process_id, .. }
+            | Self::ProcessFailed { process_id, .. } => Some(*process_id),
+            Self::SupervisorChildStarted { .. } | Self::SupervisorRestartDecision { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeEventCompositionContext {
+    pub(crate) deployment_id: u32,
+    pub(crate) composition_id: u32,
+    pub(crate) component_instance_id: Option<ComponentInstanceId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -513,14 +542,23 @@ impl RuntimeBranchScope {
 #[derive(Debug)]
 pub struct RuntimeEventRecord {
     event: RuntimeEvent,
+    composition_context: Option<RuntimeEventCompositionContext>,
     jsonl_line_len: usize,
 }
 
 impl RuntimeEventRecord {
     pub fn new(event: RuntimeEvent) -> Result<Self> {
-        let jsonl_line_len = jsonl::encoded_json_line_len(&event)?;
+        Self::new_with_composition(event, None)
+    }
+
+    pub(crate) fn new_with_composition(
+        event: RuntimeEvent,
+        composition_context: Option<RuntimeEventCompositionContext>,
+    ) -> Result<Self> {
+        let jsonl_line_len = jsonl::encoded_json_line_len(&event, composition_context)?;
         Ok(Self {
             event,
+            composition_context,
             jsonl_line_len,
         })
     }
@@ -534,7 +572,7 @@ impl RuntimeEventRecord {
     }
 
     pub(crate) fn write_jsonl_line(&self, writer: &mut impl std::io::Write) -> Result<()> {
-        jsonl::write_json_line_to_io(&self.event, writer)
+        jsonl::write_json_line_to_io(&self.event, self.composition_context, writer)
     }
 
     pub(crate) fn jsonl_line_bytes_with_newline(&self) -> Result<usize> {

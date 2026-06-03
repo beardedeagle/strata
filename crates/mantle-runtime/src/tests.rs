@@ -15,5 +15,7 @@ mod loaded_program_selection;
 mod payload_preflight;
 #[path = "tests/runtime_boundaries.rs"]
 mod runtime_boundaries;
+#[path = "tests/runtime_composition_binding.rs"]
+mod runtime_composition_binding;
 #[path = "tests/state_and_limits.rs"]
 mod state_and_limits;

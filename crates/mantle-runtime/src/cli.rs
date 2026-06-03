@@ -9,9 +9,10 @@ use crate::feature_declaration::validate_artifact_runtime_requirements;
 use crate::{
     LocalSpawnBackend, ProcessStatus, RunLimits, RuntimeFeatureDeclarationFormat,
     SpawnAuthorityPolicy, render_runtime_feature_declaration, run_artifact_path_with_limits,
+    run_artifact_path_with_limits_and_composition_binding,
 };
 
-const MANTLE_RUN_USAGE: &str = "mantle run <artifact.mta> [--deny-spawn-authority] [--disable-local-spawn-backend] [--max-runtime-processes N]";
+const MANTLE_RUN_USAGE: &str = "mantle run <artifact.mta> [--composition-binding <path.json>] [--deny-spawn-authority] [--disable-local-spawn-backend] [--max-runtime-processes N]";
 
 pub fn mantle_main<I>(args: I) -> Result<()>
 where
@@ -22,8 +23,18 @@ where
     match args.next().as_deref() {
         Some("run") => {
             let path = required_path(args.next(), MANTLE_RUN_USAGE)?;
-            let limits = run_limits_from_args(args)?;
-            let report = run_artifact_path_with_limits(&path, limits)?;
+            let run_args = run_command_args_from_args(args)?;
+            let report = if let Some(composition_binding_path) =
+                run_args.composition_binding_path.as_ref()
+            {
+                run_artifact_path_with_limits_and_composition_binding(
+                    &path,
+                    run_args.limits,
+                    composition_binding_path,
+                )?
+            } else {
+                run_artifact_path_with_limits(&path, run_args.limits)?
+            };
             println!("mantle: loaded {}", report.artifact_path.display());
             for spawned in &report.spawned_processes {
                 println!("mantle: spawned {} pid={}", spawned.process, spawned.pid);
@@ -111,9 +122,16 @@ fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
         .ok_or_else(|| Error::new(format!("missing path; usage: {usage}")))
 }
 
-fn run_limits_from_args(args: impl IntoIterator<Item = String>) -> Result<RunLimits> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunCommandArgs {
+    limits: RunLimits,
+    composition_binding_path: Option<PathBuf>,
+}
+
+fn run_command_args_from_args(args: impl IntoIterator<Item = String>) -> Result<RunCommandArgs> {
     let mut limits = RunLimits::default();
     let mut max_runtime_processes_seen = false;
+    let mut composition_binding_path = None;
     let mut rest = args.into_iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -133,17 +151,42 @@ fn run_limits_from_args(args: impl IntoIterator<Item = String>) -> Result<RunLim
                 limits.max_runtime_processes =
                     parse_positive_usize_flag("--max-runtime-processes", &value)?;
             }
+            "--composition-binding" => {
+                if composition_binding_path.is_some() {
+                    return Err(Error::new("duplicate --composition-binding argument"));
+                }
+                composition_binding_path = Some(PathBuf::from(required_path_flag_value(
+                    &mut rest,
+                    "--composition-binding",
+                )?));
+            }
             other => return Err(Error::new(format!("unexpected argument: {other}"))),
         }
     }
     limits.validate()?;
-    Ok(limits)
+    Ok(RunCommandArgs {
+        limits,
+        composition_binding_path,
+    })
+}
+
+#[cfg(test)]
+fn run_limits_from_args(args: impl IntoIterator<Item = String>) -> Result<RunLimits> {
+    run_command_args_from_args(args).map(|args| args.limits)
 }
 
 fn required_positive_integer_flag_value(
     rest: &mut impl Iterator<Item = String>,
     flag: &str,
 ) -> Result<String> {
+    let value = rest.next().ok_or_else(|| missing_flag_value_error(flag))?;
+    if value.starts_with("--") {
+        return Err(missing_flag_value_error(flag));
+    }
+    Ok(value)
+}
+
+fn required_path_flag_value(rest: &mut impl Iterator<Item = String>, flag: &str) -> Result<String> {
     let value = rest.next().ok_or_else(|| missing_flag_value_error(flag))?;
     if value.starts_with("--") {
         return Err(missing_flag_value_error(flag));
@@ -396,6 +439,50 @@ mod tests {
             SpawnAuthorityPolicy::DenyDeclared
         );
         assert_eq!(limits.local_spawn_backend, LocalSpawnBackend::Unavailable);
+    }
+
+    #[test]
+    fn run_parser_accepts_explicit_composition_binding_path() {
+        let args = run_command_args_from_args([
+            "--composition-binding".to_string(),
+            "target/app.deployment-composition.json".to_string(),
+            "--max-runtime-processes".to_string(),
+            "2".to_string(),
+        ])
+        .expect("composition binding run arguments should parse");
+
+        assert_eq!(args.limits.max_runtime_processes, 2);
+        assert_eq!(
+            args.composition_binding_path,
+            Some(PathBuf::from("target/app.deployment-composition.json"))
+        );
+    }
+
+    #[test]
+    fn run_parser_rejects_missing_composition_binding_path() {
+        let err = run_command_args_from_args(["--composition-binding".to_string()])
+            .expect_err("missing composition binding path should fail closed");
+
+        assert!(
+            err.to_string()
+                .contains("missing --composition-binding value")
+        );
+    }
+
+    #[test]
+    fn run_parser_rejects_duplicate_composition_binding_path() {
+        let err = run_command_args_from_args([
+            "--composition-binding".to_string(),
+            "a.json".to_string(),
+            "--composition-binding".to_string(),
+            "b.json".to_string(),
+        ])
+        .expect_err("duplicate composition binding path should fail closed");
+
+        assert!(
+            err.to_string()
+                .contains("duplicate --composition-binding argument")
+        );
     }
 
     #[test]

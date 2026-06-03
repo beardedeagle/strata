@@ -77,13 +77,18 @@ duplicated, malformed, stripped of required binding evidence, internally
 inconsistent with authority descriptors, or inconsistent with admission results.
 It validates the artifact schema and internal typed-ID consistency; it is not a
 source re-check, not a tamperproof attestation for a coherently rewritten JSON
-file, and not the canonical `strata.component_composition` deployment artifact.
-It is Strata-owned and not `.mta`; checked IR lowering and Mantle artifact
-admission remain the evidence classes that satisfy the Strata/Mantle runtime
-boundary obligation. Mantle
-admits typed composition metadata inside `.mta` but does not resolve source
-component names, source-unit imports, source strings, Strata composition
-artifacts, or report data at runtime.
+file, and not directly executable Mantle input. `strata composition bind-runtime`
+adds the explicit deployment-admission bridge by validating an admitted checked
+composition artifact against a matching `.mta` and rendering the separate
+`mantle.runtime_composition_binding` JSON artifact. That binding must match the
+`.mta` module, source fingerprint, composition ID, component instances, runtime
+process IDs, and port bindings before Mantle can use it for observability
+correlation. The checked composition artifact remains Strata-owned and not
+`.mta`; checked IR lowering, Mantle artifact admission, and explicit runtime
+binding admission remain separate evidence classes. Mantle admits typed
+composition metadata inside `.mta` but does not resolve source component names,
+source-unit imports, source strings, Strata composition artifacts, or report data
+at runtime.
 
 Runtime feature declaration and target binding are recorded as a
 runtime-bearing boundary feature: Strata derives canonical typed target
@@ -122,9 +127,14 @@ ID fields, strict unsigned integer syntax, u16 branch path segments plus
 bounded path length, closed runtime enum value domains, u32 artifact typed-ID
 width, artifact process-ID bounds, `artifact_loaded` first/no-repeat ordering,
 Mantle-contiguous spawned PID sequencing, non-entry spawn parent evidence,
-runtime PID-to-process-ID correlation, supervisor-child restart causality, and
-restart-window numeric bounds/coupling using borrowed line scans over
-already-read trace text.
+runtime PID-to-process-ID correlation, optional runtime-composition correlation
+field grouping plus whole-trace composition identity stability, supervisor-child
+restart causality, and restart-window numeric bounds/coupling using borrowed
+line scans over already-read trace text.
+Deployment, composition, and component-instance trace fields appear only when
+Mantle was explicitly launched with an admitted `mantle.runtime_composition_binding`
+artifact; absent binding input leaves those fields absent and forbids fabricated
+IDs.
 Validation is capped by explicit trace-byte, event-count, and runtime-process
 limits before trace evidence is used by a gate.
 The evidence includes unit and negative schema tests, source-to-runtime trace

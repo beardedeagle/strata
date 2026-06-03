@@ -401,14 +401,21 @@ supervisor IDs, supervisor child IDs, child modes, and restart-intensity fields
 so CI and audit tooling can compare the source-side and artifact-side authority
 surfaces. Process, authority, and child labels are included only as metadata.
 
-Composition admission reporting and component-composition artifact admission are
-source-side only:
+Composition admission reporting and component-composition artifact admission stay
+Strata-side. Runtime correlation requires a separate explicit binding step:
 
 ```sh
 just strata-composition-report examples/component_composition_main.str
 just strata-composition-report examples/component_composition_main.str json
+just strata-build examples/component_composition_main.str
 just strata-composition-build examples/component_composition_main.str
 just strata-composition-admit target/strata/component_composition_main.component-composition.json json
+just strata-composition-bind-runtime \
+  target/strata/component_composition_main.component-composition.json \
+  target/strata/component_composition_main.mta \
+  target/strata/component_composition_main.deployment-composition.json
+mantle run target/strata/component_composition_main.mta \
+  --composition-binding target/strata/component_composition_main.deployment-composition.json
 ```
 
 The report is emitted from checked Strata composition facts and a diagnostic
@@ -418,10 +425,12 @@ binding results, empty unsatisfied imports for admitted compositions, component
 export authority surfaces, endpoint port authority requirements, and
 cross-component authority edges. The component-composition artifact is the
 durable JSON form of that source-side checked-subset validation evidence and
-self-identifies as `strata.checked_component_composition`. It is not the
-canonical `strata.component_composition` deployment artifact. Mantle does not
-read the report or this JSON artifact; it executes only admitted `.mta`
-artifacts.
+self-identifies as `strata.checked_component_composition`. It is not `.mta` and
+is not read by Mantle. `strata composition bind-runtime` validates an admitted
+checked composition artifact against a matching `.mta` and emits the separate
+`mantle.runtime_composition_binding` JSON artifact. Mantle accepts that binding
+only when supplied with `--composition-binding`; without it, Mantle executes the
+`.mta` normally and emits no composition/deployment correlation fields.
 
 ```sh
 just strata-target-requirements examples/actor_ping.str

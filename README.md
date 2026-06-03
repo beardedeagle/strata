@@ -300,19 +300,29 @@ admission result. `strata composition admit` validates that checked subset
 fail-closed: every declared component import must be either bound exactly once or
 listed once as unsatisfied in a rejected artifact, and the diagnostic source
 fingerprint must match the declared fingerprint algorithm's canonical shape.
-This JSON artifact is Strata-owned checked-subset validation evidence, not the canonical
-`strata.component_composition` deployment artifact and not `.mta`; Mantle does
-not execute it in this slice. Source names in the artifact are metadata only;
-typed component-instance, port-binding, port, protocol, and authority descriptor
-IDs carry admission meaning.
+This JSON artifact is Strata-owned checked-subset validation evidence, not `.mta` and
+not directly executable by Mantle. `strata composition bind-runtime` is the
+explicit bridge from an admitted checked composition artifact and a matching
+`.mta` into a self-identifying runtime binding artifact with
+`schema_id: mantle.runtime_composition_binding`; Mantle accepts that binding only
+when `mantle run ... --composition-binding <path>` is supplied and the binding
+matches the artifact source hash, module, composition ID, component instances,
+and port bindings. Its `deployment_id=0` is a singleton correlation
+namespace, not a generated deployment identity. Mantle never infers source
+composition identity from source names and never reads
+`.component-composition.json` as runtime input. Source names in both JSON
+artifacts are metadata only; typed component-instance, port-binding, port,
+protocol, authority descriptor, and runtime process IDs carry admission and
+correlation meaning.
 
 In this checkout, use source-side recipes such as
 `just strata-authority-summary <path.str>`,
 `just strata-composition-report <path.str>`,
-`just strata-composition-build <path.str>`, and
-`just strata-composition-admit <path.json>` for reports and validation artifacts.
-Use `just mantle-inspect-authority <path.mta>` to run artifact-side inspection
-through the pinned toolchain recipe.
+`just strata-composition-build <path.str>`, `just strata-composition-admit
+<path.json>`, and `just strata-composition-bind-runtime <component-json>
+<artifact.mta> <binding-json>` for reports, validation artifacts, and explicit
+runtime binding artifacts. Use `just mantle-inspect-authority <path.mta>` to run
+artifact-side inspection through the pinned toolchain recipe.
 
 ### Records, Enums, And Payloads
 

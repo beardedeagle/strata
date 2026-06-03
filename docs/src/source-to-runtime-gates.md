@@ -93,26 +93,36 @@ component import binding before lowering, then runs the admitted artifact withou
 runtime source-name resolution:
 
 ```sh
-just run-example component_composition_main
-just strata-composition-report examples/component_composition_main.str json
-just strata-composition-build examples/component_composition_main.str
-just strata-composition-admit target/strata/component_composition_main.component-composition.json json
-just strata-target-requirements examples/component_composition_main.str json
-just mantle-feature-declaration json
-just mantle-admit target/strata/component_composition_main.mta json
+strata check examples/component_composition_main.str
+strata build examples/component_composition_main.str
+strata composition build examples/component_composition_main.str
+strata composition admit target/strata/component_composition_main.component-composition.json --format json
+strata composition bind-runtime \
+  target/strata/component_composition_main.component-composition.json \
+  target/strata/component_composition_main.mta \
+  --output target/strata/component_composition_main.deployment-composition.json
+mantle run target/strata/component_composition_main.mta \
+  --composition-binding target/strata/component_composition_main.deployment-composition.json
+strata target-requirements examples/component_composition_main.str --format json
+mantle feature-declaration --format json
+mantle admit target/strata/component_composition_main.mta --format json
 ```
 
 This target-binding gate keeps the boundary explicit. Strata reports the typed
 runtime features required by the checked program, emits and admits the
 Strata-owned `strata.checked_component_composition` JSON artifact as
-checked-subset component-composition validation evidence, and Mantle separately
-reports the typed features it currently supports. The JSON composition artifact
-is not the canonical `strata.component_composition` deployment artifact and not
-Mantle input; Mantle admission compares the `.mta` target-requirement set before
-execution.
-Source imports, component names, authority labels, composition artifacts, and
-report data remain diagnostics, provenance, review evidence, or admission
-evidence; they are not runtime dispatch inputs.
+checked-subset component-composition validation evidence, and then emits an
+explicit `mantle.runtime_composition_binding` deployment binding for the matching
+`.mta`. Mantle separately reports the typed features it currently supports,
+admits the `.mta` requirements before execution, and emits deployment,
+composition, and component-instance trace correlation only when the explicit
+binding is supplied. The checked composition artifact is not Mantle input;
+Mantle does not infer source composition, verify Strata composition safety, or
+dispatch from source names.
+Source imports, component names, authority labels, composition artifacts,
+deployment bindings, and report data remain diagnostics, provenance, review
+records, admission evidence, or observability correlation evidence; they are not
+runtime dispatch inputs.
 
 An immutable source computation gate proves sequential source-local bindings are
 resolved before lowering while Mantle executes only typed artifact data:

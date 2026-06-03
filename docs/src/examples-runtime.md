@@ -137,18 +137,19 @@ metadata/admission data, while runtime send dispatch still uses loaded typed
 process, message, and port IDs.
 
 ```sh
-just run-example component_composition_main
-just strata-composition-build examples/component_composition_main.str
-just strata-composition-admit target/strata/component_composition_main.component-composition.json json
+strata check examples/component_composition_main.str
+strata build examples/component_composition_main.str
+strata composition build examples/component_composition_main.str
+strata composition admit target/strata/component_composition_main.component-composition.json --format json
+strata composition bind-runtime target/strata/component_composition_main.component-composition.json target/strata/component_composition_main.mta --output target/strata/component_composition_main.deployment-composition.json
+mantle run target/strata/component_composition_main.mta --composition-binding target/strata/component_composition_main.deployment-composition.json
 ```
 
-The `component-composition.json` output is a Strata-owned checked-subset
-component-composition validation artifact with schema ID
-`strata.checked_component_composition`. It is not the canonical
-`strata.component_composition` deployment artifact and not `.mta`; Mantle does
-not execute it, and source names inside it remain metadata while typed IDs carry
-the binding and authority-flow meaning. Binding classes outside the current
-source subset are emitted as empty fail-closed arrays.
+The `component-composition.json` output is Strata-owned checked-subset evidence (`strata.checked_component_composition`), not `.mta` or Mantle runtime input.
+`strata composition bind-runtime` emits the separate `deployment-composition.json`
+binding (`mantle.runtime_composition_binding`), which Mantle admits only with
+`--composition-binding` and a matching `.mta`. Source names remain metadata;
+typed IDs carry binding, authority-flow, and trace correlation. Unsupported binding classes stay empty fail-closed arrays.
 
 ## Typed Effect Outcomes
 

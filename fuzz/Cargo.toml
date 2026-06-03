@@ -58,3 +58,10 @@ path = "fuzz_targets/strata_composition_artifact_admit.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "mantle_runtime_composition_binding"
+path = "fuzz_targets/mantle_runtime_composition_binding.rs"
+test = false
+doc = false
+bench = false

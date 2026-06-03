@@ -3,10 +3,12 @@ use mantle_artifact::{Error, Result};
 use crate::limits::{DEFAULT_MAX_RUNTIME_PROCESSES, DEFAULT_MAX_TRACE_BYTES};
 
 use super::{RUNTIME_TRACE_SCHEMA_ID, RUNTIME_TRACE_SCHEMA_VERSION, RuntimeTraceEventKind};
+use composition_context::{RuntimeTraceCompositionTable, validate_optional_composition_fields};
 use json::JsonLine;
 use process::RuntimeTraceProcessTable;
 
 mod branch_path;
+mod composition_context;
 mod json;
 mod process;
 
@@ -179,6 +181,7 @@ struct RuntimeTraceValidator {
     limits: RuntimeTraceValidationLimits,
     event_count: usize,
     processes: RuntimeTraceProcessTable,
+    composition: RuntimeTraceCompositionTable,
     first_event: Option<RuntimeTraceEventKind>,
     last_event: Option<RuntimeTraceEventKind>,
 }
@@ -189,6 +192,7 @@ impl RuntimeTraceValidator {
             limits,
             event_count: 0,
             processes: RuntimeTraceProcessTable::default(),
+            composition: RuntimeTraceCompositionTable::default(),
             first_event: None,
             last_event: None,
         }
@@ -288,6 +292,7 @@ impl RuntimeTraceValidator {
             line.require_unique_optional_field(field)?;
             line.optional_u64_or_null(field)?;
         }
+        let composition_identity = validate_optional_composition_fields(kind, &line)?;
         if kind == RuntimeTraceEventKind::BranchSelected {
             branch_path::validate_branch_path(&line)?;
         }
@@ -299,6 +304,8 @@ impl RuntimeTraceValidator {
 
         self.processes
             .validate_artifact_process_id_bounds(kind, &line)?;
+        self.composition
+            .validate_context(kind, &line, composition_identity)?;
         self.processes
             .validate_pid_correlation(kind, &line, self.limits.max_runtime_processes)?;
         self.event_count = self
@@ -329,6 +336,7 @@ fn validate_allowed_fields(kind: RuntimeTraceEventKind, line: &JsonLine<'_>) -> 
             || contract.metadata_fields().contains(&field)
             || is_allowed_optional_metadata(kind, field)
             || is_allowed_optional_numeric(kind, field)
+            || composition_context::is_optional_composition_field(field)
         {
             Ok(())
         } else {
@@ -626,6 +634,8 @@ fn validate_loop_context_fields(line: &JsonLine<'_>) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod composition_context_tests;
 #[cfg(test)]
 mod effect_outcome_tests;
 #[cfg(test)]

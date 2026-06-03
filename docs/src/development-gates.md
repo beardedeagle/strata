@@ -111,12 +111,14 @@ composition artifact generation or admission:
 just composition-artifact-gates
 ```
 
-It checks `examples/component_composition_main.str`, writes the default
-`target/strata/component_composition_main.component-composition.json`
-checked-subset validation artifact, and validates it with `strata composition
-admit --format json`. This gate is not a substitute for `.mta` source-to-runtime
-execution or for the canonical `strata.component_composition` deployment
-artifact.
+It checks and builds `examples/component_composition_main.str`, writes the
+default `target/strata/component_composition_main.component-composition.json`
+checked-subset validation artifact, validates it with `strata composition admit
+--format json`, binds that admitted evidence to the matching `.mta` through
+`strata composition bind-runtime`, and runs Mantle with the resulting
+`target/strata/component_composition_main.deployment-composition.json`. This
+proves the explicit Strata/deployment-to-Mantle observability bridge while still
+keeping `.component-composition.json` out of Mantle runtime input.
 
 ## Performance Smoke
 
@@ -127,13 +129,13 @@ and the local supervision restart example. It measures repeated Strata checking
 and lowering for collection state, source-unit imports, boundary contracts, and
 component composition; repeated checked composition report rendering,
 Strata-owned composition artifact build/rendering, Strata-owned composition
-artifact admission/validation, and target requirement rendering from a
-prechecked composition input; Mantle admission comparison through the runtime
-profiles; Mantle
+artifact admission/validation, target requirement rendering from a prechecked
+composition input, and repeated Mantle runs with an explicit runtime composition
+binding; Mantle admission comparison through the runtime profiles; Mantle
 artifact encode/decode; repeated Mantle in-memory execution of the
-collection-state and boundary-contract artifacts; repeated
-Mantle JSONL-trace execution of the collection-state artifact; and repeated
-Mantle in-memory execution of the supervision artifact.
+collection-state and boundary-contract artifacts; repeated Mantle JSONL-trace
+execution of the collection-state artifact; and repeated Mantle in-memory
+execution of the supervision artifact.
 The Mantle runtime profiles exercise artifact admission, loaded-program
 validation, internal executable-plan construction, typed dispatch, and host
 execution together; they do not benchmark a serialized bytecode path.
@@ -261,9 +263,10 @@ just fuzz-ci
 Miri runs on nightly Rust. The Miri gate is a smoke suite focused on pure or
 in-memory paths rather than filesystem-specific CLI behavior. It includes
 targeted immutable source-local binding check/lower coverage for the source
-resolution path and `composition_artifact` coverage for the pure
-component-composition artifact renderer/admission validator. Filesystem-specific
-CLI behavior remains covered by unit and acceptance tests instead.
+resolution path, `composition_artifact` coverage for the pure
+component-composition artifact renderer/admission validator, and a focused
+Mantle runtime composition-binding admission check. Filesystem-specific CLI
+behavior remains covered by unit and acceptance tests instead.
 
 Useful local commands:
 
