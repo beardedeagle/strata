@@ -40,12 +40,14 @@ const LOCAL_SUPERVISION_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     label: "local_supervision_restart in-memory runtime",
 };
 const PROFILE_SELECTOR_ENV: &str = "STRATA_PERFORMANCE_SMOKE_PROFILE";
-const ALL_PROFILES: [BenchmarkProfile; 11] = [
+const ALL_PROFILES: [BenchmarkProfile; 13] = [
     CHECK_LOWER_PROFILE,
     IMPORTS_CHECK_LOWER_PROFILE,
     boundary_contracts::CHECK_LOWER_PROFILE,
     component_composition::CHECK_LOWER_PROFILE,
     component_composition::REPORT_PROFILE,
+    component_composition::ARTIFACT_BUILD_PROFILE,
+    component_composition::ARTIFACT_ADMIT_PROFILE,
     component_composition::TARGET_REQUIREMENTS_PROFILE,
     IN_MEMORY_RUNTIME_PROFILE,
     boundary_contracts::RUNTIME_PROFILE,
@@ -53,7 +55,7 @@ const ALL_PROFILES: [BenchmarkProfile; 11] = [
     JSONL_RUNTIME_PROFILE,
     LOCAL_SUPERVISION_RUNTIME_PROFILE,
 ];
-const PROFILE_KEY_LIST: &str = "collection_state.check_lower, imports_main.check_lower, boundary_contracts_main.check_lower, component_composition_main.check_lower, component_composition_main.composition_report, component_composition_main.target_requirements, collection_state.in_memory_runtime, boundary_contracts_main.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
+const PROFILE_KEY_LIST: &str = "collection_state.check_lower, imports_main.check_lower, boundary_contracts_main.check_lower, component_composition_main.check_lower, component_composition_main.composition_report, component_composition_main.composition_artifact_build, component_composition_main.composition_artifact_admit, component_composition_main.target_requirements, collection_state.in_memory_runtime, boundary_contracts_main.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
 const JSONL_RUNTIME_ARTIFACT_PATH: &str = "target/performance-smoke/collection_state.mta";
 #[cfg(any(
     target_os = "linux",
@@ -84,52 +86,51 @@ fn collection_state_compilation_and_runtime_performance_smoke() {
     let selected_profile = selected_profile.as_deref();
     profile_selection::validate_selected_profile(selected_profile, &ALL_PROFILES, PROFILE_KEY_LIST);
 
-    if profile_selection::profile_is_selected(selected_profile, CHECK_LOWER_PROFILE) {
-        run_check_lower_profile();
+    macro_rules! run_profile {
+        ($profile:expr, $run:path) => {
+            if profile_selection::profile_is_selected(selected_profile, $profile) {
+                $run();
+            }
+        };
     }
-    if profile_selection::profile_is_selected(selected_profile, IMPORTS_CHECK_LOWER_PROFILE) {
-        run_imports_check_lower_profile();
-    }
-    if profile_selection::profile_is_selected(
-        selected_profile,
+
+    run_profile!(CHECK_LOWER_PROFILE, run_check_lower_profile);
+    run_profile!(IMPORTS_CHECK_LOWER_PROFILE, run_imports_check_lower_profile);
+    run_profile!(
         boundary_contracts::CHECK_LOWER_PROFILE,
-    ) {
-        boundary_contracts::run_check_lower_profile();
-    }
-    if profile_selection::profile_is_selected(
-        selected_profile,
+        boundary_contracts::run_check_lower_profile
+    );
+    run_profile!(
         component_composition::CHECK_LOWER_PROFILE,
-    ) {
-        component_composition::run_check_lower_profile();
-    }
-    if profile_selection::profile_is_selected(
-        selected_profile,
+        component_composition::run_check_lower_profile
+    );
+    run_profile!(
         component_composition::REPORT_PROFILE,
-    ) {
-        component_composition::run_report_profile();
-    }
-    if profile_selection::profile_is_selected(
-        selected_profile,
+        component_composition::run_report_profile
+    );
+    run_profile!(
+        component_composition::ARTIFACT_BUILD_PROFILE,
+        component_composition::run_artifact_build_profile
+    );
+    run_profile!(
+        component_composition::ARTIFACT_ADMIT_PROFILE,
+        component_composition::run_artifact_admit_profile
+    );
+    run_profile!(
         component_composition::TARGET_REQUIREMENTS_PROFILE,
-    ) {
-        component_composition::run_target_requirements_profile();
-    }
-    if profile_selection::profile_is_selected(selected_profile, IN_MEMORY_RUNTIME_PROFILE) {
-        run_in_memory_runtime_profile();
-    }
-    if profile_selection::profile_is_selected(selected_profile, boundary_contracts::RUNTIME_PROFILE)
-    {
-        boundary_contracts::run_runtime_profile();
-    }
-    if profile_selection::profile_is_selected(selected_profile, ARTIFACT_CODEC_PROFILE) {
-        run_artifact_codec_profile();
-    }
-    if profile_selection::profile_is_selected(selected_profile, JSONL_RUNTIME_PROFILE) {
-        run_jsonl_runtime_profile();
-    }
-    if profile_selection::profile_is_selected(selected_profile, LOCAL_SUPERVISION_RUNTIME_PROFILE) {
-        run_local_supervision_runtime_profile();
-    }
+        component_composition::run_target_requirements_profile
+    );
+    run_profile!(IN_MEMORY_RUNTIME_PROFILE, run_in_memory_runtime_profile);
+    run_profile!(
+        boundary_contracts::RUNTIME_PROFILE,
+        boundary_contracts::run_runtime_profile
+    );
+    run_profile!(ARTIFACT_CODEC_PROFILE, run_artifact_codec_profile);
+    run_profile!(JSONL_RUNTIME_PROFILE, run_jsonl_runtime_profile);
+    run_profile!(
+        LOCAL_SUPERVISION_RUNTIME_PROFILE,
+        run_local_supervision_runtime_profile
+    );
 }
 
 fn run_check_lower_profile() {

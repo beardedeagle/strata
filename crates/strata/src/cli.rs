@@ -14,6 +14,8 @@ use crate::language::{
 };
 use crate::source_loader::{LoadedSourceProgram, load_root_source_program};
 
+mod composition;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -162,6 +164,7 @@ where
             print_summary(&report);
             Ok(())
         }
+        Some("composition") => composition::command(args),
         Some("target-requirements") => {
             let path = required_path(
                 args.next(),
@@ -349,6 +352,8 @@ fn print_strata_usage() {
     println!("usage:");
     println!("  strata check <path.str>");
     println!("  strata build <path.str> [--output <path.mta>]");
+    println!("  strata composition build <path.str> [--composition <name>] [--output <path.json>]");
+    println!("  strata composition admit <path.json> [--format text|json]");
     println!("  strata authority-summary <path.str> [--format text|json]");
     println!("  strata composition-report <path.str> [--format text|json]");
     println!("  strata target-requirements <path.str> [--format text|json]");
@@ -385,6 +390,40 @@ mod tests {
         .expect_err("duplicate output should fail");
 
         assert!(err.to_string().contains("duplicate --output argument"));
+    }
+
+    #[test]
+    fn composition_build_rejects_duplicate_output_argument() {
+        let err = strata_main([
+            "strata".to_string(),
+            "composition".to_string(),
+            "build".to_string(),
+            "examples/component_composition_main.str".to_string(),
+            "--output".to_string(),
+            "one.json".to_string(),
+            "--output".to_string(),
+            "two.json".to_string(),
+        ])
+        .expect_err("duplicate output should fail");
+
+        assert!(err.to_string().contains("duplicate --output argument"));
+    }
+
+    #[test]
+    fn composition_build_rejects_duplicate_composition_argument() {
+        let err = strata_main([
+            "strata".to_string(),
+            "composition".to_string(),
+            "build".to_string(),
+            "examples/component_composition_main.str".to_string(),
+            "--composition".to_string(),
+            "One".to_string(),
+            "--composition".to_string(),
+            "Two".to_string(),
+        ])
+        .expect_err("duplicate composition selector should fail");
+
+        assert!(err.to_string().contains("duplicate --composition argument"));
     }
 
     #[test]
@@ -428,6 +467,34 @@ mod tests {
     #[test]
     fn composition_report_format_parser_rejects_unknown_format() {
         let err = composition_report_format_from_args(
+            ["--format".to_string(), "yaml".to_string()],
+            "usage",
+        )
+        .expect_err("unknown format should fail");
+
+        assert!(
+            err.to_string()
+                .contains("unsupported --format value \"yaml\"")
+        );
+    }
+
+    #[test]
+    fn composition_artifact_admit_format_parser_accepts_json() {
+        let format = composition::artifact_admit_format_from_args(
+            ["--format".to_string(), "json".to_string()],
+            "usage",
+        )
+        .expect("json format should parse");
+
+        assert_eq!(
+            format,
+            crate::language::ComponentCompositionArtifactAdmitFormat::Json
+        );
+    }
+
+    #[test]
+    fn composition_artifact_admit_format_parser_rejects_unknown_format() {
+        let err = composition::artifact_admit_format_from_args(
             ["--format".to_string(), "yaml".to_string()],
             "usage",
         )

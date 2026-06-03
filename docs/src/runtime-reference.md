@@ -401,22 +401,27 @@ supervisor IDs, supervisor child IDs, child modes, and restart-intensity fields
 so CI and audit tooling can compare the source-side and artifact-side authority
 surfaces. Process, authority, and child labels are included only as metadata.
 
-Composition admission reporting is source-side only:
+Composition admission reporting and component-composition artifact admission are
+source-side only:
 
 ```sh
 just strata-composition-report examples/component_composition_main.str
 just strata-composition-report examples/component_composition_main.str json
+just strata-composition-build examples/component_composition_main.str
+just strata-composition-admit target/strata/component_composition_main.component-composition.json json
 ```
 
 The report is emitted from checked Strata composition facts and a diagnostic
 FNV-1a source fingerprint. It records typed component-instance IDs, typed
-port-binding IDs, admitted binding results, empty unsatisfied imports for
-admitted compositions, component export authority surfaces, endpoint port
-authority requirements, and cross-component authority edges. Mantle does not
-read this report; it executes only admitted `.mta` artifacts.
-
-Runtime feature declarations and target requirement reports are read-only
-compatibility inspection surfaces:
+component import/export port obligations, typed port-binding IDs, admitted
+binding results, empty unsatisfied imports for admitted compositions, component
+export authority surfaces, endpoint port authority requirements, and
+cross-component authority edges. The component-composition artifact is the
+durable JSON form of that source-side checked-subset validation evidence and
+self-identifies as `strata.checked_component_composition`. It is not the
+canonical `strata.component_composition` deployment artifact. Mantle does not
+read the report or this JSON artifact; it executes only admitted `.mta`
+artifacts.
 
 ```sh
 just strata-target-requirements examples/actor_ping.str

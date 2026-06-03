@@ -138,7 +138,17 @@ process, message, and port IDs.
 
 ```sh
 just run-example component_composition_main
+just strata-composition-build examples/component_composition_main.str
+just strata-composition-admit target/strata/component_composition_main.component-composition.json json
 ```
+
+The `component-composition.json` output is a Strata-owned checked-subset
+component-composition validation artifact with schema ID
+`strata.checked_component_composition`. It is not the canonical
+`strata.component_composition` deployment artifact and not `.mta`; Mantle does
+not execute it, and source names inside it remain metadata while typed IDs carry
+the binding and authority-flow meaning. Binding classes outside the current
+source subset are emitted as empty fail-closed arrays.
 
 ## Typed Effect Outcomes
 

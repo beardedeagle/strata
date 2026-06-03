@@ -13,7 +13,7 @@ fn text_report_includes_checked_composition_authority_edges() {
         CompositionAdmissionReportFormat::Text,
     );
 
-    assert!(report.contains("format: strata.component_composition_admission_report"));
+    assert!(report.contains("format: strata.checked_component_composition_admission_report"));
     assert!(report.contains("source_hash_algorithm: fnv1a64-diagnostic"));
     assert!(report.contains("composition 0 AppComposition"));
     assert!(report.contains("admission_result: admitted"));
@@ -33,7 +33,7 @@ fn json_report_matches_checked_schema_facts() {
         CompositionAdmissionReportFormat::Json,
     );
     let expected = [
-        r#"{"report_format":"strata.component_composition_admission_report","report_version":1,"source_language":"strata","source":"component_composition_main.str","module":"component_composition_main","source_hash_fnv1a64":""#,
+        r#"{"report_format":"strata.checked_component_composition_admission_report","report_version":1,"source_language":"strata","source":"component_composition_main.str","module":"component_composition_main","source_hash_fnv1a64":""#,
         report_input.source_hash().fnv1a64(),
         r#"","source_hash_algorithm":"fnv1a64-diagnostic","compositions":[{"composition_id":0,"composition":"AppComposition","admission_result":"admitted","unsatisfied_imports":[],"component_instances":[{"component_instance_id":0,"instance":"main","component_id":1,"component":"MainComponent","component_authority":{"kind":"component_export","component_id":1,"component":"MainComponent"}},{"component_instance_id":1,"instance":"worker","component_id":0,"component":"WorkerComponent","component_authority":{"kind":"component_export","component_id":0,"component":"WorkerComponent"}}],"port_bindings":[{"port_binding_id":0,"importer_instance_id":0,"importer_instance":"main","imported_port_id":0,"imported_port":"WorkerPort","exporter_instance_id":1,"exporter_instance":"worker","exported_port_id":0,"exported_port":"WorkerPort","protocol_id":0,"protocol":"WorkerProtocol","binding_result":"admitted","imported_port_authority":{"kind":"port_connect","port_id":0,"port":"WorkerPort"},"exported_port_authority":{"kind":"port_connect","port_id":0,"port":"WorkerPort"}}],"authority_edges":[{"port_binding_id":0,"edge_kind":"port_binding","exporter_component_id":0,"exporter_component":"WorkerComponent","importer_component_id":1,"importer_component":"MainComponent","exported_port_id":0,"exported_port":"WorkerPort","imported_port_id":0,"imported_port":"WorkerPort","protocol_id":0,"protocol":"WorkerProtocol","export_authority":{"kind":"component_export","component_id":0,"component":"WorkerComponent"},"exported_port_authority":{"kind":"port_connect","port_id":0,"port":"WorkerPort"},"imported_port_authority":{"kind":"port_connect","port_id":0,"port":"WorkerPort"}}]}]}"#,
     ]

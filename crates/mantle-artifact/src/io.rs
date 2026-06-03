@@ -17,6 +17,18 @@ pub fn write_artifact(path: &Path, artifact: &MantleArtifact) -> Result<()> {
     Ok(())
 }
 
+pub fn write_text_artifact(path: &Path, contents: &str) -> Result<()> {
+    reject_symlink_path_components(path)?;
+    reject_non_regular_artifact_output_path_before_open(path)?;
+    prepare_artifact_output_parent(path)?;
+    let mut file = open_artifact_output_file(path)?;
+    validate_artifact_file_metadata(path, &file.metadata()?)?;
+    validate_opened_artifact_path(path, &file)?;
+    file.write_all(contents.as_bytes())?;
+    file.flush()?;
+    Ok(())
+}
+
 pub fn read_artifact(path: &Path) -> Result<MantleArtifact> {
     reject_symlink_path_components(path)?;
     let metadata = fs::symlink_metadata(path)?;
@@ -30,7 +42,13 @@ pub fn read_artifact(path: &Path) -> Result<MantleArtifact> {
     let mut file = open_artifact_input_file(path)?;
     validate_artifact_file_metadata(path, &file.metadata()?)?;
     validate_opened_artifact_path(path, &file)?;
-    let mut bytes = Vec::new();
+    let capacity = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(format!(
+            "artifact {} size does not fit into usize",
+            path.display()
+        ))
+    })?;
+    let mut bytes = Vec::with_capacity(capacity);
     Read::by_ref(&mut file)
         .take((MAX_ARTIFACT_BYTES + 1) as u64)
         .read_to_end(&mut bytes)?;
@@ -47,6 +65,55 @@ pub fn read_artifact(path: &Path) -> Result<MantleArtifact> {
         ))
     })?;
     MantleArtifact::decode(&contents)
+}
+
+pub fn read_text_artifact(path: &Path, max_bytes: usize) -> Result<String> {
+    reject_symlink_path_components(path)?;
+    let metadata = fs::symlink_metadata(path)?;
+    validate_artifact_file_metadata(path, &metadata)?;
+    let max_bytes_u64 = u64::try_from(max_bytes).map_err(|_| {
+        Error::new(format!(
+            "artifact {} size limit does not fit into u64",
+            path.display()
+        ))
+    })?;
+    if metadata.len() > max_bytes_u64 {
+        return Err(Error::new(format!(
+            "artifact {} is too large; maximum supported size is {max_bytes} bytes",
+            path.display()
+        )));
+    }
+    let mut file = open_artifact_input_file(path)?;
+    validate_artifact_file_metadata(path, &file.metadata()?)?;
+    validate_opened_artifact_path(path, &file)?;
+    let capacity = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(format!(
+            "artifact {} size does not fit into usize",
+            path.display()
+        ))
+    })?;
+    let mut bytes = Vec::with_capacity(capacity);
+    let read_limit = max_bytes_u64.checked_add(1).ok_or_else(|| {
+        Error::new(format!(
+            "artifact {} size limit is too large",
+            path.display()
+        ))
+    })?;
+    Read::by_ref(&mut file)
+        .take(read_limit)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > max_bytes {
+        return Err(Error::new(format!(
+            "artifact {} is too large; maximum supported size is {max_bytes} bytes",
+            path.display()
+        )));
+    }
+    String::from_utf8(bytes).map_err(|err| {
+        Error::new(format!(
+            "artifact {} is not valid UTF-8: {err}",
+            path.display()
+        ))
+    })
 }
 
 pub struct SourceHashFnv1a64 {
@@ -540,6 +607,48 @@ mod tests {
         fs::remove_file(link_dir).expect("test parent symlink should be removed");
         fs::remove_file(real_dir.join("in.mta")).expect("test input should be removed");
         fs::remove_dir(real_dir).expect("test real dir should be removed");
+    }
+
+    #[test]
+    fn text_artifact_round_trips_under_explicit_limit() {
+        let path = unique_artifact_path("text-round-trip");
+        write_text_artifact(&path, "admission evidence").expect("text artifact should write");
+
+        let text = read_text_artifact(&path, 64).expect("text artifact should read");
+
+        assert_eq!(text, "admission evidence");
+        fs::remove_file(path).expect("test text artifact should be removed");
+    }
+
+    #[test]
+    fn read_text_artifact_rejects_oversized_file() {
+        let path = unique_artifact_path("oversized-text");
+        fs::write(&path, b"abc").expect("test text artifact should be written");
+
+        let err =
+            read_text_artifact(&path, 2).expect_err("oversized text artifact should fail closed");
+
+        assert!(
+            err.to_string()
+                .contains("maximum supported size is 2 bytes"),
+            "unexpected oversized diagnostic: {err}"
+        );
+        fs::remove_file(path).expect("test oversized artifact should be removed");
+    }
+
+    #[test]
+    fn read_text_artifact_rejects_invalid_utf8() {
+        let path = unique_artifact_path("invalid-utf8-text");
+        fs::write(&path, [0xff]).expect("test invalid UTF-8 artifact should be written");
+
+        let err = read_text_artifact(&path, 8)
+            .expect_err("invalid UTF-8 text artifact should fail closed");
+
+        assert!(
+            err.to_string().contains("is not valid UTF-8"),
+            "unexpected UTF-8 diagnostic: {err}"
+        );
+        fs::remove_file(path).expect("test invalid UTF-8 artifact should be removed");
     }
 
     fn create_fifo(path: &Path) {

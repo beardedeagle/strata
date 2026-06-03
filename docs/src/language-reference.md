@@ -80,11 +80,20 @@ WorkerPort;`.
 
 The checker admits this local input only when instances name visible components,
 each import is bound once, exports belong to exporters, ports share one protocol,
-and the binding preserves exact current `Cap<PortConnect<Port>>` authority. It
-is not the canonical `strata.component_composition` artifact. Mantle receives
-typed IDs as metadata/admission data, not source names. The composition report
-command emits the Strata-owned checked graph report; Mantle does not consume it
-or validate source composition syntax.
+and the binding preserves exact current `Cap<PortConnect<Port>>` authority.
+`strata composition build <path.str>` renders the Strata-owned checked-subset
+`strata.checked_component_composition` artifact for that checked local
+composition graph under `target/strata/<stem>.component-composition.json` by
+default, and `strata composition admit <path.json>` validates the artifact
+fail-closed before it can be used as checked-subset validation evidence. The
+artifact is not the canonical `strata.component_composition` deployment artifact
+and not `.mta`; Mantle does not execute it in this slice. Source names inside it
+are provenance, diagnostics, and debug metadata only; component-instance IDs,
+port-binding IDs,
+port IDs, protocol IDs, and authority descriptor IDs carry the checked meaning.
+Binding classes outside the current source subset are present as empty
+fail-closed arrays rather than inferred facts. The older `strata
+composition-report` command remains review evidence, not the artifact.
 
 Every buildable program must declare a `Main` process. Mantle starts `Main` and
 delivers the first message variant of `Main`'s message enum as the entry

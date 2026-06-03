@@ -51,3 +51,10 @@ path = "fuzz_targets/mantle_trace_validate.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "strata_composition_artifact_admit"
+path = "fuzz_targets/strata_composition_artifact_admit.rs"
+test = false
+doc = false
+bench = false

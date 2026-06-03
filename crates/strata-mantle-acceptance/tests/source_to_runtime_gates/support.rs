@@ -63,6 +63,45 @@ impl GateHarness {
         )
     }
 
+    pub(crate) fn composition_build(&self, source: &str, artifact: &str) {
+        self.remove_artifact(artifact);
+        assert_success(
+            self.command(
+                &self.strata,
+                ["composition", "build", source, "--output", artifact],
+                "strata composition build",
+            ),
+            "strata composition build",
+        );
+        assert!(
+            self.root.join(artifact).exists(),
+            "expected {}",
+            self.root.join(artifact).display()
+        );
+    }
+
+    pub(crate) fn composition_admit(&self, artifact: &str, format: &str) -> Output {
+        assert_success(
+            self.command(
+                &self.strata,
+                ["composition", "admit", artifact, "--format", format],
+                "strata composition admit",
+            ),
+            "strata composition admit",
+        )
+    }
+
+    pub(crate) fn composition_admit_failure(&self, artifact: &str) -> Output {
+        assert_failure(
+            self.command(
+                &self.strata,
+                ["composition", "admit", artifact],
+                "strata composition admit",
+            ),
+            "strata composition admit",
+        )
+    }
+
     pub(crate) fn target_requirements(&self, source: &str, format: &str) -> Output {
         assert_success(
             self.command(
@@ -192,6 +231,19 @@ impl GateHarness {
     pub(crate) fn read_artifact(&self, artifact: &str) -> MantleArtifact {
         read_artifact(&self.root.join(artifact))
             .unwrap_or_else(|err| panic!("expected artifact {artifact}: {err}"))
+    }
+
+    pub(crate) fn read_text_artifact(&self, artifact: &str) -> String {
+        fs::read_to_string(self.root.join(artifact))
+            .unwrap_or_else(|err| panic!("expected text artifact {artifact}: {err}"))
+    }
+
+    pub(crate) fn write_text_artifact(&self, artifact: &str, text: &str) {
+        let path = self.root.join(artifact);
+        fs::create_dir_all(path.parent().expect("text artifact should have a parent"))
+            .unwrap_or_else(|err| panic!("could not create artifact directory: {err}"));
+        fs::write(&path, text)
+            .unwrap_or_else(|err| panic!("could not write text artifact {artifact}: {err}"));
     }
 
     pub(crate) fn write_target_source(&self, stem: &str, source: &str) -> PathBuf {
