@@ -6,8 +6,8 @@ mdbook_version := "0.5.2"
 mdbook_mermaid_version := "0.17.0"
 cargo_fuzz_version := "0.13.1"
 cfg_check_targets := "x86_64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc"
-fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower strata_composition_artifact_admit mantle_artifact_decode mantle_runtime_from_source mantle_trace_validate"
-fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 strata_composition_artifact_admit:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_trace_validate:128"
+fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower strata_composition_artifact_admit mantle_artifact_decode mantle_runtime_from_source mantle_trace_validate mantle_runtime_composition_binding"
+fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 strata_composition_artifact_admit:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_trace_validate:128 mantle_runtime_composition_binding:128"
 
 default:
     @just --list
@@ -143,6 +143,9 @@ strata-composition-build source:
 strata-composition-admit artifact format="text":
     cargo +{{stable_toolchain}} run -p strata --bin strata -- composition admit "{{artifact}}" --format "{{format}}"
 
+strata-composition-bind-runtime composition_artifact runtime_artifact output:
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- composition bind-runtime "{{composition_artifact}}" "{{runtime_artifact}}" --output "{{output}}"
+
 mantle-inspect-authority artifact format="text":
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- inspect-authority "{{artifact}}" --format "{{format}}"
 
@@ -161,8 +164,12 @@ run-example name:
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "target/strata/{{name}}.mta"
 
 composition-artifact-gates: build
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/component_composition_main.str
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/component_composition_main.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- composition build examples/component_composition_main.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- composition admit target/strata/component_composition_main.component-composition.json --format json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- composition bind-runtime target/strata/component_composition_main.component-composition.json target/strata/component_composition_main.mta --output target/strata/component_composition_main.deployment-composition.json
+    cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/component_composition_main.mta --composition-binding target/strata/component_composition_main.deployment-composition.json
 
 metadata-check:
     #!/usr/bin/env bash
@@ -322,6 +329,8 @@ source-to-runtime-success-gates: build
     "${cargo_run[@]}" -p strata --bin strata -- composition-report examples/component_composition_main.str --format json >/dev/null
     "${cargo_run[@]}" -p strata --bin strata -- composition build examples/component_composition_main.str
     "${cargo_run[@]}" -p strata --bin strata -- composition admit target/strata/component_composition_main.component-composition.json --format json >/dev/null
+    "${cargo_run[@]}" -p strata --bin strata -- composition bind-runtime target/strata/component_composition_main.component-composition.json target/strata/component_composition_main.mta --output target/strata/component_composition_main.deployment-composition.json
+    "${cargo_run[@]}" -p mantle-runtime --bin mantle -- run target/strata/component_composition_main.mta --composition-binding target/strata/component_composition_main.deployment-composition.json
     "${cargo_run[@]}" -p strata --bin strata -- target-requirements examples/component_composition_main.str --format json >/dev/null
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- feature-declaration --format json >/dev/null
     "${cargo_run[@]}" -p mantle-runtime --bin mantle -- admit target/strata/component_composition_main.mta --format json >/dev/null
@@ -553,6 +562,7 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_rejects_loaded_spawn_site_target_mismatched_with_authority_before_artifact_loaded
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_spawn_outcome_returns_denied_before_acceptance
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_composition_binding::admits_matching_runtime_composition_binding_and_maps_trace_context
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime bounded_restart_intensity_denies_second_restart_within_window
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime restarted_supervisor_child_stops_its_old_supervised_subtree
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime loaded_admission_rejects_indirect_supervisor_cycle

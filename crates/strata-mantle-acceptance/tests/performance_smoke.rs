@@ -40,7 +40,7 @@ const LOCAL_SUPERVISION_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     label: "local_supervision_restart in-memory runtime",
 };
 const PROFILE_SELECTOR_ENV: &str = "STRATA_PERFORMANCE_SMOKE_PROFILE";
-const ALL_PROFILES: [BenchmarkProfile; 13] = [
+const ALL_PROFILES: [BenchmarkProfile; 14] = [
     CHECK_LOWER_PROFILE,
     IMPORTS_CHECK_LOWER_PROFILE,
     boundary_contracts::CHECK_LOWER_PROFILE,
@@ -49,13 +49,14 @@ const ALL_PROFILES: [BenchmarkProfile; 13] = [
     component_composition::ARTIFACT_BUILD_PROFILE,
     component_composition::ARTIFACT_ADMIT_PROFILE,
     component_composition::TARGET_REQUIREMENTS_PROFILE,
+    component_composition::RUNTIME_BINDING_PROFILE,
     IN_MEMORY_RUNTIME_PROFILE,
     boundary_contracts::RUNTIME_PROFILE,
     ARTIFACT_CODEC_PROFILE,
     JSONL_RUNTIME_PROFILE,
     LOCAL_SUPERVISION_RUNTIME_PROFILE,
 ];
-const PROFILE_KEY_LIST: &str = "collection_state.check_lower, imports_main.check_lower, boundary_contracts_main.check_lower, component_composition_main.check_lower, component_composition_main.composition_report, component_composition_main.composition_artifact_build, component_composition_main.composition_artifact_admit, component_composition_main.target_requirements, collection_state.in_memory_runtime, boundary_contracts_main.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
+const PROFILE_KEY_LIST: &str = "collection_state.check_lower, imports_main.check_lower, boundary_contracts_main.check_lower, component_composition_main.check_lower, component_composition_main.composition_report, component_composition_main.composition_artifact_build, component_composition_main.composition_artifact_admit, component_composition_main.target_requirements, component_composition_main.runtime_binding_run, collection_state.in_memory_runtime, boundary_contracts_main.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
 const JSONL_RUNTIME_ARTIFACT_PATH: &str = "target/performance-smoke/collection_state.mta";
 #[cfg(any(
     target_os = "linux",
@@ -119,6 +120,10 @@ fn collection_state_compilation_and_runtime_performance_smoke() {
     run_profile!(
         component_composition::TARGET_REQUIREMENTS_PROFILE,
         component_composition::run_target_requirements_profile
+    );
+    run_profile!(
+        component_composition::RUNTIME_BINDING_PROFILE,
+        component_composition::run_runtime_binding_profile
     );
     run_profile!(IN_MEMORY_RUNTIME_PROFILE, run_in_memory_runtime_profile);
     run_profile!(

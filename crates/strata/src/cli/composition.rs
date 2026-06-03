@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use crate::language::{
     COMPONENT_COMPOSITION_ARTIFACT_EXTENSION, ComponentCompositionAdmissionResult,
     ComponentCompositionArtifactAdmitFormat, MAX_COMPONENT_COMPOSITION_ARTIFACT_BYTES,
-    admit_component_composition_artifact, render_component_composition_admission_summary,
-    render_component_composition_artifact,
+    RUNTIME_COMPOSITION_BINDING_ARTIFACT_EXTENSION, admit_component_composition_artifact,
+    render_component_composition_admission_summary, render_component_composition_artifact,
+    render_runtime_composition_binding,
 };
 
 use super::{Error, Result, check_source_path, print_summary, required_path};
@@ -14,6 +15,7 @@ pub(super) fn command(args: impl IntoIterator<Item = String>) -> Result<()> {
     match args.next().as_deref() {
         Some("build") => build(args),
         Some("admit") => admit(args),
+        Some("bind-runtime") => bind_runtime(args),
         Some("--help") | Some("-h") => {
             print_usage();
             Ok(())
@@ -105,6 +107,49 @@ fn admit(args: impl IntoIterator<Item = String>) -> Result<()> {
     Ok(())
 }
 
+fn bind_runtime(args: impl IntoIterator<Item = String>) -> Result<()> {
+    let mut args = args.into_iter();
+    let composition_path = required_path(
+        args.next(),
+        "strata composition bind-runtime <composition.json> <artifact.mta> [--output <path.json>]",
+    )?;
+    let artifact_path = required_path(
+        args.next(),
+        "strata composition bind-runtime <composition.json> <artifact.mta> [--output <path.json>]",
+    )?;
+    let mut output = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--output" => {
+                if output.is_some() {
+                    return Err(Error::new("duplicate --output argument"));
+                }
+                output = Some(required_path(
+                    args.next(),
+                    "strata composition bind-runtime <composition.json> <artifact.mta> --output <path.json>",
+                )?);
+            }
+            other => return Err(Error::new(format!("unexpected argument {other:?}"))),
+        }
+    }
+
+    let composition_text = mantle_artifact::read_text_artifact(
+        &composition_path,
+        MAX_COMPONENT_COMPOSITION_ARTIFACT_BYTES,
+    )?;
+    let artifact = mantle_artifact::read_artifact(&artifact_path)?;
+    let binding = render_runtime_composition_binding(&composition_text, &artifact)?;
+    let binding_path = output.unwrap_or(default_runtime_binding_path(&artifact_path)?);
+    mantle_artifact::write_text_artifact(&binding_path, &binding)?;
+    println!(
+        "strata: bound composition {} to runtime artifact {} -> {}",
+        composition_path.display(),
+        artifact_path.display(),
+        binding_path.display()
+    );
+    Ok(())
+}
+
 fn default_artifact_path(source_path: &Path, composition_name: Option<&str>) -> Result<PathBuf> {
     let stem = source_path
         .file_stem()
@@ -121,6 +166,21 @@ fn default_artifact_path(source_path: &Path, composition_name: Option<&str>) -> 
     };
     Ok(Path::new("target").join("strata").join(format!(
         "{artifact_stem}.{COMPONENT_COMPOSITION_ARTIFACT_EXTENSION}"
+    )))
+}
+
+fn default_runtime_binding_path(artifact_path: &Path) -> Result<PathBuf> {
+    let stem = artifact_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "artifact path {} has no UTF-8 file stem",
+                artifact_path.display()
+            ))
+        })?;
+    Ok(Path::new("target").join("strata").join(format!(
+        "{stem}.{RUNTIME_COMPOSITION_BINDING_ARTIFACT_EXTENSION}"
     )))
 }
 
@@ -161,6 +221,9 @@ fn print_usage() {
     println!("usage:");
     println!("  strata composition build <path.str> [--composition <name>] [--output <path.json>]");
     println!("  strata composition admit <path.json> [--format text|json]");
+    println!(
+        "  strata composition bind-runtime <composition.json> <artifact.mta> [--output <path.json>]"
+    );
 }
 
 #[cfg(all(test, unix))]
@@ -260,6 +323,160 @@ mod tests {
     }
 
     #[test]
+    fn bind_runtime_rejects_symlink_composition_input_path() {
+        use std::os::unix::fs::symlink;
+
+        let composition_artifact = unique_composition_artifact_path("bind-input-artifact");
+        let runtime_artifact = unique_runtime_artifact_path("bind-input-runtime");
+        let binding_artifact = unique_binding_artifact_path("bind-input-binding");
+        let link = unique_composition_artifact_path("bind-input-symlink");
+        build([
+            example_source_path().display().to_string(),
+            "--output".to_string(),
+            composition_artifact.display().to_string(),
+        ])
+        .expect("composition artifact should build for bind-runtime input symlink test");
+        write_runtime_artifact(&runtime_artifact);
+        symlink(&composition_artifact, &link).expect("test input symlink should be created");
+
+        let err = bind_runtime([
+            link.display().to_string(),
+            runtime_artifact.display().to_string(),
+            "--output".to_string(),
+            binding_artifact.display().to_string(),
+        ])
+        .expect_err("bind-runtime composition input symlink should fail closed");
+
+        assert_non_regular_artifact_error(&err);
+
+        fs::remove_file(link).expect("test input symlink should be removed");
+        fs::remove_file(composition_artifact).expect("test composition artifact should be removed");
+        fs::remove_file(runtime_artifact).expect("test runtime artifact should be removed");
+    }
+
+    #[test]
+    fn bind_runtime_writes_artifact_stem_default_path() {
+        let composition_artifact = unique_composition_artifact_path("bind-default-artifact");
+        let runtime_artifact = unique_runtime_artifact_path("bind-default-runtime");
+        let binding_artifact = default_runtime_binding_path(&runtime_artifact)
+            .expect("test runtime artifact path should have a default binding path");
+        fs::remove_file(&binding_artifact).ok();
+        build([
+            example_source_path().display().to_string(),
+            "--output".to_string(),
+            composition_artifact.display().to_string(),
+        ])
+        .expect("composition artifact should build for bind-runtime default path test");
+        write_runtime_artifact(&runtime_artifact);
+
+        bind_runtime([
+            composition_artifact.display().to_string(),
+            runtime_artifact.display().to_string(),
+        ])
+        .expect("bind-runtime should write the default binding path");
+
+        let binding = fs::read_to_string(&binding_artifact)
+            .expect("default runtime binding artifact should be readable");
+        assert!(binding.contains("\"schema_id\":\"mantle.runtime_composition_binding\""));
+        assert!(binding.contains("\"admission_result\":\"admitted\""));
+
+        fs::remove_file(binding_artifact).expect("test binding artifact should be removed");
+        fs::remove_file(composition_artifact).expect("test composition artifact should be removed");
+        fs::remove_file(runtime_artifact).expect("test runtime artifact should be removed");
+    }
+
+    #[test]
+    fn bind_runtime_rejects_symlink_output_path_without_touching_target() {
+        use std::os::unix::fs::symlink;
+
+        let composition_artifact = unique_composition_artifact_path("bind-output-artifact");
+        let runtime_artifact = unique_runtime_artifact_path("bind-output-runtime");
+        let target = unique_binding_artifact_path("bind-output-target");
+        let link = unique_binding_artifact_path("bind-output-link");
+        build([
+            example_source_path().display().to_string(),
+            "--output".to_string(),
+            composition_artifact.display().to_string(),
+        ])
+        .expect("composition artifact should build for bind-runtime output symlink test");
+        write_runtime_artifact(&runtime_artifact);
+        fs::create_dir_all(target.parent().expect("test target should have a parent"))
+            .expect("test artifact directory should be created");
+        fs::write(&target, "unchanged").expect("test symlink target should be written");
+        symlink(&target, &link).expect("test output symlink should be created");
+
+        let err = bind_runtime([
+            composition_artifact.display().to_string(),
+            runtime_artifact.display().to_string(),
+            "--output".to_string(),
+            link.display().to_string(),
+        ])
+        .expect_err("bind-runtime output symlink should fail closed");
+
+        assert_non_regular_artifact_error(&err);
+        assert_eq!(
+            fs::read_to_string(&target).expect("symlink target should remain readable"),
+            "unchanged",
+            "bind-runtime must not write through a symlink output path"
+        );
+
+        fs::remove_file(link).expect("test output symlink should be removed");
+        fs::remove_file(target).expect("test symlink target should be removed");
+        fs::remove_file(composition_artifact).expect("test composition artifact should be removed");
+        fs::remove_file(runtime_artifact).expect("test runtime artifact should be removed");
+    }
+
+    #[test]
+    fn bind_runtime_rejects_duplicate_output_argument() {
+        let err = bind_runtime([
+            "composition.json".to_string(),
+            "artifact.mta".to_string(),
+            "--output".to_string(),
+            "first.json".to_string(),
+            "--output".to_string(),
+            "second.json".to_string(),
+        ])
+        .expect_err("duplicate --output should fail before artifact I/O");
+
+        assert!(
+            err.to_string().contains("duplicate --output argument"),
+            "unexpected duplicate output diagnostic: {err}"
+        );
+    }
+
+    #[test]
+    fn bind_runtime_rejects_missing_output_value() {
+        let err = bind_runtime([
+            "composition.json".to_string(),
+            "artifact.mta".to_string(),
+            "--output".to_string(),
+        ])
+        .expect_err("missing --output value should fail before artifact I/O");
+
+        assert!(
+            err.to_string()
+                .contains("missing path; usage: strata composition bind-runtime"),
+            "unexpected missing output diagnostic: {err}"
+        );
+    }
+
+    #[test]
+    fn bind_runtime_rejects_unexpected_argument() {
+        let err = bind_runtime([
+            "composition.json".to_string(),
+            "artifact.mta".to_string(),
+            "--unknown".to_string(),
+        ])
+        .expect_err("unexpected bind-runtime argument should fail before artifact I/O");
+
+        assert!(
+            err.to_string()
+                .contains("unexpected argument \"--unknown\""),
+            "unexpected argument diagnostic: {err}"
+        );
+    }
+
+    #[test]
     fn build_rejects_multi_composition_source_without_selector() {
         let source = write_selector_source("missing-selector");
 
@@ -334,11 +551,32 @@ mod tests {
     }
 
     fn unique_composition_artifact_path(name: &str) -> PathBuf {
+        unique_target_path(name, COMPONENT_COMPOSITION_ARTIFACT_EXTENSION)
+    }
+
+    fn unique_runtime_artifact_path(name: &str) -> PathBuf {
+        unique_target_path(name, "mta")
+    }
+
+    fn unique_binding_artifact_path(name: &str) -> PathBuf {
+        unique_target_path(name, RUNTIME_COMPOSITION_BINDING_ARTIFACT_EXTENSION)
+    }
+
+    fn unique_target_path(name: &str, extension: &str) -> PathBuf {
         let index = TEST_ARTIFACT_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
         Path::new("target").join(format!(
-            "strata-artifact-{name}-{}-{index}.component-composition.json",
+            "strata-artifact-{name}-{}-{index}.{extension}",
             std::process::id()
         ))
+    }
+
+    fn write_runtime_artifact(path: &Path) {
+        let (checked, source_hash) =
+            check_source_path(&example_source_path()).expect("example source should check");
+        let artifact = crate::language::lower_to_artifact_with_source_hash(&checked, source_hash)
+            .expect("example source should lower");
+        mantle_artifact::write_artifact(path, &artifact)
+            .expect("test runtime artifact should write");
     }
 
     fn write_selector_source(name: &str) -> PathBuf {

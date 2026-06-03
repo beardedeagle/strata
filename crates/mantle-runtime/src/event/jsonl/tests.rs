@@ -1,13 +1,14 @@
 use mantle_artifact::{
-    ARTIFACT_SCHEMA_VERSION, ArtifactBranch, AuthorityId, LoopElementId, MessageId, OutputId,
-    PortId, ProcessId, ProtocolId, SpawnSiteId, StateId, SupervisorChildId, SupervisorId, TypeId,
+    ARTIFACT_SCHEMA_VERSION, ArtifactBranch, AuthorityId, ComponentInstanceId, LoopElementId,
+    MessageId, OutputId, PortId, ProcessId, ProtocolId, SpawnSiteId, StateId, SupervisorChildId,
+    SupervisorId, TypeId,
 };
 
 use super::*;
 use crate::event::{
     RuntimeAuthorityResult, RuntimeEffectOutcomeAction, RuntimeEffectOutcomeResult,
-    RuntimeLoopContext, RuntimeSpawnKind, RuntimeSupervisorExitReason,
-    RuntimeSupervisorRestartDecision,
+    RuntimeEventCompositionContext, RuntimeLoopContext, RuntimeSpawnKind,
+    RuntimeSupervisorExitReason, RuntimeSupervisorRestartDecision,
 };
 use crate::{
     RuntimeBranchPath, RuntimeBranchScope, RuntimeEvent, RuntimeFailureReason, RuntimeOutputStream,
@@ -45,7 +46,7 @@ fn encoded_json_line_len_counts_trace_schema_fields() {
         reason: RuntimeStopReason::Normal,
     };
     let line = encode_json_line(&event);
-    let counted_len = encoded_json_line_len(&event).expect("trace line length should count");
+    let counted_len = encoded_json_line_len(&event, None).expect("trace line length should count");
 
     assert_eq!(counted_len, line.len());
     assert!(
@@ -53,6 +54,36 @@ fn encoded_json_line_len_counts_trace_schema_fields() {
             r#","trace_schema":"mantle-runtime-observability","trace_schema_version":1}"#
         )
     );
+}
+
+#[test]
+fn trace_line_renders_optional_composition_context_only_when_supplied() {
+    let event = RuntimeEvent::ProcessStopped {
+        pid: RuntimeProcessId::FIRST,
+        process_id: ProcessId::new(0),
+        process: "Main".to_string(),
+        reason: RuntimeStopReason::Normal,
+    };
+    let context = RuntimeEventCompositionContext {
+        deployment_id: 0,
+        composition_id: 3,
+        component_instance_id: Some(ComponentInstanceId::new(2)),
+    };
+    let mut line = String::new();
+    write_json_line(&mut line, &event, Some(context)).expect("trace line should render");
+
+    assert!(line.contains(r#""deployment_id":0"#));
+    assert!(line.contains(r#""composition_id":3"#));
+    assert!(line.contains(r#""component_instance_id":2"#));
+    assert_eq!(
+        encoded_json_line_len(&event, Some(context)).expect("trace line length should count"),
+        line.len()
+    );
+
+    let absent = encode_json_line(&event);
+    assert!(!absent.contains("deployment_id"));
+    assert!(!absent.contains("composition_id"));
+    assert!(!absent.contains("component_instance_id"));
 }
 
 #[test]
@@ -244,7 +275,7 @@ fn rendered_all_event_trace_validates_against_contract() {
     for event in &events {
         let line = encode_json_line(event);
         assert_eq!(
-            encoded_json_line_len(event).expect("trace line length should count"),
+            encoded_json_line_len(event, None).expect("trace line length should count"),
             line.len()
         );
         assert_rendered_required_contract_fields(event.trace_kind(), &line);

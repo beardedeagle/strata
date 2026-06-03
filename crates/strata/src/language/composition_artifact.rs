@@ -12,6 +12,7 @@ use super::source_program::SourceProvenanceHash;
 
 mod admission;
 mod codec;
+mod deployment_binding;
 
 pub const COMPONENT_COMPOSITION_SCHEMA_ID: &str = "strata.checked_component_composition";
 pub const COMPONENT_COMPOSITION_SCHEMA_VERSION_MAJOR: u32 = 1;
@@ -25,6 +26,12 @@ pub const SOURCE_LANGUAGE: &str = "strata";
 pub const SOURCE_FINGERPRINT_ALGORITHM: &str = "fnv1a64-diagnostic";
 pub(super) const ADMISSION_RESULT_ADMITTED: &str = "admitted";
 pub(super) const ADMISSION_RESULT_REJECTED: &str = "rejected";
+
+pub use deployment_binding::{
+    RUNTIME_COMPOSITION_BINDING_ARTIFACT_EXTENSION, RUNTIME_COMPOSITION_BINDING_SCHEMA_ID,
+    RUNTIME_COMPOSITION_BINDING_SCHEMA_VERSION_MAJOR,
+    RUNTIME_COMPOSITION_BINDING_SCHEMA_VERSION_MINOR, render_runtime_composition_binding,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComponentCompositionArtifactAdmitFormat {

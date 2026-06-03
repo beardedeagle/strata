@@ -86,8 +86,9 @@ and the binding preserves exact current `Cap<PortConnect<Port>>` authority.
 composition graph under `target/strata/<stem>.component-composition.json` by
 default, and `strata composition admit <path.json>` validates the artifact
 fail-closed before it can be used as checked-subset validation evidence. The
-artifact is not the canonical `strata.component_composition` deployment artifact
-and not `.mta`; Mantle does not execute it in this slice. Source names inside it
+artifact is not `.mta` and is not read directly by Mantle; runtime composition
+correlation requires a separate explicit `mantle.runtime_composition_binding`
+artifact from `strata composition bind-runtime`. Source names inside it
 are provenance, diagnostics, and debug metadata only; component-instance IDs,
 port-binding IDs,
 port IDs, protocol IDs, and authority descriptor IDs carry the checked meaning.

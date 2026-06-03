@@ -9,6 +9,7 @@ fn component_composition_checks_builds_runs_and_admits_typed_graph() {
         "examples/component_composition_main.str",
         "target/strata/component_composition_main.mta",
     );
+    let unbound_trace = gate.read_trace("component_composition_main");
     let report_output = gate.composition_report("examples/component_composition_main.str", "json");
     gate.composition_build(
         "examples/component_composition_main.str",
@@ -17,6 +18,18 @@ fn component_composition_checks_builds_runs_and_admits_typed_graph() {
     let composition_artifact_output = gate.composition_admit(
         "target/strata/component_composition_main.component-composition.json",
         "json",
+    );
+    gate.composition_bind_runtime(
+        "target/strata/component_composition_main.component-composition.json",
+        "target/strata/component_composition_main.mta",
+        "target/strata/component_composition_main.deployment-composition.json",
+    );
+    let bound_output = gate.run_mantle_success_with_args(
+        "target/strata/component_composition_main.mta",
+        &[
+            "--composition-binding",
+            "target/strata/component_composition_main.deployment-composition.json",
+        ],
     );
     let requirements_output =
         gate.target_requirements("examples/component_composition_main.str", "json");
@@ -35,8 +48,12 @@ fn component_composition_checks_builds_runs_and_admits_typed_graph() {
         .expect("runtime feature declaration should be UTF-8");
     let admission =
         String::from_utf8(admission_output.stdout).expect("runtime admission should be UTF-8");
+    let bound_stdout =
+        String::from_utf8(bound_output.stdout).expect("bound mantle stdout should be UTF-8");
     let artifact = gate.read_artifact("target/strata/component_composition_main.mta");
     let trace = gate.read_trace("component_composition_main");
+    let deployment_binding = gate
+        .read_text_artifact("target/strata/component_composition_main.deployment-composition.json");
 
     assert_eq!(artifact.compositions.len(), 1);
     assert_eq!(artifact.compositions[0].debug_name, "AppComposition");
@@ -54,6 +71,7 @@ fn component_composition_checks_builds_runs_and_admits_typed_graph() {
                 .any(|action| matches!(action, ArtifactAction::Send { port: Some(_), .. }))
     }));
     assert!(stdout.contains("composed worker handled Work"));
+    assert!(bound_stdout.contains("composed worker handled Work"));
     assert!(
         report.contains(
             "\"report_format\":\"strata.checked_component_composition_admission_report\""
@@ -99,6 +117,21 @@ fn component_composition_checks_builds_runs_and_admits_typed_graph() {
     assert!(declaration.contains("\"implementation_limits\":[\"distributed_transport\""));
     assert!(admission.contains("\"admitted\":true"));
     assert!(admission.contains("\"component_composition_metadata\""));
+    assert!(deployment_binding.contains("\"schema_id\":\"mantle.runtime_composition_binding\""));
+    assert!(deployment_binding.contains("\"artifact_kind\":\"runtime_composition_binding\""));
+    assert!(deployment_binding.contains("\"deployment_id\":0"));
+    assert!(deployment_binding.contains("\"composition_id\":0"));
+    assert!(deployment_binding.contains("\"component_instances\":["));
+    assert!(deployment_binding.contains("\"process_id\":"));
+    assert!(deployment_binding.contains("\"admission_result\":\"admitted\""));
+    assert!(
+        !deployment_binding.contains("\"component\":\""),
+        "runtime binding must not carry source component labels as executable references"
+    );
+    assert!(
+        !deployment_binding.contains("\"port\":\""),
+        "runtime binding must not carry source port labels as executable references"
+    );
     assert!(
         artifact
             .target_requirements
@@ -112,14 +145,26 @@ fn component_composition_checks_builds_runs_and_admits_typed_graph() {
             .contains(&RuntimeFeature::TypedBoundaryTables)
     );
     assert_checked_report_binding(&report, binding);
+    assert!(
+        !unbound_trace.contains("deployment_id")
+            && !unbound_trace.contains("composition_id")
+            && !unbound_trace.contains("component_instance_id"),
+        "unbound run must not fabricate composition correlation fields"
+    );
     assert!(trace.contains(r#""event":"boundary_send_checked""#));
     assert!(trace.contains(r#""boundary_result":"accepted""#));
+    assert!(trace.contains(r#""deployment_id":0"#));
+    assert!(trace.contains(r#""composition_id":0"#));
+    assert!(trace.contains(r#""component_instance_id":0"#));
+    assert!(trace.contains(r#""component_instance_id":1"#));
 }
 
 #[test]
 fn component_composition_artifact_forgery_fails_closed() {
     let gate = GateHarness::new();
     let artifact = "target/strata/component_composition_forgery.component-composition.json";
+    let runtime_artifact = "target/strata/component_composition_forgery.mta";
+    gate.build("examples/component_composition_main.str", runtime_artifact);
     gate.composition_build("examples/component_composition_main.str", artifact);
     let original = gate.read_text_artifact(artifact);
     let forged = original.replace(
@@ -156,6 +201,18 @@ fn component_composition_artifact_forgery_fails_closed() {
     assert!(
         fingerprint_stderr.contains("field \"source_fingerprint\" must be"),
         "unexpected stderr: {fingerprint_stderr}"
+    );
+
+    let bind_failure = gate.composition_bind_runtime_failure(
+        "target/strata/component_composition_main.bad-fingerprint.component-composition.json",
+        runtime_artifact,
+        "target/strata/component_composition_main.bad.deployment-composition.json",
+    );
+    let bind_stderr = String::from_utf8(bind_failure.stderr)
+        .expect("bind-runtime failure stderr should be UTF-8");
+    assert!(
+        bind_stderr.contains("field \"source_fingerprint\" must be"),
+        "unexpected stderr: {bind_stderr}"
     );
 }
 
@@ -202,6 +259,8 @@ fn component_composition_artifact_binding_evidence_fails_closed() {
 fn component_composition_rejected_artifact_exits_nonzero() {
     let gate = GateHarness::new();
     let artifact = "target/strata/component_composition_rejected_gate.component-composition.json";
+    let runtime_artifact = "target/strata/component_composition_rejected_gate.mta";
+    gate.build("examples/component_composition_main.str", runtime_artifact);
     gate.composition_build("examples/component_composition_main.str", artifact);
     let rejected = gate
         .read_text_artifact(artifact)
@@ -227,6 +286,131 @@ fn component_composition_rejected_artifact_exits_nonzero() {
     assert!(
         stderr.contains("component composition artifact admission rejected"),
         "unexpected stderr: {stderr}"
+    );
+
+    let bind_failure = gate.composition_bind_runtime_failure(
+        "target/strata/component_composition_main.rejected.component-composition.json",
+        runtime_artifact,
+        "target/strata/component_composition_main.rejected.deployment-composition.json",
+    );
+    let bind_stderr = String::from_utf8(bind_failure.stderr)
+        .expect("bind-runtime failure stderr should be UTF-8");
+    assert!(
+        bind_stderr.contains("requires an admitted checked composition artifact"),
+        "unexpected stderr: {bind_stderr}"
+    );
+}
+
+#[test]
+fn component_composition_runtime_binding_forgery_fails_before_execution() {
+    let gate = GateHarness::new();
+    gate.remove_trace("component_composition_binding_forgery");
+    let runtime_artifact = "target/strata/component_composition_binding_forgery.mta";
+    gate.build("examples/component_composition_main.str", runtime_artifact);
+    gate.composition_build(
+        "examples/component_composition_main.str",
+        "target/strata/component_composition_binding_forgery.component-composition.json",
+    );
+    gate.composition_bind_runtime(
+        "target/strata/component_composition_binding_forgery.component-composition.json",
+        runtime_artifact,
+        "target/strata/component_composition_binding_forgery.deployment-composition.json",
+    );
+    let forged = replace_string_field(
+        &gate.read_text_artifact(
+            "target/strata/component_composition_binding_forgery.deployment-composition.json",
+        ),
+        "mantle_artifact_source_hash_fnv1a64",
+        "1111111111111111",
+    );
+    gate.write_text_artifact(
+        "target/strata/component_composition_binding_forgery.forged.deployment-composition.json",
+        &forged,
+    );
+
+    let failure = gate.run_mantle_failure_with_args(
+        runtime_artifact,
+        &[
+            "--composition-binding",
+            "target/strata/component_composition_binding_forgery.forged.deployment-composition.json",
+        ],
+    );
+    let stderr =
+        String::from_utf8(failure.stderr).expect("mantle run failure stderr should be UTF-8");
+
+    assert!(
+        stderr.contains("mantle_artifact_source_hash_fnv1a64"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(
+        !gate
+            .root
+            .join("target/strata/component_composition_binding_forgery.observability.jsonl")
+            .exists(),
+        "binding admission failure must happen before runtime trace creation"
+    );
+
+    let forged_schema = replace_string_field(
+        &gate.read_text_artifact(
+            "target/strata/component_composition_binding_forgery.deployment-composition.json",
+        ),
+        "composition_schema_id",
+        "forged.schema",
+    );
+    gate.write_text_artifact(
+        "target/strata/component_composition_binding_forgery.forged-schema.deployment-composition.json",
+        &forged_schema,
+    );
+    let schema_failure = gate.run_mantle_failure_with_args(
+        runtime_artifact,
+        &[
+            "--composition-binding",
+            "target/strata/component_composition_binding_forgery.forged-schema.deployment-composition.json",
+        ],
+    );
+    let schema_stderr = String::from_utf8(schema_failure.stderr)
+        .expect("mantle run schema failure stderr should be UTF-8");
+
+    assert!(
+        schema_stderr.contains("composition_schema_id"),
+        "unexpected stderr: {schema_stderr}"
+    );
+    assert!(
+        !gate
+            .root
+            .join("target/strata/component_composition_binding_forgery.observability.jsonl")
+            .exists(),
+        "schema admission failure must happen before runtime trace creation"
+    );
+
+    let forged_deployment = replace_unsigned_field(
+        &gate.read_text_artifact(
+            "target/strata/component_composition_binding_forgery.deployment-composition.json",
+        ),
+        "deployment_id",
+        7,
+    );
+    gate.write_text_artifact(
+        "target/strata/component_composition_binding_forgery.forged-deployment.deployment-composition.json",
+        &forged_deployment,
+    );
+    let deployment_failure = gate.run_mantle_failure_with_args(
+        runtime_artifact,
+        &[
+            "--composition-binding",
+            "target/strata/component_composition_binding_forgery.forged-deployment.deployment-composition.json",
+        ],
+    );
+    let deployment_stderr = String::from_utf8(deployment_failure.stderr)
+        .expect("mantle run deployment failure stderr should be UTF-8");
+
+    assert!(
+        deployment_stderr.contains("deployment_id"),
+        "unexpected stderr: {deployment_stderr}"
+    );
+    assert!(
+        !gate.trace_exists("component_composition_binding_forgery"),
+        "deployment admission failure must happen before runtime trace creation"
     );
 }
 
@@ -327,6 +511,29 @@ fn replace_string_field(artifact: &str, field: &str, replacement: &str) -> Strin
     let mut forged = String::with_capacity(artifact.len() - (end - start) + replacement.len());
     forged.push_str(&artifact[..start]);
     forged.push_str(replacement);
+    forged.push_str(&artifact[end..]);
+    forged
+}
+
+fn replace_unsigned_field(artifact: &str, field: &str, replacement: u32) -> String {
+    let marker = format!("\"{field}\":");
+    let start = artifact
+        .find(&marker)
+        .expect("artifact should contain unsigned integer field")
+        + marker.len();
+    let digit_count = artifact[start..]
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .count();
+    assert!(
+        digit_count > 0,
+        "artifact unsigned integer field should contain at least one digit"
+    );
+    let end = start + digit_count;
+    let replacement = replacement.to_string();
+    let mut forged = String::with_capacity(artifact.len() - (end - start) + replacement.len());
+    forged.push_str(&artifact[..start]);
+    forged.push_str(&replacement);
     forged.push_str(&artifact[end..]);
     forged
 }

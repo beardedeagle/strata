@@ -29,6 +29,27 @@ These fields describe the JSONL observability contract only. They do not
 identify a `.mta` artifact schema, carry executable bindings, select runtime
 behavior, or move runtime semantics into Strata.
 
+When `mantle run` receives an admitted explicit runtime composition binding with
+`--composition-binding`, each trace event also carries `deployment_id` and
+`composition_id`, and events associated with a mapped runtime process carry
+`component_instance_id`. The current binding schema uses singleton
+`deployment_id=0`; it is a stable correlation namespace, not a unique
+deployment allocator. These fields are observability correlation only. They
+are emitted from the validated `mantle.runtime_composition_binding` artifact,
+not from source names and not from `.component-composition.json`. Deployment,
+composition, and component-instance trace fields appear only when that binding is
+supplied; absent binding input means Mantle fabricates no deployment,
+composition, or component-instance IDs. Trace validation requires deployment and
+composition identity to stay stable for the whole bound trace. Once a mapped
+process emits `component_instance_id`, later events for the same `process_id`
+must keep the same component-instance correlation; adding it after an earlier
+uncorrelated event for that process or omitting it later fails closed.
+Binding admission requires every runtime process to map to one checked
+component instance, so process-scoped events in bound traces carry
+`component_instance_id`. Non-process-scoped events carry only the bound
+`deployment_id`/`composition_id` namespace. These fields are observability-only
+and are never used for dispatch or source-name lookup.
+
 Mantle validates traces with a read-only schema check when repository tests ask
 for trace evidence. Validation checks event kind support, required fields,
 string-vs-number field shapes, exact per-event field sets, payload and loop
@@ -38,9 +59,12 @@ segments that match Mantle's emitted branch-path encoding, schema identity,
 u32 artifact typed-ID width, u16 branch-path segment width, branch-path length,
 artifact process-ID bounds from `process_count`, Mantle-contiguous spawned PID
 sequencing, non-entry spawn parent evidence, runtime PID-to-process-ID
-correlation, supervisor-child slot causality for child starts and restart
-decisions, restart-window numeric bounds and decision coupling, and process
-lifecycle causality boundaries after terminal stop/fail events. It never
+correlation, optional deployment/composition/component-instance correlation
+field grouping plus whole-trace identity stability, bound component-instance
+table bounds, one-to-one process/component-instance correlation,
+supervisor-child slot causality for child starts and restart decisions,
+restart-window numeric bounds and decision coupling, and process lifecycle
+causality boundaries after terminal stop/fail events. It never
 dispatches from trace data and never turns labels, source names, or debug
 strings into runtime inputs.
 

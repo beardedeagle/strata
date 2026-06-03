@@ -1,6 +1,5 @@
 use mantle_artifact::{
-    ArtifactBranch, ArtifactValue, Error, MantleArtifact, OutputId, ProcessId, Result, StateId,
-    StepResult,
+    ArtifactBranch, ArtifactValue, Error, OutputId, ProcessId, Result, StateId, StepResult,
 };
 
 use accounting::{checked_output_bytes, checked_trace_event_bytes};
@@ -8,6 +7,7 @@ use model::{ActiveStep, ProcessInstance, RuntimeLoopElement, RuntimeMessageEnvel
 use process_refs::LocalProcessRefs;
 use templates::{RuntimeTemplateContext, evaluate_runtime_template};
 
+use crate::RuntimeCompositionBinding;
 use crate::event::{
     RuntimeAuthorityResult, RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope,
     RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
@@ -20,7 +20,7 @@ use crate::executable::{
 use crate::host::RuntimeHost;
 use crate::limits::{LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy};
 use crate::program::{LoadedProgram, LoadedSpawnKind, RuntimePayload};
-use crate::report::{MessageDelivery, ProcessReport, ProcessStatus, RuntimeReport, SpawnReport};
+use crate::report::{MessageDelivery, ProcessStatus, SpawnReport};
 
 mod accounting;
 mod action_scope;
@@ -28,6 +28,7 @@ mod boundaries;
 mod control_flow;
 mod delivery;
 mod effect_outcomes;
+mod entrypoint;
 mod model;
 mod process_lifecycle;
 mod process_refs;
@@ -38,68 +39,10 @@ use action_scope::{BranchSelection, RuntimeActionScope};
 use boundaries::BoundarySendContext;
 use effect_outcomes::RuntimeEffectOutcome;
 
-pub fn run_artifact_with_host<H: RuntimeHost>(
-    artifact: &MantleArtifact,
-    host: &mut H,
-    limits: RunLimits,
-) -> Result<RuntimeReport> {
-    limits.validate()?;
-    let program = LoadedProgram::from_artifact(artifact)?;
-    run_loaded_program_with_host(&program, host, limits)
-}
-
-pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
-    program: &LoadedProgram,
-    host: &mut H,
-    limits: RunLimits,
-) -> Result<RuntimeReport> {
-    let executable = ExecutableProgram::from_admitted(program)?;
-    let mut run = RuntimeRun::new(program, &executable, host, limits);
-    let entry = executable.entry();
-    run.record_event(RuntimeEvent::ArtifactLoaded {
-        format: program.format.clone(),
-        schema_version: program.schema_version.clone(),
-        source_language: program.source_language.clone(),
-        module: program.module.clone(),
-        entry_process_id: entry.process_id,
-        entry_process: entry.process_label.to_string(),
-        entry_message_id: entry.message_id,
-        process_count: run.executable.process_count(),
-    })?;
-    let entry_pid = run.spawn_process(entry.process_id, None)?;
-    run.send_message(
-        entry_pid,
-        RuntimeMessageEnvelope::new(entry.message_id, None),
-        None,
-    )?;
-    run.drain_mailboxes(limits.max_dispatches)?;
-    run.reject_unhandled_messages()?;
-    run.flush_host()?;
-
-    let process_reports = run
-        .processes
-        .into_iter()
-        .map(|process| {
-            Ok(ProcessReport {
-                pid: process.pid,
-                process: program.process_label(process.process_id)?.to_string(),
-                state: program
-                    .state_label(process.process_id, process.state)?
-                    .to_string(),
-                status: process.status,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(RuntimeReport {
-        entry_process: entry.process_label.to_string(),
-        entry_message: entry.message_label.to_string(),
-        spawned_processes: run.spawned_processes,
-        delivered_messages: run.delivered_messages,
-        processes: process_reports,
-        emitted_outputs: run.emitted_outputs,
-    })
-}
+pub use entrypoint::run_artifact_with_host;
+pub(crate) use entrypoint::run_loaded_program_with_composition_binding;
+#[cfg(test)]
+pub(crate) use entrypoint::run_loaded_program_with_host;
 
 struct RuntimeRun<'program, 'plan, 'host, H: RuntimeHost> {
     program: &'program LoadedProgram,
@@ -116,17 +59,29 @@ struct RuntimeRun<'program, 'plan, 'host, H: RuntimeHost> {
     max_emitted_output_bytes: usize,
     spawn_authority_policy: SpawnAuthorityPolicy,
     local_spawn_backend: LocalSpawnBackend,
+    composition_binding: Option<RuntimeCompositionBinding>,
     spawned_processes: Vec<SpawnReport>,
     delivered_messages: Vec<MessageDelivery>,
     emitted_outputs: Vec<String>,
 }
 
 impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, H> {
-    fn new(
+    #[cfg(test)]
+    pub(super) fn new(
         program: &'program LoadedProgram,
         executable: &'plan ExecutableProgram<'program>,
         host: &'host mut H,
         limits: RunLimits,
+    ) -> Self {
+        Self::new_with_composition_binding(program, executable, host, limits, None)
+    }
+
+    fn new_with_composition_binding(
+        program: &'program LoadedProgram,
+        executable: &'plan ExecutableProgram<'program>,
+        host: &'host mut H,
+        limits: RunLimits,
+        composition_binding: Option<RuntimeCompositionBinding>,
     ) -> Self {
         Self {
             program,
@@ -143,6 +98,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             max_emitted_output_bytes: limits.max_emitted_output_bytes,
             spawn_authority_policy: limits.spawn_authority_policy,
             local_spawn_backend: limits.local_spawn_backend,
+            composition_binding,
             spawned_processes: Vec::new(),
             delivered_messages: Vec::new(),
             emitted_outputs: Vec::new(),
@@ -176,7 +132,12 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
     }
 
     fn record_event(&mut self, event: RuntimeEvent) -> Result<()> {
-        let record = RuntimeEventRecord::new(event)?;
+        let composition_context = self
+            .composition_binding
+            .as_ref()
+            .map(|binding| binding.trace_context_for_event(&event))
+            .transpose()?;
+        let record = RuntimeEventRecord::new_with_composition(event, composition_context)?;
         let event_bytes = checked_trace_event_bytes(self.trace_bytes, &record)?;
         if event_bytes > self.max_trace_bytes {
             return Err(Error::new(format!(

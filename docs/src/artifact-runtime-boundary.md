@@ -191,14 +191,30 @@ with `hash_alg=fnv1a64-diagnostic`, carries source provenance as metadata whose
 diagnostic source fingerprint must have the declared canonical lowercase
 hexadecimal shape, and admits or rejects the checked local composition graph with
 typed component-instance, component import/export port, port-binding, port,
-protocol, and authority descriptor IDs. This is not the canonical
-`strata.component_composition` deployment artifact described in
-`docs/architecture`; it is deliberately not `.mta`, and Mantle does not execute
-it in this slice. Binding classes that the current source subset cannot express
-are present as empty arrays and fail closed if forged non-empty, keeping the
-Strata-owned source evidence boundary explicit without inventing capability,
-interface, runtime-feature, archive-format, crypto-policy, policy-hash, or
-diagnostic-set facts.
+protocol, and authority descriptor IDs. It is deliberately not `.mta` and Mantle
+does not read it as runtime input. Binding classes that the current source subset
+cannot express are present as empty arrays and fail closed if forged non-empty,
+keeping the Strata-owned source evidence boundary explicit without inventing
+capability, interface, runtime-feature, archive-format, crypto-policy,
+policy-hash, or diagnostic-set facts.
+
+`strata composition bind-runtime` is the explicit deployment-admission bridge
+from admitted checked composition evidence to Mantle observability correlation.
+It validates that the checked artifact is globally admitted and matches a
+specific `.mta` source language, module, diagnostic source hash, composition ID,
+component-instance table, runtime process correlation, and port-binding table,
+then emits `target/strata/<stem>.deployment-composition.json` with
+`schema_id=mantle.runtime_composition_binding` and
+`composition_schema_id=strata.checked_component_composition`. Mantle accepts that
+artifact only when the operator supplies `mantle run <artifact.mta>
+--composition-binding <deployment-composition.json>`, validates the exact
+binding and checked-composition schema identities again before `ArtifactLoaded`,
+and uses it only to render singleton `deployment_id=0`,
+`composition_id`, and optional `component_instance_id` trace correlation.
+Without the binding argument, Mantle runs the `.mta` without composition
+correlation fields; it does not infer composition identity from source names,
+does not verify Strata composition safety itself, and does not dispatch from
+composition metadata.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect usage, and must exactly match the action effects that execute.

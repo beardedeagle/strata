@@ -4,8 +4,8 @@ use std::io;
 use mantle_artifact::ArtifactValue;
 
 use crate::event::{
-    RUNTIME_TRACE_SCHEMA_ID, RUNTIME_TRACE_SCHEMA_VERSION, RuntimeBranchPath, RuntimeLoopContext,
-    RuntimeProcessId,
+    RUNTIME_TRACE_SCHEMA_ID, RUNTIME_TRACE_SCHEMA_VERSION, RuntimeBranchPath,
+    RuntimeEventCompositionContext, RuntimeLoopContext, RuntimeProcessId,
 };
 
 pub(super) struct JsonStr<'a>(pub(super) &'a str);
@@ -16,10 +16,24 @@ impl fmt::Display for JsonStr<'_> {
     }
 }
 
-pub(super) struct TraceSchemaJson;
+pub(super) struct TraceSchemaJson(pub(super) Option<RuntimeEventCompositionContext>);
 
 impl fmt::Display for TraceSchemaJson {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(context) = self.0 {
+            write!(
+                formatter,
+                ",\"deployment_id\":{},\"composition_id\":{}",
+                context.deployment_id, context.composition_id
+            )?;
+            if let Some(instance_id) = context.component_instance_id {
+                write!(
+                    formatter,
+                    ",\"component_instance_id\":{}",
+                    instance_id.as_u32()
+                )?;
+            }
+        }
         write!(
             formatter,
             ",\"trace_schema\":\"{}\",\"trace_schema_version\":{}}}",

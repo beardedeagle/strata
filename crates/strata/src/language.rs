@@ -36,8 +36,11 @@ pub use composition_artifact::{
     COMPONENT_COMPOSITION_SCHEMA_ID, COMPONENT_COMPOSITION_SCHEMA_VERSION_MAJOR,
     COMPONENT_COMPOSITION_SCHEMA_VERSION_MINOR, ComponentCompositionAdmissionResult,
     ComponentCompositionAdmissionSummary, ComponentCompositionArtifactAdmitFormat,
-    MAX_COMPONENT_COMPOSITION_ARTIFACT_BYTES, admit_component_composition_artifact,
+    MAX_COMPONENT_COMPOSITION_ARTIFACT_BYTES, RUNTIME_COMPOSITION_BINDING_ARTIFACT_EXTENSION,
+    RUNTIME_COMPOSITION_BINDING_SCHEMA_ID, RUNTIME_COMPOSITION_BINDING_SCHEMA_VERSION_MAJOR,
+    RUNTIME_COMPOSITION_BINDING_SCHEMA_VERSION_MINOR, admit_component_composition_artifact,
     render_component_composition_admission_summary, render_component_composition_artifact,
+    render_runtime_composition_binding,
 };
 pub use composition_report::{
     CompositionAdmissionReport, CompositionAdmissionReportFormat,
