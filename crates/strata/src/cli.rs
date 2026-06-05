@@ -14,6 +14,7 @@ use crate::language::{
 };
 use crate::source_loader::{LoadedSourceProgram, load_root_source_program};
 
+mod authority_effects;
 mod composition;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -144,6 +145,7 @@ where
             print_summary(&summary);
             Ok(())
         }
+        Some("authority-effects") => authority_effects::command(args),
         Some("composition-report") => {
             let path = required_path(
                 args.next(),
@@ -356,6 +358,11 @@ fn print_strata_usage() {
     println!("  strata composition admit <path.json> [--format text|json]");
     println!(
         "  strata composition bind-runtime <composition.json> <artifact.mta> [--output <path.json>]"
+    );
+    println!("  strata authority-effects build <path.str> [--output <path.json>]");
+    println!("  strata authority-effects admit <path.json> [--format text|json]");
+    println!(
+        "  strata authority-effects bind-runtime <authority-effect.json> <artifact.mta> [--deny-spawn-authority] [--output <path.json>]"
     );
     println!("  strata authority-summary <path.str> [--format text|json]");
     println!("  strata composition-report <path.str> [--format text|json]");

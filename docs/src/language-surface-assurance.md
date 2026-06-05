@@ -30,6 +30,30 @@ evidence, `Err(Denied(Unit))` runtime denial before acceptance,
 source-to-runtime gates, fuzz seeds, bounded authority-model evidence,
 diagnostics, and docs are tracked together.
 
+Authority/effect admission binding is recorded as a runtime-bearing
+Strata/Mantle boundary feature: checked authority IDs, spawn-site IDs,
+transition message/current-state/effect IDs, component authority surfaces with
+declared import-port counts, and exact effect facts are rendered as the Strata-owned
+`strata.checked_authority_effects` artifact,
+admitted before binding, correlated with the matching `.mta`, and rendered as
+the Mantle-facing `mantle.runtime_authority_effect_binding` artifact. Mantle
+admits the runtime binding by typed IDs and descriptor/effect equivalence before
+execution. The dynamic-local branch applies the admitted
+`spawn_authority_policy` before runtime side effects and records typed
+`spawn_authority_checked` evidence; the lexical supervisor-child branch records
+typed `supervisor_child_started` and `supervisor_restart_decision` evidence
+instead of inventing dynamic authority. Source labels, debug names, diagnostics,
+and report text remain metadata; they cannot retarget authorities, spawn sites,
+ports, components, or effects. `source_path` is slash-normalized provenance
+metadata, and the checked schema namespace is frontend-owned as
+`<source_language>.checked_authority_effects`. Mantle rejects raw
+`.authority-effect.json` files supplied as runtime bindings before trace
+creation. Source-to-runtime gates for dynamic-local spawn authority, lexical
+supervisor-child spawning, and component authority surfaces; forged-binding
+negative tests; dynamic-local, lexical supervisor-child, and component
+runtime-binding fuzz seeds; performance-smoke profiles; diagnostics; and docs
+are tracked together.
+
 Local supervision is recorded as a runtime-bearing boundary feature: local
 `one_for_one` supervisor declarations, lexical child IDs, child restart modes,
 explicit restart intensity, lexical spawn-site classification, Mantle artifact

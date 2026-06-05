@@ -38,6 +38,16 @@ source-language metadata, or invalid loaded template references fail before
 as opaque artifact metadata and does not dispatch or execute templates on source
 names.
 
+## Admitted Authority/Effect Binding
+
+Authority/effect facts cross only through `.authority-effect.json` into explicit
+`.authority-effect-binding.json`; Mantle consumes only `--authority-effect-binding`,
+validating typed IDs/descriptors plus policy while source labels remain metadata.
+Mantle validates the binding schema, source-language namespace, `.mta` identity,
+typed descriptor/effect equivalence, and policy before `ArtifactLoaded`, trace
+creation, or any runtime side effect. A raw `.authority-effect.json` file is
+checked Strata evidence only; it is never valid Mantle runtime input.
+
 ## Runtime Branching
 
 Step bodies can use a final-position runtime `if` whose condition is a checked

@@ -40,6 +40,15 @@ requirement extraction, `mantle.feature_declaration.v5` rendering,
 requirements-vs-declaration admission before runtime execution, and Mantle's
 artifact-derived check that declared requirements cover the decoded runtime
 constructs.
+They also include authority/effect admission-binding paths for dynamic local
+spawn authority in `examples/effect_outcome_spawn_denied.str` and lexical
+supervisor-child spawning in `examples/local_supervision_restart.str`: `strata
+authority-effects build`, `strata authority-effects admit`, `strata
+authority-effects bind-runtime`, and `mantle run --authority-effect-binding`.
+Those paths prove checked authority/effect facts are emitted as a Strata-owned
+artifact, admitted before binding, correlated with the matching `.mta`, and
+consumed by Mantle as typed runtime policy/observability input rather than
+source labels or report text.
 Trace-reading acceptance gates also validate the Mantle-owned JSONL trace
 schema before using trace evidence. That validation is limited to observability
 metadata, exact per-event field sets, required field shapes, grouped
@@ -120,6 +129,36 @@ checked-subset validation artifact, validates it with `strata composition admit
 proves the explicit Strata/deployment-to-Mantle observability bridge while still
 keeping `.component-composition.json` out of Mantle runtime input.
 
+## Focused Authority/Effect Artifact Gate
+
+Run the focused authority/effect artifact gate when changing checked
+authority/effect rendering, admission, runtime binding, or Mantle authority
+policy admission:
+
+```sh
+just authority-effect-artifact-gates
+```
+
+It checks and builds `examples/effect_outcome_spawn_denied.str`, writes the
+default `target/strata/effect_outcome_spawn_denied.authority-effect.json`
+checked authority/effect artifact, validates it with
+`strata authority-effects admit --format json`, binds the admitted facts to the
+matching `.mta`, and runs Mantle with the accepted-policy
+`target/strata/effect_outcome_spawn_denied.authority-effect-binding.json`. It
+then binds the same admitted facts with `--deny-spawn-authority` and runs Mantle
+with
+`target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json`.
+Next, it repeats the build/admit/bind/run chain for
+`examples/local_supervision_restart.str` so lexical supervisor-child facts are
+proven through the same explicit runtime binding bridge. Finally, it checks and
+builds `examples/component_composition_main.str`, emits and admits both the
+component-composition and authority/effect artifacts, binds both runtime
+sidecars, and runs Mantle with both explicit bindings. This proves the explicit
+Strata-to-Mantle authority/effect bridge across dynamic-local authority, lexical
+supervisor-child facts, and component/port authority surfaces while keeping
+source labels, debug names, report text, and the Strata-owned
+`.authority-effect.json` artifact non-executable inside Mantle.
+
 ## Performance Smoke
 
 `just performance-smoke` runs stable source-to-runtime resource smoke profiles
@@ -131,7 +170,11 @@ component composition; repeated checked composition report rendering,
 Strata-owned composition artifact build/rendering, Strata-owned composition
 artifact admission/validation, target requirement rendering from a prechecked
 composition input, and repeated Mantle runs with an explicit runtime composition
-binding; Mantle admission comparison through the runtime profiles; Mantle
+binding; authority/effect artifact build/rendering, authority/effect artifact
+admission, authority/effect runtime-binding admission for the denied-spawn and
+component authority-surface examples, and repeated Mantle runs with the explicit
+authority/effect binding for the denied-spawn example; Mantle admission
+comparison through the runtime profiles; Mantle
 artifact encode/decode; repeated Mantle in-memory execution of the
 collection-state and boundary-contract artifacts; repeated Mantle JSONL-trace
 execution of the collection-state artifact; and repeated Mantle in-memory
@@ -236,12 +279,16 @@ just performance-memory-review /tmp/strata-base .
 ## Fuzzing
 
 The fuzz harnesses live under `fuzz/` and run with `cargo-fuzz` on nightly Rust.
-They cover five boundaries:
+They cover these boundaries:
 
 - parsing, checking, and lowering arbitrary UTF-8 source;
 - parsing, checking, and lowering delimited multi-source Strata source programs;
+- admitting Strata-owned checked component-composition artifacts;
+- admitting Strata-owned checked authority/effect artifacts;
 - decoding and re-encoding arbitrary UTF-8 artifact text;
 - running valid lowered artifacts through the in-memory runtime host;
+- admitting Mantle runtime composition bindings;
+- admitting Mantle runtime authority/effect bindings;
 - validating Mantle-owned runtime trace JSONL without trusting trace strings as
   executable meaning.
 
@@ -264,9 +311,12 @@ Miri runs on nightly Rust. The Miri gate is a smoke suite focused on pure or
 in-memory paths rather than filesystem-specific CLI behavior. It includes
 targeted immutable source-local binding check/lower coverage for the source
 resolution path, `composition_artifact` coverage for the pure
-component-composition artifact renderer/admission validator, and a focused
-Mantle runtime composition-binding admission check. Filesystem-specific CLI
-behavior remains covered by unit and acceptance tests instead.
+component-composition artifact renderer/admission validator, representative
+authority/effect artifact render/admit and closest component-import negative
+coverage, and focused Mantle runtime composition- and authority/effect-binding
+admission checks, including component authority-surface and negative
+forged-field authority/effect-binding checks. Filesystem-specific CLI behavior
+remains covered by unit and acceptance tests instead.
 
 Useful local commands:
 

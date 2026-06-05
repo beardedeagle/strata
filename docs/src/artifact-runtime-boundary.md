@@ -216,6 +216,43 @@ correlation fields; it does not infer composition identity from source names,
 does not verify Strata composition safety itself, and does not dispatch from
 composition metadata.
 
+The authority/effect fact artifact is a separate Strata-owned boundary surface
+emitted by `strata authority-effects build` as
+`target/strata/<stem>.authority-effect.json` by default. It self-identifies as
+the checked `strata.checked_authority_effects` schema version `1.0` with
+`hash_alg=fnv1a64-diagnostic`, records checked process IDs, process-local
+state/message counts, checked protocol/port/component table counts, authority
+IDs, spawn-site IDs, transition IDs, transition message/current-state
+references, exact effect IDs, supervisor-child spawn proof facts for lexical
+supervisor spawn sites, component/port authority-surface IDs, declared
+import-port counts, and source provenance metadata, and fails closed when typed
+IDs are noncanonical, duplicated, outside declared table counts, unknown,
+internally inconsistent, missing a supervisor-child backlink, or paired with
+unsupported non-empty future fields. It is not `.mta`, not runtime input, and
+not a policy grant. Its `source_path` field is slash-normalized diagnostic
+metadata for review/provenance only; neither Strata lowering nor Mantle
+execution uses that path as an executable binding.
+
+`strata authority-effects bind-runtime` is the explicit runtime-admission bridge
+from admitted checked authority/effect facts to Mantle policy input and
+observability evidence. It validates an admitted `.authority-effect.json`
+against a specific `.mta` source language, module, source hash, process table,
+authority table, spawn-site table, transition effect table, and component
+authority-surface table, then emits
+`target/strata/<stem>.authority-effect-binding.json` with
+`schema_id=mantle.runtime_authority_effect_binding`. The checked authority/effect
+schema name is a frontend-owned namespace, `<source_language>.checked_authority_effects`;
+Strata emits `strata.checked_authority_effects`, and Mantle validates a binding
+language-neutrally against the loaded artifact's `source_language` plus that
+suffix rather than hardcoding Strata ownership. Mantle accepts the runtime binding
+only when the operator supplies `mantle run <artifact.mta>
+--authority-effect-binding <authority-effect-binding.json>`, validates the
+binding and checked-fact schema identity again before `ArtifactLoaded`, and uses
+the admitted `spawn_authority_policy` only to accept or deny already-declared
+local spawn authority by typed IDs. Source labels, debug names, report text, and
+authority names are metadata and cannot grant, widen, strip, or retarget runtime
+authority.
+
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect usage, and must exactly match the action effects that execute.
 Runtime `if` conditions are admitted as typed `Bool` value templates. Mantle

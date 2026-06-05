@@ -9,10 +9,10 @@ use crate::feature_declaration::validate_artifact_runtime_requirements;
 use crate::{
     LocalSpawnBackend, ProcessStatus, RunLimits, RuntimeFeatureDeclarationFormat,
     SpawnAuthorityPolicy, render_runtime_feature_declaration, run_artifact_path_with_limits,
-    run_artifact_path_with_limits_and_composition_binding,
+    run_artifact_path_with_limits_and_bindings,
 };
 
-const MANTLE_RUN_USAGE: &str = "mantle run <artifact.mta> [--composition-binding <path.json>] [--deny-spawn-authority] [--disable-local-spawn-backend] [--max-runtime-processes N]";
+const MANTLE_RUN_USAGE: &str = "mantle run <artifact.mta> [--composition-binding <path.json>] [--authority-effect-binding <path.json>] [--deny-spawn-authority] [--disable-local-spawn-backend] [--max-runtime-processes N]";
 
 pub fn mantle_main<I>(args: I) -> Result<()>
 where
@@ -24,13 +24,14 @@ where
         Some("run") => {
             let path = required_path(args.next(), MANTLE_RUN_USAGE)?;
             let run_args = run_command_args_from_args(args)?;
-            let report = if let Some(composition_binding_path) =
-                run_args.composition_binding_path.as_ref()
+            let report = if run_args.composition_binding_path.is_some()
+                || run_args.authority_effect_binding_path.is_some()
             {
-                run_artifact_path_with_limits_and_composition_binding(
+                run_artifact_path_with_limits_and_bindings(
                     &path,
                     run_args.limits,
-                    composition_binding_path,
+                    run_args.composition_binding_path.as_deref(),
+                    run_args.authority_effect_binding_path.as_deref(),
                 )?
             } else {
                 run_artifact_path_with_limits(&path, run_args.limits)?
@@ -126,16 +127,23 @@ fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
 struct RunCommandArgs {
     limits: RunLimits,
     composition_binding_path: Option<PathBuf>,
+    authority_effect_binding_path: Option<PathBuf>,
 }
 
 fn run_command_args_from_args(args: impl IntoIterator<Item = String>) -> Result<RunCommandArgs> {
     let mut limits = RunLimits::default();
     let mut max_runtime_processes_seen = false;
     let mut composition_binding_path = None;
+    let mut authority_effect_binding_path = None;
+    let mut deny_spawn_authority_seen = false;
     let mut rest = args.into_iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--deny-spawn-authority" => {
+                if deny_spawn_authority_seen {
+                    return Err(Error::new("duplicate --deny-spawn-authority argument"));
+                }
+                deny_spawn_authority_seen = true;
                 limits.spawn_authority_policy = SpawnAuthorityPolicy::DenyDeclared;
             }
             "--disable-local-spawn-backend" => {
@@ -160,13 +168,28 @@ fn run_command_args_from_args(args: impl IntoIterator<Item = String>) -> Result<
                     "--composition-binding",
                 )?));
             }
+            "--authority-effect-binding" => {
+                if authority_effect_binding_path.is_some() {
+                    return Err(Error::new("duplicate --authority-effect-binding argument"));
+                }
+                authority_effect_binding_path = Some(PathBuf::from(required_path_flag_value(
+                    &mut rest,
+                    "--authority-effect-binding",
+                )?));
+            }
             other => return Err(Error::new(format!("unexpected argument: {other}"))),
         }
+    }
+    if deny_spawn_authority_seen && authority_effect_binding_path.is_some() {
+        return Err(Error::new(
+            "--deny-spawn-authority cannot be combined with --authority-effect-binding; encode the policy in the binding",
+        ));
     }
     limits.validate()?;
     Ok(RunCommandArgs {
         limits,
         composition_binding_path,
+        authority_effect_binding_path,
     })
 }
 
@@ -446,6 +469,8 @@ mod tests {
         let args = run_command_args_from_args([
             "--composition-binding".to_string(),
             "target/app.deployment-composition.json".to_string(),
+            "--authority-effect-binding".to_string(),
+            "target/app.authority-effect-binding.json".to_string(),
             "--max-runtime-processes".to_string(),
             "2".to_string(),
         ])
@@ -455,6 +480,10 @@ mod tests {
         assert_eq!(
             args.composition_binding_path,
             Some(PathBuf::from("target/app.deployment-composition.json"))
+        );
+        assert_eq!(
+            args.authority_effect_binding_path,
+            Some(PathBuf::from("target/app.authority-effect-binding.json"))
         );
     }
 
@@ -482,6 +511,48 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("duplicate --composition-binding argument")
+        );
+    }
+
+    #[test]
+    fn run_parser_rejects_missing_authority_effect_binding_path() {
+        let err = run_command_args_from_args(["--authority-effect-binding".to_string()])
+            .expect_err("missing authority/effect binding path should fail closed");
+
+        assert!(
+            err.to_string()
+                .contains("missing --authority-effect-binding value")
+        );
+    }
+
+    #[test]
+    fn run_parser_rejects_duplicate_authority_effect_binding_path() {
+        let err = run_command_args_from_args([
+            "--authority-effect-binding".to_string(),
+            "a.json".to_string(),
+            "--authority-effect-binding".to_string(),
+            "b.json".to_string(),
+        ])
+        .expect_err("duplicate authority/effect binding path should fail closed");
+
+        assert!(
+            err.to_string()
+                .contains("duplicate --authority-effect-binding argument")
+        );
+    }
+
+    #[test]
+    fn run_parser_rejects_direct_spawn_policy_with_authority_effect_binding() {
+        let err = run_command_args_from_args([
+            "--authority-effect-binding".to_string(),
+            "target/app.authority-effect-binding.json".to_string(),
+            "--deny-spawn-authority".to_string(),
+        ])
+        .expect_err("direct spawn policy should not mix with admitted binding");
+
+        assert!(
+            err.to_string()
+                .contains("cannot be combined with --authority-effect-binding")
         );
     }
 

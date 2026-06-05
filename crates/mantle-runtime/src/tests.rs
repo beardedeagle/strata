@@ -13,6 +13,8 @@ mod for_each_host;
 mod loaded_program_selection;
 #[path = "tests/payload_preflight.rs"]
 mod payload_preflight;
+#[path = "tests/runtime_authority_effect_binding.rs"]
+mod runtime_authority_effect_binding;
 #[path = "tests/runtime_boundaries.rs"]
 mod runtime_boundaries;
 #[path = "tests/runtime_composition_binding.rs"]

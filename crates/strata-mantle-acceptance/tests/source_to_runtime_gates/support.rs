@@ -5,6 +5,9 @@ use std::sync::Once;
 
 use mantle_runtime::{RuntimeTraceValidationLimits, validate_runtime_trace_jsonl};
 
+#[path = "support/authority_effect.rs"]
+mod authority_effect;
+
 pub(crate) use mantle_artifact::{
     ArtifactAction, ArtifactCapabilityDescriptor, ArtifactEffect, ArtifactProcess,
     ArtifactSendTarget, ArtifactSpawnKind, ArtifactTransition, ArtifactTypeKind, ArtifactValue,
