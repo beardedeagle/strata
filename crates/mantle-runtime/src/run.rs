@@ -7,7 +7,6 @@ use model::{ActiveStep, ProcessInstance, RuntimeLoopElement, RuntimeMessageEnvel
 use process_refs::LocalProcessRefs;
 use templates::{RuntimeTemplateContext, evaluate_runtime_template};
 
-use crate::RuntimeCompositionBinding;
 use crate::event::{
     RuntimeAuthorityResult, RuntimeBranchPath, RuntimeBranchPathSegment, RuntimeBranchScope,
     RuntimeEvent, RuntimeEventRecord, RuntimeFailureReason, RuntimeOutputStream, RuntimeProcessId,
@@ -21,6 +20,7 @@ use crate::host::RuntimeHost;
 use crate::limits::{LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy};
 use crate::program::{LoadedProgram, LoadedSpawnKind, RuntimePayload};
 use crate::report::{MessageDelivery, ProcessStatus, SpawnReport};
+use crate::{RuntimeAuthorityPolicy, RuntimeCompositionBinding};
 
 mod accounting;
 mod action_scope;
@@ -39,10 +39,10 @@ use action_scope::{BranchSelection, RuntimeActionScope};
 use boundaries::BoundarySendContext;
 use effect_outcomes::RuntimeEffectOutcome;
 
-pub use entrypoint::run_artifact_with_host;
-pub(crate) use entrypoint::run_loaded_program_with_composition_binding;
 #[cfg(test)]
 pub(crate) use entrypoint::run_loaded_program_with_host;
+pub use entrypoint::{run_artifact_with_host, run_artifact_with_host_and_binding_texts};
+pub(crate) use entrypoint::{run_loaded_program_with_bindings, validate_authority_binding_limits};
 
 struct RuntimeRun<'program, 'plan, 'host, H: RuntimeHost> {
     program: &'program LoadedProgram,
@@ -58,6 +58,7 @@ struct RuntimeRun<'program, 'plan, 'host, H: RuntimeHost> {
     emitted_output_bytes: usize,
     max_emitted_output_bytes: usize,
     spawn_authority_policy: SpawnAuthorityPolicy,
+    authority_policy: RuntimeAuthorityPolicy,
     local_spawn_backend: LocalSpawnBackend,
     composition_binding: Option<RuntimeCompositionBinding>,
     spawned_processes: Vec<SpawnReport>,
@@ -73,7 +74,14 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         host: &'host mut H,
         limits: RunLimits,
     ) -> Self {
-        Self::new_with_composition_binding(program, executable, host, limits, None)
+        Self::new_with_composition_binding(
+            program,
+            executable,
+            host,
+            limits,
+            None,
+            RuntimeAuthorityPolicy::admit_all(),
+        )
     }
 
     fn new_with_composition_binding(
@@ -82,6 +90,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         host: &'host mut H,
         limits: RunLimits,
         composition_binding: Option<RuntimeCompositionBinding>,
+        authority_policy: RuntimeAuthorityPolicy,
     ) -> Self {
         Self {
             program,
@@ -97,6 +106,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             emitted_output_bytes: 0,
             max_emitted_output_bytes: limits.max_emitted_output_bytes,
             spawn_authority_policy: limits.spawn_authority_policy,
+            authority_policy,
             local_spawn_backend: limits.local_spawn_backend,
             composition_binding,
             spawned_processes: Vec::new(),
@@ -110,6 +120,15 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             self.spawn_authority_policy,
             SpawnAuthorityPolicy::AdmitDeclared
         )
+    }
+
+    pub(super) fn authority_decision(
+        &self,
+        process_id: ProcessId,
+        authority_id: mantle_artifact::AuthorityId,
+    ) -> Result<crate::authority_effect_binding::RuntimeAuthorityDecisionResult> {
+        self.authority_policy
+            .decision_for_authority(process_id, authority_id)
     }
 
     pub(super) fn is_local_spawn_backend_available(&self) -> bool {
@@ -156,7 +175,9 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         target: ProcessId,
         spawn: ExecutableSpawnSite,
     ) -> Result<bool> {
-        let admitted = self.is_spawn_authority_admitted();
+        let decision = self.authority_decision(step.process_id, spawn.authority)?;
+        let admitted = decision.decision.admits()
+            && (decision.decision_id.is_some() || self.is_spawn_authority_admitted());
         self.record_event(RuntimeEvent::SpawnAuthorityChecked {
             pid: step.pid,
             process_id: step.process_id,
@@ -164,6 +185,7 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
             target_process_id: target,
             spawn_site_id: spawn.id,
             authority_id: spawn.authority,
+            authority_policy_decision_id: decision.decision_id,
             spawn_kind: match spawn.kind {
                 LoadedSpawnKind::DynamicLocal => RuntimeSpawnKind::DynamicLocal,
                 LoadedSpawnKind::LexicalSupervisorChild => RuntimeSpawnKind::LexicalSupervisorChild,

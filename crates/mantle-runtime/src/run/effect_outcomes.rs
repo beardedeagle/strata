@@ -4,7 +4,8 @@ use mantle_artifact::{
 };
 
 use super::RuntimeRun;
-use super::boundaries::BoundarySendContext;
+use super::boundaries::{BoundarySendContext, boundary_send_authority_denied_error};
+use super::delivery::DeliveryPreflightFailure;
 use super::model::{ActiveStep, RuntimeMessageEnvelope};
 use super::process_refs::{LocalProcessRefs, SendOutcomeTarget};
 use super::templates::{RuntimeTemplateContext, evaluate_runtime_template};
@@ -268,6 +269,15 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                 target_process_id,
                 request.message,
             )?;
+            let denied = self.record_denied_boundary_send_checked(
+                request.step,
+                port,
+                target_process_id,
+                request.message,
+            )?;
+            if denied {
+                return Err(boundary_send_authority_denied_error(request.step, port));
+            }
         }
         let prepared_payload = match (expected_payload_type, request.payload) {
             (None, None) => None,
@@ -334,50 +344,47 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
                         }
                     })
                 }
-                Err(failure) => {
-                    let original_message = self.runtime_message_payload(
-                        target_process_id,
-                        request.message,
-                        prepared_payload.as_ref(),
-                    )?;
-                    self.send_error_outcome(
-                        request.outcome_ty,
-                        failure.send_error_variant(),
-                        original_message,
-                    )
-                    .map(|payload| RuntimeEffectOutcomeExecution {
-                        payload,
-                        trace: RuntimeEffectOutcomeTrace::send(
-                            target_process_id,
-                            request.message,
-                            request.port,
-                            effect_outcome_result_for_delivery_failure(failure),
-                        ),
-                    })
-                }
-            },
-            SendOutcomeTarget::InactiveSupervisorChild { failure, .. } => {
-                let original_message = self.runtime_message_payload(
+                Err(failure) => self.send_failure_outcome(
+                    request.outcome_ty,
                     target_process_id,
                     request.message,
+                    request.port,
                     prepared_payload.as_ref(),
-                )?;
-                self.send_error_outcome(
+                    failure,
+                ),
+            },
+            SendOutcomeTarget::InactiveSupervisorChild { failure, .. } => self
+                .send_failure_outcome(
                     request.outcome_ty,
-                    failure.send_error_variant(),
-                    original_message,
-                )
-                .map(|payload| RuntimeEffectOutcomeExecution {
-                    payload,
-                    trace: RuntimeEffectOutcomeTrace::send(
-                        target_process_id,
-                        request.message,
-                        request.port,
-                        effect_outcome_result_for_delivery_failure(failure),
-                    ),
-                })
-            }
+                    target_process_id,
+                    request.message,
+                    request.port,
+                    prepared_payload.as_ref(),
+                    failure,
+                ),
         }
+    }
+
+    fn send_failure_outcome(
+        &self,
+        outcome_ty: TypeId,
+        target_process_id: ProcessId,
+        message: MessageId,
+        port: Option<PortId>,
+        payload: Option<&RuntimePayload>,
+        failure: DeliveryPreflightFailure,
+    ) -> Result<RuntimeEffectOutcomeExecution> {
+        let original_message = self.runtime_message_payload(target_process_id, message, payload)?;
+        self.send_error_outcome(outcome_ty, failure.send_error_variant(), original_message)
+            .map(|payload| RuntimeEffectOutcomeExecution {
+                payload,
+                trace: RuntimeEffectOutcomeTrace::send(
+                    target_process_id,
+                    message,
+                    port,
+                    effect_outcome_result_for_delivery_failure(failure),
+                ),
+            })
     }
 
     fn record_effect_outcome_bound(

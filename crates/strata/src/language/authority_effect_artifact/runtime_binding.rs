@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use mantle_artifact::{ArtifactCapabilityDescriptor, ArtifactEffect, MantleArtifact};
 
 use super::super::diagnostic::{Error, Result};
@@ -14,101 +12,22 @@ pub const RUNTIME_AUTHORITY_EFFECT_BINDING_ARTIFACT_EXTENSION: &str =
 pub const MAX_RUNTIME_AUTHORITY_EFFECT_BINDING_BYTES: usize = 1024 * 1024;
 
 mod render;
-mod source_facts;
 
+use super::source_facts::{
+    CheckedAuthorityEffectFacts, CheckedProcessFacts, DescriptorFact, EffectFact, SpawnKindFact,
+    admitted_authority_effect_facts,
+};
 use render::render_binding_json;
-use source_facts::admitted_authority_effect_facts;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeSpawnAuthorityPolicy {
-    AdmitDeclared,
-    DenyDeclared,
-}
-
-impl RuntimeSpawnAuthorityPolicy {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::AdmitDeclared => "admit_declared",
-            Self::DenyDeclared => "deny_declared",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CheckedAuthorityEffectFacts<'a> {
-    source_language: Cow<'a, str>,
-    source_module: Cow<'a, str>,
-    source_fingerprint: Cow<'a, str>,
-    processes: Vec<CheckedProcessFacts>,
-    component_surfaces: Vec<CheckedComponentSurfaceFact>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CheckedProcessFacts {
-    authorities: Vec<DescriptorFact>,
-    spawn_sites: Vec<SpawnSiteFact>,
-    transitions: Vec<TransitionEffectFact>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DescriptorFact {
-    Spawn { target_process_id: u32 },
-    ProtocolBoundary { protocol_id: u32 },
-    PortConnect { port_id: u32 },
-    ComponentExport { component_id: u32 },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SpawnSiteFact {
-    kind: SpawnKindFact,
-    target_process_id: u32,
-    authority_id: Option<u32>,
-    supervisor_id: Option<u32>,
-    supervisor_child_id: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SpawnKindFact {
-    DynamicLocal,
-    LexicalSupervisorChild,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TransitionEffectFact {
-    message_id: u32,
-    current_state_id: Option<u32>,
-    effects: Vec<EffectFact>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EffectFact {
-    Emit,
-    Spawn,
-    Send,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CheckedComponentSurfaceFact {
-    export_port_id: u32,
-    component_authority: DescriptorFact,
-    export_port_authority: DescriptorFact,
-    import_port_authorities: Vec<CheckedPortAuthorityFact>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CheckedPortAuthorityFact {
-    port_id: u32,
-    authority: DescriptorFact,
-}
 
 pub fn render_runtime_authority_effect_binding(
     authority_effect_text: &str,
+    authority_policy_text: &str,
     artifact: &MantleArtifact,
-    spawn_authority_policy: RuntimeSpawnAuthorityPolicy,
 ) -> Result<String> {
     let facts = admitted_authority_effect_facts(authority_effect_text)?;
+    let policy = super::policy::admitted_authority_policy_decisions(authority_policy_text, &facts)?;
     validate_against_runtime_artifact(&facts, artifact)?;
-    render_binding_json(&facts, artifact, spawn_authority_policy)
+    render_binding_json(&facts, &policy, artifact)
 }
 
 fn validate_against_runtime_artifact(

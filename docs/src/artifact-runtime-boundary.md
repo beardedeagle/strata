@@ -233,12 +233,20 @@ not a policy grant. Its `source_path` field is slash-normalized diagnostic
 metadata for review/provenance only; neither Strata lowering nor Mantle
 execution uses that path as an executable binding.
 
+`strata authority-effects policy build` turns admitted checked authority/effect
+facts into the separate `strata.authority_policy_decisions` artifact. Policy
+admission validates a closed, canonical decision table over typed
+process-authority IDs and exact descriptors. Missing, duplicated, out-of-order,
+unknown, unsupported, label-spoofed, stale, or descriptor-mismatched decisions
+fail closed; source names and debug labels are metadata only.
+
 `strata authority-effects bind-runtime` is the explicit runtime-admission bridge
-from admitted checked authority/effect facts to Mantle policy input and
-observability evidence. It validates an admitted `.authority-effect.json`
-against a specific `.mta` source language, module, source hash, process table,
-authority table, spawn-site table, transition effect table, and component
-authority-surface table, then emits
+from admitted checked authority/effect facts plus an admitted typed authority
+policy artifact to Mantle policy input and observability evidence. It validates
+the admitted `.authority-effect.json` and `.authority-policy.json` against each
+other and against a specific `.mta` source language, module, source hash,
+process table, authority table, spawn-site table, transition effect table, and
+component authority-surface table, then emits
 `target/strata/<stem>.authority-effect-binding.json` with
 `schema_id=mantle.runtime_authority_effect_binding`. The checked authority/effect
 schema name is a frontend-owned namespace, `<source_language>.checked_authority_effects`;
@@ -247,11 +255,13 @@ language-neutrally against the loaded artifact's `source_language` plus that
 suffix rather than hardcoding Strata ownership. Mantle accepts the runtime binding
 only when the operator supplies `mantle run <artifact.mta>
 --authority-effect-binding <authority-effect-binding.json>`, validates the
-binding and checked-fact schema identity again before `ArtifactLoaded`, and uses
-the admitted `spawn_authority_policy` only to accept or deny already-declared
-local spawn authority by typed IDs. Source labels, debug names, report text, and
-authority names are metadata and cannot grant, widen, strip, or retarget runtime
-authority.
+binding, checked-fact schema identity, and authority-policy schema identity again
+before `ArtifactLoaded`, and uses admitted `policy_decisions` only to accept or
+deny already-declared runtime-enforceable authorities by typed process and
+authority IDs. Dynamic spawn and boundary port-connect decisions are enforced
+before runtime side effects and recorded with `authority_policy_decision_id`.
+Source labels, debug names, report text, and authority names are metadata and
+cannot grant, widen, strip, or retarget runtime authority.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect usage, and must exactly match the action effects that execute.

@@ -75,9 +75,12 @@ composition edge, port-authority mismatch, or unbound component import fails
 admission before runtime
 events begin.
 
-Accepted typed boundary sends emit `boundary_send_checked` runtime trace events.
-Denied boundary shapes are admission diagnostics, not runtime trace events,
-because they do not enter runtime dispatch or produce `ArtifactLoaded`.
+Typed boundary sends emit `boundary_send_checked` runtime trace events before
+mailbox acceptance. Accepted sends continue to message acceptance; admitted
+authority-policy denials record `boundary_result=denied` and stop before target
+message side effects. Invalid boundary shapes are still admission diagnostics,
+not runtime trace events, because they do not enter runtime dispatch or produce
+`ArtifactLoaded`.
 
 Run the source-to-runtime example with:
 

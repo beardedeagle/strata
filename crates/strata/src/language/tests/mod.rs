@@ -1,4 +1,5 @@
 mod authority_effect_artifact;
+mod authority_policy_artifact;
 mod boundary_contracts;
 mod builtin_value_shapes;
 mod component_composition;

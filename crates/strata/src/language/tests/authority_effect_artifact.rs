@@ -1,10 +1,11 @@
 use super::super::{
     AUTHORITY_EFFECT_HASH_ALG, AUTHORITY_EFFECT_SCHEMA_ID, AUTHORITY_EFFECT_SCHEMA_VERSION_MAJOR,
     AUTHORITY_EFFECT_SCHEMA_VERSION_MINOR, AuthorityEffectAdmissionResult,
-    AuthorityEffectArtifactAdmitFormat, RuntimeSpawnAuthorityPolicy, SourceProvenanceHash,
-    admit_authority_effect_artifact, check_source, lower_to_artifact,
-    render_authority_effect_admission_summary, render_authority_effect_artifact,
-    render_runtime_authority_effect_binding,
+    AuthorityEffectArtifactAdmitFormat, AuthorityPolicyBuildOptions, AuthorityPolicyDecision,
+    SourceProvenanceHash, admit_authority_effect_artifact, admit_authority_policy_artifact,
+    check_source, lower_to_artifact, render_authority_effect_admission_summary,
+    render_authority_effect_artifact, render_authority_policy_admission_summary,
+    render_authority_policy_artifact, render_runtime_authority_effect_binding,
 };
 
 const SOURCE: &str = r#"
@@ -176,21 +177,157 @@ fn admission_summary_renders_text_and_json() {
 }
 
 #[test]
+fn policy_artifact_emits_closed_typed_decisions_and_admits() {
+    let authority_effect = example_artifact();
+    let policy = render_authority_policy_artifact(
+        &authority_effect,
+        AuthorityPolicyBuildOptions {
+            spawn_authority_decision: AuthorityPolicyDecision::Deny,
+            port_authority_decision: AuthorityPolicyDecision::Admit,
+        },
+    )
+    .expect("authority policy artifact should render");
+    let summary = admit_authority_policy_artifact(&policy, &authority_effect)
+        .expect("authority policy artifact should admit");
+
+    assert!(policy.contains("\"schema_id\":\"strata.authority_policy_decisions\""));
+    assert!(policy.contains("\"authority_effect_schema_id\":\"strata.checked_authority_effects\""));
+    assert!(policy.contains("\"decisions\":[{"));
+    assert!(policy.contains("\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1}"));
+    assert!(policy.contains("\"descriptor\":{\"kind\":\"port_connect\",\"port_id\":0}"));
+    assert!(policy.contains("\"decision\":\"deny\""));
+    assert!(!policy.contains("\"process\":"));
+    assert!(!policy.contains("\"authority\":"));
+    assert_eq!(summary.authority_decision_count, 2);
+    assert_eq!(summary.denied_authority_decision_count, 1);
+}
+
+#[test]
+fn policy_admission_rejects_missing_decision_closed_set() {
+    let authority_effect = example_artifact();
+    let policy =
+        render_authority_policy_artifact(&authority_effect, AuthorityPolicyBuildOptions::default())
+            .expect("authority policy artifact should render");
+    let truncated = policy.replace(
+        ",{\"decision_id\":1,\"process_id\":0,\"authority_id\":1,\"descriptor\":{\"kind\":\"port_connect\",\"port_id\":0},\"decision\":\"admit\"}",
+        "",
+    );
+    let err = admit_authority_policy_artifact(&truncated, &authority_effect)
+        .expect_err("missing policy decision must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("decision count 1 does not match checked authority count 2"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn policy_admission_rejects_source_label_spoofing() {
+    let authority_effect = example_artifact();
+    let policy =
+        render_authority_policy_artifact(&authority_effect, AuthorityPolicyBuildOptions::default())
+            .expect("authority policy artifact should render");
+    let spoofed = policy.replacen(
+        "\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1}",
+        "\"process\":\"Main\",\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1}",
+        1,
+    );
+    let err = admit_authority_policy_artifact(&spoofed, &authority_effect)
+        .expect_err("source-label policy spoofing must fail closed");
+
+    assert!(
+        err.to_string().contains("unknown field \"process\""),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn policy_admission_rejects_descriptor_mismatch() {
+    let authority_effect = example_artifact();
+    let policy =
+        render_authority_policy_artifact(&authority_effect, AuthorityPolicyBuildOptions::default())
+            .expect("authority policy artifact should render");
+    let forged = policy.replacen(
+        "\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1}",
+        "\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":0}",
+        1,
+    );
+    let err = admit_authority_policy_artifact(&forged, &authority_effect)
+        .expect_err("descriptor mismatch must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("descriptor does not match checked authority/effect facts"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn policy_admission_rejects_stale_source_identity() {
+    let authority_effect = example_artifact();
+    let expected_hash = SourceProvenanceHash::from_source(SOURCE);
+    let policy =
+        render_authority_policy_artifact(&authority_effect, AuthorityPolicyBuildOptions::default())
+            .expect("authority policy artifact should render");
+    let stale = policy.replace(
+        &format!("\"source_fingerprint\":\"{}\"", expected_hash.fnv1a64()),
+        "\"source_fingerprint\":\"1111111111111111\"",
+    );
+    let err = admit_authority_policy_artifact(&stale, &authority_effect)
+        .expect_err("stale policy source identity must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("field \"source_fingerprint\" must be"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn policy_admission_summary_json_escapes_artifact_path() {
+    let authority_effect = example_artifact();
+    let policy =
+        render_authority_policy_artifact(&authority_effect, AuthorityPolicyBuildOptions::default())
+            .expect("authority policy artifact should render");
+    let summary = admit_authority_policy_artifact(&policy, &authority_effect)
+        .expect("authority policy artifact should admit");
+    let json = render_authority_policy_admission_summary(
+        &summary,
+        "target/strata/with\"quote.authority-policy.json",
+        AuthorityEffectArtifactAdmitFormat::Json,
+    );
+
+    assert!(
+        json.contains(r#""artifact":"target/strata/with\"quote.authority-policy.json""#),
+        "artifact path should be JSON escaped: {json}"
+    );
+}
+
+#[test]
 fn runtime_binding_matches_runtime_artifact_and_removes_labels() {
     let (authority_effect, artifact) = authority_effect_and_runtime_artifact();
-    let binding = render_runtime_authority_effect_binding(
+    let policy = render_authority_policy_artifact(
         &authority_effect,
-        &artifact,
-        RuntimeSpawnAuthorityPolicy::DenyDeclared,
+        AuthorityPolicyBuildOptions {
+            spawn_authority_decision: AuthorityPolicyDecision::Deny,
+            port_authority_decision: AuthorityPolicyDecision::Admit,
+        },
     )
-    .expect("authority/effect artifact should bind to matching runtime artifact");
+    .expect("authority policy artifact should render");
+    let binding = render_runtime_authority_effect_binding(&authority_effect, &policy, &artifact)
+        .expect("authority/effect artifact should bind to matching runtime artifact");
 
     assert!(binding.contains("\"schema_id\":\"mantle.runtime_authority_effect_binding\""));
     assert!(binding.contains("\"deployment_id\":0"));
     assert!(
         binding.contains("\"authority_effect_schema_id\":\"strata.checked_authority_effects\"")
     );
-    assert!(binding.contains("\"spawn_authority_policy\":\"deny_declared\""));
+    assert!(
+        binding.contains("\"authority_policy_schema_id\":\"strata.authority_policy_decisions\"")
+    );
+    assert!(binding.contains("\"policy_decisions\":[{"));
+    assert!(binding.contains("\"decision\":\"deny\""));
     assert!(binding.contains("\"transition_effects\":[{"));
     assert!(
         !binding.contains("\"process\":"),
@@ -209,13 +346,12 @@ fn runtime_binding_matches_runtime_artifact_and_removes_labels() {
 #[test]
 fn runtime_binding_rejects_mismatched_artifact_identity() {
     let (authority_effect, mut artifact) = authority_effect_and_runtime_artifact();
+    let policy =
+        render_authority_policy_artifact(&authority_effect, AuthorityPolicyBuildOptions::default())
+            .expect("authority policy artifact should render");
     artifact.source_hash_fnv1a64 = "1111111111111111".to_string();
-    let err = render_runtime_authority_effect_binding(
-        &authority_effect,
-        &artifact,
-        RuntimeSpawnAuthorityPolicy::AdmitDeclared,
-    )
-    .expect_err("mismatched .mta identity must fail closed");
+    let err = render_runtime_authority_effect_binding(&authority_effect, &policy, &artifact)
+        .expect_err("mismatched .mta identity must fail closed");
 
     assert!(
         err.to_string()
@@ -236,12 +372,10 @@ fn runtime_binding_rejects_forged_widened_authority() {
             "\"kind\":\"dynamic_local\",\"target_process_id\":1,\"target_process\":\"Worker\",\"authority_id\":0",
             "\"kind\":\"dynamic_local\",\"target_process_id\":0,\"target_process\":\"Main\",\"authority_id\":0",
         );
-    let err = render_runtime_authority_effect_binding(
-        &forged,
-        &artifact,
-        RuntimeSpawnAuthorityPolicy::AdmitDeclared,
-    )
-    .expect_err("forged widened authority must fail closed");
+    let policy = render_authority_policy_artifact(&forged, AuthorityPolicyBuildOptions::default())
+        .expect("forged but structurally valid authority/effect artifact should render policy");
+    let err = render_runtime_authority_effect_binding(&forged, &policy, &artifact)
+        .expect_err("forged widened authority must fail closed");
 
     assert!(
         err.to_string().contains("descriptor does not match"),
@@ -258,12 +392,10 @@ fn runtime_binding_rejects_forged_transition_effect_order() {
     );
     admit_authority_effect_artifact(&forged)
         .expect("structural admission does not re-check source-derived effect facts");
-    let err = render_runtime_authority_effect_binding(
-        &forged,
-        &artifact,
-        RuntimeSpawnAuthorityPolicy::AdmitDeclared,
-    )
-    .expect_err("forged transition effect facts must fail closed at runtime binding");
+    let policy = render_authority_policy_artifact(&forged, AuthorityPolicyBuildOptions::default())
+        .expect("forged authority/effect artifact should still render policy");
+    let err = render_runtime_authority_effect_binding(&forged, &policy, &artifact)
+        .expect_err("forged transition effect facts must fail closed at runtime binding");
 
     assert!(
         err.to_string()

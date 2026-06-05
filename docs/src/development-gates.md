@@ -44,11 +44,13 @@ They also include authority/effect admission-binding paths for dynamic local
 spawn authority in `examples/effect_outcome_spawn_denied.str` and lexical
 supervisor-child spawning in `examples/local_supervision_restart.str`: `strata
 authority-effects build`, `strata authority-effects admit`, `strata
-authority-effects bind-runtime`, and `mantle run --authority-effect-binding`.
-Those paths prove checked authority/effect facts are emitted as a Strata-owned
-artifact, admitted before binding, correlated with the matching `.mta`, and
-consumed by Mantle as typed runtime policy/observability input rather than
-source labels or report text.
+authority-effects policy build`, `strata authority-effects policy admit`,
+`strata authority-effects bind-runtime`, and
+`mantle run --authority-effect-binding`. Those paths prove checked
+authority/effect facts and closed typed policy decisions are emitted as
+separate Strata-owned artifacts, admitted before binding, correlated with the
+matching `.mta`, and consumed by Mantle as typed runtime
+policy/observability input rather than source labels or report text.
 Trace-reading acceptance gates also validate the Mantle-owned JSONL trace
 schema before using trace evidence. That validation is limited to observability
 metadata, exact per-event field sets, required field shapes, grouped
@@ -142,17 +144,20 @@ just authority-effect-artifact-gates
 It checks and builds `examples/effect_outcome_spawn_denied.str`, writes the
 default `target/strata/effect_outcome_spawn_denied.authority-effect.json`
 checked authority/effect artifact, validates it with
-`strata authority-effects admit --format json`, binds the admitted facts to the
-matching `.mta`, and runs Mantle with the accepted-policy
+`strata authority-effects admit --format json`, builds and admits
+`target/strata/effect_outcome_spawn_denied.authority-policy.json`, binds the
+admitted facts and typed policy decisions to the matching `.mta`, and runs
+Mantle with the accepted-policy
 `target/strata/effect_outcome_spawn_denied.authority-effect-binding.json`. It
-then binds the same admitted facts with `--deny-spawn-authority` and runs Mantle
-with
+then builds an explicit deny-spawn
+`target/strata/effect_outcome_spawn_denied.authority-deny-policy.json`, admits
+it, binds it, and runs Mantle with
 `target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json`.
 Next, it repeats the build/admit/bind/run chain for
 `examples/local_supervision_restart.str` so lexical supervisor-child facts are
 proven through the same explicit runtime binding bridge. Finally, it checks and
 builds `examples/component_composition_main.str`, emits and admits both the
-component-composition and authority/effect artifacts, binds both runtime
+component-composition, authority/effect, and authority-policy artifacts, binds both runtime
 sidecars, and runs Mantle with both explicit bindings. This proves the explicit
 Strata-to-Mantle authority/effect bridge across dynamic-local authority, lexical
 supervisor-child facts, and component/port authority surfaces while keeping
@@ -171,8 +176,9 @@ Strata-owned composition artifact build/rendering, Strata-owned composition
 artifact admission/validation, target requirement rendering from a prechecked
 composition input, and repeated Mantle runs with an explicit runtime composition
 binding; authority/effect artifact build/rendering, authority/effect artifact
-admission, authority/effect runtime-binding admission for the denied-spawn and
-component authority-surface examples, and repeated Mantle runs with the explicit
+admission, authority-policy artifact build/rendering and admission,
+authority/effect runtime-binding admission for the denied-spawn and component
+authority-surface examples, and repeated Mantle runs with the explicit
 authority/effect binding for the denied-spawn example; Mantle admission
 comparison through the runtime profiles; Mantle
 artifact encode/decode; repeated Mantle in-memory execution of the

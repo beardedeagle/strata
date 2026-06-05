@@ -134,16 +134,32 @@ strata check examples/effect_outcome_spawn_denied.str
 strata build examples/effect_outcome_spawn_denied.str
 strata authority-effects build examples/effect_outcome_spawn_denied.str
 strata authority-effects admit target/strata/effect_outcome_spawn_denied.authority-effect.json --format json
+strata authority-effects policy build \
+  target/strata/effect_outcome_spawn_denied.authority-effect.json \
+  --output target/strata/effect_outcome_spawn_denied.authority-policy.json
+strata authority-effects policy admit \
+  target/strata/effect_outcome_spawn_denied.authority-policy.json \
+  target/strata/effect_outcome_spawn_denied.authority-effect.json \
+  --format json
 strata authority-effects bind-runtime \
   target/strata/effect_outcome_spawn_denied.authority-effect.json \
+  target/strata/effect_outcome_spawn_denied.authority-policy.json \
   target/strata/effect_outcome_spawn_denied.mta \
   --output target/strata/effect_outcome_spawn_denied.authority-effect-binding.json
 mantle run target/strata/effect_outcome_spawn_denied.mta \
   --authority-effect-binding target/strata/effect_outcome_spawn_denied.authority-effect-binding.json
+strata authority-effects policy build \
+  target/strata/effect_outcome_spawn_denied.authority-effect.json \
+  --deny-spawn-authority \
+  --output target/strata/effect_outcome_spawn_denied.authority-deny-policy.json
+strata authority-effects policy admit \
+  target/strata/effect_outcome_spawn_denied.authority-deny-policy.json \
+  target/strata/effect_outcome_spawn_denied.authority-effect.json \
+  --format json
 strata authority-effects bind-runtime \
   target/strata/effect_outcome_spawn_denied.authority-effect.json \
+  target/strata/effect_outcome_spawn_denied.authority-deny-policy.json \
   target/strata/effect_outcome_spawn_denied.mta \
-  --deny-spawn-authority \
   --output target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json
 mantle run target/strata/effect_outcome_spawn_denied.mta \
   --authority-effect-binding target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json
@@ -156,8 +172,16 @@ strata check examples/local_supervision_restart.str
 strata build examples/local_supervision_restart.str
 strata authority-effects build examples/local_supervision_restart.str
 strata authority-effects admit target/strata/local_supervision_restart.authority-effect.json --format json
+strata authority-effects policy build \
+  target/strata/local_supervision_restart.authority-effect.json \
+  --output target/strata/local_supervision_restart.authority-policy.json
+strata authority-effects policy admit \
+  target/strata/local_supervision_restart.authority-policy.json \
+  target/strata/local_supervision_restart.authority-effect.json \
+  --format json
 strata authority-effects bind-runtime \
   target/strata/local_supervision_restart.authority-effect.json \
+  target/strata/local_supervision_restart.authority-policy.json \
   target/strata/local_supervision_restart.mta \
   --output target/strata/local_supervision_restart.authority-effect-binding.json
 mantle run target/strata/local_supervision_restart.mta \
@@ -178,8 +202,16 @@ strata composition bind-runtime \
   --output target/strata/component_composition_main.deployment-composition.json
 strata authority-effects build examples/component_composition_main.str
 strata authority-effects admit target/strata/component_composition_main.authority-effect.json --format json
+strata authority-effects policy build \
+  target/strata/component_composition_main.authority-effect.json \
+  --output target/strata/component_composition_main.authority-policy.json
+strata authority-effects policy admit \
+  target/strata/component_composition_main.authority-policy.json \
+  target/strata/component_composition_main.authority-effect.json \
+  --format json
 strata authority-effects bind-runtime \
   target/strata/component_composition_main.authority-effect.json \
+  target/strata/component_composition_main.authority-policy.json \
   target/strata/component_composition_main.mta \
   --output target/strata/component_composition_main.authority-effect-binding.json
 mantle run target/strata/component_composition_main.mta \
@@ -188,14 +220,17 @@ mantle run target/strata/component_composition_main.mta \
 ```
 
 This gate keeps the ownership split explicit. Strata emits and admits
-`strata.checked_authority_effects` facts from checked IR; the runtime binding
-then correlates those facts with a matching `.mta` and records the bounded
-`spawn_authority_policy`. Mantle consumes only
+`strata.checked_authority_effects` facts from checked IR; Strata emits and admits
+the closed `strata.authority_policy_decisions` table over typed process
+authority IDs; the runtime binding then correlates those facts and decisions
+with a matching `.mta`. Mantle consumes only
 `mantle.runtime_authority_effect_binding`, only when supplied through
 `--authority-effect-binding`, and validates the binding before `ArtifactLoaded`
-or runtime side effects. Source labels, authority names, report text, and debug
-names remain diagnostics/provenance metadata and cannot retarget authority or
-effect facts.
+or runtime side effects. Dynamic spawn and boundary port-connect decisions are
+enforced by typed IDs and traced with `authority_policy_decision_id`. Source
+labels, authority names, report text, and debug names remain
+diagnostics/provenance metadata and cannot retarget authority, policy, or effect
+facts.
 
 An immutable source computation gate proves sequential source-local bindings are
 resolved before lowering while Mantle executes only typed artifact data:
@@ -262,7 +297,8 @@ runs with available local spawn capacity/backend; the source-visible failure
 branches use the dedicated commands below.
 
 The local spawn authority denial gate uses the same check/build path and then
-runs Mantle with denied admitted spawn authority:
+runs Mantle with a direct denial runtime limit. The authority/effect binding
+gate above is the product path for typed admitted spawn-authority policy:
 
 ```sh
 just strata-check examples/effect_outcome_spawn_denied.str
@@ -290,11 +326,9 @@ just mantle-run-disable-local-spawn-backend target/strata/effect_outcome_spawn_b
 
 The exhausted-spawn, backend-unavailable-spawn, stopped-target send, and
 inactive-crashed-child send gates also assert `effect_outcome_bound` trace
-events. Runtime-unit and trace-validation coverage separately exercise
-`MailboxClosed` for closed-mailbox send outcomes; the current source surface
-keeps lexical supervisor children from becoming first-class `ProcessRef`
-payloads, so that closed-mailbox runtime path is not presented as a
-source-to-runtime gate. These trace events carry the numeric
+events. The denied-port-policy send-outcome gate instead proves fail-closed
+authority denial before source-visible outcome binding or delivery; runtime-unit
+and trace-validation coverage separately exercise closed-mailbox runtime causes. These trace events carry the numeric
 `outcome_id`, the `spawn` or `send` action kind, and the closed
 `outcome_result` category so the branch result is attributable to Mantle
 runtime cause rather than inferred only from output text.

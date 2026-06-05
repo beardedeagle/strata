@@ -2,9 +2,11 @@ use mantle_artifact::{
     ArtifactCapabilityDescriptor, ArtifactEffect, Error, MantleArtifact, Result,
 };
 
-use crate::limits::SpawnAuthorityPolicy;
-
 use super::json::{JsonArray, JsonObject};
+use super::{
+    RuntimeAuthorityDecision, RuntimeAuthorityPolicy, RuntimeAuthorityPolicyDecision,
+    RuntimeProcessAuthorityPolicy,
+};
 
 const PROCESS_FIELDS: &[&str] = &[
     "process_id",
@@ -31,7 +33,13 @@ const COMPONENT_SURFACE_FIELDS: &[&str] = &[
     "import_port_authorities",
 ];
 const IMPORT_PORT_FIELDS: &[&str] = &["port_id", "port_authority"];
-const POLICY_FIELDS: &[&str] = &["spawn_authority_policy"];
+const POLICY_DECISION_FIELDS: &[&str] = &[
+    "decision_id",
+    "process_id",
+    "authority_id",
+    "descriptor",
+    "decision",
+];
 const DESCRIPTOR_SPAWN_FIELDS: &[&str] = &["kind", "target_process_id"];
 const DESCRIPTOR_PROTOCOL_FIELDS: &[&str] = &["kind", "protocol_id"];
 const DESCRIPTOR_PORT_FIELDS: &[&str] = &["kind", "port_id"];
@@ -359,15 +367,105 @@ fn validate_import_ports(
     Ok(())
 }
 
-pub(super) fn validate_policy(policy: &JsonObject<'_>) -> Result<SpawnAuthorityPolicy> {
-    policy.require_exact_fields(POLICY_FIELDS)?;
-    match policy.required_string("spawn_authority_policy")? {
-        "admit_declared" => Ok(SpawnAuthorityPolicy::AdmitDeclared),
-        "deny_declared" => Ok(SpawnAuthorityPolicy::DenyDeclared),
-        other => Err(Error::new(format!(
-            "unsupported spawn_authority_policy {other:?}"
-        ))),
+pub(super) fn validate_policy_decisions(
+    decisions: &JsonArray<'_>,
+    artifact: &MantleArtifact,
+) -> Result<RuntimeAuthorityPolicy> {
+    let expected_count = artifact
+        .processes
+        .iter()
+        .try_fold(0usize, |count, process| {
+            count
+                .checked_add(process.authorities.len())
+                .ok_or_else(|| Error::new("authority policy decision count overflowed"))
+        })?;
+    let mut parsed = Vec::with_capacity(expected_count);
+    decisions.for_each_object(|index, decision| {
+        decision.require_exact_fields(POLICY_DECISION_FIELDS)?;
+        let decision_id = decision.required_u32("decision_id")?;
+        if usize::try_from(decision_id).ok() != Some(index) {
+            return Err(Error::new(format!(
+                "authority policy decision_id {decision_id} at array index {index} is not canonical"
+            )));
+        }
+        let process_id = decision.required_u32("process_id")?;
+        let authority_id = decision.required_u32("authority_id")?;
+        let process = artifact
+            .processes
+            .get(usize::try_from(process_id).map_err(|_| {
+                Error::new(format!(
+                    "authority policy decision references unknown process_id {process_id}"
+                ))
+            })?)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "authority policy decision references unknown process_id {process_id}"
+                ))
+            })?;
+        let authority = process
+            .authorities
+            .get(usize::try_from(authority_id).map_err(|_| {
+                Error::new(format!(
+                    "authority policy decision references unknown authority_id {authority_id}"
+                ))
+            })?)
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "authority policy decision references unknown authority_id {authority_id}"
+                ))
+            })?;
+        if !descriptor_matches(
+            descriptor_fact(&decision.required_object("descriptor")?)?,
+            authority.descriptor,
+        ) {
+            return Err(Error::new(format!(
+                "authority policy decision_id {decision_id} descriptor does not match runtime artifact"
+            )));
+        }
+        parsed.push((
+            process_id,
+            authority_id,
+            RuntimeAuthorityDecision {
+                decision_id,
+                decision: policy_decision(decision.required_string("decision")?)?,
+            },
+        ));
+        Ok(())
+    })?;
+    if parsed.len() != expected_count {
+        return Err(Error::new(format!(
+            "authority policy decision count {} does not match runtime authority count {expected_count}",
+            parsed.len()
+        )));
     }
+    let mut process_policies = Vec::with_capacity(artifact.processes.len());
+    let mut cursor = 0usize;
+    for (process_id, process) in artifact.processes.iter().enumerate() {
+        let mut authority_decisions = Vec::with_capacity(process.authorities.len());
+        for authority_id in 0..process.authorities.len() {
+            let Some((actual_process_id, actual_authority_id, decision)) =
+                parsed.get(cursor).copied()
+            else {
+                return Err(Error::new("authority policy decision table is truncated"));
+            };
+            if usize::try_from(actual_process_id).ok() != Some(process_id)
+                || usize::try_from(actual_authority_id).ok() != Some(authority_id)
+            {
+                return Err(Error::new(format!(
+                    "authority policy decision_id {} is not ordered by process_id and authority_id",
+                    decision.decision_id
+                )));
+            }
+            authority_decisions.push(decision);
+            cursor = cursor
+                .checked_add(1)
+                .ok_or_else(|| Error::new("authority policy decision cursor overflowed"))?;
+        }
+        process_policies.push(RuntimeProcessAuthorityPolicy {
+            decisions: authority_decisions,
+        });
+    }
+    Ok(RuntimeAuthorityPolicy::Decisions(process_policies))
 }
 
 fn descriptor_fact(descriptor: &JsonObject<'_>) -> Result<DescriptorFact> {
@@ -421,6 +519,16 @@ fn descriptor_matches(checked: DescriptorFact, runtime: ArtifactCapabilityDescri
             ArtifactCapabilityDescriptor::ComponentExport { component },
         ) => component_id == component.as_u32(),
         _ => false,
+    }
+}
+
+fn policy_decision(value: &str) -> Result<RuntimeAuthorityPolicyDecision> {
+    match value {
+        "admit" => Ok(RuntimeAuthorityPolicyDecision::Admit),
+        "deny" => Ok(RuntimeAuthorityPolicyDecision::Deny),
+        other => Err(Error::new(format!(
+            "unsupported authority policy decision {other:?}"
+        ))),
     }
 }
 

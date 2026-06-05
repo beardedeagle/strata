@@ -37,4 +37,5 @@ fn boundary_contracts_check_build_run_and_trace_typed_port() {
     assert!(trace.contains(r#""port":"WorkerPort""#));
     assert!(trace.contains(r#""protocol":"WorkerProtocol""#));
     assert!(trace.contains(r#""boundary_result":"accepted""#));
+    assert!(trace.contains(r#""authority_policy_decision_id":null"#));
 }

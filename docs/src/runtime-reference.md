@@ -40,13 +40,12 @@ names.
 
 ## Admitted Authority/Effect Binding
 
-Authority/effect facts cross only through `.authority-effect.json` into explicit
-`.authority-effect-binding.json`; Mantle consumes only `--authority-effect-binding`,
-validating typed IDs/descriptors plus policy while source labels remain metadata.
-Mantle validates the binding schema, source-language namespace, `.mta` identity,
-typed descriptor/effect equivalence, and policy before `ArtifactLoaded`, trace
-creation, or any runtime side effect. A raw `.authority-effect.json` file is
-checked Strata evidence only; it is never valid Mantle runtime input.
+Authority/effect facts cross through `.authority-effect.json`; typed policy
+decisions cross through `.authority-policy.json`; Strata binds both with a
+matching `.mta` into `.authority-effect-binding.json`. Mantle consumes only
+`--authority-effect-binding`, validating schema/source namespace, `.mta`
+identity, typed descriptors/effects, and the closed policy table before side
+effects. Raw checked sidecars are never valid Mantle runtime input.
 
 ## Runtime Branching
 
@@ -670,7 +669,7 @@ before state resolution so outcome sends can target them. Process-reference
 spawns after ordinary effects execute in ordinary source order and cannot be
 used by later outcome bindings.
 
-For local send outcomes, Mantle checks target process, lifecycle mailbox state, and mailbox capacity before accepting the message. Accepted sends commit and return `Ok(Unit)`; pre-acceptance failures return `Err(Full(message))`, `Err(Stopped(message))`, `Err(Crashed(message))`, or `Err(MailboxClosed(message))` with the original message preserved. `Stopped` is produced for normally terminated targets when that cause remains observable. `MailboxClosed` is reserved for explicit mailbox closure, supervisor-driven shutdown, policy closure, or indistinguishable closed-state rejection. Ordinary source-created `Panic(...)` still records no-replay evidence and fails before a later sender can recover the target; direct `ProcessRef<T>` message metadata remains send/message-boundary authority and does not become storable source state.
+For local send outcomes, Mantle checks target process, lifecycle mailbox state, and mailbox capacity before accepting the message. Accepted sends commit and return `Ok(Unit)`; pre-acceptance failures return `Err(Full(message))`, `Err(Stopped(message))`, `Err(Crashed(message))`, or `Err(MailboxClosed(message))` with the original message preserved. `Stopped` is produced for normally terminated targets when that cause remains observable. `MailboxClosed` is reserved for explicit mailbox closure, supervisor-driven shutdown, or indistinguishable closed-state rejection. A denied admitted `port_connect` policy is a typed authority failure rather than a mailbox lifecycle cause; both bare typed-port sends and typed-port send outcomes fail closed as runtime errors before delivery after recording `boundary_send_checked` denial evidence. Ordinary source-created `Panic(...)` still records no-replay evidence and fails before a later sender can recover the target; direct `ProcessRef<T>` message metadata remains send/message-boundary authority and does not become storable source state.
 
 For local spawn outcomes, accepted spawns commit the new process and return `Ok(process_ref)` with a typed `ProcessRef<TargetProcess>` payload. If process authority is denied by the admitted runtime policy before acceptance, Mantle returns `Err(Denied(Unit))`; if process capacity is exhausted before acceptance, Mantle returns `Err(Exhausted(Unit))`; if Mantle has no available local spawn backend for this run, it returns `Err(BackendUnavailable(Unit))` before acceptance. Bare statement `send` and `spawn` still fail closed: pre-acceptance failure is reported as a runtime error instead of being silently dropped.
 
@@ -724,11 +723,8 @@ Current pattern-matching closure boundaries:
 | Arbitrary/general match expressions outside supported function, `init`, `step`, `match msg`, and `match state` forms | Future language semantics, not part of the current buildable surface. |
 
 State changes are immutable whole-value transitions. There is no assignment
-statement and no source-visible field mutation.
-
-Payload-bearing process states can be observed only through checked immutable
-state patterns such as `Working(job: Job)`. Returning `Done(job)` creates a new
-whole state value; it does not rewrite the payload inside the existing state.
+statement, no source-visible field mutation, and no payload rewrite inside an
+existing process state.
 
 ## Limits
 

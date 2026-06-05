@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use mantle_artifact::{Error, MantleArtifact, Result, read_artifact};
+use mantle_artifact::{MantleArtifact, Result, read_artifact};
 
 mod authority_effect_binding;
 mod cli;
@@ -40,13 +40,13 @@ pub use program::RuntimePayload;
 pub use report::{
     MessageDelivery, ProcessReport, ProcessStatus, RunReport, RuntimeReport, SpawnReport,
 };
-pub use run::run_artifact_with_host;
+pub use run::{run_artifact_with_host, run_artifact_with_host_and_binding_texts};
 
-pub(crate) use authority_effect_binding::RuntimeAuthorityEffectBinding;
+pub(crate) use authority_effect_binding::{RuntimeAuthorityEffectBinding, RuntimeAuthorityPolicy};
 pub(crate) use composition_binding::RuntimeCompositionBinding;
 use host::{JsonlTraceHost, prepare_trace_file};
 use program::LoadedProgram;
-use run::run_loaded_program_with_composition_binding;
+use run::{run_loaded_program_with_bindings, validate_authority_binding_limits};
 
 pub fn run_artifact_path(path: &Path) -> Result<RunReport> {
     run_artifact_path_with_limits(path, RunLimits::default())
@@ -136,30 +136,25 @@ pub(crate) fn run_artifact_with_limits_and_composition_binding(
 pub(crate) fn run_artifact_with_limits_and_bindings(
     path: &Path,
     artifact: &MantleArtifact,
-    mut limits: RunLimits,
+    limits: RunLimits,
     composition_binding: Option<RuntimeCompositionBinding>,
     authority_effect_binding: Option<RuntimeAuthorityEffectBinding>,
 ) -> Result<RunReport> {
-    if authority_effect_binding.is_some()
-        && limits.spawn_authority_policy != SpawnAuthorityPolicy::AdmitDeclared
-    {
-        return Err(Error::new(
-            "RunLimits spawn_authority_policy cannot be combined with an authority/effect binding; encode the policy in the binding",
-        ));
-    }
-    if let Some(binding) = authority_effect_binding {
-        limits.spawn_authority_policy = binding.spawn_authority_policy();
-    }
+    validate_authority_binding_limits(limits, authority_effect_binding.is_some())?;
+    let authority_policy = authority_effect_binding
+        .map(RuntimeAuthorityEffectBinding::into_policy)
+        .unwrap_or_else(RuntimeAuthorityPolicy::admit_all);
     limits.validate()?;
     let program = LoadedProgram::from_artifact(artifact)?;
     let trace_path = path.with_extension("observability.jsonl");
     let trace_file = prepare_trace_file(&trace_path)?;
     let mut host = JsonlTraceHost::new(trace_file, limits.max_trace_bytes);
-    let runtime_report = run_loaded_program_with_composition_binding(
+    let runtime_report = run_loaded_program_with_bindings(
         &program,
         &mut host,
         limits,
         composition_binding,
+        authority_policy,
     )?;
 
     Ok(RunReport {

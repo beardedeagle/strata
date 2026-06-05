@@ -27,7 +27,7 @@ const NUMERIC_TRACE_FIELDS: &[&str] = &[
     "restart_window_ms",
 ];
 const NULLABLE_NUMERIC_TRACE_FIELDS: &[&str] = &["restart_time_ms"];
-const NULLABLE_TYPED_ID_FIELDS: &[&str] = &["new_child_pid"];
+const NULLABLE_TYPED_ID_FIELDS: &[&str] = &["authority_policy_decision_id", "new_child_pid"];
 const AUTHORITY_RESULT_VALUES: &[&str] = &["accepted", "denied"];
 const BRANCH_VALUES: &[&str] = &["then", "else"];
 const BRANCH_SCOPE_VALUES: &[&str] = &["next_state", "action"];
