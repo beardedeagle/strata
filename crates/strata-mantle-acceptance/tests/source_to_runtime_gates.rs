@@ -3,6 +3,8 @@
 #[path = "source_to_runtime_gates/support.rs"]
 mod support;
 
+#[path = "source_to_runtime_gates/authority_effect_binding.rs"]
+mod authority_effect_binding;
 #[path = "source_to_runtime_gates/basic_runtime.rs"]
 mod basic_runtime;
 #[path = "source_to_runtime_gates/boundary_contracts.rs"]

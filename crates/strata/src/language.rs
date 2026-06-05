@@ -1,4 +1,5 @@
 mod ast;
+mod authority_effect_artifact;
 mod authority_summary;
 mod checked;
 mod checked_render;
@@ -27,6 +28,18 @@ pub use ast::{
     OutputLiteral, Param, Pattern, Port, PortBinding, Process, Protocol, Record, RecordField,
     RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueBooleanOperator,
     ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator, ValueScalarOrderingOperator,
+};
+pub use authority_effect_artifact::{
+    AUTHORITY_EFFECT_ARTIFACT_EXTENSION, AUTHORITY_EFFECT_HASH_ALG, AUTHORITY_EFFECT_SCHEMA_ID,
+    AUTHORITY_EFFECT_SCHEMA_VERSION_MAJOR, AUTHORITY_EFFECT_SCHEMA_VERSION_MINOR,
+    AuthorityEffectAdmissionResult, AuthorityEffectAdmissionSummary,
+    AuthorityEffectArtifactAdmitFormat, MAX_AUTHORITY_EFFECT_ARTIFACT_BYTES,
+    RUNTIME_AUTHORITY_EFFECT_BINDING_ARTIFACT_EXTENSION,
+    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_ID,
+    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MAJOR,
+    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MINOR, RuntimeSpawnAuthorityPolicy,
+    admit_authority_effect_artifact, render_authority_effect_admission_summary,
+    render_authority_effect_artifact, render_runtime_authority_effect_binding,
 };
 pub use authority_summary::{AuthoritySummaryFormat, render_authority_summary};
 pub use checked::CheckedProgram;

@@ -124,6 +124,79 @@ deployment bindings, and report data remain diagnostics, provenance, review
 records, admission evidence, or observability correlation evidence; they are not
 runtime dispatch inputs.
 
+The authority/effect admission-binding gate proves checked authority and exact
+effect facts cross the Strata/Mantle boundary as admitted typed artifacts and a
+matching runtime binding. The dynamic-local branch exercises
+`effect_outcome_spawn_denied`:
+
+```sh
+strata check examples/effect_outcome_spawn_denied.str
+strata build examples/effect_outcome_spawn_denied.str
+strata authority-effects build examples/effect_outcome_spawn_denied.str
+strata authority-effects admit target/strata/effect_outcome_spawn_denied.authority-effect.json --format json
+strata authority-effects bind-runtime \
+  target/strata/effect_outcome_spawn_denied.authority-effect.json \
+  target/strata/effect_outcome_spawn_denied.mta \
+  --output target/strata/effect_outcome_spawn_denied.authority-effect-binding.json
+mantle run target/strata/effect_outcome_spawn_denied.mta \
+  --authority-effect-binding target/strata/effect_outcome_spawn_denied.authority-effect-binding.json
+strata authority-effects bind-runtime \
+  target/strata/effect_outcome_spawn_denied.authority-effect.json \
+  target/strata/effect_outcome_spawn_denied.mta \
+  --deny-spawn-authority \
+  --output target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json
+mantle run target/strata/effect_outcome_spawn_denied.mta \
+  --authority-effect-binding target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json
+```
+
+The same gate also exercises the lexical supervisor-child branch:
+
+```sh
+strata check examples/local_supervision_restart.str
+strata build examples/local_supervision_restart.str
+strata authority-effects build examples/local_supervision_restart.str
+strata authority-effects admit target/strata/local_supervision_restart.authority-effect.json --format json
+strata authority-effects bind-runtime \
+  target/strata/local_supervision_restart.authority-effect.json \
+  target/strata/local_supervision_restart.mta \
+  --output target/strata/local_supervision_restart.authority-effect-binding.json
+mantle run target/strata/local_supervision_restart.mta \
+  --authority-effect-binding target/strata/local_supervision_restart.authority-effect-binding.json
+```
+
+The same gate also exercises component authority surfaces with both explicit
+runtime sidecars supplied to Mantle:
+
+```sh
+strata check examples/component_composition_main.str
+strata build examples/component_composition_main.str
+strata composition build examples/component_composition_main.str
+strata composition admit target/strata/component_composition_main.component-composition.json --format json
+strata composition bind-runtime \
+  target/strata/component_composition_main.component-composition.json \
+  target/strata/component_composition_main.mta \
+  --output target/strata/component_composition_main.deployment-composition.json
+strata authority-effects build examples/component_composition_main.str
+strata authority-effects admit target/strata/component_composition_main.authority-effect.json --format json
+strata authority-effects bind-runtime \
+  target/strata/component_composition_main.authority-effect.json \
+  target/strata/component_composition_main.mta \
+  --output target/strata/component_composition_main.authority-effect-binding.json
+mantle run target/strata/component_composition_main.mta \
+  --composition-binding target/strata/component_composition_main.deployment-composition.json \
+  --authority-effect-binding target/strata/component_composition_main.authority-effect-binding.json
+```
+
+This gate keeps the ownership split explicit. Strata emits and admits
+`strata.checked_authority_effects` facts from checked IR; the runtime binding
+then correlates those facts with a matching `.mta` and records the bounded
+`spawn_authority_policy`. Mantle consumes only
+`mantle.runtime_authority_effect_binding`, only when supplied through
+`--authority-effect-binding`, and validates the binding before `ArtifactLoaded`
+or runtime side effects. Source labels, authority names, report text, and debug
+names remain diagnostics/provenance metadata and cannot retarget authority or
+effect facts.
+
 An immutable source computation gate proves sequential source-local bindings are
 resolved before lowering while Mantle executes only typed artifact data:
 

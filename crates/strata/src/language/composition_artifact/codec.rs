@@ -4,13 +4,13 @@ use super::super::diagnostic::{Error, Result};
 
 const MAX_JSON_CONTAINER_DEPTH: usize = 64;
 
-pub(super) struct JsonObject<'a> {
+pub(in crate::language) struct JsonObject<'a> {
     context: String,
     text: &'a str,
 }
 
 impl<'a> JsonObject<'a> {
-    pub(super) fn new(text: &'a str, context: impl Into<String>) -> Result<Self> {
+    pub(in crate::language) fn new(text: &'a str, context: impl Into<String>) -> Result<Self> {
         let text = trim_json_ascii_whitespace(text);
         if !(text.starts_with('{') && text.ends_with('}')) {
             return Err(Error::new(format!(
@@ -26,7 +26,7 @@ impl<'a> JsonObject<'a> {
         Ok(object)
     }
 
-    pub(super) fn require_exact_fields(&self, fields: &[&str]) -> Result<()> {
+    pub(in crate::language) fn require_exact_fields(&self, fields: &[&str]) -> Result<()> {
         self.for_each_field(|field| {
             if fields.contains(&field) {
                 Ok(())
@@ -40,7 +40,7 @@ impl<'a> JsonObject<'a> {
         Ok(())
     }
 
-    pub(super) fn required_string(&self, field: &str) -> Result<Cow<'a, str>> {
+    pub(in crate::language) fn required_string(&self, field: &str) -> Result<Cow<'a, str>> {
         match self.required_value(field)? {
             JsonValue::String(value) => decode_json_string_body(value)
                 .map_err(|message| self.error(format!("field {field:?} {message}"))),
@@ -48,7 +48,11 @@ impl<'a> JsonObject<'a> {
         }
     }
 
-    pub(super) fn required_string_eq(&self, field: &str, expected: &str) -> Result<()> {
+    pub(in crate::language) fn required_string_eq(
+        &self,
+        field: &str,
+        expected: &str,
+    ) -> Result<()> {
         let actual = self.required_string(field)?;
         if actual.as_ref() == expected {
             Ok(())
@@ -59,7 +63,7 @@ impl<'a> JsonObject<'a> {
         }
     }
 
-    pub(super) fn required_u32(&self, field: &str) -> Result<u32> {
+    pub(in crate::language) fn required_u32(&self, field: &str) -> Result<u32> {
         match self.required_value(field)? {
             JsonValue::Number(value) => {
                 parse_u32(value).map_err(|message| self.error(format!("field {field:?} {message}")))
@@ -68,14 +72,31 @@ impl<'a> JsonObject<'a> {
         }
     }
 
-    pub(super) fn required_array(&self, field: &str) -> Result<JsonArray<'a>> {
+    pub(in crate::language) fn required_optional_u32(&self, field: &str) -> Result<Option<u32>> {
+        let raw = self
+            .raw_value(field)?
+            .ok_or_else(|| self.error(format!("missing field {field:?}")))?;
+        if trim_json_ascii_whitespace(raw) == "null" {
+            return Ok(None);
+        }
+        match JsonValue::parse(raw) {
+            JsonValue::Number(value) => parse_u32(value)
+                .map(Some)
+                .map_err(|message| self.error(format!("field {field:?} {message}"))),
+            _ => Err(self.error(format!(
+                "field {field:?} must be an unsigned integer or null"
+            ))),
+        }
+    }
+
+    pub(in crate::language) fn required_array(&self, field: &str) -> Result<JsonArray<'a>> {
         match self.required_value(field)? {
             JsonValue::Array(value) => JsonArray::new(value, format!("{}.{}", self.context, field)),
             _ => Err(self.error(format!("field {field:?} must be an array"))),
         }
     }
 
-    pub(super) fn required_object(&self, field: &str) -> Result<JsonObject<'a>> {
+    pub(in crate::language) fn required_object(&self, field: &str) -> Result<JsonObject<'a>> {
         match self.required_value(field)? {
             JsonValue::Object(value) => {
                 JsonObject::new(value, format!("{}.{}", self.context, field))
@@ -84,7 +105,7 @@ impl<'a> JsonObject<'a> {
         }
     }
 
-    pub(super) fn required_null(&self, field: &str) -> Result<()> {
+    pub(in crate::language) fn required_null(&self, field: &str) -> Result<()> {
         match self.raw_value(field)? {
             Some(value) if trim_json_ascii_whitespace(value) == "null" => Ok(()),
             Some(_) => Err(self.error(format!("field {field:?} must be null"))),
@@ -92,7 +113,7 @@ impl<'a> JsonObject<'a> {
         }
     }
 
-    pub(super) fn required_empty_object(&self, field: &str) -> Result<()> {
+    pub(in crate::language) fn required_empty_object(&self, field: &str) -> Result<()> {
         self.required_object(field)?.require_exact_fields(&[])
     }
 
@@ -237,7 +258,7 @@ impl<'a> JsonObject<'a> {
     }
 }
 
-pub(super) struct JsonArray<'a> {
+pub(in crate::language) struct JsonArray<'a> {
     context: String,
     text: &'a str,
 }
@@ -257,7 +278,7 @@ impl<'a> JsonArray<'a> {
         })
     }
 
-    pub(super) fn count_values(&self) -> Result<usize> {
+    pub(in crate::language) fn count_values(&self) -> Result<usize> {
         let mut count = 0usize;
         self.for_each_raw_value(|_, _| {
             count = count
@@ -268,7 +289,7 @@ impl<'a> JsonArray<'a> {
         Ok(count)
     }
 
-    pub(super) fn for_each_object(
+    pub(in crate::language) fn for_each_object(
         &self,
         mut visit: impl FnMut(usize, JsonObject<'a>) -> Result<()>,
     ) -> Result<()> {

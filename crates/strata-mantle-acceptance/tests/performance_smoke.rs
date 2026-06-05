@@ -1,13 +1,22 @@
-#![deny(unsafe_code)]
-#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(unsafe_code, unsafe_op_in_unsafe_fn)]
 
-use std::hint::black_box;
-use std::path::Path;
-use std::time::{Duration, Instant};
+use std::{
+    hint::black_box,
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use mantle_runtime::{
     InMemoryRuntimeHost, LocalSpawnBackend, RunLimits, SpawnAuthorityPolicy,
     run_artifact_with_host, run_artifact_with_limits,
+};
+
+#[path = "performance_smoke/formatting.rs"]
+mod formatting;
+
+use formatting::{
+    format_allocations, format_memory, format_optional_duration, format_optional_duration_nanos,
+    format_optional_u64, format_reference_allocations,
 };
 
 const PERFORMANCE_BASELINE: &str = include_str!("../../../benchmarks/performance-smoke.baseline");
@@ -40,23 +49,6 @@ const LOCAL_SUPERVISION_RUNTIME_PROFILE: BenchmarkProfile = BenchmarkProfile {
     label: "local_supervision_restart in-memory runtime",
 };
 const PROFILE_SELECTOR_ENV: &str = "STRATA_PERFORMANCE_SMOKE_PROFILE";
-const ALL_PROFILES: [BenchmarkProfile; 14] = [
-    CHECK_LOWER_PROFILE,
-    IMPORTS_CHECK_LOWER_PROFILE,
-    boundary_contracts::CHECK_LOWER_PROFILE,
-    component_composition::CHECK_LOWER_PROFILE,
-    component_composition::REPORT_PROFILE,
-    component_composition::ARTIFACT_BUILD_PROFILE,
-    component_composition::ARTIFACT_ADMIT_PROFILE,
-    component_composition::TARGET_REQUIREMENTS_PROFILE,
-    component_composition::RUNTIME_BINDING_PROFILE,
-    IN_MEMORY_RUNTIME_PROFILE,
-    boundary_contracts::RUNTIME_PROFILE,
-    ARTIFACT_CODEC_PROFILE,
-    JSONL_RUNTIME_PROFILE,
-    LOCAL_SUPERVISION_RUNTIME_PROFILE,
-];
-const PROFILE_KEY_LIST: &str = "collection_state.check_lower, imports_main.check_lower, boundary_contracts_main.check_lower, component_composition_main.check_lower, component_composition_main.composition_report, component_composition_main.composition_artifact_build, component_composition_main.composition_artifact_admit, component_composition_main.target_requirements, component_composition_main.runtime_binding_run, collection_state.in_memory_runtime, boundary_contracts_main.in_memory_runtime, collection_state.artifact_codec, collection_state.jsonl_runtime, local_supervision_restart.in_memory_runtime";
 const JSONL_RUNTIME_ARTIFACT_PATH: &str = "target/performance-smoke/collection_state.mta";
 #[cfg(any(
     target_os = "linux",
@@ -85,7 +77,7 @@ const PERF_RUN_LIMITS: RunLimits = RunLimits {
 fn collection_state_compilation_and_runtime_performance_smoke() {
     let selected_profile = std::env::var(PROFILE_SELECTOR_ENV).ok();
     let selected_profile = selected_profile.as_deref();
-    profile_selection::validate_selected_profile(selected_profile, &ALL_PROFILES, PROFILE_KEY_LIST);
+    profiles::validate_selected_profile(selected_profile);
 
     macro_rules! run_profile {
         ($profile:expr, $run:path) => {
@@ -124,6 +116,26 @@ fn collection_state_compilation_and_runtime_performance_smoke() {
     run_profile!(
         component_composition::RUNTIME_BINDING_PROFILE,
         component_composition::run_runtime_binding_profile
+    );
+    run_profile!(
+        authority_effect::ARTIFACT_BUILD_PROFILE,
+        authority_effect::run_artifact_build_profile
+    );
+    run_profile!(
+        authority_effect::ARTIFACT_ADMIT_PROFILE,
+        authority_effect::run_artifact_admit_profile
+    );
+    run_profile!(
+        authority_effect::RUNTIME_BINDING_PROFILE,
+        authority_effect::run_runtime_binding_profile
+    );
+    run_profile!(
+        authority_effect::COMPONENT_RUNTIME_BINDING_PROFILE,
+        authority_effect::run_component_runtime_binding_profile
+    );
+    run_profile!(
+        authority_effect::RUNTIME_RUN_PROFILE,
+        authority_effect::run_runtime_run_profile
     );
     run_profile!(IN_MEMORY_RUNTIME_PROFILE, run_in_memory_runtime_profile);
     run_profile!(
@@ -236,6 +248,8 @@ struct BenchmarkProfile {
 #[allow(unsafe_code)]
 #[path = "performance_smoke/allocation_meter.rs"]
 mod allocation_meter;
+#[path = "performance_smoke/authority_effect.rs"]
+mod authority_effect;
 #[path = "performance_smoke/boundary_contracts.rs"]
 mod boundary_contracts;
 #[path = "performance_smoke/component_composition.rs"]
@@ -244,6 +258,8 @@ mod component_composition;
 mod platform_resources;
 #[path = "performance_smoke/profile_selection.rs"]
 mod profile_selection;
+#[path = "performance_smoke/profiles.rs"]
+mod profiles;
 
 use platform_resources::{capture_cpu_time, capture_memory};
 #[derive(Clone, Copy, Debug)]
@@ -695,55 +711,4 @@ fn baseline_value(key: &str) -> &str {
         }
     }
     found.unwrap_or_else(|| panic!("performance baseline key {key} is missing"))
-}
-
-fn format_optional_duration(duration: Option<Duration>) -> String {
-    duration.map_or_else(
-        || "unavailable".to_owned(),
-        |duration| format!("{duration:?}"),
-    )
-}
-
-fn format_optional_duration_nanos(duration: Option<Duration>) -> String {
-    duration.map_or_else(
-        || "unavailable".to_owned(),
-        |duration| duration.as_nanos().to_string(),
-    )
-}
-
-fn format_optional_u64(value: Option<u64>) -> String {
-    value.map_or_else(|| "unavailable".to_owned(), |value| value.to_string())
-}
-
-fn format_memory(metrics: ResourceMetrics) -> String {
-    match (metrics.current_rss_kib, metrics.peak_rss_kib) {
-        (Some(current), Some(peak)) => format!("{current} KiB current, {peak} KiB peak"),
-        (Some(current), None) => format!("{current} KiB current, peak unavailable"),
-        (None, Some(peak)) => format!("current unavailable, {peak} KiB peak"),
-        (None, None) => "unavailable".to_owned(),
-    }
-}
-
-fn format_allocations(allocations: AllocationMetrics) -> String {
-    format!(
-        "{} allocs, {} deallocs, {} B allocated, {} B deallocated, {} B net live delta, {} B peak live over interval start",
-        allocations.allocation_count,
-        allocations.deallocation_count,
-        allocations.allocated_bytes,
-        allocations.deallocated_bytes,
-        allocations.net_live_bytes_delta,
-        allocations.peak_live_bytes_over_start,
-    )
-}
-
-fn format_reference_allocations(reference: ReferenceMetrics) -> String {
-    format!(
-        "{} allocs, {} deallocs, {} B allocated, {} B deallocated, {} B net live delta, {} B peak live over interval start",
-        reference.allocation_count,
-        reference.deallocation_count,
-        reference.allocated_bytes,
-        reference.deallocated_bytes,
-        reference.net_live_bytes_delta,
-        reference.peak_live_bytes_over_start,
-    )
 }

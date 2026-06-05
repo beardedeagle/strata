@@ -172,6 +172,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
     },
     ProofDomain {
+        id: "authority-effect-admission-binding",
+        title: "Authority/effect admission binding",
+        feature_ids: &["authority-effect-admission-binding"],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "local-supervision",
         title: "Local supervision and lifecycle semantics",
         feature_ids: &["local-supervision"],

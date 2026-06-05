@@ -11,7 +11,7 @@ use super::diagnostic::{Error, Result};
 use super::source_program::SourceProvenanceHash;
 
 mod admission;
-mod codec;
+pub(in crate::language) mod codec;
 mod deployment_binding;
 
 pub const COMPONENT_COMPOSITION_SCHEMA_ID: &str = "strata.checked_component_composition";
