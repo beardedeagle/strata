@@ -4,6 +4,55 @@ const SOURCE: &str = "examples/effect_outcome_spawn_denied.str";
 const LEXICAL_SUPERVISION_SOURCE: &str = "examples/local_supervision_restart.str";
 const COMPONENT_SOURCE: &str = "examples/component_composition_main.str";
 const MISMATCHED_SOURCE: &str = "examples/hello.str";
+const DENIED_PORT_SEND_OUTCOME_SOURCE: &str = r#"module authority_effect_denied_port_send_outcome;
+
+protocol WorkerProtocol message WorkerMsg requires Cap<ProtocolBoundary<WorkerProtocol>>;
+port WorkerPort protocol WorkerProtocol target Worker requires Cap<PortConnect<WorkerPort>>;
+
+record MainState { sent: Result<Unit,SendError<WorkerMsg>> }
+enum MainMsg { Start }
+enum Bool { False, True }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    authority spawn_worker: Cap<Spawn<Worker>>;
+    authority connect_worker: Cap<PortConnect<WorkerPort>>;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { sent: Err(Stopped(Work)) };
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [emit, spawn, send] ~ [] @det {
+        let worker: ProcessRef<Worker> = spawn Worker;
+        let sent: Result<Unit,SendError<WorkerMsg>> = send worker via WorkerPort Work;
+        if (sent == Err(MailboxClosed(Work))) {
+            emit "mailbox branch must not run on policy denial";
+        } else {
+            emit "fallback branch must not run on policy denial";
+        }
+        return Stop(MainState { sent: sent });
+    }
+}
+
+record WorkerState;
+enum WorkerMsg { Work }
+
+proc Worker mailbox bounded(1) {
+    type State = WorkerState;
+    type Msg = WorkerMsg;
+
+    fn init() -> WorkerState ! [] ~ [] @det {
+        return WorkerState;
+    }
+
+    fn step(state: WorkerState, Work) -> ProcResult<WorkerState> ! [emit] ~ [] @det {
+        emit "worker handled denied-policy work";
+        return Stop(state);
+    }
+}
+"#;
 
 #[test]
 fn accepted_authority_effect_binding_runs_with_typed_trace_evidence() {
@@ -18,11 +67,18 @@ fn accepted_authority_effect_binding_runs_with_typed_trace_evidence() {
         String::from_utf8_lossy(&admission.stdout).contains("\"admission_result\":\"admitted\""),
         "authority/effect admission output should prove admitted status"
     );
+    let policy_admission =
+        build_and_admit_policy(&harness, paths.authority_effect, paths.policy, false, false);
+    assert!(
+        String::from_utf8_lossy(&policy_admission.stdout)
+            .contains("\"denied_authority_decision_count\":0"),
+        "authority policy admission should prove no denied typed decisions"
+    );
     harness.authority_effect_bind_runtime(
         paths.authority_effect,
+        paths.policy,
         paths.artifact,
         paths.binding,
-        false,
     );
 
     let run = harness.run_mantle_success_with_args(
@@ -42,6 +98,7 @@ fn accepted_authority_effect_binding_runs_with_typed_trace_evidence() {
             "\"target_process_id\":1",
             "\"spawn_site_id\":0",
             "\"authority_id\":0",
+            "\"authority_policy_decision_id\":0",
             "\"authority_result\":\"accepted\"",
         ],
     );
@@ -56,11 +113,18 @@ fn denied_authority_effect_binding_denies_declared_spawn_by_typed_id() {
     harness.build(SOURCE, paths.artifact);
     harness.authority_effect_build(SOURCE, paths.authority_effect);
     harness.authority_effect_admit(paths.authority_effect, "json");
+    let policy_admission =
+        build_and_admit_policy(&harness, paths.authority_effect, paths.policy, true, false);
+    assert!(
+        String::from_utf8_lossy(&policy_admission.stdout)
+            .contains("\"denied_authority_decision_count\":1"),
+        "denied authority policy admission should prove one denied typed decision"
+    );
     harness.authority_effect_bind_runtime(
         paths.authority_effect,
+        paths.policy,
         paths.artifact,
         paths.binding,
-        true,
     );
 
     let run = harness.run_mantle_success_with_args(
@@ -80,6 +144,7 @@ fn denied_authority_effect_binding_denies_declared_spawn_by_typed_id() {
             "\"target_process_id\":1",
             "\"spawn_site_id\":0",
             "\"authority_id\":0",
+            "\"authority_policy_decision_id\":0",
             "\"authority_result\":\"denied\"",
         ],
     );
@@ -108,11 +173,12 @@ fn lexical_supervisor_child_authority_effect_binding_runs_with_typed_trace_evide
         String::from_utf8_lossy(&admission.stdout).contains("\"admission_result\":\"admitted\""),
         "lexical supervisor authority/effect admission should prove admitted status"
     );
+    build_and_admit_policy(&harness, paths.authority_effect, paths.policy, false, false);
     harness.authority_effect_bind_runtime(
         paths.authority_effect,
+        paths.policy,
         paths.artifact,
         paths.binding,
-        false,
     );
     let binding = harness.read_text_artifact(paths.binding);
     assert!(
@@ -205,6 +271,8 @@ fn component_authority_surfaces_bind_with_composition_runtime_evidence() {
         &[
             "\"event\":\"boundary_send_checked\"",
             "\"boundary_result\":\"accepted\"",
+            "\"authority_id\":1",
+            "\"authority_policy_decision_id\":1",
             "\"deployment_id\":0",
             "\"composition_id\":0",
             "\"component_instance_id\":0",
@@ -220,6 +288,104 @@ fn component_authority_surfaces_bind_with_composition_runtime_evidence() {
 }
 
 #[test]
+fn denied_port_authority_policy_rejects_boundary_send_before_message_side_effect() {
+    let paths = ComponentSurfacePaths::new("authority_effect_component_port_denied");
+    let harness = GateHarness::new();
+    harness.remove_trace(paths.trace_stem);
+    build_component_authority_binding_with_policy(&harness, &paths, false, true);
+
+    let run = harness.run_mantle_failure_with_args(
+        paths.artifact,
+        &[
+            "--composition-binding",
+            paths.composition_binding,
+            "--authority-effect-binding",
+            paths.binding,
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("boundary send authority denied"),
+        "denied port authority policy should stop boundary send before delivery, got {stderr}"
+    );
+    let trace = harness.read_trace(paths.trace_stem);
+    assert_trace_event(
+        &trace,
+        &[
+            "\"event\":\"boundary_send_checked\"",
+            "\"authority_id\":1",
+            "\"authority_policy_decision_id\":1",
+            "\"boundary_result\":\"denied\"",
+        ],
+    );
+    assert!(
+        !trace.contains("\"event\":\"message_accepted\",\"pid\":2"),
+        "denied boundary send must not enqueue the target message: {trace}"
+    );
+}
+
+#[test]
+fn denied_port_authority_policy_fails_send_outcome_before_source_binding() {
+    let paths = ScenarioPaths::new("authority_effect_denied_port_send_outcome");
+    let harness = GateHarness::new();
+    harness.remove_trace(paths.trace_stem);
+    let source_path =
+        harness.write_target_source(paths.trace_stem, DENIED_PORT_SEND_OUTCOME_SOURCE);
+    let source = source_path
+        .strip_prefix(&harness.root)
+        .expect("generated source should be under workspace root")
+        .to_str()
+        .expect("generated source path should be UTF-8");
+    harness.check(source);
+    harness.build(source, paths.artifact);
+    harness.authority_effect_build(source, paths.authority_effect);
+    build_and_admit_policy(&harness, paths.authority_effect, paths.policy, false, true);
+    harness.authority_effect_bind_runtime(
+        paths.authority_effect,
+        paths.policy,
+        paths.artifact,
+        paths.binding,
+    );
+
+    let run = harness.run_mantle_failure_with_args(
+        paths.artifact,
+        &["--authority-effect-binding", paths.binding],
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("boundary send authority denied"),
+        "denied port send outcome should fail closed as authority denial, got {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        !stdout.contains("worker handled denied-policy work"),
+        "denied port send outcome must not deliver the worker message: {stdout}"
+    );
+    let trace = harness.read_trace(paths.trace_stem);
+    assert_trace_event(
+        &trace,
+        &[
+            "\"event\":\"boundary_send_checked\"",
+            "\"authority_id\":1",
+            "\"authority_policy_decision_id\":1",
+            "\"boundary_result\":\"denied\"",
+        ],
+    );
+    assert_trace_event(
+        &trace,
+        &["\"event\":\"artifact_loaded\"", "\"process_count\":2"],
+    );
+    assert!(
+        !trace.contains("\"event\":\"effect_outcome_bound\",\"pid\":1"),
+        "denied send outcome must not bind source-visible result: {trace}"
+    );
+    assert!(
+        !trace.contains("\"event\":\"message_accepted\",\"pid\":2"),
+        "denied send outcome must not enqueue the target message: {trace}"
+    );
+}
+
+#[test]
 fn forged_authority_effect_binding_rejects_before_trace_side_effects() {
     let paths = ScenarioPaths::new("authority_effect_forged");
     let harness = GateHarness::new();
@@ -227,11 +393,12 @@ fn forged_authority_effect_binding_rejects_before_trace_side_effects() {
     harness.check(SOURCE);
     harness.build(SOURCE, paths.artifact);
     harness.authority_effect_build(SOURCE, paths.authority_effect);
+    build_and_admit_policy(&harness, paths.authority_effect, paths.policy, false, false);
     harness.authority_effect_bind_runtime(
         paths.authority_effect,
+        paths.policy,
         paths.artifact,
         paths.binding,
-        false,
     );
     let forged = harness.read_text_artifact(paths.binding).replace(
         "{\"authority_id\":0,\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1}}",
@@ -311,6 +478,31 @@ fn raw_authority_effect_artifact_rejects_as_mantle_binding_before_trace_side_eff
 }
 
 #[test]
+fn raw_authority_policy_artifact_rejects_as_mantle_binding_before_trace_side_effects() {
+    let paths = ScenarioPaths::new("authority_effect_policy_wrong_binding_kind");
+    let harness = GateHarness::new();
+    harness.remove_trace(paths.trace_stem);
+    harness.check(SOURCE);
+    harness.build(SOURCE, paths.artifact);
+    harness.authority_effect_build(SOURCE, paths.authority_effect);
+    build_and_admit_policy(&harness, paths.authority_effect, paths.policy, false, false);
+
+    let run = harness.run_mantle_failure_with_args(
+        paths.artifact,
+        &["--authority-effect-binding", paths.policy],
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("field \"schema_id\" must be \"mantle.runtime_authority_effect_binding\""),
+        "raw authority policy artifact should fail through runtime binding schema validation, got {stderr}"
+    );
+    assert!(
+        !harness.trace_exists(paths.trace_stem),
+        "raw authority policy artifact must fail as a Mantle binding before creating runtime trace"
+    );
+}
+
+#[test]
 fn bind_runtime_failure_leaves_no_output_artifact() {
     let paths = ScenarioPaths::new("authority_effect_bind_failure");
     let harness = GateHarness::new();
@@ -319,12 +511,13 @@ fn bind_runtime_failure_leaves_no_output_artifact() {
     harness.authority_effect_build(SOURCE, paths.authority_effect);
     harness.check(MISMATCHED_SOURCE);
     harness.build(MISMATCHED_SOURCE, paths.mismatched_artifact);
+    build_and_admit_policy(&harness, paths.authority_effect, paths.policy, true, false);
 
     let output = harness.authority_effect_bind_runtime_failure(
         paths.authority_effect,
+        paths.policy,
         paths.mismatched_artifact,
         paths.binding,
-        true,
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -357,78 +550,52 @@ struct ScenarioPaths {
     artifact: &'static str,
     mismatched_artifact: &'static str,
     authority_effect: &'static str,
+    policy: &'static str,
     forged_authority_effect: &'static str,
     binding: &'static str,
     forged_binding: &'static str,
     trace_stem: &'static str,
 }
 
+macro_rules! scenario_paths {
+    ($name:literal) => {
+        Self {
+            artifact: concat!("target/strata/", $name, ".mta"),
+            mismatched_artifact: concat!("target/strata/", $name, "_mismatch.mta"),
+            authority_effect: concat!("target/strata/", $name, ".authority-effect.json"),
+            policy: concat!("target/strata/", $name, ".authority-policy.json"),
+            forged_authority_effect: concat!(
+                "target/strata/",
+                $name,
+                ".forged-authority-effect.json"
+            ),
+            binding: concat!("target/strata/", $name, ".authority-effect-binding.json"),
+            forged_binding: concat!("target/strata/", $name, ".forged-binding.json"),
+            trace_stem: $name,
+        }
+    };
+}
+
 impl ScenarioPaths {
     fn new(name: &'static str) -> Self {
         match name {
-            "authority_effect_accepted" => Self {
-                artifact: "target/strata/authority_effect_accepted.mta",
-                mismatched_artifact: "target/strata/authority_effect_accepted_mismatch.mta",
-                authority_effect: "target/strata/authority_effect_accepted.authority-effect.json",
-                forged_authority_effect: "target/strata/authority_effect_accepted.forged-authority-effect.json",
-                binding: "target/strata/authority_effect_accepted.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_accepted.forged-binding.json",
-                trace_stem: "authority_effect_accepted",
-            },
-            "authority_effect_denied" => Self {
-                artifact: "target/strata/authority_effect_denied.mta",
-                mismatched_artifact: "target/strata/authority_effect_denied_mismatch.mta",
-                authority_effect: "target/strata/authority_effect_denied.authority-effect.json",
-                forged_authority_effect: "target/strata/authority_effect_denied.forged-authority-effect.json",
-                binding: "target/strata/authority_effect_denied.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_denied.forged-binding.json",
-                trace_stem: "authority_effect_denied",
-            },
-            "authority_effect_lexical_supervisor_child" => Self {
-                artifact: "target/strata/authority_effect_lexical_supervisor_child.mta",
-                mismatched_artifact: "target/strata/authority_effect_lexical_supervisor_child_mismatch.mta",
-                authority_effect: "target/strata/authority_effect_lexical_supervisor_child.authority-effect.json",
-                forged_authority_effect: "target/strata/authority_effect_lexical_supervisor_child.forged-authority-effect.json",
-                binding: "target/strata/authority_effect_lexical_supervisor_child.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_lexical_supervisor_child.forged-binding.json",
-                trace_stem: "authority_effect_lexical_supervisor_child",
-            },
-            "authority_effect_forged" => Self {
-                artifact: "target/strata/authority_effect_forged.mta",
-                mismatched_artifact: "target/strata/authority_effect_forged_mismatch.mta",
-                authority_effect: "target/strata/authority_effect_forged.authority-effect.json",
-                forged_authority_effect: "target/strata/authority_effect_forged.forged-authority-effect.json",
-                binding: "target/strata/authority_effect_forged.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_forged.forged-binding.json",
-                trace_stem: "authority_effect_forged",
-            },
-            "authority_effect_wrong_binding_kind" => Self {
-                artifact: "target/strata/authority_effect_wrong_binding_kind.mta",
-                mismatched_artifact: "target/strata/authority_effect_wrong_binding_kind_mismatch.mta",
-                authority_effect: "target/strata/authority_effect_wrong_binding_kind.authority-effect.json",
-                forged_authority_effect: "target/strata/authority_effect_wrong_binding_kind.forged-authority-effect.json",
-                binding: "target/strata/authority_effect_wrong_binding_kind.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_wrong_binding_kind.forged-binding.json",
-                trace_stem: "authority_effect_wrong_binding_kind",
-            },
-            "authority_effect_bind_failure" => Self {
-                artifact: "target/strata/authority_effect_bind_failure.mta",
-                mismatched_artifact: "target/strata/authority_effect_bind_failure_mismatch.mta",
-                authority_effect: "target/strata/authority_effect_bind_failure.authority-effect.json",
-                forged_authority_effect: "target/strata/authority_effect_bind_failure.forged-authority-effect.json",
-                binding: "target/strata/authority_effect_bind_failure.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_bind_failure.forged-binding.json",
-                trace_stem: "authority_effect_bind_failure",
-            },
-            "authority_effect_admit_failure" => Self {
-                artifact: "target/strata/authority_effect_admit_failure.mta",
-                mismatched_artifact: "target/strata/authority_effect_admit_failure_mismatch.mta",
-                authority_effect: "target/strata/authority_effect_admit_failure.authority-effect.json",
-                forged_authority_effect: "target/strata/authority_effect_admit_failure.forged-authority-effect.json",
-                binding: "target/strata/authority_effect_admit_failure.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_admit_failure.forged-binding.json",
-                trace_stem: "authority_effect_admit_failure",
-            },
+            "authority_effect_accepted" => scenario_paths!("authority_effect_accepted"),
+            "authority_effect_denied" => scenario_paths!("authority_effect_denied"),
+            "authority_effect_lexical_supervisor_child" => {
+                scenario_paths!("authority_effect_lexical_supervisor_child")
+            }
+            "authority_effect_forged" => scenario_paths!("authority_effect_forged"),
+            "authority_effect_wrong_binding_kind" => {
+                scenario_paths!("authority_effect_wrong_binding_kind")
+            }
+            "authority_effect_policy_wrong_binding_kind" => {
+                scenario_paths!("authority_effect_policy_wrong_binding_kind")
+            }
+            "authority_effect_denied_port_send_outcome" => {
+                scenario_paths!("authority_effect_denied_port_send_outcome")
+            }
+            "authority_effect_bind_failure" => scenario_paths!("authority_effect_bind_failure"),
+            "authority_effect_admit_failure" => scenario_paths!("authority_effect_admit_failure"),
             _ => panic!("unknown authority/effect scenario"),
         }
     }
@@ -437,6 +604,7 @@ impl ScenarioPaths {
 struct ComponentSurfacePaths {
     artifact: &'static str,
     authority_effect: &'static str,
+    policy: &'static str,
     binding: &'static str,
     forged_binding: &'static str,
     composition_artifact: &'static str,
@@ -444,27 +612,33 @@ struct ComponentSurfacePaths {
     trace_stem: &'static str,
 }
 
+macro_rules! component_surface_paths {
+    ($name:literal) => {
+        Self {
+            artifact: concat!("target/strata/", $name, ".mta"),
+            authority_effect: concat!("target/strata/", $name, ".authority-effect.json"),
+            policy: concat!("target/strata/", $name, ".authority-policy.json"),
+            binding: concat!("target/strata/", $name, ".authority-effect-binding.json"),
+            forged_binding: concat!("target/strata/", $name, ".forged-binding.json"),
+            composition_artifact: concat!("target/strata/", $name, ".component-composition.json"),
+            composition_binding: concat!("target/strata/", $name, ".deployment-composition.json"),
+            trace_stem: $name,
+        }
+    };
+}
+
 impl ComponentSurfacePaths {
     fn new(name: &'static str) -> Self {
         match name {
-            "authority_effect_component_surfaces" => Self {
-                artifact: "target/strata/authority_effect_component_surfaces.mta",
-                authority_effect: "target/strata/authority_effect_component_surfaces.authority-effect.json",
-                binding: "target/strata/authority_effect_component_surfaces.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_component_surfaces.forged-binding.json",
-                composition_artifact: "target/strata/authority_effect_component_surfaces.component-composition.json",
-                composition_binding: "target/strata/authority_effect_component_surfaces.deployment-composition.json",
-                trace_stem: "authority_effect_component_surfaces",
-            },
-            "authority_effect_component_surface_forged" => Self {
-                artifact: "target/strata/authority_effect_component_surface_forged.mta",
-                authority_effect: "target/strata/authority_effect_component_surface_forged.authority-effect.json",
-                binding: "target/strata/authority_effect_component_surface_forged.authority-effect-binding.json",
-                forged_binding: "target/strata/authority_effect_component_surface_forged.forged-binding.json",
-                composition_artifact: "target/strata/authority_effect_component_surface_forged.component-composition.json",
-                composition_binding: "target/strata/authority_effect_component_surface_forged.deployment-composition.json",
-                trace_stem: "authority_effect_component_surface_forged",
-            },
+            "authority_effect_component_surfaces" => {
+                component_surface_paths!("authority_effect_component_surfaces")
+            }
+            "authority_effect_component_surface_forged" => {
+                component_surface_paths!("authority_effect_component_surface_forged")
+            }
+            "authority_effect_component_port_denied" => {
+                component_surface_paths!("authority_effect_component_port_denied")
+            }
             _ => panic!("unknown component authority/effect scenario"),
         }
     }
@@ -473,6 +647,15 @@ impl ComponentSurfacePaths {
 fn build_component_authority_binding(
     harness: &GateHarness,
     paths: &ComponentSurfacePaths,
+) -> std::process::Output {
+    build_component_authority_binding_with_policy(harness, paths, false, false)
+}
+
+fn build_component_authority_binding_with_policy(
+    harness: &GateHarness,
+    paths: &ComponentSurfacePaths,
+    deny_spawn_authority: bool,
+    deny_port_authority: bool,
 ) -> std::process::Output {
     harness.check(COMPONENT_SOURCE);
     harness.build(COMPONENT_SOURCE, paths.artifact);
@@ -485,11 +668,34 @@ fn build_component_authority_binding(
     );
     harness.authority_effect_build(COMPONENT_SOURCE, paths.authority_effect);
     let admission = harness.authority_effect_admit(paths.authority_effect, "json");
+    build_and_admit_policy(
+        harness,
+        paths.authority_effect,
+        paths.policy,
+        deny_spawn_authority,
+        deny_port_authority,
+    );
     harness.authority_effect_bind_runtime(
         paths.authority_effect,
+        paths.policy,
         paths.artifact,
         paths.binding,
-        false,
     );
     admission
+}
+
+fn build_and_admit_policy(
+    harness: &GateHarness,
+    authority_effect: &str,
+    policy: &str,
+    deny_spawn_authority: bool,
+    deny_port_authority: bool,
+) -> std::process::Output {
+    harness.authority_policy_build(
+        authority_effect,
+        policy,
+        deny_spawn_authority,
+        deny_port_authority,
+    );
+    harness.authority_policy_admit(policy, authority_effect, "json")
 }

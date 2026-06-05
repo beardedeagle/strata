@@ -126,6 +126,14 @@ fn collection_state_compilation_and_runtime_performance_smoke() {
         authority_effect::run_artifact_admit_profile
     );
     run_profile!(
+        authority_effect::POLICY_BUILD_PROFILE,
+        authority_effect::run_policy_build_profile
+    );
+    run_profile!(
+        authority_effect::POLICY_ADMIT_PROFILE,
+        authority_effect::run_policy_admit_profile
+    );
+    run_profile!(
         authority_effect::RUNTIME_BINDING_PROFILE,
         authority_effect::run_runtime_binding_profile
     );

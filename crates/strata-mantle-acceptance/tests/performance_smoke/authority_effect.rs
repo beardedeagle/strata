@@ -18,6 +18,14 @@ pub(super) const ARTIFACT_ADMIT_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "effect_outcome_spawn_denied.authority_effect_artifact_admit",
     label: "effect_outcome_spawn_denied authority/effect artifact admit",
 };
+pub(super) const POLICY_BUILD_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "effect_outcome_spawn_denied.authority_policy_artifact_build",
+    label: "effect_outcome_spawn_denied authority policy artifact build",
+};
+pub(super) const POLICY_ADMIT_PROFILE: BenchmarkProfile = BenchmarkProfile {
+    key: "effect_outcome_spawn_denied.authority_policy_artifact_admit",
+    label: "effect_outcome_spawn_denied authority policy artifact admit",
+};
 pub(super) const RUNTIME_BINDING_PROFILE: BenchmarkProfile = BenchmarkProfile {
     key: "effect_outcome_spawn_denied.authority_effect_runtime_binding",
     label: "effect_outcome_spawn_denied authority/effect runtime binding",
@@ -70,6 +78,46 @@ pub(super) fn run_artifact_admit_profile() {
     assert_within_budget(budget, metrics);
 }
 
+pub(super) fn run_policy_build_profile() {
+    let budget = PerformanceBudget::load(POLICY_BUILD_PROFILE);
+    let authority_effect = authority_effect_artifact_for_source(SOURCE_PATH);
+    let options = strata::language::AuthorityPolicyBuildOptions {
+        spawn_authority_decision: strata::language::AuthorityPolicyDecision::Deny,
+        port_authority_decision: strata::language::AuthorityPolicyDecision::Admit,
+    };
+    let metrics = measure_for(budget.iterations, || {
+        let policy = strata::language::render_authority_policy_artifact(
+            black_box(&authority_effect),
+            options,
+        )
+        .expect("authority policy artifact should render");
+        black_box(policy);
+    });
+    assert_within_budget(budget, metrics);
+}
+
+pub(super) fn run_policy_admit_profile() {
+    let budget = PerformanceBudget::load(POLICY_ADMIT_PROFILE);
+    let authority_effect = authority_effect_artifact_for_source(SOURCE_PATH);
+    let policy = strata::language::render_authority_policy_artifact(
+        &authority_effect,
+        strata::language::AuthorityPolicyBuildOptions {
+            spawn_authority_decision: strata::language::AuthorityPolicyDecision::Deny,
+            port_authority_decision: strata::language::AuthorityPolicyDecision::Admit,
+        },
+    )
+    .expect("authority policy artifact should render");
+    let metrics = measure_for(budget.iterations, || {
+        let summary = strata::language::admit_authority_policy_artifact(
+            black_box(&policy),
+            black_box(&authority_effect),
+        )
+        .expect("authority policy artifact should admit");
+        black_box(summary);
+    });
+    assert_within_budget(budget, metrics);
+}
+
 pub(super) fn run_runtime_binding_profile() {
     let budget = PerformanceBudget::load(RUNTIME_BINDING_PROFILE);
     let source_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(SOURCE_PATH);
@@ -81,13 +129,21 @@ pub(super) fn run_runtime_binding_profile() {
     let authority_effect =
         strata::language::render_authority_effect_artifact(&checked, SOURCE_PATH, &source_hash)
             .expect("authority/effect artifact should render");
+    let policy = strata::language::render_authority_policy_artifact(
+        &authority_effect,
+        strata::language::AuthorityPolicyBuildOptions {
+            spawn_authority_decision: strata::language::AuthorityPolicyDecision::Deny,
+            port_authority_decision: strata::language::AuthorityPolicyDecision::Admit,
+        },
+    )
+    .expect("authority policy artifact should render");
     let artifact = strata::language::lower_to_artifact_with_source_hash(&checked, source_hash)
         .expect("authority/effect runtime binding performance smoke source should lower");
     let metrics = measure_for(budget.iterations, || {
         let binding = strata::language::render_runtime_authority_effect_binding(
             black_box(&authority_effect),
+            black_box(&policy),
             black_box(&artifact),
-            strata::language::RuntimeSpawnAuthorityPolicy::DenyDeclared,
         )
         .expect("authority/effect runtime binding should render");
         mantle_runtime::validate_runtime_authority_effect_binding_text(
@@ -114,13 +170,18 @@ pub(super) fn run_component_runtime_binding_profile() {
         &source_hash,
     )
     .expect("component authority/effect artifact should render");
+    let policy = strata::language::render_authority_policy_artifact(
+        &authority_effect,
+        strata::language::AuthorityPolicyBuildOptions::default(),
+    )
+    .expect("component authority policy artifact should render");
     let artifact = strata::language::lower_to_artifact_with_source_hash(&checked, source_hash)
         .expect("component authority/effect runtime binding smoke source should lower");
     let metrics = measure_for(budget.iterations, || {
         let binding = strata::language::render_runtime_authority_effect_binding(
             black_box(&authority_effect),
+            black_box(&policy),
             black_box(&artifact),
-            strata::language::RuntimeSpawnAuthorityPolicy::AdmitDeclared,
         )
         .expect("component authority/effect runtime binding should render");
         mantle_runtime::validate_runtime_authority_effect_binding_text(
@@ -144,12 +205,20 @@ pub(super) fn run_runtime_run_profile() {
     let authority_effect =
         strata::language::render_authority_effect_artifact(&checked, SOURCE_PATH, &source_hash)
             .expect("authority/effect artifact should render");
+    let policy = strata::language::render_authority_policy_artifact(
+        &authority_effect,
+        strata::language::AuthorityPolicyBuildOptions {
+            spawn_authority_decision: strata::language::AuthorityPolicyDecision::Deny,
+            port_authority_decision: strata::language::AuthorityPolicyDecision::Admit,
+        },
+    )
+    .expect("authority policy artifact should render");
     let artifact = strata::language::lower_to_artifact_with_source_hash(&checked, source_hash)
         .expect("authority/effect runtime-run performance smoke source should lower");
     let binding = strata::language::render_runtime_authority_effect_binding(
         &authority_effect,
+        &policy,
         &artifact,
-        strata::language::RuntimeSpawnAuthorityPolicy::DenyDeclared,
     )
     .expect("authority/effect runtime binding should render");
     let artifact_path = Path::new(RUNTIME_RUN_ARTIFACT_PATH);
@@ -176,4 +245,15 @@ pub(super) fn run_runtime_run_profile() {
         black_box(report);
     });
     assert_within_budget(budget, metrics);
+}
+
+fn authority_effect_artifact_for_source(source_path: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(source_path);
+    let loaded = strata::load_root_source_program(&path)
+        .expect("authority/effect performance smoke source should load");
+    let (program, source_hash) = loaded.into_parts();
+    let checked = strata::language::check_source_program(program)
+        .expect("authority/effect performance smoke source should check");
+    strata::language::render_authority_effect_artifact(&checked, source_path, &source_hash)
+        .expect("authority/effect artifact should render")
 }

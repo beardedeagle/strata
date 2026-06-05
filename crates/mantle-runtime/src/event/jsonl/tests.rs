@@ -87,6 +87,45 @@ fn trace_line_renders_optional_composition_context_only_when_supplied() {
 }
 
 #[test]
+fn authority_policy_decision_trace_field_is_nullable_without_binding() {
+    let spawn = RuntimeEvent::SpawnAuthorityChecked {
+        pid: RuntimeProcessId::FIRST,
+        process_id: ProcessId::new(0),
+        process: "Main".to_string(),
+        target_process_id: ProcessId::new(1),
+        spawn_site_id: SpawnSiteId::new(0),
+        authority_id: AuthorityId::new(0),
+        authority_policy_decision_id: None,
+        spawn_kind: RuntimeSpawnKind::DynamicLocal,
+        authority_result: RuntimeAuthorityResult::Accepted,
+    };
+    let boundary = RuntimeEvent::BoundarySendChecked {
+        pid: RuntimeProcessId::FIRST,
+        process_id: ProcessId::new(0),
+        process: "Main".to_string(),
+        port_id: PortId::new(0),
+        port: "WorkerPort".to_string(),
+        protocol_id: ProtocolId::new(0),
+        protocol: "WorkerProtocol".to_string(),
+        authority_id: AuthorityId::new(1),
+        authority_policy_decision_id: None,
+        target_process_id: ProcessId::new(1),
+        target_process: "Worker".to_string(),
+        message_id: MessageId::new(0),
+        message: "Work".to_string(),
+        boundary_result: RuntimeAuthorityResult::Accepted,
+    };
+
+    let spawn_line = encode_json_line(&spawn);
+    let boundary_line = encode_json_line(&boundary);
+
+    assert!(spawn_line.contains(r#""authority_policy_decision_id":null"#));
+    assert!(boundary_line.contains(r#""authority_policy_decision_id":null"#));
+    assert_rendered_required_contract_fields(spawn.trace_kind(), &spawn_line);
+    assert_rendered_required_contract_fields(boundary.trace_kind(), &boundary_line);
+}
+
+#[test]
 fn program_output_trace_includes_output_id() {
     let event = RuntimeEvent::ProgramOutput {
         pid: RuntimeProcessId::FIRST,
@@ -366,6 +405,7 @@ fn all_event_trace_events() -> Vec<RuntimeEvent> {
             target_process_id: ProcessId::new(1),
             spawn_site_id: SpawnSiteId::new(0),
             authority_id: AuthorityId::new(0),
+            authority_policy_decision_id: Some(0),
             spawn_kind: RuntimeSpawnKind::DynamicLocal,
             authority_result: RuntimeAuthorityResult::Accepted,
         },
@@ -377,6 +417,8 @@ fn all_event_trace_events() -> Vec<RuntimeEvent> {
             port: "WorkerPort".to_string(),
             protocol_id: ProtocolId::new(0),
             protocol: "WorkerProtocol".to_string(),
+            authority_id: AuthorityId::new(1),
+            authority_policy_decision_id: Some(1),
             target_process_id: ProcessId::new(1),
             target_process: "Worker".to_string(),
             message_id: MessageId::new(0),

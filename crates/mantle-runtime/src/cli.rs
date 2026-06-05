@@ -182,7 +182,7 @@ fn run_command_args_from_args(args: impl IntoIterator<Item = String>) -> Result<
     }
     if deny_spawn_authority_seen && authority_effect_binding_path.is_some() {
         return Err(Error::new(
-            "--deny-spawn-authority cannot be combined with --authority-effect-binding; encode the policy in the binding",
+            "--deny-spawn-authority cannot be combined with --authority-effect-binding; encode the policy in an authority policy artifact before binding",
         ));
     }
     limits.validate()?;

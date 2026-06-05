@@ -111,8 +111,8 @@ instances share `process_id` and label metadata but have different `pid` values.
 | --- | --- |
 | `artifact_loaded` | Mantle admits an artifact and loads its entry metadata. |
 | `process_spawned` | Mantle creates a runtime process instance. |
-| `spawn_authority_checked` | Mantle checked an admitted spawn-site authority before spawn acceptance. |
-| `boundary_send_checked` | Mantle accepted a typed-port boundary send on the mailbox acceptance path. |
+| `spawn_authority_checked` | Mantle checked an admitted spawn-site authority and optional authority-policy decision before spawn acceptance. |
+| `boundary_send_checked` | Mantle checked a typed-port boundary send authority before mailbox acceptance. |
 | `effect_outcome_bound` | Mantle bound a typed effect outcome and recorded its source-visible result category. |
 | `message_accepted` | Mantle accepts a message into a process mailbox. |
 | `message_dequeued` | A process dequeued a message for handling. |
@@ -160,29 +160,34 @@ cannot create a later runtime process.
 Example shape:
 
 ```json
-{"event":"spawn_authority_checked","pid":1,"process_id":0,"process":"Main","target_process_id":1,"spawn_site_id":0,"authority_id":0,"spawn_kind":"dynamic_local","authority_result":"accepted","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"spawn_authority_checked","pid":1,"process_id":0,"process":"Main","target_process_id":1,"spawn_site_id":0,"authority_id":0,"authority_policy_decision_id":0,"spawn_kind":"dynamic_local","authority_result":"accepted","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
 ```
 
-`spawn_site_id` and `authority_id` are admitted typed table IDs. `spawn_kind`
-currently records `dynamic_local`. `authority_result` is `accepted` or
-`denied`; a denied spawn outcome returns `Err(Denied(Unit))` before the target
-process is accepted.
+`spawn_site_id` and `authority_id` are admitted typed table IDs.
+`authority_policy_decision_id` is the admitted typed policy row, or `null` for
+runs without an authority/effect binding. `spawn_kind` currently records
+`dynamic_local`. `authority_result` is `accepted` or `denied`; a denied spawn
+outcome returns `Err(Denied(Unit))` before the target process is accepted.
 
 ## Boundary Send Checked
 
 Example shape:
 
 ```json
-{"event":"boundary_send_checked","pid":1,"process_id":0,"process":"Main","port_id":0,"port":"WorkerPort","protocol_id":0,"protocol":"WorkerProtocol","target_process_id":1,"target_process":"Worker","message_id":0,"message":"Work","boundary_result":"accepted","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
+{"event":"boundary_send_checked","pid":1,"process_id":0,"process":"Main","port_id":0,"port":"WorkerPort","protocol_id":0,"protocol":"WorkerProtocol","authority_id":1,"authority_policy_decision_id":1,"target_process_id":1,"target_process":"Worker","message_id":0,"message":"Work","boundary_result":"accepted","trace_schema":"mantle-runtime-observability","trace_schema_version":1}
 ```
 
-`port_id`, `protocol_id`, `target_process_id`, and `message_id` are admitted
-typed IDs. Labels are diagnostics and trace metadata only. A
-`boundary_result` of `accepted` is emitted only for typed-port sends that proceed
-on the same runtime path as mailbox acceptance. A typed send outcome that returns
-`Full`, `Stopped`, `Crashed`, or `MailboxClosed` before mailbox acceptance
-does not emit an accepted boundary event. Invalid or denied boundary shapes fail artifact or
-loaded-program admission before runtime dispatch.
+`port_id`, `protocol_id`, `authority_id`, `target_process_id`, and
+`message_id` are admitted typed IDs. `authority_policy_decision_id` is the
+admitted typed policy row, or `null` for runs without an authority/effect
+binding. Labels are diagnostics and trace metadata only. A `boundary_result` of
+`accepted` is emitted only for typed-port sends that proceed on the same runtime
+path as mailbox acceptance; a policy `denied` result is emitted before mailbox
+acceptance and before target-side message side effects. A typed send outcome
+that returns `Full`, `Stopped`, `Crashed`, or `MailboxClosed` before mailbox
+acceptance does not emit an accepted boundary event; a denied typed-port send
+outcome fails closed before any `effect_outcome_bound` event. Invalid boundary shapes
+still fail artifact or loaded-program admission before runtime dispatch.
 
 ## Effect Outcome Bound
 
@@ -197,7 +202,9 @@ Example shapes:
 `port_id` are admitted typed IDs. `action` is `spawn` or `send`.
 `outcome_result` is a closed Mantle result category: `ok`, `denied`,
 `exhausted`, or `backend_unavailable` for spawn outcomes, and `ok`, `full`,
-`stopped`, `crashed`, or `mailbox_closed` for send outcomes. Spawn outcome events require `spawn_site_id` and do not carry a
+`stopped`, `crashed`, or `mailbox_closed` for send outcomes. Authority-policy
+denial of a typed-port send outcome is not represented as a send outcome result;
+it fails closed before source-visible binding. Spawn outcome events require `spawn_site_id` and do not carry a
 message or port ID. Send outcome events require `message_id` and may carry
 `port_id` when the outcome action was tied to an admitted typed port.
 

@@ -1,4 +1,4 @@
-use super::boundaries::BoundarySendContext;
+use super::boundaries::{BoundarySendContext, boundary_send_authority_denied_error};
 use super::model::RuntimeMailboxState;
 use super::*;
 use crate::event::RuntimeStopReason;
@@ -69,12 +69,18 @@ impl<'program, 'plan, 'host, H: RuntimeHost> RuntimeRun<'program, 'plan, 'host, 
         let process_label = process_label.to_string();
 
         if let Some(boundary) = boundary {
-            self.record_boundary_send_checked(
+            let admitted = self.record_boundary_send_checked(
                 boundary.step,
                 boundary.port_id,
                 process_id,
                 envelope.message,
             )?;
+            if !admitted {
+                return Err(boundary_send_authority_denied_error(
+                    boundary.step,
+                    boundary.port_id,
+                ));
+            }
         }
         self.record_event(RuntimeEvent::MessageAccepted {
             pid,

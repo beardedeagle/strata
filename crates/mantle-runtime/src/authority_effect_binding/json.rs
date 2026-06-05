@@ -64,6 +64,7 @@ impl<'a> JsonObject<'a> {
         field: &str,
         source_language: &str,
         suffix: &str,
+        schema_label: &str,
     ) -> Result<()> {
         let actual = self.required_string(field)?;
         if actual.len() == source_language.len() + suffix.len()
@@ -73,7 +74,7 @@ impl<'a> JsonObject<'a> {
             Ok(())
         } else {
             Err(self.error(format!(
-                "field {field:?} must match source language and authority/effect schema, got {actual:?}"
+                "field {field:?} must match source language and {schema_label} schema, got {actual:?}"
             )))
         }
     }

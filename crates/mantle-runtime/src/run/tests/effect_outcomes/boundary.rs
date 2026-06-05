@@ -1,6 +1,8 @@
 use super::super::support::*;
 use super::*;
+use crate::authority_effect_binding::RuntimeAuthorityEffectBinding;
 use crate::event::{RuntimeAuthorityResult, RuntimeEvent};
+use crate::run::run_loaded_program_with_bindings;
 use mantle_artifact::{
     ArtifactAction, ArtifactAuthority, ArtifactPort, ArtifactProtocol, EffectOutcomeId, PortId,
     ProtocolId,
@@ -35,6 +37,67 @@ fn runtime_boundary_send_outcome_traces_accepted_boundary_on_message_acceptance(
             ..
         } if *process_id == WORKER_PROCESS && *message_id == PING_MESSAGE
     )));
+}
+
+#[test]
+fn runtime_boundary_send_outcome_denied_policy_fails_closed_without_binding_outcome() {
+    let mut artifact = send_outcome_artifact();
+    attach_worker_boundary_to_send_outcome(&mut artifact);
+    let program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    let binding = RuntimeAuthorityEffectBinding::decode_for_test(
+        &denied_port_send_outcome_binding_json(),
+        &artifact,
+    )
+    .expect("denied port authority/effect binding should admit");
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = run_loaded_program_with_bindings(
+        &program,
+        &mut host,
+        RunLimits::default(),
+        None,
+        binding.into_policy(),
+    )
+    .expect_err("denied boundary send outcome should fail closed before source binding");
+
+    assert!(
+        err.to_string().contains("boundary send authority denied"),
+        "unexpected diagnostic: {err}"
+    );
+    assert!(
+        !host.events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::MessageAccepted {
+                process_id: WORKER_PROCESS,
+                message_id: PING_MESSAGE,
+                ..
+            }
+        )),
+        "denied boundary send outcome must not accept the target message"
+    );
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::BoundarySendChecked {
+            port_id,
+            authority_policy_decision_id: Some(1),
+            boundary_result: RuntimeAuthorityResult::Denied,
+            target_process_id,
+            message_id,
+            ..
+        } if *port_id == PortId::new(0)
+            && *target_process_id == WORKER_PROCESS
+            && *message_id == PING_MESSAGE
+    )));
+    assert!(
+        !host.events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::EffectOutcomeBound {
+                action: RuntimeEffectOutcomeAction::Send,
+                ..
+            }
+        )),
+        "denied boundary send outcome must not bind a source-visible send result"
+    );
 }
 
 #[test]
@@ -126,4 +189,8 @@ fn attach_worker_boundary_to_send_outcome(artifact: &mut MantleArtifact) {
         panic!("test artifact should have a send outcome action");
     };
     *port = Some(PortId::new(0));
+}
+
+fn denied_port_send_outcome_binding_json() -> String {
+    r#"{"schema_id":"mantle.runtime_authority_effect_binding","schema_version_major":1,"schema_version_minor":0,"artifact_kind":"runtime_authority_effect_binding","deployment_id":0,"source_language":"test_frontend","source_module":"unbound_worker_process_ref","source_fingerprint":"0000000000000000","source_fingerprint_algorithm":"fnv1a64-diagnostic","mantle_artifact_format":"mantle-target-artifact","mantle_artifact_schema_version":"6","mantle_artifact_module":"unbound_worker_process_ref","mantle_artifact_source_hash_fnv1a64":"0000000000000000","authority_effect_schema_id":"test_frontend.checked_authority_effects","authority_effect_schema_version_major":1,"authority_effect_schema_version_minor":0,"authority_policy_schema_id":"test_frontend.authority_policy_decisions","authority_policy_schema_version_major":1,"authority_policy_schema_version_minor":0,"processes":[{"process_id":0,"authorities":[{"authority_id":0,"descriptor":{"kind":"spawn","target_process_id":1}},{"authority_id":1,"descriptor":{"kind":"port_connect","port_id":0}}],"spawn_sites":[{"spawn_site_id":0,"kind":"dynamic_local","target_process_id":1,"authority_id":0,"supervisor_id":null,"supervisor_child_id":null}],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"spawn"},{"effect_id":1,"effect":"send"}]}]},{"process_id":1,"authorities":[],"spawn_sites":[],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[]}]}],"component_authority_surfaces":[],"policy_decisions":[{"decision_id":0,"process_id":0,"authority_id":0,"descriptor":{"kind":"spawn","target_process_id":1},"decision":"admit"},{"decision_id":1,"process_id":0,"authority_id":1,"descriptor":{"kind":"port_connect","port_id":0},"decision":"deny"}],"admission_result":"admitted","extensions":{}}"#.to_string()
 }

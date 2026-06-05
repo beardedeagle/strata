@@ -12,7 +12,9 @@ use super::diagnostic::{Error, Result};
 use super::source_program::SourceProvenanceHash;
 
 mod admission;
+mod policy;
 mod runtime_binding;
+mod source_facts;
 
 /// Strata's frontend-owned checked authority/effect fact schema.
 ///
@@ -31,12 +33,18 @@ const SOURCE_LANGUAGE: &str = "strata";
 const SOURCE_FINGERPRINT_ALGORITHM: &str = "fnv1a64-diagnostic";
 const ADMISSION_RESULT_ADMITTED: &str = "admitted";
 
+pub use policy::{
+    AUTHORITY_POLICY_ARTIFACT_EXTENSION, AUTHORITY_POLICY_SCHEMA_ID,
+    AUTHORITY_POLICY_SCHEMA_VERSION_MAJOR, AUTHORITY_POLICY_SCHEMA_VERSION_MINOR,
+    AuthorityPolicyAdmissionResult, AuthorityPolicyAdmissionSummary, AuthorityPolicyBuildOptions,
+    AuthorityPolicyDecision, MAX_AUTHORITY_POLICY_ARTIFACT_BYTES, admit_authority_policy_artifact,
+    render_authority_policy_admission_summary, render_authority_policy_artifact,
+};
 pub use runtime_binding::{
     RUNTIME_AUTHORITY_EFFECT_BINDING_ARTIFACT_EXTENSION,
     RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_ID,
     RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MAJOR,
-    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MINOR, RuntimeSpawnAuthorityPolicy,
-    render_runtime_authority_effect_binding,
+    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MINOR, render_runtime_authority_effect_binding,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -32,14 +32,19 @@ pub use ast::{
 pub use authority_effect_artifact::{
     AUTHORITY_EFFECT_ARTIFACT_EXTENSION, AUTHORITY_EFFECT_HASH_ALG, AUTHORITY_EFFECT_SCHEMA_ID,
     AUTHORITY_EFFECT_SCHEMA_VERSION_MAJOR, AUTHORITY_EFFECT_SCHEMA_VERSION_MINOR,
+    AUTHORITY_POLICY_ARTIFACT_EXTENSION, AUTHORITY_POLICY_SCHEMA_ID,
+    AUTHORITY_POLICY_SCHEMA_VERSION_MAJOR, AUTHORITY_POLICY_SCHEMA_VERSION_MINOR,
     AuthorityEffectAdmissionResult, AuthorityEffectAdmissionSummary,
-    AuthorityEffectArtifactAdmitFormat, MAX_AUTHORITY_EFFECT_ARTIFACT_BYTES,
+    AuthorityEffectArtifactAdmitFormat, AuthorityPolicyAdmissionResult,
+    AuthorityPolicyAdmissionSummary, AuthorityPolicyBuildOptions, AuthorityPolicyDecision,
+    MAX_AUTHORITY_EFFECT_ARTIFACT_BYTES, MAX_AUTHORITY_POLICY_ARTIFACT_BYTES,
     RUNTIME_AUTHORITY_EFFECT_BINDING_ARTIFACT_EXTENSION,
     RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_ID,
     RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MAJOR,
-    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MINOR, RuntimeSpawnAuthorityPolicy,
-    admit_authority_effect_artifact, render_authority_effect_admission_summary,
-    render_authority_effect_artifact, render_runtime_authority_effect_binding,
+    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MINOR, admit_authority_effect_artifact,
+    admit_authority_policy_artifact, render_authority_effect_admission_summary,
+    render_authority_effect_artifact, render_authority_policy_admission_summary,
+    render_authority_policy_artifact, render_runtime_authority_effect_binding,
 };
 pub use authority_summary::{AuthoritySummaryFormat, render_authority_summary};
 pub use checked::CheckedProgram;

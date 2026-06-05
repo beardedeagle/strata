@@ -4,16 +4,21 @@ use mantle_artifact::MantleArtifact;
 
 use super::super::super::checked_render::push_json_field;
 use super::super::super::diagnostic::{Error, Result};
+use super::super::policy::{
+    AUTHORITY_POLICY_SCHEMA_ID, AUTHORITY_POLICY_SCHEMA_VERSION_MAJOR,
+    AUTHORITY_POLICY_SCHEMA_VERSION_MINOR, AuthorityPolicyDecisions,
+};
+use super::super::source_facts::{
+    CheckedAuthorityEffectFacts, DescriptorFact, SpawnSiteFact, TransitionEffectFact,
+};
 use super::super::{
     ADMISSION_RESULT_ADMITTED, AUTHORITY_EFFECT_SCHEMA_ID, AUTHORITY_EFFECT_SCHEMA_VERSION_MAJOR,
     AUTHORITY_EFFECT_SCHEMA_VERSION_MINOR, SOURCE_FINGERPRINT_ALGORITHM,
 };
 use super::{
-    CheckedAuthorityEffectFacts, DescriptorFact, MAX_RUNTIME_AUTHORITY_EFFECT_BINDING_BYTES,
-    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_ID,
+    MAX_RUNTIME_AUTHORITY_EFFECT_BINDING_BYTES, RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_ID,
     RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MAJOR,
-    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MINOR, RuntimeSpawnAuthorityPolicy,
-    SpawnSiteFact, TransitionEffectFact,
+    RUNTIME_AUTHORITY_EFFECT_BINDING_SCHEMA_VERSION_MINOR,
 };
 
 const RUNTIME_AUTHORITY_EFFECT_BINDING_KIND: &str = "runtime_authority_effect_binding";
@@ -22,8 +27,8 @@ const RUNTIME_BINDING_INITIAL_CAPACITY: usize = 4 * 1024;
 
 pub(super) fn render_binding_json(
     facts: &CheckedAuthorityEffectFacts<'_>,
+    policy: &AuthorityPolicyDecisions,
     artifact: &MantleArtifact,
-    spawn_authority_policy: RuntimeSpawnAuthorityPolicy,
 ) -> Result<String> {
     let mut out = String::with_capacity(RUNTIME_BINDING_INITIAL_CAPACITY);
     out.push('{');
@@ -92,15 +97,19 @@ pub(super) fn render_binding_json(
     let _ = write!(out, "{AUTHORITY_EFFECT_SCHEMA_VERSION_MAJOR}");
     out.push_str(",\"authority_effect_schema_version_minor\":");
     let _ = write!(out, "{AUTHORITY_EFFECT_SCHEMA_VERSION_MINOR}");
-    push_processes_json(&mut out, facts);
-    push_component_surfaces_json(&mut out, facts);
-    out.push_str(",\"policy\":{");
+    out.push(',');
     push_json_field(
         &mut out,
-        "spawn_authority_policy",
-        spawn_authority_policy.as_str(),
+        "authority_policy_schema_id",
+        AUTHORITY_POLICY_SCHEMA_ID,
     );
-    out.push('}');
+    out.push_str(",\"authority_policy_schema_version_major\":");
+    let _ = write!(out, "{AUTHORITY_POLICY_SCHEMA_VERSION_MAJOR}");
+    out.push_str(",\"authority_policy_schema_version_minor\":");
+    let _ = write!(out, "{AUTHORITY_POLICY_SCHEMA_VERSION_MINOR}");
+    push_processes_json(&mut out, facts);
+    push_component_surfaces_json(&mut out, facts);
+    push_policy_decisions_json(&mut out, policy);
     out.push(',');
     push_json_field(&mut out, "admission_result", ADMISSION_RESULT_ADMITTED);
     out.push_str(",\"extensions\":{}");
@@ -111,6 +120,27 @@ pub(super) fn render_binding_json(
         )));
     }
     Ok(out)
+}
+
+fn push_policy_decisions_json(out: &mut String, policy: &AuthorityPolicyDecisions) {
+    out.push_str(",\"policy_decisions\":[");
+    for (decision_id, decision) in policy.decisions.iter().enumerate() {
+        if decision_id > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"decision_id\":");
+        let _ = write!(out, "{decision_id}");
+        out.push_str(",\"process_id\":");
+        let _ = write!(out, "{}", decision.process_id);
+        out.push_str(",\"authority_id\":");
+        let _ = write!(out, "{}", decision.authority_id);
+        out.push_str(",\"descriptor\":");
+        push_descriptor_json(out, decision.descriptor);
+        out.push(',');
+        push_json_field(out, "decision", decision.decision.as_str());
+        out.push('}');
+    }
+    out.push(']');
 }
 
 fn push_processes_json(out: &mut String, facts: &CheckedAuthorityEffectFacts<'_>) {

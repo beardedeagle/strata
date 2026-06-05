@@ -8,22 +8,26 @@ use mantle_artifact::{
 
 use super::support::{
     ArtifactAction, ArtifactCapabilityDescriptor, ArtifactComponent, ArtifactEffect, ArtifactPort,
-    ArtifactProtocol, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite, ComponentId,
-    MantleArtifact, MessageId, PortId, ProcessId, ProtocolId, RunLimits, SpawnAuthorityPolicy,
-    SpawnSiteId, valid_artifact,
+    ArtifactProtocol, ArtifactSendTarget, ArtifactSpawnKind, ArtifactSpawnSite, AuthorityId,
+    ComponentId, MantleArtifact, MessageId, PortId, ProcessId, ProtocolId, RunLimits,
+    SpawnAuthorityPolicy, SpawnSiteId, valid_artifact,
 };
+use crate::InMemoryRuntimeHost;
 use crate::authority_effect_binding::RuntimeAuthorityEffectBinding;
+use crate::event::{RuntimeAuthorityResult, RuntimeEvent};
 
 #[test]
 fn admits_matching_runtime_authority_effect_binding_policy() {
     let artifact = authority_artifact();
     let binding = RuntimeAuthorityEffectBinding::decode_for_test(&binding_json(), &artifact)
         .expect("matching runtime authority/effect binding should admit");
+    let decision = binding
+        .into_policy()
+        .decision_for_authority(ProcessId::new(0), AuthorityId::new(0))
+        .expect("policy decision should be present");
 
-    assert_eq!(
-        binding.spawn_authority_policy(),
-        SpawnAuthorityPolicy::DenyDeclared
-    );
+    assert_eq!(decision.decision_id, Some(0));
+    assert!(!decision.decision.admits());
 }
 
 #[test]
@@ -38,18 +42,31 @@ fn rejects_hardcoded_foreign_checked_schema_for_nonmatching_frontend() {
 }
 
 #[test]
+fn rejects_hardcoded_foreign_policy_schema_for_nonmatching_frontend() {
+    assert_binding_rejects(
+        binding_json().replace(
+            "\"authority_policy_schema_id\":\"test_frontend.authority_policy_decisions\"",
+            "\"authority_policy_schema_id\":\"foreign_frontend.authority_policy_decisions\"",
+        ),
+        "must match source language and authority policy schema",
+    );
+}
+
+#[test]
 fn admits_matching_runtime_authority_effect_binding_admitted_policy() {
     let artifact = authority_artifact();
     let binding = RuntimeAuthorityEffectBinding::decode_for_test(
-        &binding_json().replace("deny_declared", "admit_declared"),
+        &binding_json().replace("\"decision\":\"deny\"", "\"decision\":\"admit\""),
         &artifact,
     )
     .expect("matching admitted runtime authority/effect binding should admit");
+    let decision = binding
+        .into_policy()
+        .decision_for_authority(ProcessId::new(0), AuthorityId::new(0))
+        .expect("policy decision should be present");
 
-    assert_eq!(
-        binding.spawn_authority_policy(),
-        SpawnAuthorityPolicy::AdmitDeclared
-    );
+    assert_eq!(decision.decision_id, Some(0));
+    assert!(decision.decision.admits());
 }
 
 #[test]
@@ -58,11 +75,13 @@ fn admits_matching_runtime_authority_effect_binding_component_surfaces() {
     let binding =
         RuntimeAuthorityEffectBinding::decode_for_test(&component_binding_json(), &artifact)
             .expect("matching component authority/effect binding should admit");
+    let decision = binding
+        .into_policy()
+        .decision_for_authority(ProcessId::new(0), AuthorityId::new(0))
+        .expect("component policy decision should be present");
 
-    assert_eq!(
-        binding.spawn_authority_policy(),
-        SpawnAuthorityPolicy::DenyDeclared
-    );
+    assert_eq!(decision.decision_id, Some(0));
+    assert!(!decision.decision.admits());
 }
 
 #[test]
@@ -74,9 +93,13 @@ fn admits_matching_runtime_authority_effect_binding_lexical_supervisor_child() {
     )
     .expect("matching lexical supervisor-child authority/effect binding should admit");
 
-    assert_eq!(
-        binding.spawn_authority_policy(),
-        SpawnAuthorityPolicy::AdmitDeclared
+    let err = binding
+        .into_policy()
+        .decision_for_authority(ProcessId::new(0), AuthorityId::new(0))
+        .expect_err("lexical supervisor artifact has no runtime process authority");
+    assert!(
+        err.to_string().contains("has no decision"),
+        "unexpected diagnostic: {err}"
     );
 }
 
@@ -193,8 +216,60 @@ fn rejects_wrong_mta_identity() {
 #[test]
 fn rejects_unsupported_policy_value() {
     assert_binding_rejects(
-        binding_json().replace("deny_declared", "grant_all"),
-        "unsupported spawn_authority_policy",
+        binding_json().replace("\"decision\":\"deny\"", "\"decision\":\"grant\""),
+        "unsupported authority policy decision",
+    );
+}
+
+#[test]
+fn rejects_missing_policy_decision() {
+    assert_binding_rejects(
+        binding_json().replace(
+            "\"policy_decisions\":[{\"decision_id\":0,\"process_id\":0,\"authority_id\":0,\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1},\"decision\":\"deny\"}]",
+            "\"policy_decisions\":[]",
+        ),
+        "decision count 0 does not match runtime authority count 1",
+    );
+}
+
+#[test]
+fn rejects_out_of_order_policy_decision_id() {
+    assert_binding_rejects(
+        binding_json().replace("\"decision_id\":0", "\"decision_id\":1"),
+        "decision_id 1 at array index 0 is not canonical",
+    );
+}
+
+#[test]
+fn rejects_unknown_policy_process_id() {
+    assert_binding_rejects(
+        binding_json().replace(
+            "\"policy_decisions\":[{\"decision_id\":0,\"process_id\":0",
+            "\"policy_decisions\":[{\"decision_id\":0,\"process_id\":99",
+        ),
+        "references unknown process_id 99",
+    );
+}
+
+#[test]
+fn rejects_unknown_policy_authority_id() {
+    assert_binding_rejects(
+        binding_json().replace(
+            "\"policy_decisions\":[{\"decision_id\":0,\"process_id\":0,\"authority_id\":0",
+            "\"policy_decisions\":[{\"decision_id\":0,\"process_id\":0,\"authority_id\":99",
+        ),
+        "references unknown authority_id 99",
+    );
+}
+
+#[test]
+fn rejects_mismatched_policy_descriptor() {
+    assert_binding_rejects(
+        binding_json().replace(
+            "\"policy_decisions\":[{\"decision_id\":0,\"process_id\":0,\"authority_id\":0,\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":1},\"decision\":\"deny\"}]",
+            "\"policy_decisions\":[{\"decision_id\":0,\"process_id\":0,\"authority_id\":0,\"descriptor\":{\"kind\":\"spawn\",\"target_process_id\":0},\"decision\":\"deny\"}]",
+        ),
+        "decision_id 0 descriptor does not match runtime artifact",
     );
 }
 
@@ -210,7 +285,7 @@ fn rejects_nonzero_deployment_id() {
 fn rejects_programmatic_deny_policy_with_authority_effect_binding() {
     let artifact = authority_artifact();
     let binding = RuntimeAuthorityEffectBinding::decode_for_test(
-        &binding_json().replace("deny_declared", "admit_declared"),
+        &binding_json().replace("\"decision\":\"deny\"", "\"decision\":\"admit\""),
         &artifact,
     )
     .expect("matching admitted binding should decode");
@@ -227,6 +302,64 @@ fn rejects_programmatic_deny_policy_with_authority_effect_binding() {
         Some(binding),
     )
     .expect_err("direct deny policy must not be relaxed by a binding");
+
+    assert!(
+        err.to_string()
+            .contains("cannot be combined with an authority/effect binding"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn host_api_runs_with_authority_effect_binding_text() {
+    let artifact = authority_artifact();
+    let binding = binding_json().replace("\"decision\":\"deny\"", "\"decision\":\"admit\"");
+    let mut host = InMemoryRuntimeHost::default();
+
+    let report = crate::run_artifact_with_host_and_binding_texts(
+        &artifact,
+        &mut host,
+        RunLimits::default(),
+        None,
+        Some(&binding),
+    )
+    .expect("host API should run with an admitted authority/effect binding");
+
+    assert!(
+        report
+            .delivered_messages
+            .iter()
+            .any(|message| message.process == "Worker"),
+        "host API run should preserve admitted runtime behavior"
+    );
+    assert!(host.events().iter().any(|event| matches!(
+        event,
+        RuntimeEvent::SpawnAuthorityChecked {
+            authority_policy_decision_id: Some(0),
+            authority_result: RuntimeAuthorityResult::Accepted,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn host_api_rejects_programmatic_deny_policy_with_authority_effect_binding_text() {
+    let artifact = authority_artifact();
+    let binding = binding_json().replace("\"decision\":\"deny\"", "\"decision\":\"admit\"");
+    let limits = RunLimits {
+        spawn_authority_policy: SpawnAuthorityPolicy::DenyDeclared,
+        ..RunLimits::default()
+    };
+    let mut host = InMemoryRuntimeHost::default();
+
+    let err = crate::run_artifact_with_host_and_binding_texts(
+        &artifact,
+        &mut host,
+        limits,
+        None,
+        Some(&binding),
+    )
+    .expect_err("host API must not combine direct deny policy with authority binding");
 
     assert!(
         err.to_string()
@@ -384,13 +517,13 @@ fn component_authority_artifact() -> MantleArtifact {
 }
 
 fn binding_json() -> String {
-    r#"{"schema_id":"mantle.runtime_authority_effect_binding","schema_version_major":1,"schema_version_minor":0,"artifact_kind":"runtime_authority_effect_binding","deployment_id":0,"source_language":"test_frontend","source_module":"actor_ping","source_fingerprint":"0000000000000000","source_fingerprint_algorithm":"fnv1a64-diagnostic","mantle_artifact_format":"mantle-target-artifact","mantle_artifact_schema_version":"6","mantle_artifact_module":"actor_ping","mantle_artifact_source_hash_fnv1a64":"0000000000000000","authority_effect_schema_id":"test_frontend.checked_authority_effects","authority_effect_schema_version_major":1,"authority_effect_schema_version_minor":0,"processes":[{"process_id":0,"authorities":[{"authority_id":0,"descriptor":{"kind":"spawn","target_process_id":1}}],"spawn_sites":[{"spawn_site_id":0,"kind":"dynamic_local","target_process_id":1,"authority_id":0,"supervisor_id":null,"supervisor_child_id":null}],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"spawn"},{"effect_id":1,"effect":"send"}]}]},{"process_id":1,"authorities":[],"spawn_sites":[],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"emit"}]}]}],"component_authority_surfaces":[],"policy":{"spawn_authority_policy":"deny_declared"},"admission_result":"admitted","extensions":{}}"#.to_string()
+    r#"{"schema_id":"mantle.runtime_authority_effect_binding","schema_version_major":1,"schema_version_minor":0,"artifact_kind":"runtime_authority_effect_binding","deployment_id":0,"source_language":"test_frontend","source_module":"actor_ping","source_fingerprint":"0000000000000000","source_fingerprint_algorithm":"fnv1a64-diagnostic","mantle_artifact_format":"mantle-target-artifact","mantle_artifact_schema_version":"6","mantle_artifact_module":"actor_ping","mantle_artifact_source_hash_fnv1a64":"0000000000000000","authority_effect_schema_id":"test_frontend.checked_authority_effects","authority_effect_schema_version_major":1,"authority_effect_schema_version_minor":0,"authority_policy_schema_id":"test_frontend.authority_policy_decisions","authority_policy_schema_version_major":1,"authority_policy_schema_version_minor":0,"processes":[{"process_id":0,"authorities":[{"authority_id":0,"descriptor":{"kind":"spawn","target_process_id":1}}],"spawn_sites":[{"spawn_site_id":0,"kind":"dynamic_local","target_process_id":1,"authority_id":0,"supervisor_id":null,"supervisor_child_id":null}],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"spawn"},{"effect_id":1,"effect":"send"}]}]},{"process_id":1,"authorities":[],"spawn_sites":[],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"emit"}]}]}],"component_authority_surfaces":[],"policy_decisions":[{"decision_id":0,"process_id":0,"authority_id":0,"descriptor":{"kind":"spawn","target_process_id":1},"decision":"deny"}],"admission_result":"admitted","extensions":{}}"#.to_string()
 }
 
 fn lexical_supervisor_binding_json() -> String {
-    r#"{"schema_id":"mantle.runtime_authority_effect_binding","schema_version_major":1,"schema_version_minor":0,"artifact_kind":"runtime_authority_effect_binding","deployment_id":0,"source_language":"test_frontend","source_module":"local_supervision_restart","source_fingerprint":"2bac33f1a6db8805","source_fingerprint_algorithm":"fnv1a64-diagnostic","mantle_artifact_format":"mantle-target-artifact","mantle_artifact_schema_version":"6","mantle_artifact_module":"local_supervision_restart","mantle_artifact_source_hash_fnv1a64":"2bac33f1a6db8805","authority_effect_schema_id":"test_frontend.checked_authority_effects","authority_effect_schema_version_major":1,"authority_effect_schema_version_minor":0,"processes":[{"process_id":0,"authorities":[],"spawn_sites":[{"spawn_site_id":0,"kind":"lexical_supervisor_child","target_process_id":1,"authority_id":null,"supervisor_id":0,"supervisor_child_id":0}],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"send"}]}]},{"process_id":1,"authorities":[],"spawn_sites":[],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[]}]}],"component_authority_surfaces":[],"policy":{"spawn_authority_policy":"admit_declared"},"admission_result":"admitted","extensions":{}}"#.to_string()
+    r#"{"schema_id":"mantle.runtime_authority_effect_binding","schema_version_major":1,"schema_version_minor":0,"artifact_kind":"runtime_authority_effect_binding","deployment_id":0,"source_language":"test_frontend","source_module":"local_supervision_restart","source_fingerprint":"2bac33f1a6db8805","source_fingerprint_algorithm":"fnv1a64-diagnostic","mantle_artifact_format":"mantle-target-artifact","mantle_artifact_schema_version":"6","mantle_artifact_module":"local_supervision_restart","mantle_artifact_source_hash_fnv1a64":"2bac33f1a6db8805","authority_effect_schema_id":"test_frontend.checked_authority_effects","authority_effect_schema_version_major":1,"authority_effect_schema_version_minor":0,"authority_policy_schema_id":"test_frontend.authority_policy_decisions","authority_policy_schema_version_major":1,"authority_policy_schema_version_minor":0,"processes":[{"process_id":0,"authorities":[],"spawn_sites":[{"spawn_site_id":0,"kind":"lexical_supervisor_child","target_process_id":1,"authority_id":null,"supervisor_id":0,"supervisor_child_id":0}],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"send"}]}]},{"process_id":1,"authorities":[],"spawn_sites":[],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[]}]}],"component_authority_surfaces":[],"policy_decisions":[],"admission_result":"admitted","extensions":{}}"#.to_string()
 }
 
 fn component_binding_json() -> String {
-    r#"{"schema_id":"mantle.runtime_authority_effect_binding","schema_version_major":1,"schema_version_minor":0,"artifact_kind":"runtime_authority_effect_binding","deployment_id":0,"source_language":"test_frontend","source_module":"authority_effect_components","source_fingerprint":"2222222222222222","source_fingerprint_algorithm":"fnv1a64-diagnostic","mantle_artifact_format":"mantle-target-artifact","mantle_artifact_schema_version":"6","mantle_artifact_module":"authority_effect_components","mantle_artifact_source_hash_fnv1a64":"2222222222222222","authority_effect_schema_id":"test_frontend.checked_authority_effects","authority_effect_schema_version_major":1,"authority_effect_schema_version_minor":0,"processes":[{"process_id":0,"authorities":[{"authority_id":0,"descriptor":{"kind":"spawn","target_process_id":1}}],"spawn_sites":[{"spawn_site_id":0,"kind":"dynamic_local","target_process_id":1,"authority_id":0,"supervisor_id":null,"supervisor_child_id":null}],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"spawn"},{"effect_id":1,"effect":"send"}]}]},{"process_id":1,"authorities":[],"spawn_sites":[],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"emit"}]}]}],"component_authority_surfaces":[{"component_id":0,"export_port_id":0,"component_authority":{"kind":"component_export","component_id":0},"export_port_authority":{"kind":"port_connect","port_id":0},"import_port_authorities":[{"port_id":1,"port_authority":{"kind":"port_connect","port_id":1}}]},{"component_id":1,"export_port_id":1,"component_authority":{"kind":"component_export","component_id":1},"export_port_authority":{"kind":"port_connect","port_id":1},"import_port_authorities":[]}],"policy":{"spawn_authority_policy":"deny_declared"},"admission_result":"admitted","extensions":{}}"#.to_string()
+    r#"{"schema_id":"mantle.runtime_authority_effect_binding","schema_version_major":1,"schema_version_minor":0,"artifact_kind":"runtime_authority_effect_binding","deployment_id":0,"source_language":"test_frontend","source_module":"authority_effect_components","source_fingerprint":"2222222222222222","source_fingerprint_algorithm":"fnv1a64-diagnostic","mantle_artifact_format":"mantle-target-artifact","mantle_artifact_schema_version":"6","mantle_artifact_module":"authority_effect_components","mantle_artifact_source_hash_fnv1a64":"2222222222222222","authority_effect_schema_id":"test_frontend.checked_authority_effects","authority_effect_schema_version_major":1,"authority_effect_schema_version_minor":0,"authority_policy_schema_id":"test_frontend.authority_policy_decisions","authority_policy_schema_version_major":1,"authority_policy_schema_version_minor":0,"processes":[{"process_id":0,"authorities":[{"authority_id":0,"descriptor":{"kind":"spawn","target_process_id":1}}],"spawn_sites":[{"spawn_site_id":0,"kind":"dynamic_local","target_process_id":1,"authority_id":0,"supervisor_id":null,"supervisor_child_id":null}],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"spawn"},{"effect_id":1,"effect":"send"}]}]},{"process_id":1,"authorities":[],"spawn_sites":[],"transition_effects":[{"transition_id":0,"message_id":0,"current_state_id":null,"effects":[{"effect_id":0,"effect":"emit"}]}]}],"component_authority_surfaces":[{"component_id":0,"export_port_id":0,"component_authority":{"kind":"component_export","component_id":0},"export_port_authority":{"kind":"port_connect","port_id":0},"import_port_authorities":[{"port_id":1,"port_authority":{"kind":"port_connect","port_id":1}}]},{"component_id":1,"export_port_id":1,"component_authority":{"kind":"component_export","component_id":1},"export_port_authority":{"kind":"port_connect","port_id":1},"import_port_authorities":[]}],"policy_decisions":[{"decision_id":0,"process_id":0,"authority_id":0,"descriptor":{"kind":"spawn","target_process_id":1},"decision":"deny"}],"admission_result":"admitted","extensions":{}}"#.to_string()
 }

@@ -1,14 +1,14 @@
-use mantle_artifact::{MantleArtifact, Result};
+use mantle_artifact::{Error, MantleArtifact, Result};
 
 use super::RuntimeRun;
 use super::model::RuntimeMessageEnvelope;
-use crate::RuntimeCompositionBinding;
 use crate::event::RuntimeEvent;
 use crate::executable::ExecutableProgram;
 use crate::host::RuntimeHost;
-use crate::limits::RunLimits;
+use crate::limits::{RunLimits, SpawnAuthorityPolicy};
 use crate::program::LoadedProgram;
 use crate::report::{ProcessReport, RuntimeReport};
+use crate::{RuntimeAuthorityEffectBinding, RuntimeAuthorityPolicy, RuntimeCompositionBinding};
 
 pub fn run_artifact_with_host<H: RuntimeHost>(
     artifact: &MantleArtifact,
@@ -18,6 +18,33 @@ pub fn run_artifact_with_host<H: RuntimeHost>(
     limits.validate()?;
     let program = LoadedProgram::from_artifact(artifact)?;
     run_loaded_program_with_host(&program, host, limits)
+}
+
+pub fn run_artifact_with_host_and_binding_texts<H: RuntimeHost>(
+    artifact: &MantleArtifact,
+    host: &mut H,
+    limits: RunLimits,
+    composition_binding_text: Option<&str>,
+    authority_effect_binding_text: Option<&str>,
+) -> Result<RuntimeReport> {
+    validate_authority_binding_limits(limits, authority_effect_binding_text.is_some())?;
+    limits.validate()?;
+    let program = LoadedProgram::from_artifact(artifact)?;
+    let composition_binding = composition_binding_text
+        .map(|text| RuntimeCompositionBinding::decode_text(text, artifact))
+        .transpose()?;
+    let authority_policy = authority_effect_binding_text
+        .map(|text| RuntimeAuthorityEffectBinding::decode_text(text, artifact))
+        .transpose()?
+        .map(RuntimeAuthorityEffectBinding::into_policy)
+        .unwrap_or_else(RuntimeAuthorityPolicy::admit_all);
+    run_loaded_program_with_bindings(
+        &program,
+        host,
+        limits,
+        composition_binding,
+        authority_policy,
+    )
 }
 
 pub(crate) fn run_loaded_program_with_host<H: RuntimeHost>(
@@ -34,6 +61,36 @@ pub(crate) fn run_loaded_program_with_composition_binding<H: RuntimeHost>(
     limits: RunLimits,
     composition_binding: Option<RuntimeCompositionBinding>,
 ) -> Result<RuntimeReport> {
+    run_loaded_program_with_bindings(
+        program,
+        host,
+        limits,
+        composition_binding,
+        RuntimeAuthorityPolicy::admit_all(),
+    )
+}
+
+pub(crate) fn validate_authority_binding_limits(
+    limits: RunLimits,
+    has_authority_effect_binding: bool,
+) -> Result<()> {
+    if has_authority_effect_binding
+        && limits.spawn_authority_policy != SpawnAuthorityPolicy::AdmitDeclared
+    {
+        return Err(Error::new(
+            "RunLimits spawn_authority_policy cannot be combined with an authority/effect binding; encode the policy in an authority policy artifact before binding",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn run_loaded_program_with_bindings<H: RuntimeHost>(
+    program: &LoadedProgram,
+    host: &mut H,
+    limits: RunLimits,
+    composition_binding: Option<RuntimeCompositionBinding>,
+    authority_policy: RuntimeAuthorityPolicy,
+) -> Result<RuntimeReport> {
     let executable = ExecutableProgram::from_admitted(program)?;
     let mut run = RuntimeRun::new_with_composition_binding(
         program,
@@ -41,6 +98,7 @@ pub(crate) fn run_loaded_program_with_composition_binding<H: RuntimeHost>(
         host,
         limits,
         composition_binding,
+        authority_policy,
     );
     let entry = executable.entry();
     run.record_event(RuntimeEvent::ArtifactLoaded {

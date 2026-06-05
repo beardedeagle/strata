@@ -74,6 +74,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "strata_authority_policy_artifact_admit"
+path = "fuzz_targets/strata_authority_policy_artifact_admit.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "mantle_runtime_authority_effect_binding"
 path = "fuzz_targets/mantle_runtime_authority_effect_binding.rs"
 test = false

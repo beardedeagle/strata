@@ -6,8 +6,8 @@ mdbook_version := "0.5.2"
 mdbook_mermaid_version := "0.17.0"
 cargo_fuzz_version := "0.13.1"
 cfg_check_targets := "x86_64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc"
-fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower strata_composition_artifact_admit strata_authority_effect_artifact_admit mantle_artifact_decode mantle_runtime_from_source mantle_trace_validate mantle_runtime_composition_binding mantle_runtime_authority_effect_binding"
-fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 strata_composition_artifact_admit:128 strata_authority_effect_artifact_admit:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_trace_validate:128 mantle_runtime_composition_binding:128 mantle_runtime_authority_effect_binding:128"
+fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower strata_composition_artifact_admit strata_authority_effect_artifact_admit strata_authority_policy_artifact_admit mantle_artifact_decode mantle_runtime_from_source mantle_trace_validate mantle_runtime_composition_binding mantle_runtime_authority_effect_binding"
+fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 strata_composition_artifact_admit:128 strata_authority_effect_artifact_admit:128 strata_authority_policy_artifact_admit:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_trace_validate:128 mantle_runtime_composition_binding:128 mantle_runtime_authority_effect_binding:128"
 
 default:
     @just --list
@@ -140,11 +140,15 @@ strata-authority-effects-build source:
 strata-authority-effects-admit artifact format="text":
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects admit "{{artifact}}" --format "{{format}}"
 
-strata-authority-effects-bind-runtime authority_effect_artifact runtime_artifact output:
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime "{{authority_effect_artifact}}" "{{runtime_artifact}}" --output "{{output}}"
+strata-authority-effects-policy-build authority_effect_artifact output:
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy build "{{authority_effect_artifact}}" --output "{{output}}"
 
-strata-authority-effects-bind-runtime-deny-spawn authority_effect_artifact runtime_artifact output:
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime "{{authority_effect_artifact}}" "{{runtime_artifact}}" --deny-spawn-authority --output "{{output}}"
+
+strata-authority-effects-policy-admit policy_artifact authority_effect_artifact format="text":
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy admit "{{policy_artifact}}" "{{authority_effect_artifact}}" --format "{{format}}"
+
+strata-authority-effects-bind-runtime authority_effect_artifact policy_artifact runtime_artifact output:
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime "{{authority_effect_artifact}}" "{{policy_artifact}}" "{{runtime_artifact}}" --output "{{output}}"
 
 strata-composition-report source format="text":
     cargo +{{stable_toolchain}} run -p strata --bin strata -- composition-report "{{source}}" --format "{{format}}"
@@ -177,7 +181,6 @@ run-example name:
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check "examples/{{name}}.str"
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build "examples/{{name}}.str"
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "target/strata/{{name}}.mta"
-
 composition-artifact-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/component_composition_main.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/component_composition_main.str
@@ -185,21 +188,26 @@ composition-artifact-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- composition admit target/strata/component_composition_main.component-composition.json --format json
     cargo +{{stable_toolchain}} run -p strata --bin strata -- composition bind-runtime target/strata/component_composition_main.component-composition.json target/strata/component_composition_main.mta --output target/strata/component_composition_main.deployment-composition.json
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/component_composition_main.mta --composition-binding target/strata/component_composition_main.deployment-composition.json
-
 authority-effect-artifact-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/effect_outcome_spawn_denied.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/effect_outcome_spawn_denied.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects build examples/effect_outcome_spawn_denied.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects admit target/strata/effect_outcome_spawn_denied.authority-effect.json --format json
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/effect_outcome_spawn_denied.authority-effect.json target/strata/effect_outcome_spawn_denied.mta --output target/strata/effect_outcome_spawn_denied.authority-effect-binding.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy build target/strata/effect_outcome_spawn_denied.authority-effect.json --output target/strata/effect_outcome_spawn_denied.authority-policy.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy admit target/strata/effect_outcome_spawn_denied.authority-policy.json target/strata/effect_outcome_spawn_denied.authority-effect.json --format json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/effect_outcome_spawn_denied.authority-effect.json target/strata/effect_outcome_spawn_denied.authority-policy.json target/strata/effect_outcome_spawn_denied.mta --output target/strata/effect_outcome_spawn_denied.authority-effect-binding.json
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_spawn_denied.mta --authority-effect-binding target/strata/effect_outcome_spawn_denied.authority-effect-binding.json
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/effect_outcome_spawn_denied.authority-effect.json target/strata/effect_outcome_spawn_denied.mta --deny-spawn-authority --output target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy build target/strata/effect_outcome_spawn_denied.authority-effect.json --deny-spawn-authority --output target/strata/effect_outcome_spawn_denied.authority-deny-policy.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy admit target/strata/effect_outcome_spawn_denied.authority-deny-policy.json target/strata/effect_outcome_spawn_denied.authority-effect.json --format json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/effect_outcome_spawn_denied.authority-effect.json target/strata/effect_outcome_spawn_denied.authority-deny-policy.json target/strata/effect_outcome_spawn_denied.mta --output target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/effect_outcome_spawn_denied.mta --authority-effect-binding target/strata/effect_outcome_spawn_denied.authority-effect-deny-binding.json
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/local_supervision_restart.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/local_supervision_restart.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects build examples/local_supervision_restart.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects admit target/strata/local_supervision_restart.authority-effect.json --format json
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/local_supervision_restart.authority-effect.json target/strata/local_supervision_restart.mta --output target/strata/local_supervision_restart.authority-effect-binding.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy build target/strata/local_supervision_restart.authority-effect.json --output target/strata/local_supervision_restart.authority-policy.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy admit target/strata/local_supervision_restart.authority-policy.json target/strata/local_supervision_restart.authority-effect.json --format json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/local_supervision_restart.authority-effect.json target/strata/local_supervision_restart.authority-policy.json target/strata/local_supervision_restart.mta --output target/strata/local_supervision_restart.authority-effect-binding.json
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/local_supervision_restart.mta --authority-effect-binding target/strata/local_supervision_restart.authority-effect-binding.json
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/component_composition_main.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/component_composition_main.str
@@ -208,9 +216,14 @@ authority-effect-artifact-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- composition bind-runtime target/strata/component_composition_main.component-composition.json target/strata/component_composition_main.mta --output target/strata/component_composition_main.deployment-composition.json
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects build examples/component_composition_main.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects admit target/strata/component_composition_main.authority-effect.json --format json
-    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/component_composition_main.authority-effect.json target/strata/component_composition_main.mta --output target/strata/component_composition_main.authority-effect-binding.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy build target/strata/component_composition_main.authority-effect.json --output target/strata/component_composition_main.authority-policy.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy admit target/strata/component_composition_main.authority-policy.json target/strata/component_composition_main.authority-effect.json --format json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/component_composition_main.authority-effect.json target/strata/component_composition_main.authority-policy.json target/strata/component_composition_main.mta --output target/strata/component_composition_main.authority-effect-binding.json
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/component_composition_main.mta --composition-binding target/strata/component_composition_main.deployment-composition.json --authority-effect-binding target/strata/component_composition_main.authority-effect-binding.json
-
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy build target/strata/component_composition_main.authority-effect.json --deny-port-authority --output target/strata/component_composition_main.authority-port-deny-policy.json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy admit target/strata/component_composition_main.authority-port-deny-policy.json target/strata/component_composition_main.authority-effect.json --format json
+    cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects bind-runtime target/strata/component_composition_main.authority-effect.json target/strata/component_composition_main.authority-port-deny-policy.json target/strata/component_composition_main.mta --output target/strata/component_composition_main.authority-effect-port-deny-binding.json
+    bash -c 'set -euo pipefail; output=$(cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run target/strata/component_composition_main.mta --composition-binding target/strata/component_composition_main.deployment-composition.json --authority-effect-binding target/strata/component_composition_main.authority-effect-port-deny-binding.json 2>&1) && { printf "%s\n" "$output"; echo "expected denied port authority policy to fail" >&2; exit 1; } || { printf "%s\n" "$output"; grep -q "boundary send authority denied" <<<"$output"; }'
 metadata-check:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -472,7 +485,6 @@ source-to-runtime-failure-gates: build
         echo "Error: panic must not be reported as a normal process stop." >&2
         exit 1
     fi
-
 quality: fmt-check check cfg-check test lint performance-smoke metadata-check toolchain-policy-check docs assurance source-to-runtime-gates diff-check
 
 assurance: language-surface-assurance bounded-assurance-smoke
@@ -598,12 +610,15 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p strata composition_artifact
     cargo +{{nightly_toolchain}} miri test -p strata language::tests::authority_effect_artifact::artifact_emits_required_identity_fields_and_admits
     cargo +{{nightly_toolchain}} miri test -p strata language::tests::authority_effect_artifact::admission_rejects_missing_declared_component_import_authority
+    cargo +{{nightly_toolchain}} miri test -p strata language::tests::authority_effect_artifact::policy_artifact_emits_closed_typed_decisions_and_admits
+    cargo +{{nightly_toolchain}} miri test -p strata language::tests::authority_policy_artifact::policy_admission_rejects_unsupported_decision
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_uniform_arm_prefix_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_selected_arm_action_block_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p mantle-artifact validate_admits_lexical_supervisor_child_spawn_site
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_rejects_loaded_spawn_site_target_mismatched_with_authority_before_artifact_loaded
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_spawn_outcome_returns_denied_before_acceptance
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_boundary_send_outcome_denied_policy_fails_closed_without_binding_outcome
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_composition_binding::admits_matching_runtime_composition_binding_and_maps_trace_context
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_authority_effect_binding::admits_matching_runtime_authority_effect_binding_policy
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_authority_effect_binding::admits_matching_runtime_authority_effect_binding_lexical_supervisor_child

@@ -362,7 +362,13 @@ fn print_strata_usage() {
     println!("  strata authority-effects build <path.str> [--output <path.json>]");
     println!("  strata authority-effects admit <path.json> [--format text|json]");
     println!(
-        "  strata authority-effects bind-runtime <authority-effect.json> <artifact.mta> [--deny-spawn-authority] [--output <path.json>]"
+        "  strata authority-effects policy build <authority-effect.json> [--deny-spawn-authority] [--deny-port-authority] [--output <path.json>]"
+    );
+    println!(
+        "  strata authority-effects policy admit <authority-policy.json> <authority-effect.json> [--format text|json]"
+    );
+    println!(
+        "  strata authority-effects bind-runtime <authority-effect.json> <authority-policy.json> <artifact.mta> [--output <path.json>]"
     );
     println!("  strata authority-summary <path.str> [--format text|json]");
     println!("  strata composition-report <path.str> [--format text|json]");

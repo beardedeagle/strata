@@ -1,14 +1,78 @@
-use super::super::super::composition_artifact::codec::{JsonArray, JsonObject};
-use super::super::super::diagnostic::{Error, Result};
-use super::super::{
+use std::borrow::Cow;
+
+use super::super::composition_artifact::codec::{JsonArray, JsonObject};
+use super::super::diagnostic::{Error, Result};
+use super::{
     AUTHORITY_EFFECT_SCHEMA_ID, AuthorityEffectAdmissionResult, SOURCE_FINGERPRINT_ALGORITHM,
     admit_authority_effect_artifact,
 };
-use super::{
-    CheckedAuthorityEffectFacts, CheckedComponentSurfaceFact, CheckedPortAuthorityFact,
-    CheckedProcessFacts, DescriptorFact, EffectFact, SpawnKindFact, SpawnSiteFact,
-    TransitionEffectFact,
-};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CheckedAuthorityEffectFacts<'a> {
+    pub(super) source_language: Cow<'a, str>,
+    pub(super) source_module: Cow<'a, str>,
+    pub(super) source_fingerprint: Cow<'a, str>,
+    pub(super) processes: Vec<CheckedProcessFacts>,
+    pub(super) component_surfaces: Vec<CheckedComponentSurfaceFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CheckedProcessFacts {
+    pub(super) authorities: Vec<DescriptorFact>,
+    pub(super) spawn_sites: Vec<SpawnSiteFact>,
+    pub(super) transitions: Vec<TransitionEffectFact>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DescriptorFact {
+    Spawn { target_process_id: u32 },
+    ProtocolBoundary { protocol_id: u32 },
+    PortConnect { port_id: u32 },
+    ComponentExport { component_id: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SpawnSiteFact {
+    pub(super) kind: SpawnKindFact,
+    pub(super) target_process_id: u32,
+    pub(super) authority_id: Option<u32>,
+    pub(super) supervisor_id: Option<u32>,
+    pub(super) supervisor_child_id: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SpawnKindFact {
+    DynamicLocal,
+    LexicalSupervisorChild,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TransitionEffectFact {
+    pub(super) message_id: u32,
+    pub(super) current_state_id: Option<u32>,
+    pub(super) effects: Vec<EffectFact>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EffectFact {
+    Emit,
+    Spawn,
+    Send,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CheckedComponentSurfaceFact {
+    pub(super) export_port_id: u32,
+    pub(super) component_authority: DescriptorFact,
+    pub(super) export_port_authority: DescriptorFact,
+    pub(super) import_port_authorities: Vec<CheckedPortAuthorityFact>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CheckedPortAuthorityFact {
+    pub(super) port_id: u32,
+    pub(super) authority: DescriptorFact,
+}
 
 const SOURCE_PROCESS_FIELDS: &[&str] = &[
     "process_id",
@@ -48,7 +112,7 @@ const DESCRIPTOR_PROTOCOL_FIELDS: &[&str] = &["kind", "protocol_id", "protocol"]
 const DESCRIPTOR_PORT_FIELDS: &[&str] = &["kind", "port_id", "port"];
 const DESCRIPTOR_COMPONENT_FIELDS: &[&str] = &["kind", "component_id", "component"];
 
-pub(super) fn admitted_authority_effect_facts(
+pub(in crate::language::authority_effect_artifact) fn admitted_authority_effect_facts(
     text: &str,
 ) -> Result<CheckedAuthorityEffectFacts<'_>> {
     let summary = admit_authority_effect_artifact(text)?;

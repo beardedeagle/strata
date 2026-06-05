@@ -70,6 +70,10 @@ impl RuntimeCompositionBinding {
         Self::decode_and_validate(&text, artifact)
     }
 
+    pub(crate) fn decode_text(text: &str, artifact: &MantleArtifact) -> Result<Self> {
+        Self::decode_and_validate(text, artifact)
+    }
+
     #[cfg(test)]
     pub(crate) fn decode_for_test(text: &str, artifact: &MantleArtifact) -> Result<Self> {
         Self::decode_and_validate(text, artifact)
