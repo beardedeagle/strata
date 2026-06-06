@@ -99,7 +99,7 @@ fn process_ref_stale_lifecycle_does_not_retarget_to_new_worker_pid() {
             r#""sender_pid":1"#,
         ],
     );
-    assert_trace_event(
+    let new_worker_spawned = trace_line_index_with_fields(
         &trace,
         &[
             r#""event":"process_spawned""#,
@@ -132,6 +132,10 @@ fn process_ref_stale_lifecycle_does_not_retarget_to_new_worker_pid() {
     assert!(
         stale_worker_stopped < stale_send_outcome,
         "stale send outcome must be bound after the referenced worker stopped"
+    );
+    assert!(
+        new_worker_spawned < stale_send_outcome,
+        "stale send outcome must be bound after a newer same-definition worker exists"
     );
     assert_trace_event(
         &trace,
