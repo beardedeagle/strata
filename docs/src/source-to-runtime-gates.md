@@ -278,6 +278,7 @@ just run-example runtime_loop_element_projection
 just run-example effect_outcomes
 just run-example effect_outcome_mailbox_full
 just run-example effect_outcome_stopped_target
+just run-example process_ref_stale_lifecycle
 # Default-limit acceptance only; the exhausted/backend-unavailable branches use dedicated gates below.
 just run-example effect_outcome_spawn_exhausted
 just run-example effect_outcome_spawn_backend_unavailable
@@ -289,6 +290,10 @@ just run-example local_supervision_transient
 just run-example local_supervision_inactive_send_outcome
 just run-example local_supervision_inactive_crashed_send_outcome
 ```
+
+`just process-ref-lifecycle-gates` runs `process_ref_stale_lifecycle` plus the
+trace-level assertion that a transported old runtime PID stops instead of
+retargeting to a newer same-definition worker.
 
 `run-example` uses default runtime limits and policies. For
 `effect_outcome_spawn_exhausted` and
@@ -324,14 +329,17 @@ just strata-build examples/effect_outcome_spawn_backend_unavailable.str
 just mantle-run-disable-local-spawn-backend target/strata/effect_outcome_spawn_backend_unavailable.mta
 ```
 
-The exhausted-spawn, backend-unavailable-spawn, stopped-target send, and
-inactive-crashed-child send gates also assert `effect_outcome_bound` trace
-events. The denied-port-policy send-outcome gate instead proves fail-closed
-authority denial before source-visible outcome binding or delivery; runtime-unit
-and trace-validation coverage separately exercise closed-mailbox runtime causes. These trace events carry the numeric
+The exhausted-spawn, backend-unavailable-spawn, stopped-target send,
+stale-process-ref send, and inactive-crashed-child send gates also assert
+`effect_outcome_bound` trace events. The denied-port-policy send-outcome gate
+instead proves fail-closed authority denial before source-visible outcome
+binding or delivery; runtime-unit and trace-validation coverage separately
+exercise closed-mailbox runtime causes. These trace events carry the numeric
 `outcome_id`, the `spawn` or `send` action kind, and the closed
-`outcome_result` category so the branch result is attributable to Mantle
-runtime cause rather than inferred only from output text.
+`outcome_result` category so the branch result is attributable to Mantle runtime
+cause rather than inferred only from output text. For stale process references,
+the proof combines the received `payload_pid`, the later stopped send outcome,
+and the absence of delivery to the newer runtime PID.
 
 A source rejection gate must fail during checking and must not create a target
 artifact:

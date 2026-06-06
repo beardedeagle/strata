@@ -109,39 +109,41 @@ Read them in this order:
    map payload destructuring.
 53. `actor_reply.str` for transporting typed process references through message
    payloads.
-54. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+54. `process_ref_stale_lifecycle.str` for a transported old runtime PID
+   returning `Err(Stopped(message))` without retargeting to a newer worker.
+55. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-55. `imports_main.str`, with `imports_types.str` and `imports_worker.str`, for
+56. `imports_main.str`, with `imports_types.str` and `imports_worker.str`, for
    source-unit imports checked and lowered from one root source path.
-56. `boundary_contracts_main.str`, with `boundary_contracts_worker.str`, for
+57. `boundary_contracts_main.str`, with `boundary_contracts_worker.str`, for
    typed protocol, port, and component boundary contracts.
-57. `component_composition_main.str`, with `component_composition_worker.str`,
+58. `component_composition_main.str`, with `component_composition_worker.str`,
    for checked local component-instance and port-binding composition admission.
-58. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
+59. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
    commit-or-return state evidence, and the typed send-error contract
    shape.
-59. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
-60. `effect_outcome_stopped_target.str` for a source-visible `Stopped`
+60. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
+61. `effect_outcome_stopped_target.str` for a source-visible `Stopped`
    send outcome after a normally terminated target.
-61. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
+62. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
    source-created `Panic(...)` prevents a later observer from recovering the
    crash as a source-visible send outcome.
-62. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
+63. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
    denial before process acceptance.
-63. `effect_outcome_spawn_exhausted.str` for source-visible local spawn capacity
+64. `effect_outcome_spawn_exhausted.str` for source-visible local spawn capacity
    exhaustion before process acceptance under `--max-runtime-processes 1`.
-64. `effect_outcome_spawn_backend_unavailable.str` for source-visible local
+65. `effect_outcome_spawn_backend_unavailable.str` for source-visible local
    spawn backend unavailability before process acceptance under
    `--disable-local-spawn-backend`.
-65. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+66. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
-66. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
+67. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
    `local_supervision_temporary.str`, `local_supervision_transient_restart.str`,
    `local_supervision_transient.str`, and
    `local_supervision_inactive_send_outcome.str` for local `one_for_one`
    supervision, lexical child sends, restart modes, stopped-child send outcomes,
    and restart observability.
-67. `local_supervision_inactive_crashed_send_outcome.str` for source-visible
+68. `local_supervision_inactive_crashed_send_outcome.str` for source-visible
    `Err(Crashed(message))` when an inactive temporary supervised child failed
    before the send was accepted.
 

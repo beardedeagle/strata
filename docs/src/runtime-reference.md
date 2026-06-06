@@ -262,7 +262,7 @@ Current process-reference boundaries:
 | `send worker Ping;` | Supported for a process reference spawned earlier in the same transition. Lowering emits a process-reference table ID. |
 | `enum WorkerMsg { Work(ProcessRef<Sink>) }` | Supported only as a direct message payload type. |
 | `send worker Work(sink);` and `send reply_to Done;` | Supported for direct process-reference payload forwarding. Mantle routes by checked target process ID and runtime process ID. |
-| Multiple `ProcessRef<Worker>` bindings to one process definition | Supported. Each spawn creates a separate runtime process instance. |
+| Multiple `ProcessRef<Worker>` bindings to one process definition | Supported. Each spawn creates a separate runtime process instance; transported refs stay bound to their runtime PID and never retarget to another instance. |
 | Process references directly in record fields or collection element/key/value types | Rejected. Process references are runtime authority, not general immutable data values. |
 | Process references nested inside record, enum, list, map, or next-state payload templates | Rejected. A process reference must be the direct payload of a message that declares `ProcessRef<T>`. |
 | Message enums that carry direct `ProcessRef<T>` payloads as pure source values | Rejected. They are message authority surfaces, not source-local computation values. |
@@ -702,7 +702,7 @@ These conditions branch on a typed built-in variant pattern. They do not add
 structural equality for preserved message payloads, and they do not compare
 process-reference identities from `Ok(process_ref)` spawn outcomes.
 
-`examples/effect_outcome_mailbox_full.str`, `examples/effect_outcome_stopped_target.str`, and `examples/local_supervision_inactive_crashed_send_outcome.str` exercise source-to-runtime pre-acceptance send failure outcomes; the stopped-target gate sends through a concrete process reference after normal termination and observes `Err(Stopped(message))`, while the crashed-child gate observes `Err(Crashed(message))` without replaying the consumed crash message. The denied-, exhausted-, and backend-unavailable spawn examples check/build the same typed local spawn outcome shape, then run Mantle with denied admission, an exhausted process limit, or a disabled local spawn backend. Each rejected spawn outcome records typed trace evidence and admits no child process.
+`examples/effect_outcome_mailbox_full.str`, `examples/effect_outcome_stopped_target.str`, `examples/process_ref_stale_lifecycle.str`, and `examples/local_supervision_inactive_crashed_send_outcome.str` exercise source-to-runtime pre-acceptance send failure outcomes; the stale lifecycle gate keeps a newer same-definition worker running while a transported old PID returns `Err(Stopped(message))` instead of retargeting. The denied-, exhausted-, and backend-unavailable spawn examples check/build the same typed local spawn outcome shape, then run Mantle with denied admission, an exhausted process limit, or a disabled local spawn backend. Each rejected spawn outcome records typed trace evidence and admits no child process.
 
 Current pattern-matching closure boundaries:
 

@@ -41,6 +41,122 @@ fn actor_reply_checks_builds_and_runs_on_mantle() {
 }
 
 #[test]
+fn process_ref_stale_lifecycle_does_not_retarget_to_new_worker_pid() {
+    let gate = GateHarness::new();
+    let stem = "process_ref_stale_lifecycle";
+    let artifact_path = "target/strata/process_ref_stale_lifecycle.mta";
+    gate.remove_trace(stem);
+    let run = gate.check_build_run("examples/process_ref_stale_lifecycle.str", artifact_path);
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("mantle: spawned Worker pid=2"));
+    assert!(stdout.contains("mantle: spawned Worker pid=3"));
+    assert!(stdout.contains("stale ref stopped"));
+    assert!(stdout.contains("mantle: process Worker remains running"));
+    assert!(!stdout.contains("unexpected stale ref outcome"));
+    assert!(!stdout.contains("live worker should not receive stale send"));
+
+    let artifact = gate.read_artifact(artifact_path);
+    let worker_process_id = artifact_process_id(&artifact, "Worker");
+    let worker_ref_type = process_ref_type_id(&artifact, worker_process_id);
+    let work_message = message_id(artifact_process(&artifact, "Worker"), "Work");
+    let sender = artifact_process(&artifact, "Sender");
+    assert!(
+        sender.transitions.iter().any(|transition| {
+            transition.actions.iter().any(|action| {
+                matches!(
+                    action,
+                    ArtifactAction::SendOutcome {
+                        target: ArtifactSendTarget::ReceivedPayload { ty, target_process },
+                        message,
+                        ..
+                    } if *ty == worker_ref_type
+                        && *target_process == worker_process_id
+                        && *message == work_message
+                )
+            })
+        }),
+        "Sender must lower direct ProcessRef payload sends to received-payload IDs"
+    );
+    let encoded = artifact.encode();
+    assert!(
+        !encoded.contains("target_process=Worker")
+            && !encoded.contains("target_payload_type_id=ProcessRef"),
+        "stale ProcessRef routing must not lower source names or type spellings as dispatch data"
+    );
+
+    let trace = gate.read_trace(stem);
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"message_accepted""#,
+            r#""pid":4"#,
+            r#""process":"Sender""#,
+            r#""message":"Attempt""#,
+            &format!(r#""payload_type_id":{}"#, worker_ref_type.as_u32()),
+            &format!(r#""payload_process_id":{}"#, worker_process_id.as_u32()),
+            r#""payload_pid":2"#,
+            r#""sender_pid":1"#,
+        ],
+    );
+    let new_worker_spawned = trace_line_index_with_fields(
+        &trace,
+        &[
+            r#""event":"process_spawned""#,
+            r#""pid":3"#,
+            &format!(r#""process_id":{}"#, worker_process_id.as_u32()),
+            r#""process":"Worker""#,
+        ],
+    );
+    let stale_worker_stopped = trace_line_index_with_fields(
+        &trace,
+        &[
+            r#""event":"process_stopped""#,
+            r#""pid":2"#,
+            &format!(r#""process_id":{}"#, worker_process_id.as_u32()),
+            r#""process":"Worker""#,
+        ],
+    );
+    let stale_send_outcome = trace_line_index_with_fields(
+        &trace,
+        &[
+            r#""event":"effect_outcome_bound""#,
+            r#""pid":4"#,
+            r#""process":"Sender""#,
+            r#""action":"send""#,
+            &format!(r#""target_process_id":{}"#, worker_process_id.as_u32()),
+            &format!(r#""message_id":{}"#, work_message.as_u32()),
+            r#""outcome_result":"stopped""#,
+        ],
+    );
+    assert!(
+        stale_worker_stopped < stale_send_outcome,
+        "stale send outcome must be bound after the referenced worker stopped"
+    );
+    assert!(
+        new_worker_spawned < stale_send_outcome,
+        "stale send outcome must be bound after a newer same-definition worker exists"
+    );
+    assert_trace_event(
+        &trace,
+        &[
+            r#""event":"state_updated""#,
+            r#""pid":4"#,
+            r#""to":"SenderState{sent:Err(Stopped(Work))}""#,
+        ],
+    );
+    assert!(
+        !trace.lines().any(|line| {
+            line.contains(r#""event":"message_accepted""#)
+                && line.contains(r#""pid":3"#)
+                && line.contains(r#""process":"Worker""#)
+                && line.contains(r#""message":"Work""#)
+        }),
+        "stale ProcessRef send must not retarget Work to the newer Worker pid=3"
+    );
+}
+
+#[test]
 fn actor_emit_spawn_send_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run(
