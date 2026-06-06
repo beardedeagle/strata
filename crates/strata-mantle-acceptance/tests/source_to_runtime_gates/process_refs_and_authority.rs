@@ -104,7 +104,7 @@ fn process_ref_stale_lifecycle_does_not_retarget_to_new_worker_pid() {
         &[
             r#""event":"process_spawned""#,
             r#""pid":3"#,
-            r#""process_id":1"#,
+            &format!(r#""process_id":{}"#, worker_process_id.as_u32()),
             r#""process":"Worker""#,
         ],
     );
@@ -113,7 +113,7 @@ fn process_ref_stale_lifecycle_does_not_retarget_to_new_worker_pid() {
         &[
             r#""event":"process_stopped""#,
             r#""pid":2"#,
-            r#""process_id":1"#,
+            &format!(r#""process_id":{}"#, worker_process_id.as_u32()),
             r#""process":"Worker""#,
         ],
     );
