@@ -143,7 +143,6 @@ strata-authority-effects-admit artifact format="text":
 strata-authority-effects-policy-build authority_effect_artifact output:
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy build "{{authority_effect_artifact}}" --output "{{output}}"
 
-
 strata-authority-effects-policy-admit policy_artifact authority_effect_artifact format="text":
     cargo +{{stable_toolchain}} run -p strata --bin strata -- authority-effects policy admit "{{policy_artifact}}" "{{authority_effect_artifact}}" --format "{{format}}"
 
@@ -181,6 +180,8 @@ run-example name:
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check "examples/{{name}}.str"
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build "examples/{{name}}.str"
     cargo +{{stable_toolchain}} run -p mantle-runtime --bin mantle -- run "target/strata/{{name}}.mta"
+process-ref-lifecycle-gates: build
+    cargo +{{stable_toolchain}} test -p strata-mantle-acceptance --test source_to_runtime_gates process_ref_stale_lifecycle_does_not_retarget_to_new_worker_pid
 composition-artifact-gates: build
     cargo +{{stable_toolchain}} run -p strata --bin strata -- check examples/component_composition_main.str
     cargo +{{stable_toolchain}} run -p strata --bin strata -- build examples/component_composition_main.str
@@ -292,7 +293,7 @@ toolchain-policy-check:
 
     echo "Toolchain policy OK: standard gates use stable and nightly gates are explicit."
 
-source-to-runtime-gates: source-to-runtime-success-gates source-to-runtime-failure-gates authority-effect-artifact-gates
+source-to-runtime-gates: source-to-runtime-success-gates source-to-runtime-failure-gates authority-effect-artifact-gates process-ref-lifecycle-gates
 
 source-to-runtime-success-gates: build
     #!/usr/bin/env bash
@@ -356,6 +357,7 @@ source-to-runtime-success-gates: build
         actor_payload_state_match_wildcard
         nested_patterns
         actor_reply
+        process_ref_stale_lifecycle
         actor_emit_spawn_send
         effect_outcomes
         effect_outcome_mailbox_full
@@ -396,9 +398,7 @@ source-to-runtime-success-gates: build
 source-to-runtime-failure-gates: build
     #!/usr/bin/env bash
     set -euo pipefail
-
     cargo_run=(cargo +{{stable_toolchain}} run)
-
     expect_check_failure() {
         local source="$1"
         local expected="$2"

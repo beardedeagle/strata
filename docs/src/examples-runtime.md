@@ -177,8 +177,8 @@ Key source ideas:
   names, for runtime meaning.
 - `effect_outcome_mailbox_full`, `effect_outcome_stopped_target`, and
   `effect_outcome_crashed_target` cover pre-acceptance capacity failure,
-  normally stopped targets, and the current fail-closed
-  source-created panic boundary.
+  normally stopped targets, and source-created panic fail-closed behavior.
+- `process_ref_stale_lifecycle` proves a transported old runtime PID returns `Err(Stopped(message))` without retargeting to a newer same-definition worker.
 - `effect_outcome_spawn_denied` covers denied admitted spawn authority before a
   `Worker` instance is accepted.
 - `effect_outcome_spawn_exhausted` covers process-capacity exhaustion before a
