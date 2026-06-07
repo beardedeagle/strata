@@ -51,9 +51,13 @@ flowchart LR
     Deliver["deliver entry message"]
     Dispatch["dispatch by message ID"]
     Execute["execute typed actions"]
-    Trace["write JSONL trace"]
+    Host["explicit runtime host"]
+    Trace["JSONL trace sink"]
+    Output["program output sink"]
 
-    Artifact --> Decode --> Validate --> Load --> Plan --> Spawn --> Deliver --> Dispatch --> Execute --> Trace
+    Artifact --> Decode --> Validate --> Load --> Plan --> Spawn --> Deliver --> Dispatch --> Execute --> Host
+    Host --> Trace
+    Host --> Output
 ```
 
 Mantle must validate artifacts before execution. Runtime dispatch uses loaded
@@ -64,7 +68,10 @@ executable plan is an internal Mantle structure built from the admitted
 template references but is not serialized bytecode and is not emitted by Strata
 lowering. Strata still emits typed `.mta` value templates at the boundary;
 Mantle owns only the internal executable template program derived from admitted
-artifact data.
+artifact data. Runtime execution emits events, program output, monotonic time
+queries, and final flushes through an explicit `RuntimeHost`; the CLI is a
+filesystem/stdout host adapter over that admitted core, while in-memory callers
+use the same runtime path with in-memory sinks.
 
 ## Important Boundaries
 
@@ -88,7 +95,7 @@ Mantle owns:
 - admitted runtime tables;
 - process instances and mailboxes;
 - action execution;
-- runtime traces.
+- host-mediated runtime events, output, clocks, and traces.
 
 Workspace source-to-runtime acceptance gates own the cross-boundary proof that a
 Strata program can be checked, lowered, admitted by Mantle, executed, and

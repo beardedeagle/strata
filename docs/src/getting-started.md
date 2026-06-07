@@ -97,10 +97,10 @@ just mantle-run target/strata/hello.mta
 Expected output includes:
 
 ```text
+hello from Strata
 mantle: loaded target/strata/hello.mta
 mantle: spawned Main pid=1
 mantle: delivered Start to Main
-hello from Strata
 mantle: stopped Main normally
 mantle: trace target/strata/hello.observability.jsonl
 ```

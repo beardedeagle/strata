@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use std::io::{self, Write};
 use std::path::Path;
 
 use mantle_artifact::{MantleArtifact, Result, read_artifact};
@@ -44,7 +45,7 @@ pub use run::{run_artifact_with_host, run_artifact_with_host_and_binding_texts};
 
 pub(crate) use authority_effect_binding::{RuntimeAuthorityEffectBinding, RuntimeAuthorityPolicy};
 pub(crate) use composition_binding::RuntimeCompositionBinding;
-use host::{JsonlTraceHost, prepare_trace_file};
+use host::{FilesystemRuntimeHost, prepare_trace_file};
 use program::LoadedProgram;
 use run::{run_loaded_program_with_bindings, validate_authority_binding_limits};
 
@@ -96,6 +97,22 @@ pub fn run_artifact_path_with_limits_and_bindings(
     composition_binding_path: Option<&Path>,
     authority_effect_binding_path: Option<&Path>,
 ) -> Result<RunReport> {
+    run_artifact_path_with_limits_and_bindings_and_output(
+        path,
+        limits,
+        composition_binding_path,
+        authority_effect_binding_path,
+        io::sink(),
+    )
+}
+
+pub(crate) fn run_artifact_path_with_limits_and_bindings_and_output<W: Write>(
+    path: &Path,
+    limits: RunLimits,
+    composition_binding_path: Option<&Path>,
+    authority_effect_binding_path: Option<&Path>,
+    output: W,
+) -> Result<RunReport> {
     let artifact = read_artifact(path)?;
     let composition_binding = composition_binding_path
         .map(|binding_path| RuntimeCompositionBinding::read_path(binding_path, &artifact))
@@ -103,12 +120,13 @@ pub fn run_artifact_path_with_limits_and_bindings(
     let authority_effect_binding = authority_effect_binding_path
         .map(|binding_path| RuntimeAuthorityEffectBinding::read_path(binding_path, &artifact))
         .transpose()?;
-    run_artifact_with_limits_and_bindings(
+    run_artifact_with_limits_and_bindings_and_output(
         path,
         &artifact,
         limits,
         composition_binding,
         authority_effect_binding,
+        output,
     )
 }
 
@@ -140,6 +158,24 @@ pub(crate) fn run_artifact_with_limits_and_bindings(
     composition_binding: Option<RuntimeCompositionBinding>,
     authority_effect_binding: Option<RuntimeAuthorityEffectBinding>,
 ) -> Result<RunReport> {
+    run_artifact_with_limits_and_bindings_and_output(
+        path,
+        artifact,
+        limits,
+        composition_binding,
+        authority_effect_binding,
+        io::sink(),
+    )
+}
+
+pub(crate) fn run_artifact_with_limits_and_bindings_and_output<W: Write>(
+    path: &Path,
+    artifact: &MantleArtifact,
+    limits: RunLimits,
+    composition_binding: Option<RuntimeCompositionBinding>,
+    authority_effect_binding: Option<RuntimeAuthorityEffectBinding>,
+    output: W,
+) -> Result<RunReport> {
     validate_authority_binding_limits(limits, authority_effect_binding.is_some())?;
     let authority_policy = authority_effect_binding
         .map(RuntimeAuthorityEffectBinding::into_policy)
@@ -148,7 +184,7 @@ pub(crate) fn run_artifact_with_limits_and_bindings(
     let program = LoadedProgram::from_artifact(artifact)?;
     let trace_path = path.with_extension("observability.jsonl");
     let trace_file = prepare_trace_file(&trace_path)?;
-    let mut host = JsonlTraceHost::new(trace_file, limits.max_trace_bytes);
+    let mut host = FilesystemRuntimeHost::new(trace_file, limits.max_trace_bytes, output);
     let runtime_report = run_loaded_program_with_bindings(
         &program,
         &mut host,

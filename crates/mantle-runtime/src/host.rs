@@ -108,6 +108,42 @@ impl RuntimeHost for JsonlTraceHost {
     }
 }
 
+pub(crate) struct FilesystemRuntimeHost<W: Write> {
+    trace: JsonlTraceHost,
+    stdout: W,
+}
+
+impl<W: Write> FilesystemRuntimeHost<W> {
+    pub(crate) fn new(trace_file: File, max_trace_bytes: usize, stdout: W) -> Self {
+        Self {
+            trace: JsonlTraceHost::new(trace_file, max_trace_bytes),
+            stdout,
+        }
+    }
+}
+
+impl<W: Write> RuntimeHost for FilesystemRuntimeHost<W> {
+    fn record_event(&mut self, event: RuntimeEventRecord) -> Result<()> {
+        self.trace.record_event(event)
+    }
+
+    fn emit_stdout(&mut self, text: &str) -> Result<()> {
+        self.stdout.write_all(text.as_bytes())?;
+        self.stdout.write_all(b"\n")?;
+        Ok(())
+    }
+
+    fn monotonic_ms(&mut self) -> Result<u64> {
+        self.trace.monotonic_ms()
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.trace.flush()?;
+        self.stdout.flush()?;
+        Ok(())
+    }
+}
+
 pub(crate) fn prepare_trace_file(path: &Path) -> Result<File> {
     reject_symlink_path_components(path)?;
     reject_non_regular_trace_path_before_open(path)?;

@@ -25,6 +25,11 @@ Windows cfg-check coverage includes the Windows source-loading, artifact IO,
 and trace path implementations that use reparse-point rejection and stable
 opened-file metadata checks.
 
+Runtime host/sink boundary changes must prove both the in-memory host and the
+CLI filesystem/stdout host adapter. Focused coverage should include trace sink,
+program-output sink, and flush failure paths, plus a CLI assertion that mandatory
+host failures return before any successful run report is printed.
+
 Run the source-to-runtime gates after changes that affect syntax,
 checking, lowering, artifacts, runtime behavior, diagnostics, examples, or
 acceptance criteria.
