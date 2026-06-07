@@ -38,14 +38,6 @@ source-language metadata, or invalid loaded template references fail before
 as opaque artifact metadata and does not dispatch or execute templates on source
 names.
 
-Mantle execution is host-boundary explicit. After artifact admission and loaded
-runtime-table construction, the runtime core records events, program stdout,
-monotonic clock reads, and final flushes through a `RuntimeHost`. The `mantle
-run` CLI is the filesystem/stdout host adapter that writes
-`*.observability.jsonl` and program output; in-memory execution uses the same
-admitted runtime core with in-memory sinks. Mandatory host sink setup, write, or
-flush failures fail closed before the CLI prints a successful run report.
-
 ## Admitted Authority/Effect Binding
 
 Authority/effect facts cross through `.authority-effect.json`; typed policy

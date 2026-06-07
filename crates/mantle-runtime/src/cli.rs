@@ -1,5 +1,4 @@
 use std::env;
-use std::io::{self, Write};
 use std::path::PathBuf;
 
 use mantle_artifact::{
@@ -8,9 +7,9 @@ use mantle_artifact::{
 
 use crate::feature_declaration::validate_artifact_runtime_requirements;
 use crate::{
-    LocalSpawnBackend, ProcessStatus, RunLimits, RunReport, RuntimeFeatureDeclarationFormat,
-    SpawnAuthorityPolicy, render_runtime_feature_declaration,
-    run_artifact_path_with_limits_and_bindings_and_output,
+    LocalSpawnBackend, ProcessStatus, RunLimits, RuntimeFeatureDeclarationFormat,
+    SpawnAuthorityPolicy, render_runtime_feature_declaration, run_artifact_path_with_limits,
+    run_artifact_path_with_limits_and_bindings,
 };
 
 const MANTLE_RUN_USAGE: &str = "mantle run <artifact.mta> [--composition-binding <path.json>] [--authority-effect-binding <path.json>] [--deny-spawn-authority] [--disable-local-spawn-backend] [--max-runtime-processes N]";
@@ -19,30 +18,52 @@ pub fn mantle_main<I>(args: I) -> Result<()>
 where
     I: IntoIterator<Item = String>,
 {
-    let stdout = io::stdout();
-    let mut output = stdout.lock();
-    mantle_main_with_output(args, &mut output)
-}
-
-pub(crate) fn mantle_main_with_output<I, W>(args: I, output: &mut W) -> Result<()>
-where
-    I: IntoIterator<Item = String>,
-    W: Write,
-{
     let mut args = args.into_iter();
     let _program = args.next();
     match args.next().as_deref() {
         Some("run") => {
             let path = required_path(args.next(), MANTLE_RUN_USAGE)?;
             let run_args = run_command_args_from_args(args)?;
-            let report = run_artifact_path_with_limits_and_bindings_and_output(
-                &path,
-                run_args.limits,
-                run_args.composition_binding_path.as_deref(),
-                run_args.authority_effect_binding_path.as_deref(),
-                &mut *output,
-            )?;
-            write_run_report(output, &report)
+            let report = if run_args.composition_binding_path.is_some()
+                || run_args.authority_effect_binding_path.is_some()
+            {
+                run_artifact_path_with_limits_and_bindings(
+                    &path,
+                    run_args.limits,
+                    run_args.composition_binding_path.as_deref(),
+                    run_args.authority_effect_binding_path.as_deref(),
+                )?
+            } else {
+                run_artifact_path_with_limits(&path, run_args.limits)?
+            };
+            println!("mantle: loaded {}", report.artifact_path.display());
+            for spawned in &report.spawned_processes {
+                println!("mantle: spawned {} pid={}", spawned.process, spawned.pid);
+            }
+            for delivery in &report.delivered_messages {
+                println!(
+                    "mantle: delivered {} to {}",
+                    delivery.message, delivery.process
+                );
+            }
+            for output in &report.emitted_outputs {
+                println!("{output}");
+            }
+            for process in &report.processes {
+                match process.status {
+                    ProcessStatus::Running => {
+                        println!("mantle: process {} remains running", process.process);
+                    }
+                    ProcessStatus::Stopped => {
+                        println!("mantle: stopped {} normally", process.process);
+                    }
+                    ProcessStatus::Failed => {
+                        println!("mantle: failed {} abnormally", process.process);
+                    }
+                }
+            }
+            println!("mantle: trace {}", report.trace_path.display());
+            Ok(())
         }
         Some("inspect-authority") => {
             let path = required_path(
@@ -56,7 +77,8 @@ where
             let artifact = read_artifact(&path)?;
             let summary =
                 render_artifact_authority_summary(&artifact, &path.display().to_string(), format)?;
-            write_summary(output, &summary)
+            print_summary(&summary);
+            Ok(())
         }
         Some("feature-declaration") => {
             let format = runtime_feature_declaration_format_from_args(
@@ -64,7 +86,8 @@ where
                 "mantle feature-declaration [--format text|json]",
             )?;
             let declaration = render_runtime_feature_declaration(format);
-            write_summary(output, &declaration)
+            print_summary(&declaration);
+            Ok(())
         }
         Some("admit") => {
             let path = required_path(
@@ -79,52 +102,19 @@ where
             validate_artifact_runtime_requirements(&artifact)?;
             let admission =
                 render_runtime_admission(&artifact, &path.display().to_string(), format);
-            write_summary(output, &admission)
+            print_summary(&admission);
+            Ok(())
         }
-        Some("--help") | Some("-h") => write_mantle_usage(output),
+        Some("--help") | Some("-h") => {
+            print_mantle_usage();
+            Ok(())
+        }
         Some(other) => Err(Error::new(format!("unknown mantle command {other:?}"))),
         None => {
-            write_mantle_usage(output)?;
+            print_mantle_usage();
             Err(Error::new("missing mantle command"))
         }
     }
-}
-
-fn write_run_report(output: &mut impl Write, report: &RunReport) -> Result<()> {
-    writeln!(output, "mantle: loaded {}", report.artifact_path.display())?;
-    for spawned in &report.spawned_processes {
-        writeln!(
-            output,
-            "mantle: spawned {} pid={}",
-            spawned.process, spawned.pid
-        )?;
-    }
-    for delivery in &report.delivered_messages {
-        writeln!(
-            output,
-            "mantle: delivered {} to {}",
-            delivery.message, delivery.process
-        )?;
-    }
-    for process in &report.processes {
-        match process.status {
-            ProcessStatus::Running => {
-                writeln!(
-                    output,
-                    "mantle: process {} remains running",
-                    process.process
-                )?;
-            }
-            ProcessStatus::Stopped => {
-                writeln!(output, "mantle: stopped {} normally", process.process)?;
-            }
-            ProcessStatus::Failed => {
-                writeln!(output, "mantle: failed {} abnormally", process.process)?;
-            }
-        }
-    }
-    writeln!(output, "mantle: trace {}", report.trace_path.display())?;
-    Ok(())
 }
 
 fn required_path(value: Option<String>, usage: &str) -> Result<PathBuf> {
@@ -433,24 +423,19 @@ fn push_json_control_escape(out: &mut String, ch: char) {
     out.push(char::from(HEX[value & 0x0f]));
 }
 
-fn write_summary(output: &mut impl Write, summary: &str) -> Result<()> {
-    write!(output, "{summary}")?;
+fn print_summary(summary: &str) {
+    print!("{summary}");
     if !summary.ends_with('\n') {
-        writeln!(output)?;
+        println!();
     }
-    Ok(())
 }
 
-fn write_mantle_usage(output: &mut impl Write) -> Result<()> {
-    writeln!(output, "usage:")?;
-    writeln!(output, "  {MANTLE_RUN_USAGE}")?;
-    writeln!(
-        output,
-        "  mantle inspect-authority <path.mta> [--format text|json]"
-    )?;
-    writeln!(output, "  mantle feature-declaration [--format text|json]")?;
-    writeln!(output, "  mantle admit <path.mta> [--format text|json]")?;
-    Ok(())
+fn print_mantle_usage() {
+    println!("usage:");
+    println!("  {MANTLE_RUN_USAGE}");
+    println!("  mantle inspect-authority <path.mta> [--format text|json]");
+    println!("  mantle feature-declaration [--format text|json]");
+    println!("  mantle admit <path.mta> [--format text|json]");
 }
 
 pub fn run_mantle_from_env() -> Result<()> {
