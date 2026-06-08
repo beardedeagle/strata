@@ -43,9 +43,10 @@ Target requirements are checked/lowered facts embedded in the artifact. Strata
 emits `target_requirements.source_language` and a sorted set of canonical
 runtime feature IDs such as `bounded_mailbox`, `local_execution`, `local_send`,
 `local_spawn`, `emit_effect`, and `typed_boundary_tables`. Mantle compares those
-requirements with its runtime feature declaration before `ArtifactLoaded` or
-executing runtime side effects; an unsupported feature fails closed with a
-diagnostic such as `target runtime feature remote_spawn is not supported`.
+requirements with its `mantle.local_only.v1` runtime target profile before
+`ArtifactLoaded` or executing runtime side effects; an unsupported feature fails
+closed with a diagnostic such as `target runtime feature remote_spawn is not
+supported`.
 
 ## Admission
 
@@ -76,17 +77,17 @@ execution, the artifact decoder and validator check:
 Decode-time bounds must happen before allocation when counts come from the
 artifact body.
 
-Mantle also publishes a typed `mantle.feature_declaration.v5` runtime feature
+Mantle also publishes a typed `mantle.feature_declaration.v6` runtime feature
 declaration. The current declaration names the artifact format and schema
 version it admits, its opaque source-language metadata policy, local runtime
-feature support, non-progress containment class, message-count mailbox model,
+feature support, target-profile identity, host/network/transport/cluster
+authority policy, non-progress containment class, message-count mailbox model,
 conservative message-observation support, allocation model, component/spawn
-observability support, validity-window defaults, backend identity, and
-explicit implementation limits such as remote send, remote spawn, and
-distributed transport. Admission derives the minimum runtime feature set
-required by the decoded `.mta` tables and requires the artifact's typed
-`target_requirements` block to cover that set before `ArtifactLoaded` or any
-runtime side effect.
+observability support, validity-window defaults, backend identity, and explicit
+implementation limits such as remote send, remote spawn, and distributed
+transport. Admission derives the minimum runtime feature set required by the
+decoded `.mta` tables and requires the artifact's typed `target_requirements`
+block to cover that set before `ArtifactLoaded` or any runtime side effect.
 Unsupported schema versions, unsupported required features, underdeclared
 requirements, unsorted or duplicate requirement entries, mismatched
 source-language metadata, and malformed requirement fields fail closed.

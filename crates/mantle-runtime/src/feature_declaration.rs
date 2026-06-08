@@ -1,10 +1,12 @@
 use std::fmt::Write as _;
 
 use mantle_artifact::{
-    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, Error, MantleArtifact, Result, RuntimeFeature,
+    ARTIFACT_FORMAT, ARTIFACT_SCHEMA_VERSION, MantleArtifact, Result, RuntimeFeature,
 };
 
-pub const RUNTIME_FEATURE_DECLARATION_SCHEMA_VERSION: &str = "mantle.feature_declaration.v5";
+use crate::target_profile::{LOCAL_RUNTIME_TARGET_PROFILE, UnsupportedRuntimeBoundary};
+
+pub const RUNTIME_FEATURE_DECLARATION_SCHEMA_VERSION: &str = "mantle.feature_declaration.v6";
 const SOURCE_LANGUAGE_SUPPORT: SourceLanguageSupport = SourceLanguageSupport::ArtifactMetadata;
 const MANTLE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const STRATA_VERSION: &str = "0.16.0";
@@ -22,29 +24,6 @@ const VALIDITY_CROSS_CLUSTER_DEFAULT_MS: u64 = 3_600_000;
 const VALIDITY_REPOSITORY_AUTHORITY_DEFAULT_MS: u64 = 604_800_000;
 const CONFORMANCE_CORPUS_VERSION: &str = "bounded_local_current";
 const BACKEND_IDENTITY: &str = "mantle-runtime-rust";
-
-const SUPPORTED_RUNTIME_FEATURES: &[RuntimeFeature] = &[
-    RuntimeFeature::BoundedMailbox,
-    RuntimeFeature::ComponentCompositionMetadata,
-    RuntimeFeature::EmitEffect,
-    RuntimeFeature::JsonlTrace,
-    RuntimeFeature::LocalExecution,
-    RuntimeFeature::LocalSend,
-    RuntimeFeature::LocalSpawn,
-    RuntimeFeature::LocalSupervision,
-    RuntimeFeature::RuntimeBranching,
-    RuntimeFeature::RuntimeForEach,
-    RuntimeFeature::ScalarValueTemplates,
-    RuntimeFeature::TypedBoundaryTables,
-    RuntimeFeature::TypedEffectOutcomes,
-    RuntimeFeature::TypedValueTemplates,
-];
-
-const IMPLEMENTATION_LIMITS: &[RuntimeFeature] = &[
-    RuntimeFeature::DistributedTransport,
-    RuntimeFeature::RemoteSend,
-    RuntimeFeature::RemoteSpawn,
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SourceLanguageSupport {
@@ -78,18 +57,11 @@ pub(crate) fn validate_artifact_runtime_requirements(artifact: &MantleArtifact) 
 }
 
 pub(crate) fn validate_runtime_features_supported(features: &[RuntimeFeature]) -> Result<()> {
-    for feature in features {
-        if !SUPPORTED_RUNTIME_FEATURES.contains(feature) {
-            return Err(Error::new(format!(
-                "target runtime feature {} is not supported by this Mantle runtime",
-                feature.as_str()
-            )));
-        }
-    }
-    Ok(())
+    LOCAL_RUNTIME_TARGET_PROFILE.validate_features(features)
 }
 
 fn render_text() -> String {
+    let target_profile = LOCAL_RUNTIME_TARGET_PROFILE;
     let mut out = String::new();
     out.push_str("mantle runtime feature declaration\n");
     writeln!(
@@ -105,8 +77,47 @@ fn render_text() -> String {
     out.push_str("source_language_support: ");
     out.push_str(SOURCE_LANGUAGE_SUPPORT.as_str());
     out.push('\n');
+    writeln!(out, "target_profile: {}", target_profile.id)
+        .expect("writing to a String cannot fail");
+    writeln!(out, "runtime_scope: {}", target_profile.execution_scope)
+        .expect("writing to a String cannot fail");
+    writeln!(out, "host_authority: {}", target_profile.host_authority)
+        .expect("writing to a String cannot fail");
+    writeln!(
+        out,
+        "network_authority: {}",
+        target_profile.network_authority
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(
+        out,
+        "transport_authority: {}",
+        target_profile.transport_authority
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(
+        out,
+        "cluster_membership: {}",
+        target_profile.cluster_membership
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(
+        out,
+        "remote_operations.policy: {}",
+        target_profile.remote_operation_policy
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(
+        out,
+        "remote_operations.fail_stage: {}",
+        target_profile.unsupported_fail_stage
+    )
+    .expect("writing to a String cannot fail");
     out.push_str("optional_strata_profiles: []\n");
-    out.push_str("mantle_profiles: []\n");
+    out.push_str("mantle_profiles:\n");
+    out.push_str("  - ");
+    out.push_str(target_profile.id);
+    out.push('\n');
     writeln!(out, "non_progress_containment: {NON_PROGRESS_CONTAINMENT}")
         .expect("writing to a String cannot fail");
     writeln!(
@@ -191,21 +202,28 @@ fn render_text() -> String {
     .expect("writing to a String cannot fail");
     writeln!(out, "backend_identity: {BACKEND_IDENTITY}").expect("writing to a String cannot fail");
     out.push_str("supported_runtime_features:\n");
-    for feature in SUPPORTED_RUNTIME_FEATURES {
+    for feature in target_profile.supported_features() {
         out.push_str("  - ");
         out.push_str(feature.as_str());
         out.push('\n');
     }
     out.push_str("implementation_limits:\n");
-    for feature in IMPLEMENTATION_LIMITS {
+    for boundary in target_profile.unsupported_boundaries() {
         out.push_str("  - unsupported ");
-        out.push_str(feature.as_str());
+        out.push_str(boundary.feature.as_str());
+        out.push_str(" boundary=");
+        out.push_str(boundary.boundary);
+        out.push_str(" required_authority=");
+        out.push_str(boundary.required_authority);
+        out.push_str(" fail_stage=");
+        out.push_str(boundary.fail_stage);
         out.push('\n');
     }
     out
 }
 
 fn render_json() -> String {
+    let target_profile = LOCAL_RUNTIME_TARGET_PROFILE;
     let mut out = String::new();
     out.push('{');
     push_json_field(
@@ -228,9 +246,45 @@ fn render_json() -> String {
         SOURCE_LANGUAGE_SUPPORT.as_str(),
     );
     out.push(',');
+    push_json_field(&mut out, "target_profile", target_profile.id);
+    out.push(',');
+    push_json_field(&mut out, "runtime_scope", target_profile.execution_scope);
+    out.push(',');
+    push_json_field(&mut out, "host_authority", target_profile.host_authority);
+    out.push(',');
+    push_json_field(
+        &mut out,
+        "network_authority",
+        target_profile.network_authority,
+    );
+    out.push(',');
+    push_json_field(
+        &mut out,
+        "transport_authority",
+        target_profile.transport_authority,
+    );
+    out.push(',');
+    push_json_field(
+        &mut out,
+        "cluster_membership",
+        target_profile.cluster_membership,
+    );
+    out.push(',');
+    push_json_field(
+        &mut out,
+        "remote_operations.policy",
+        target_profile.remote_operation_policy,
+    );
+    out.push(',');
+    push_json_field(
+        &mut out,
+        "remote_operations.fail_stage",
+        target_profile.unsupported_fail_stage,
+    );
+    out.push(',');
     push_json_string_array_field(&mut out, "optional_strata_profiles", &[]);
     out.push(',');
-    push_json_string_array_field(&mut out, "mantle_profiles", &[]);
+    push_json_string_array_field(&mut out, "mantle_profiles", &[target_profile.id]);
     out.push(',');
     push_json_field(
         &mut out,
@@ -393,10 +447,16 @@ fn render_json() -> String {
     push_json_runtime_feature_array_field(
         &mut out,
         "supported_runtime_features",
-        SUPPORTED_RUNTIME_FEATURES,
+        target_profile.supported_features(),
     );
     out.push(',');
-    push_json_runtime_feature_array_field(&mut out, "implementation_limits", IMPLEMENTATION_LIMITS);
+    push_json_runtime_feature_array_field(
+        &mut out,
+        "implementation_limits",
+        target_profile.implementation_limits(),
+    );
+    out.push(',');
+    push_json_implementation_limit_boundaries(&mut out, target_profile.unsupported_boundaries());
     out.push('}');
     out
 }
@@ -449,6 +509,29 @@ fn push_json_runtime_feature_array_field(out: &mut String, key: &str, values: &[
     out.push(']');
 }
 
+fn push_json_implementation_limit_boundaries(
+    out: &mut String,
+    boundaries: &[UnsupportedRuntimeBoundary],
+) {
+    push_json_string(out, "implementation_limit_boundaries");
+    out.push_str(":[");
+    for (index, boundary) in boundaries.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        push_json_field(out, "feature", boundary.feature.as_str());
+        out.push(',');
+        push_json_field(out, "boundary", boundary.boundary);
+        out.push(',');
+        push_json_field(out, "required_authority", boundary.required_authority);
+        out.push(',');
+        push_json_field(out, "fail_stage", boundary.fail_stage);
+        out.push('}');
+    }
+    out.push(']');
+}
+
 fn push_json_string(out: &mut String, value: &str) {
     out.push('"');
     for ch in value.chars() {
@@ -493,8 +576,15 @@ mod tests {
         assert!(declaration.contains("allocation.model: host_process_allocator"));
         assert!(declaration.contains("validity_window.defaults.member_none_max_ms"));
         assert!(declaration.contains("source_language_support: artifact_declared_metadata"));
+        assert!(declaration.contains("target_profile: mantle.local_only.v1"));
+        assert!(declaration.contains("mantle_profiles:\n  - mantle.local_only.v1"));
+        assert!(declaration.contains("runtime_scope: single_host_local_runtime"));
+        assert!(declaration.contains("network_authority: none"));
+        assert!(declaration.contains("remote_operations.policy: non_admitted"));
         assert!(declaration.contains("local_execution"));
         assert!(declaration.contains("typed_boundary_tables"));
+        assert!(declaration.contains("unsupported distributed_transport"));
+        assert!(declaration.contains("unsupported remote_send"));
         assert!(declaration.contains("unsupported remote_spawn"));
     }
 
@@ -503,10 +593,15 @@ mod tests {
         let declaration = render_runtime_feature_declaration(RuntimeFeatureDeclarationFormat::Json);
 
         assert!(declaration.starts_with("{\"declaration_schema_version\""));
-        assert!(declaration.contains("\"mantle.feature_declaration.v5\""));
+        assert!(declaration.contains("\"mantle.feature_declaration.v6\""));
         assert!(declaration.contains("\"artifact_format\":\"mantle-target-artifact\""));
         assert!(declaration.contains("\"strata_version\":\"0.16.0\""));
         assert!(declaration.contains("\"source_language_support\":\"artifact_declared_metadata\""));
+        assert!(declaration.contains("\"target_profile\":\"mantle.local_only.v1\""));
+        assert!(declaration.contains("\"mantle_profiles\":[\"mantle.local_only.v1\"]"));
+        assert!(declaration.contains("\"runtime_scope\":\"single_host_local_runtime\""));
+        assert!(declaration.contains("\"network_authority\":\"none\""));
+        assert!(declaration.contains("\"remote_operations.policy\":\"non_admitted\""));
         assert!(declaration.contains("\"non_progress_containment\":\"none\""));
         assert!(declaration.contains("\"mailbox.logical_capacity_model\":\"message_count\""));
         assert!(declaration.contains("\"mailbox.closed_outcome_supported\":true"));
@@ -517,6 +612,11 @@ mod tests {
         assert!(declaration.contains("\"spawn_observability.backend_unavailable_supported\":true"));
         assert!(declaration.contains("\"validity_window.defaults.member_none_max_ms\":900000"));
         assert!(declaration.contains("\"local_spawn\""));
+        assert!(declaration.contains(
+            "\"implementation_limits\":[\"distributed_transport\",\"remote_send\",\"remote_spawn\"]"
+        ));
+        assert!(declaration.contains("\"implementation_limit_boundaries\""));
+        assert!(declaration.contains("\"boundary\":\"remote_process_spawn\""));
         assert!(declaration.ends_with("]}"));
     }
 
@@ -562,7 +662,7 @@ mod tests {
 
     #[test]
     fn validation_rejects_unsupported_runtime_feature() {
-        for feature in IMPLEMENTATION_LIMITS {
+        for feature in LOCAL_RUNTIME_TARGET_PROFILE.implementation_limits() {
             let err = validate_runtime_features_supported(&[*feature])
                 .expect_err("implementation limit should fail closed before execution");
 

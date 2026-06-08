@@ -1,6 +1,101 @@
 use super::support::*;
 
 #[test]
+fn forged_remote_distributed_target_requirements_fail_before_runtime_admission() {
+    let gate = GateHarness::new();
+    let seed_artifact = "target/strata/hello.mta";
+    gate.check("examples/hello.str");
+    gate.build("examples/hello.str", seed_artifact);
+    let seed = gate.read_artifact(seed_artifact);
+
+    for (feature, feature_name, forged_artifact, trace_stem) in [
+        (
+            RuntimeFeature::DistributedTransport,
+            "distributed_transport",
+            "target/strata/hello_distributed_transport.mta",
+            "hello_distributed_transport",
+        ),
+        (
+            RuntimeFeature::RemoteSend,
+            "remote_send",
+            "target/strata/hello_remote_send.mta",
+            "hello_remote_send",
+        ),
+        (
+            RuntimeFeature::RemoteSpawn,
+            "remote_spawn",
+            "target/strata/hello_remote_spawn.mta",
+            "hello_remote_spawn",
+        ),
+    ] {
+        gate.remove_artifact(forged_artifact);
+        gate.remove_trace(trace_stem);
+        let mut artifact = seed.clone();
+        ensure_target_requirement(&mut artifact, feature);
+        gate.write_unvalidated_encoded_artifact(forged_artifact, &artifact.encode());
+
+        let expected = format!("target runtime feature {feature_name} is not supported");
+        let admission = gate.admit_failure(forged_artifact);
+        let admit_stderr = String::from_utf8_lossy(&admission.stderr);
+        assert!(
+            admit_stderr.contains(&expected),
+            "forged {feature_name} target requirement should fail admission: {admit_stderr}"
+        );
+
+        let run = gate.run_mantle_failure(forged_artifact);
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(
+            stderr.contains(&expected),
+            "forged {feature_name} target requirement should fail before runtime: {stderr}"
+        );
+        assert!(!stdout.contains("mantle: loaded"));
+        assert!(
+            !gate.trace_exists(trace_stem),
+            "forged {feature_name} target requirement must not create a runtime trace"
+        );
+    }
+}
+
+#[test]
+fn checked_strata_examples_stay_inside_local_runtime_target_profile() {
+    let gate = GateHarness::new();
+    let unsupported_features = ["distributed_transport", "remote_send", "remote_spawn"];
+    let sources = gate.top_level_entry_example_sources();
+    for representative in [
+        "examples/hello.str",
+        "examples/actor_ping.str",
+        "examples/component_composition_main.str",
+    ] {
+        assert!(
+            sources.iter().any(|source| source == representative),
+            "entry example scan should include {representative}: {sources:?}"
+        );
+    }
+
+    for source in sources {
+        let requirements = gate.target_requirements(&source, "json");
+        let requirements = String::from_utf8(requirements.stdout)
+            .expect("target requirements should render UTF-8 JSON");
+
+        assert!(
+            requirements.contains("\"source_language\":\"strata\""),
+            "{source} must keep Strata source language metadata: {requirements}"
+        );
+        assert!(
+            requirements.contains("\"local_execution\""),
+            "{source} must declare local runtime execution: {requirements}"
+        );
+        for unsupported in unsupported_features {
+            assert!(
+                !requirements.contains(&format!("\"{unsupported}\"")),
+                "{source} must not lower into unsupported runtime feature {unsupported}: {requirements}"
+            );
+        }
+    }
+}
+
+#[test]
 fn hello_source_checks_builds_and_runs_on_mantle() {
     let gate = GateHarness::new();
     let run = gate.check_build_run("examples/hello.str", "target/strata/hello.mta");
@@ -15,6 +110,11 @@ fn hello_source_checks_builds_and_runs_on_mantle() {
     assert!(requirements.contains("\"emit_effect\""));
     assert!(!requirements.contains("\"local_spawn\""));
     assert!(!requirements.contains("\"typed_value_templates\""));
+    let admission = gate.admit("target/strata/hello.mta", "json");
+    let admission = String::from_utf8(admission.stdout).expect("runtime admission should be UTF-8");
+    assert!(admission.contains("\"runtime_profile\":\"mantle.local_only.v1\""));
+    assert!(admission.contains("\"runtime_scope\":\"single_host_local_runtime\""));
+
     let artifact = gate.read_artifact("target/strata/hello.mta");
     assert!(
         artifact

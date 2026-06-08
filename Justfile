@@ -1,36 +1,28 @@
 set dotenv-load
-
 stable_toolchain := "stable"
 nightly_toolchain := "nightly"
 mdbook_version := "0.5.2"
 mdbook_mermaid_version := "0.17.0"
 cargo_fuzz_version := "0.13.1"
 cfg_check_targets := "x86_64-unknown-linux-musl x86_64-apple-darwin x86_64-pc-windows-msvc"
-fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower strata_composition_artifact_admit strata_authority_effect_artifact_admit strata_authority_policy_artifact_admit mantle_artifact_decode mantle_runtime_from_source mantle_trace_validate mantle_runtime_composition_binding mantle_runtime_authority_effect_binding"
-fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 strata_composition_artifact_admit:128 strata_authority_effect_artifact_admit:128 strata_authority_policy_artifact_admit:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_trace_validate:128 mantle_runtime_composition_binding:128 mantle_runtime_authority_effect_binding:128"
-
+fuzz_targets := "strata_parse_check_lower strata_source_program_check_lower strata_composition_artifact_admit strata_authority_effect_artifact_admit strata_authority_policy_artifact_admit mantle_artifact_decode mantle_runtime_from_source mantle_runtime_artifact_admission mantle_trace_validate mantle_runtime_composition_binding mantle_runtime_authority_effect_binding"
+fuzz_smoke_targets := "strata_parse_check_lower:256 strata_source_program_check_lower:128 strata_composition_artifact_admit:128 strata_authority_effect_artifact_admit:128 strata_authority_policy_artifact_admit:128 mantle_artifact_decode:256 mantle_runtime_from_source:128 mantle_runtime_artifact_admission:128 mantle_trace_validate:128 mantle_runtime_composition_binding:128 mantle_runtime_authority_effect_binding:128"
 default:
     @just --list
-
 # =============================================================================
 # Local development
 # =============================================================================
-
 fmt:
     cargo +{{stable_toolchain}} fmt --all
     cargo +{{stable_toolchain}} fmt --manifest-path fuzz/Cargo.toml --all
-
 fmt-check:
     cargo +{{stable_toolchain}} fmt --all --check
     cargo +{{stable_toolchain}} fmt --manifest-path fuzz/Cargo.toml --all --check
-
 check:
     cargo +{{stable_toolchain}} check --workspace --all-targets
-
 cfg-check:
     #!/usr/bin/env bash
     set -euo pipefail
-
     targets=( {{cfg_check_targets}} )
     installed="$(rustup target list --installed --toolchain {{stable_toolchain}})"
     missing=()
@@ -293,7 +285,13 @@ toolchain-policy-check:
 
     echo "Toolchain policy OK: standard gates use stable and nightly gates are explicit."
 
-source-to-runtime-gates: source-to-runtime-success-gates source-to-runtime-failure-gates authority-effect-artifact-gates process-ref-lifecycle-gates
+source-to-runtime-gates: source-to-runtime-success-gates source-to-runtime-failure-gates authority-effect-artifact-gates process-ref-lifecycle-gates remote-distributed-boundary-gates
+
+remote-distributed-boundary-gates: build
+    cargo +{{stable_toolchain}} test -p mantle-runtime local_runtime_target_profile --lib
+    cargo +{{stable_toolchain}} test -p mantle-runtime runtime_rejects_unsupported_target_feature_before_artifact_loaded --lib
+    cargo +{{stable_toolchain}} test -p strata-mantle-acceptance checked_strata_examples_stay_inside_local_runtime_target_profile --test source_to_runtime_gates
+    cargo +{{stable_toolchain}} test -p strata-mantle-acceptance forged_remote_distributed_target_requirements_fail_before_runtime_admission --test source_to_runtime_gates
 
 source-to-runtime-success-gates: build
     #!/usr/bin/env bash
@@ -616,6 +614,8 @@ miri-smoke:
     cargo +{{nightly_toolchain}} miri test -p strata property_generated_selected_arm_action_block_shapes_lower_as_typed_actions
     cargo +{{nightly_toolchain}} miri test -p mantle-artifact validate_admits_lexical_supervisor_child_spawn_site
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime in_memory_host_runs_actor_without_filesystem_trace_sink
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime local_runtime_target_profile_classifies_every_runtime_feature
+    cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_rejects_unsupported_target_feature_before_artifact_loaded
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_rejects_loaded_spawn_site_target_mismatched_with_authority_before_artifact_loaded
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_spawn_outcome_returns_denied_before_acceptance
     cargo +{{nightly_toolchain}} miri test -p mantle-runtime runtime_boundary_send_outcome_denied_policy_fails_closed_without_binding_outcome

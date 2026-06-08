@@ -7,6 +7,7 @@ use mantle_artifact::{
 };
 
 use crate::feature_declaration::validate_artifact_runtime_requirements;
+use crate::target_profile::LOCAL_RUNTIME_TARGET_PROFILE;
 use crate::{
     LocalSpawnBackend, ProcessStatus, RunLimits, RunReport, RuntimeFeatureDeclarationFormat,
     SpawnAuthorityPolicy, render_runtime_feature_declaration,
@@ -377,6 +378,12 @@ fn render_runtime_admission_text(
     out.push_str("source_language: ");
     out.push_str(artifact.source_language.as_ref());
     out.push('\n');
+    out.push_str("runtime_profile: ");
+    out.push_str(LOCAL_RUNTIME_TARGET_PROFILE.id);
+    out.push('\n');
+    out.push_str("runtime_scope: ");
+    out.push_str(LOCAL_RUNTIME_TARGET_PROFILE.execution_scope);
+    out.push('\n');
     out.push_str("features:\n");
     for feature in &artifact.target_requirements.features {
         out.push_str("  - ");
@@ -399,6 +406,10 @@ fn render_runtime_admission_json(
     push_json_string_body(&mut out, artifact.schema_version.as_ref());
     out.push_str("\",\"source_language\":\"");
     push_json_string_body(&mut out, artifact.source_language.as_ref());
+    out.push_str("\",\"runtime_profile\":\"");
+    push_json_string_body(&mut out, LOCAL_RUNTIME_TARGET_PROFILE.id);
+    out.push_str("\",\"runtime_scope\":\"");
+    push_json_string_body(&mut out, LOCAL_RUNTIME_TARGET_PROFILE.execution_scope);
     out.push_str("\",\"features\":[");
     for (index, feature) in artifact.target_requirements.features.iter().enumerate() {
         if index > 0 {

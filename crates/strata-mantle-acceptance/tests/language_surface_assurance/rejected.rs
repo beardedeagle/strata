@@ -112,4 +112,18 @@ pub(crate) const FEATURES: &[Feature] = &[
             Documentation => ("docs/src/language-reference.md", "Immutable `List<T,N>` and `Map<K,V,N>` source values"),
         ],
     ),
+    feature!(
+        "rejected-remote-distributed-runtime-boundary",
+        "Remote and distributed runtime capabilities stay non-admitted",
+        FutureOrRejected,
+        FutureNonAdmitted,
+        REJECTED_SURFACE_REQUIREMENTS,
+        [
+            Diagnostics => ("docs/src/diagnostics.md", "remote spawn/send or distributed transport"),
+            NegativeTest => ("crates/mantle-runtime/src/target_profile.rs", "local_runtime_target_profile_rejects_remote_distributed_features"),
+            NegativeTest => ("crates/mantle-runtime/src/tests/runtime_boundaries.rs", "RuntimeFeature::RemoteSend"),
+            NegativeTest => ("crates/strata-mantle-acceptance/tests/source_to_runtime_gates/basic_runtime.rs", "forged_remote_distributed_target_requirements_fail_before_runtime_admission"),
+            Documentation => ("docs/src/language-surface-assurance.md", "Remote/distributed runtime capabilities"),
+        ],
+    ),
 ];

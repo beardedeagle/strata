@@ -42,10 +42,14 @@ just source-to-runtime-gates
 The success gates include the typed target-binding path for the component
 composition example: `strata target-requirements`, `mantle
 feature-declaration`, `mantle admit`, and `mantle run`. That path proves
-requirement extraction, `mantle.feature_declaration.v5` rendering,
+requirement extraction, `mantle.feature_declaration.v6` rendering,
 requirements-vs-declaration admission before runtime execution, and Mantle's
 artifact-derived check that declared requirements cover the decoded runtime
-constructs.
+feature surface. `just remote-distributed-boundary-gates` is part of the broader
+source-to-runtime gate and keeps the local-only runtime target profile explicit:
+checked Strata entry examples must not lower remote/distributed target
+requirements, and forged artifacts requiring remote send, remote spawn, or
+distributed transport must fail before runtime admission.
 They also include authority/effect admission-binding paths for dynamic local
 spawn authority in `examples/effect_outcome_spawn_denied.str` and lexical
 supervisor-child spawning in `examples/local_supervision_restart.str`: `strata

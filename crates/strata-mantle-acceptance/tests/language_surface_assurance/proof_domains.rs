@@ -305,6 +305,7 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
             "rejected-nested-process-ref-payloads",
             "rejected-dynamic-map-keys",
             "rejected-unbounded-collections",
+            "rejected-remote-distributed-runtime-boundary",
         ],
         obligations: proof_obligations::REJECTED,
     },

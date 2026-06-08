@@ -16,6 +16,7 @@ mod limits;
 mod program;
 mod report;
 mod run;
+mod target_profile;
 
 pub use authority_effect_binding::validate_runtime_authority_effect_binding_text;
 pub use cli::{mantle_main, run_mantle_from_env};
