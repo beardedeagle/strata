@@ -183,6 +183,12 @@ fn validate_process_ref_name(
             process.name, process_ref
         )));
     }
+    if semantic_index.identifier_conflicts_with_declared_value(process_ref) {
+        return Err(Error::new(format!(
+            "process {} process reference {} conflicts with a declared type or value constructor",
+            process.name, process_ref
+        )));
+    }
     Ok(())
 }
 
