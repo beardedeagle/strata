@@ -25,18 +25,16 @@ just strata-target-requirements examples/component_composition_main.str json
 just mantle-admit target/strata/component_composition_main.mta json
 ```
 
-Current implementation limits are reported as runtime implementation limits, not
-Strata language law. Remote send, remote spawn, distributed transport, cluster
-membership, package management, hot upgrade, generated stubs, native output,
-and serialized execution-plan bytecode remain unsupported. Mantle may compile
-an admitted `LoadedProgram` into an internal executable plan for dispatch and an
-internal executable template program for value-template evaluation, but the
-`.mta` remains the language-neutral boundary. Strata does not emit bytecode or
-executable template programs. Unsupported required features, malformed
-source-language metadata, or invalid loaded template references fail before
-`ArtifactLoaded` and before runtime side effects. Mantle treats source language
-as opaque artifact metadata and does not dispatch or execute templates on source
-names.
+Current implementation limits are runtime implementation limits, not Strata language law. Remote send, remote spawn, distributed transport, cluster
+membership, package management, hot upgrade, generated stubs, native output, and serialized execution-plan bytecode remain unsupported. Mantle may compile
+an admitted `LoadedProgram` into internal executable plans for dispatch and value-template evaluation, but `.mta` remains the language-neutral boundary.
+Strata does not emit bytecode or executable template programs. Unsupported required features, malformed source-language metadata, or invalid loaded template
+references fail before `ArtifactLoaded` and runtime side effects. Mantle treats source language as opaque artifact metadata and never dispatches on source names.
+
+Mantle execution is host-boundary explicit: after artifact admission and loaded runtime-table construction, the runtime core records events, program stdout,
+monotonic clock reads, and final flushes through a `RuntimeHost`. `mantle run` is the filesystem/stdout host adapter that writes `*.observability.jsonl`
+and program output; in-memory execution uses the same admitted runtime core with in-memory sinks. Program-output trace events are written before stdout so
+failed stdout sinks still leave audit evidence; mandatory host sink setup, write, or flush failures fail closed before the CLI prints a successful run report.
 
 ## Admitted Authority/Effect Binding
 

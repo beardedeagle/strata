@@ -6,13 +6,28 @@ use mantle_artifact::{Error, Result};
 
 use crate::{RuntimeEvent, RuntimeEventRecord};
 
+/// Explicit host boundary for admitted Mantle runtime execution.
+///
+/// Implementations own runtime-observable sinks and services outside the pure
+/// admitted execution core. Mandatory host failures must be returned as errors
+/// so execution fails closed instead of silently dropping trace, output, clock,
+/// or final flush obligations.
 pub trait RuntimeHost {
+    /// Persist or collect one runtime event before execution continues.
     fn record_event(&mut self, event: RuntimeEventRecord) -> Result<()>;
+
+    /// Emit one logical program stdout item.
     fn emit_stdout(&mut self, text: &str) -> Result<()>;
+
+    /// Return host monotonic time in milliseconds for runtime trace records.
     fn monotonic_ms(&mut self) -> Result<u64>;
+
+    /// Flush mandatory host sinks before a successful run report is returned.
     fn flush(&mut self) -> Result<()>;
 }
 
+/// In-memory runtime host for tests and embedded callers that need collected
+/// events and program stdout without filesystem or process stdout side effects.
 #[derive(Debug, Default)]
 pub struct InMemoryRuntimeHost {
     events: Vec<RuntimeEvent>,
@@ -104,6 +119,42 @@ impl RuntimeHost for JsonlTraceHost {
 
     fn flush(&mut self) -> Result<()> {
         self.file.flush()?;
+        Ok(())
+    }
+}
+
+pub(crate) struct FilesystemRuntimeHost<W: Write> {
+    trace: JsonlTraceHost,
+    stdout: W,
+}
+
+impl<W: Write> FilesystemRuntimeHost<W> {
+    pub(crate) fn new(trace_file: File, max_trace_bytes: usize, stdout: W) -> Self {
+        Self {
+            trace: JsonlTraceHost::new(trace_file, max_trace_bytes),
+            stdout,
+        }
+    }
+}
+
+impl<W: Write> RuntimeHost for FilesystemRuntimeHost<W> {
+    fn record_event(&mut self, event: RuntimeEventRecord) -> Result<()> {
+        self.trace.record_event(event)
+    }
+
+    fn emit_stdout(&mut self, text: &str) -> Result<()> {
+        self.stdout.write_all(text.as_bytes())?;
+        self.stdout.write_all(b"\n")?;
+        Ok(())
+    }
+
+    fn monotonic_ms(&mut self) -> Result<u64> {
+        self.trace.monotonic_ms()
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.trace.flush()?;
+        self.stdout.flush()?;
         Ok(())
     }
 }
