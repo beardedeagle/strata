@@ -356,10 +356,10 @@ fn step(state: WorkerState, Assign(job: Job)) -> ProcResult<WorkerState> ! [] ~ 
 ### Pure Source Computation
 
 Pure source functions can name sequential immutable intermediate values before
-their terminal return:
+their terminal return. `Bool`, `False`, and `True` are core built-ins and must
+not be redeclared by source programs:
 
 ```strata
-enum Bool { False, True }
 enum Phase { Idle, Active }
 record Work { phase: Phase }
 

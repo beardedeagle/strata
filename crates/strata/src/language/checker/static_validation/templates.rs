@@ -145,7 +145,7 @@ pub(super) fn validate_bool_condition_template(
     } = condition.result_type().kind()
     else {
         return Err(Error::new(format!(
-            "process {} if condition requires enum Bool {{ False, True }}",
+            "process {} if condition requires core Bool",
             process.debug_name()
         )));
     };
@@ -156,7 +156,7 @@ pub(super) fn validate_bool_condition_template(
         && variants[1].payload_type.is_none();
     if !is_bool_contract {
         return Err(Error::new(format!(
-            "process {} if condition requires enum Bool {{ False, True }}",
+            "process {} if condition requires core Bool",
             process.debug_name()
         )));
     }
@@ -535,7 +535,7 @@ pub(super) fn validate_checked_bool_contract_type(ty: &CheckedTypeRef) -> Result
         return Ok(());
     }
     Err(Error::new(format!(
-        "equality result type must be enum Bool {{ False, True }}, found {ty}"
+        "equality result type must be core Bool, found {ty}"
     )))
 }
 
