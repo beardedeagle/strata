@@ -11,25 +11,28 @@ runtime branches and loops, typed value templates, typed effect outcomes,
 boundary tables, and component-composition metadata where those surfaces are
 present.
 
-Mantle publishes its own runtime feature declaration:
+Mantle publishes its own runtime feature declaration for the current local-only
+target profile, `mantle.local_only.v1`:
 
 ```sh
 just mantle-feature-declaration json
 ```
 
 Admission compares the artifact identity and typed requirements against that
-declaration:
+profile-backed declaration and reports the admitted `runtime_profile`:
 
 ```sh
 just strata-target-requirements examples/component_composition_main.str json
 just mantle-admit target/strata/component_composition_main.mta json
 ```
 
-Current implementation limits are runtime implementation limits, not Strata language law. Remote send, remote spawn, distributed transport, cluster
-membership, package management, hot upgrade, generated stubs, native output, and serialized execution-plan bytecode remain unsupported. Mantle may compile
-an admitted `LoadedProgram` into internal executable plans for dispatch and value-template evaluation, but `.mta` remains the language-neutral boundary.
-Strata does not emit bytecode or executable template programs. Unsupported required features, malformed source-language metadata, or invalid loaded template
-references fail before `ArtifactLoaded` and runtime side effects. Mantle treats source language as opaque artifact metadata and never dispatches on source names.
+Current implementation limits are runtime implementation limits, not Strata language law. The admitted profile is single-host local runtime execution with
+explicit local host sinks, no ambient network authority, no transport authority, no cluster membership, and no admitted remote operation policy. Remote send,
+remote spawn, distributed transport, cluster membership, package management, hot upgrade, generated stubs, native output, and serialized execution-plan
+bytecode remain unsupported. Mantle may compile an admitted `LoadedProgram` into internal executable plans for dispatch and value-template evaluation, but
+`.mta` remains the language-neutral boundary. Strata does not emit bytecode or executable template programs. Unsupported required features, malformed
+source-language metadata, or invalid loaded template references fail before `ArtifactLoaded` and runtime side effects. Mantle treats source language as opaque
+artifact metadata and never dispatches on source names.
 
 Mantle execution is host-boundary explicit: after artifact admission and loaded runtime-table construction, the runtime core records events, program stdout,
 monotonic clock reads, and final flushes through a `RuntimeHost`. `mantle run` is the filesystem/stdout host adapter that writes `*.observability.jsonl`
@@ -448,7 +451,7 @@ just mantle-feature-declaration json
 
 `strata target-requirements` checks and lowers source, then prints the runtime
 feature IDs embedded in the generated artifact. `mantle feature-declaration`
-prints the current `mantle.feature_declaration.v5` metadata: artifact format,
+prints the current `mantle.feature_declaration.v6` metadata: artifact format,
 schema version, source-language metadata policy, local containment and mailbox
 models, conservative message-observation fields, allocation fields,
 validity-window defaults, component/spawn observability fields, supported

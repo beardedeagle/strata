@@ -125,7 +125,7 @@ Runtime feature declaration and target binding are recorded as a
 runtime-bearing boundary feature: Strata derives canonical typed target
 requirements from checked IR and lowering facts, embeds them in the `.mta`,
 renders them through `strata target-requirements`, Mantle renders its own typed
-`mantle.feature_declaration.v5` declaration, and Mantle admission compares the
+`mantle.feature_declaration.v6` declaration, and Mantle admission compares the
 artifact's format, schema version, source language, declared runtime features,
 and artifact-derived minimum required features before execution. The runtime
 declaration includes conservative message-observation fields and explicit
@@ -136,6 +136,16 @@ send/spawn, and distributed transport remain fail-closed implementation limits.
 The evidence includes unit, negative, bounded determinism, source-to-runtime,
 acceptance, fuzz-seed, performance-smoke, docs, and assurance matrix coverage;
 it does not claim theorem-prover coverage.
+
+Remote/distributed runtime capabilities are recorded as a future/non-admitted
+boundary: Strata lowering must not emit `remote_send`, `remote_spawn`, or
+`distributed_transport`, and Mantle's `mantle.local_only.v1` target profile must
+reject forged artifacts requiring those canonical feature IDs before admission,
+`ArtifactLoaded`, host sinks, or runtime side effects. The focused remote /
+distributed boundary gate checks current `.str` entry examples against the
+local-only profile and separately forges remote/distributed artifact
+requirements to prove fail-closed admission. This preserves the local-runtime
+boundary until a real distributed Mantle design exists.
 
 Mantle executable-plan construction is recorded as an internal runtime
 implementation feature: Mantle validates a loaded `.mta`, builds typed

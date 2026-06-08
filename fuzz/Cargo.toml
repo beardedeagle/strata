@@ -53,6 +53,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "mantle_runtime_artifact_admission"
+path = "fuzz_targets/mantle_runtime_artifact_admission.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "strata_composition_artifact_admit"
 path = "fuzz_targets/strata_composition_artifact_admit.rs"
 test = false

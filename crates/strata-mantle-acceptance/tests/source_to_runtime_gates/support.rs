@@ -48,6 +48,37 @@ impl GateHarness {
         self.run_mantle_success(artifact)
     }
 
+    pub(crate) fn top_level_entry_example_sources(&self) -> Vec<String> {
+        let examples_dir = self.root.join("examples");
+        let mut sources = fs::read_dir(&examples_dir)
+            .unwrap_or_else(|err| panic!("could not read {}: {err}", examples_dir.display()))
+            .filter_map(|entry| {
+                let entry = entry.expect("example directory entry should be readable");
+                let path = entry.path();
+                if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("str") {
+                    return None;
+                }
+                let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+                    panic!("could not read example source {}: {err}", path.display())
+                });
+                if !source.contains("proc Main") {
+                    return None;
+                }
+                let file_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("example source filename should be UTF-8");
+                Some(format!("examples/{file_name}"))
+            })
+            .collect::<Vec<_>>();
+        sources.sort();
+        assert!(
+            !sources.is_empty(),
+            "expected at least one top-level example"
+        );
+        sources
+    }
+
     pub(crate) fn check(&self, source: &str) {
         assert_success(
             self.command(&self.strata, ["check", source], "strata check"),
@@ -193,6 +224,13 @@ impl GateHarness {
                 ["admit", artifact, "--format", format],
                 "mantle admit",
             ),
+            "mantle admit",
+        )
+    }
+
+    pub(crate) fn admit_failure(&self, artifact: &str) -> Output {
+        assert_failure(
+            self.command(&self.mantle, ["admit", artifact], "mantle admit"),
             "mantle admit",
         )
     }
@@ -625,7 +663,7 @@ impl AuthorityAdmissionMutation {
     }
 }
 
-fn ensure_target_requirement(artifact: &mut MantleArtifact, feature: RuntimeFeature) {
+pub(crate) fn ensure_target_requirement(artifact: &mut MantleArtifact, feature: RuntimeFeature) {
     artifact.target_requirements.features.push(feature);
     artifact.target_requirements.features.sort_unstable();
     artifact.target_requirements.features.dedup();

@@ -32,24 +32,35 @@ fn runtime_rejects_action_without_declared_effect() {
 
 #[test]
 fn runtime_rejects_unsupported_target_feature_before_artifact_loaded() {
-    let mut artifact = valid_artifact();
-    let mut requirements = test_target_requirements();
-    requirements.features.push(RuntimeFeature::RemoteSpawn);
-    artifact.target_requirements =
-        ArtifactTargetRequirements::new(TEST_SOURCE_LANGUAGE, requirements.features);
-    let mut host = InMemoryRuntimeHost::default();
+    for (feature, feature_name) in [
+        (
+            RuntimeFeature::DistributedTransport,
+            "distributed_transport",
+        ),
+        (RuntimeFeature::RemoteSend, "remote_send"),
+        (RuntimeFeature::RemoteSpawn, "remote_spawn"),
+    ] {
+        let mut artifact = valid_artifact();
+        let mut requirements = test_target_requirements();
+        requirements.features.push(feature);
+        artifact.target_requirements =
+            ArtifactTargetRequirements::new(TEST_SOURCE_LANGUAGE, requirements.features);
+        let mut host = InMemoryRuntimeHost::default();
 
-    let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
-        .expect_err("unsupported target feature should fail before execution");
+        let err = run_artifact_with_host(&artifact, &mut host, RunLimits::default())
+            .expect_err("unsupported target feature should fail before execution");
 
-    assert!(
-        err.to_string()
-            .contains("target runtime feature remote_spawn is not supported")
-    );
-    assert!(
-        host.events().is_empty(),
-        "runtime requirement mismatch must fail before ArtifactLoaded"
-    );
+        assert!(
+            err.to_string().contains(&format!(
+                "target runtime feature {feature_name} is not supported"
+            )),
+            "{err}"
+        );
+        assert!(
+            host.events().is_empty(),
+            "unsupported {feature_name} requirement must fail before ArtifactLoaded"
+        );
+    }
 }
 
 #[test]

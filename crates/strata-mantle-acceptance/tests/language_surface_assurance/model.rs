@@ -308,6 +308,7 @@ pub(crate) mod expected {
         "rejected-nested-process-ref-payloads",
         "rejected-dynamic-map-keys",
         "rejected-unbounded-collections",
+        "rejected-remote-distributed-runtime-boundary",
     ];
 
     pub(crate) const PROOF_DOMAIN_IDS: &[&str] = &[
