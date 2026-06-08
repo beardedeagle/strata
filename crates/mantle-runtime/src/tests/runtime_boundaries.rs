@@ -1,4 +1,5 @@
 use super::support::*;
+use std::io::{self, Write};
 
 #[test]
 fn runtime_rejects_invalid_artifact_identity() {
@@ -270,4 +271,206 @@ fn runtime_rejects_emitted_output_limit_exhaustion() {
     );
 
     let _ = fs::remove_file(trace_path);
+}
+
+#[test]
+fn filesystem_runtime_host_output_write_failure_fails_closed() {
+    let artifact_path = unique_current_dir_artifact_path("runtime-output-write-failure");
+    let trace_path = artifact_path.with_extension("observability.jsonl");
+    let artifact = valid_artifact();
+    let mut output = FailingOutput::fail_on_write();
+
+    let err = run_artifact_with_limits_and_bindings_and_output(
+        &artifact_path,
+        &artifact,
+        RunLimits::default(),
+        None,
+        None,
+        &mut output,
+    )
+    .expect_err("output sink write failure must fail closed");
+
+    assert!(
+        err.to_string().contains("runtime output sink write failed"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        output.text().is_empty(),
+        "failed output sink must not receive a partial success report"
+    );
+    let trace = fs::read_to_string(&trace_path)
+        .expect("failed output sink should still leave trace-first audit evidence");
+    assert!(
+        trace.contains(r#""event":"program_output""#),
+        "output sink failure must preserve attempted program output in the runtime trace"
+    );
+
+    let _ = fs::remove_file(trace_path);
+}
+
+#[test]
+fn filesystem_runtime_host_output_flush_failure_fails_closed() {
+    let artifact_path = unique_current_dir_artifact_path("runtime-output-flush-failure");
+    let trace_path = artifact_path.with_extension("observability.jsonl");
+    let artifact = valid_artifact();
+    let mut output = FailingOutput::fail_on_flush();
+
+    let err = run_artifact_with_limits_and_bindings_and_output(
+        &artifact_path,
+        &artifact,
+        RunLimits::default(),
+        None,
+        None,
+        &mut output,
+    )
+    .expect_err("output sink flush failure must fail closed");
+
+    assert!(
+        err.to_string().contains("runtime output sink flush failed"),
+        "unexpected error: {err}"
+    );
+    assert_eq!(
+        output.text(),
+        "worker handled Ping\n",
+        "program output can be emitted before a later flush failure, but no run report is returned"
+    );
+
+    let _ = fs::remove_file(trace_path);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn mantle_cli_output_sink_failure_returns_no_success_report() {
+    let artifact_path = unique_current_dir_artifact_path("runtime-cli-output-write-failure");
+    let trace_path = artifact_path.with_extension("observability.jsonl");
+    write_artifact(&artifact_path, &valid_artifact()).expect("artifact write should succeed");
+    let mut output = FailingOutput::fail_on_write();
+
+    let err = crate::cli::mantle_main_with_output(
+        [
+            "mantle".to_string(),
+            "run".to_string(),
+            artifact_path.display().to_string(),
+        ],
+        &mut output,
+    )
+    .expect_err("CLI output sink failure must fail closed");
+
+    assert!(
+        err.to_string().contains("runtime output sink write failed"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        !output.text().contains("mantle: loaded"),
+        "CLI must not print a success report after output sink failure"
+    );
+
+    let _ = fs::remove_file(artifact_path);
+    let _ = fs::remove_file(trace_path);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn mantle_cli_run_report_flush_failure_fails_closed() {
+    let artifact_path = unique_current_dir_artifact_path("runtime-cli-report-flush-failure");
+    let trace_path = artifact_path.with_extension("observability.jsonl");
+    write_artifact(&artifact_path, &valid_artifact()).expect("artifact write should succeed");
+    let mut output = FailingOutput::fail_on_second_flush();
+
+    let err = crate::cli::mantle_main_with_output(
+        [
+            "mantle".to_string(),
+            "run".to_string(),
+            artifact_path.display().to_string(),
+        ],
+        &mut output,
+    )
+    .expect_err("CLI run report flush failure must fail closed");
+
+    assert!(
+        err.to_string().contains("runtime output sink flush failed"),
+        "unexpected error: {err}"
+    );
+    assert_eq!(
+        output.flush_attempts(),
+        2,
+        "regression must fail on the report flush after the runtime output flush succeeds"
+    );
+    assert!(
+        output.text().contains("mantle: trace"),
+        "report bytes may reach a buffered sink before final flush failure"
+    );
+
+    let _ = fs::remove_file(artifact_path);
+    let _ = fs::remove_file(trace_path);
+}
+
+struct FailingOutput {
+    text: String,
+    fail_writes: bool,
+    flushes_before_failure: Option<usize>,
+    flush_attempts: usize,
+}
+
+impl FailingOutput {
+    fn fail_on_write() -> Self {
+        Self {
+            text: String::new(),
+            fail_writes: true,
+            flushes_before_failure: None,
+            flush_attempts: 0,
+        }
+    }
+
+    fn fail_on_flush() -> Self {
+        Self::fail_after_flush_successes(0)
+    }
+
+    fn fail_on_second_flush() -> Self {
+        Self::fail_after_flush_successes(1)
+    }
+
+    fn fail_after_flush_successes(flushes_before_failure: usize) -> Self {
+        Self {
+            text: String::new(),
+            fail_writes: false,
+            flushes_before_failure: Some(flushes_before_failure),
+            flush_attempts: 0,
+        }
+    }
+
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    fn flush_attempts(&self) -> usize {
+        self.flush_attempts
+    }
+}
+
+impl Write for FailingOutput {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.fail_writes {
+            return Err(io::Error::other("runtime output sink write failed"));
+        }
+        let text = std::str::from_utf8(buf).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "runtime output sink test received non-UTF-8 output",
+            )
+        })?;
+        self.text.push_str(text);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_attempts += 1;
+        if let Some(flushes_before_failure) = &mut self.flushes_before_failure {
+            if *flushes_before_failure == 0 {
+                return Err(io::Error::other("runtime output sink flush failed"));
+            }
+            *flushes_before_failure -= 1;
+        }
+        Ok(())
+    }
 }
