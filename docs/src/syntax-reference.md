@@ -681,7 +681,7 @@ typed Bool-producing operands, not as source strings or function names.
 Pure conditionals require core `Bool`, whose fieldless `False` and `True` values
 are always available and cannot be redeclared. Both branches are value
 expressions checked against the same expected type. Concrete conditions select one branch before lowering.
-runtime-bound expression-form conditionals lower as typed Mantle value
+Runtime-bound expression-form conditionals lower as typed Mantle value
 templates. Expression branch bodies cannot contain statements or effects.
 
 Final-position `return_if_else` is runtime control flow in `step` bodies. The
