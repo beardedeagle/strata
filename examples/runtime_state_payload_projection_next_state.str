@@ -5,12 +5,6 @@ record MainState;
 record Job {
     phase: Phase,
 }
-
-enum Bool {
-    False,
-    True,
-}
-
 enum Phase {
     Ready,
     Done,

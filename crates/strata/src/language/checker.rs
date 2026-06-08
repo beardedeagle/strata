@@ -39,7 +39,10 @@ use super::checked::{
     CheckedValueTemplate, checked_action_count,
 };
 use super::diagnostic::{Error, Result};
-use super::{LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE, PROCESS_REF_TYPE};
+use super::{
+    BOOL_FALSE, BOOL_TRUE, BOOL_TYPE, LIST_TYPE, MAP_TYPE, MAX_VALUE_NESTING, PROC_RESULT_TYPE,
+    PROCESS_REF_TYPE,
+};
 pub(in crate::language::checker) use authority::{AuthorityBinding, SpawnSiteAllocator};
 use authority::{collect_authorities, validate_authority_usage};
 use boundaries::{check_boundaries, validate_boundary_counts};
@@ -489,9 +492,7 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
     if !module.imports.is_empty() {
         return Err(Error::new("imports require checking from a source program"));
     }
-    if module.enums.is_empty() {
-        return Err(Error::new("expected at least one enum declaration"));
-    }
+    let module = module_with_core_bool(module)?;
     if module.processes.is_empty() {
         return Err(Error::new("expected at least one process declaration"));
     }
@@ -559,6 +560,101 @@ pub fn check_module(module: Module) -> Result<CheckedProgram> {
         compositions: checked_boundaries.compositions,
         processes: checked_processes,
     }))
+}
+
+fn module_with_core_bool(mut module: Module) -> Result<Module> {
+    reject_core_bool_conflicts(&module)?;
+    let mut enums = Vec::with_capacity(module.enums.len() + 1);
+    enums.push(core_bool_enum()?);
+    enums.append(&mut module.enums);
+    module.enums = enums;
+    Ok(module)
+}
+
+fn core_bool_enum() -> Result<Enum> {
+    Ok(Enum {
+        name: Identifier::new(BOOL_TYPE)?,
+        variants: vec![
+            EnumVariant {
+                name: Identifier::new(BOOL_FALSE)?,
+                payload_type: None,
+            },
+            EnumVariant {
+                name: Identifier::new(BOOL_TRUE)?,
+                payload_type: None,
+            },
+        ],
+    })
+}
+
+fn reject_core_bool_conflicts(module: &Module) -> Result<()> {
+    for protocol in &module.protocols {
+        reject_core_bool_type_name("protocol", &protocol.name)?;
+    }
+    for port in &module.ports {
+        reject_core_bool_type_name("port", &port.name)?;
+    }
+    for component in &module.components {
+        reject_core_bool_type_name("component", &component.name)?;
+    }
+    for composition in &module.compositions {
+        reject_core_bool_type_name("composition", &composition.name)?;
+        for instance in &composition.instances {
+            reject_core_bool_type_name("component instance", &instance.name)?;
+        }
+    }
+    for record in &module.records {
+        reject_core_bool_type_name("record", &record.name)?;
+        for field in &record.fields {
+            reject_core_bool_type_name("record field", &field.name)?;
+        }
+    }
+    for item in &module.enums {
+        reject_core_bool_type_name("enum", &item.name)?;
+        for variant in &item.variants {
+            reject_core_bool_value_name("enum variant", &variant.name)?;
+        }
+    }
+    for function in &module.functions {
+        reject_core_bool_value_name("module function", &function.name)?;
+    }
+    for process in &module.processes {
+        reject_core_bool_type_name("process", &process.name)?;
+        for authority in &process.authorities {
+            reject_core_bool_type_name("process authority", &authority.name)?;
+        }
+        for supervisor in &process.supervisors {
+            for child in &supervisor.children {
+                reject_core_bool_type_name("supervisor child", &child.name)?;
+            }
+        }
+        reject_core_bool_value_name("process init function", &process.init.name)?;
+        for function in &process.functions {
+            reject_core_bool_value_name("process function", &function.name)?;
+        }
+        for step in &process.steps {
+            reject_core_bool_value_name("process step function", &step.name)?;
+        }
+    }
+    Ok(())
+}
+
+fn reject_core_bool_type_name(kind: &str, name: &Identifier) -> Result<()> {
+    if name.as_str() == BOOL_TYPE {
+        return Err(Error::new(format!(
+            "{kind} {name} conflicts with core Bool type"
+        )));
+    }
+    reject_core_bool_value_name(kind, name)
+}
+
+fn reject_core_bool_value_name(kind: &str, name: &Identifier) -> Result<()> {
+    if matches!(name.as_str(), BOOL_FALSE | BOOL_TRUE) {
+        return Err(Error::new(format!(
+            "{kind} {name} conflicts with core Bool value constructor"
+        )));
+    }
+    Ok(())
 }
 
 fn check_process<'a>(

@@ -1,7 +1,6 @@
 module function_return_if_statement;
 
 record MainState;
-enum Bool { False, True }
 enum Mode { Cold, Warm }
 enum Readiness { ColdReady, WarmReady }
 enum MainMsg { Start }

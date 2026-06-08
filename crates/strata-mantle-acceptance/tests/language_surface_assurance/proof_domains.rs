@@ -78,6 +78,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::CHECKER_LOWERING_FUZZ,
     },
     ProofDomain {
+        id: "core-bool-builtins",
+        title: "Core Bool built-in value contract",
+        feature_ids: &["core-bool-builtins"],
+        obligations: proof_obligations::CHECKER_LOWERING_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "bool-equality-predicate-value-forms",
         title: "Bool, equality, and predicate value forms",
         feature_ids: &["bool-equality-predicates"],

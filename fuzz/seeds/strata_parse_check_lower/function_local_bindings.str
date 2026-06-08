@@ -1,6 +1,4 @@
 module function_local_bindings_seed;
-
-enum Bool { False, True }
 enum Phase { Idle, Active }
 record Work { phase: Phase }
 record Route {

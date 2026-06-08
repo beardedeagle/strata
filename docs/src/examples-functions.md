@@ -51,8 +51,8 @@ Key source ideas:
 ## Function If Else
 
 `examples/function_if_else.str` uses pure source-time conditionals in normal
-source functions. The checker resolves the explicit `Bool { False, True }`
-condition and selects one immutable branch before lowering. The example includes
+source functions. The checker resolves the core `Bool` condition and selects one
+immutable branch before lowering. The example includes
 both expression-form `return if (...) { value } else { value };` and braced pure
 return branches.
 
@@ -62,7 +62,7 @@ just run-example function_if_else
 
 Key source ideas:
 
-- `enum Bool { False, True }` is an exact source contract for conditionals.
+- `Bool`, `False`, and `True` are core built-ins for conditionals and cannot be redeclared.
 - `if (flag) { WarmReady } else { ColdReady }` is a pure value expression, not
   a statement block.
 - `if (flag) { return WarmReady; } else { return ColdReady; }` is an equivalent

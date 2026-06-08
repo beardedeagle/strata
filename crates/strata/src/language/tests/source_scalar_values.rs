@@ -6,8 +6,6 @@ use super::support::*;
 fn parses_typed_scalar_literals_and_operator_precedence() {
     let source = r#"
 module source_scalar_precedence;
-
-enum Bool { False, True }
 record MainState;
 enum MainMsg { Start }
 
@@ -118,8 +116,6 @@ proc Main mailbox bounded(1) {
 fn folds_concrete_scalar_bindings_records_lists_maps_and_if() {
     let source = r#"
 module source_scalar_concrete;
-
-enum Bool { False, True }
 enum Priority { Normal, High }
 record Job { weight: U32 }
 record MainState {
@@ -194,8 +190,6 @@ proc Main mailbox bounded(1) {
 fn lowers_runtime_bound_scalar_operators_as_typed_templates() {
     let source = r#"
 module runtime_scalar_templates;
-
-enum Bool { False, True }
 enum Priority { Normal, High }
 record MainState {
     selected: Priority,
@@ -446,8 +440,6 @@ fn rejects_unsuffixed_numeric_value_expressions_and_non_bool_scalar_conditions()
 
     let source = r#"
 module source_scalar_non_bool_condition;
-
-enum Bool { False, True }
 record MainState;
 enum MainMsg { Start }
 
@@ -512,7 +504,6 @@ record MainState {{
     bound: U8,
     ordered: Bool,
 }}
-enum Bool {{ False, True }}
 enum MainMsg {{ Start }}
 
 fn bound_value(seed: U8) -> U8 ! [] ~ [] @det {{

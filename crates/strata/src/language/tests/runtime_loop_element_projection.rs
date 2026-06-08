@@ -288,12 +288,6 @@ record BatchRequest {
     enabled: Bool,
     jobs: List<Job,2>,
 }
-
-enum Bool {
-    False,
-    True,
-}
-
 enum Phase {
     Ready,
     Done,

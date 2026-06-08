@@ -4,10 +4,6 @@ record MainState {
     init: Readiness,
     step: Readiness,
 }
-enum Bool {
-    False,
-    True,
-}
 enum Mode {
     Cold,
     Warm,

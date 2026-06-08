@@ -266,8 +266,10 @@ cannot grant, widen, strip, or retarget runtime authority.
 
 Transition effect metadata is admitted with the artifact, loaded as runtime
 effect usage, and must exactly match the action effects that execute.
-Runtime `if` conditions are admitted as typed `Bool` value templates. Mantle
-validates both branch bodies before execution, executes only the selected
+Runtime `if` conditions are admitted as typed `Bool` value templates. Strata
+lowers core `Bool` to the canonical Mantle fieldless enum/value IDs, and Mantle
+validates the typed artifact shape instead of dispatching through source names.
+Mantle validates both branch bodies before execution, executes only the selected
 branch, admits one direct nested runtime branch action layer, rejects deeper
 direct branch nesting, rejects branch-local process-reference binding, and
 records branch selection in the runtime trace. Runtime branch bodies

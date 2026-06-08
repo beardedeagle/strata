@@ -27,7 +27,7 @@ Mantle artifact internals.
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
 | Scalar operators | `+`, `-`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=`, and scalar equality over matching integer types only. |
 | Boolean predicates | `!`, `&&`, and `||` over checked Bool-producing predicates. |
-| Pure conditionals | Expression-only `if (condition) { value } else { value }` over explicit `enum Bool { False, True }`; concrete forms fold before lowering, and runtime-bound value forms lower as typed Mantle value templates. |
+| Pure conditionals | Expression-only `if (condition) { value } else { value }` over core `Bool`; concrete forms fold before lowering, and runtime-bound value forms lower as typed Mantle value templates. |
 | Source-local bindings | `let name: Type = value_expr;` inside pure source function block bodies before the terminal return. |
 | Runtime branching | Final-position `if (condition) { ... return ...; } else { ... return ...; }` and statement-level effect branches in `step` bodies, lowered to Mantle control flow. |
 | Patterns | Constructor patterns, constructor payload bindings, nested constructor and record/list/map payload destructuring in functions, message dispatch, state matches, function return-match expressions, step return-match expressions with optional uniform and selected-arm action prefixes, and `_` wildcards. |
@@ -217,17 +217,29 @@ used in source function parameters and returns, source-local bindings, process
 local pure functions, record fields, message payloads, list/map values, and
 runtime `if` predicates through `Bool`.
 
-## Built-In Result Values
+## Built-In Values
 
 The buildable value surface includes these built-in value shapes:
 
 ```strata
+Bool
 Unit
 Option<T>
 Result<T,E>
 SendError<M>
 SpawnError<A>
 ```
+
+`Bool` has the fieldless core values `False` and `True`. `Bool`, `False`, and
+`True` are always available to Strata source and cannot be redeclared by user
+code or reused as source declaration names, including records, record fields,
+enums, variants, functions, processes, component instances, process authorities,
+supervisor children, or boundary declarations. The checker resolves them to core
+typed IDs, lowering emits the canonical Mantle fieldless enum shape, and Mantle
+admits and executes only the typed artifact value shape rather than dispatching
+on source strings. This core surface does
+not introduce a general prelude, standard library, floats, string equality, or
+implicit truthiness.
 
 `Unit` has the single value `Unit`. `Option<T>` has `None` and `Some(T)`.
 `Result<T,E>` has `Ok(T)` and `Err(E)`. Local send outcomes use
@@ -669,18 +681,15 @@ Source functions and pure value expressions can use a source-time value-level
 conditional:
 
 ```strata
-enum Bool { False, True }
-
 fn readiness(flag: Bool) -> Readiness ! [] ~ [] @det {
     return if (flag) { WarmReady } else { ColdReady };
 }
 ```
 
 The equivalent braced pure return form is also supported in source functions. The
-condition type is exactly the declared fieldless enum
-`Bool { False, True }`. Both expression-form branches are source value
-expressions checked against the same expected return, field, state, or payload
-type. Braced source function return-if branches may contain immutable
+condition type is exactly core `Bool`; user declarations of `Bool`, `True`, or
+`False` are rejected. Both expression-form branches are source value expressions
+checked against the same expected return, field, state, or payload type. Braced source function return-if branches may contain immutable
 source-local bindings before the terminal pure return. Branches cannot perform
 `emit`, `send`, `spawn`, runtime `for`, branch-local process-reference binding,
 mutation, or any other runtime statement.
@@ -696,7 +705,7 @@ source-string branch key.
 
 The equality surface is `==` and `!=` over these operand families:
 
-- `Bool`, with the exact `enum Bool { False, True }` contract;
+- core `Bool` with fieldless `False` and `True` values;
 - fixed-width scalar integer values with matching scalar types;
 - fieldless values of the same payload-free enum type;
 - built-in `Option`, `Result`, `SendError`, and `SpawnError` values only when one
@@ -727,8 +736,8 @@ if ((flag == True) && !(status == Done)) {
 }
 ```
 
-Every composed operand must have the exact `Bool` contract. The supported
-operands are direct `Bool` values or templates, typed equality predicates,
+Every composed operand must produce core `Bool`. The supported operands are
+direct `Bool` values or templates, typed equality predicates,
 typed scalar-ordering predicates, and nested Boolean predicate composition.
 Fully concrete source predicates fold during checking. Runtime-dependent
 predicates lower into typed Mantle value templates; Mantle validates the typed

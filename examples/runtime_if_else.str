@@ -1,10 +1,6 @@
 module runtime_if_else;
 
 record MainState;
-enum Bool {
-    False,
-    True,
-}
 enum MainMsg {
     Start,
 }

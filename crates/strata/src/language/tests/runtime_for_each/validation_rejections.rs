@@ -151,22 +151,14 @@ fn runtime_for_each_if_rejects_non_bool_loop_condition() {
 }
 
 #[test]
-fn runtime_for_each_if_rejects_missing_bool_contract() {
-    let source = RUNTIME_FOR_EACH_IF
-        .replace(
-            "enum Bool {\n    False,\n    True,\n}",
-            "enum Bool {\n    No,\n    Yes,\n}",
-        )
-        .replace("List<Bool,2>[True, False]", "List<Bool,2>[Yes, No]")
-        .replace("item != False", "item != No")
-        .replace("item == False", "item == No")
-        .replace("flag == True", "flag == Yes");
-    let error =
-        check_source(&source).expect_err("loop branch condition must require Bool contract");
+fn runtime_for_each_if_rejects_user_declared_bool_contract() {
+    let source =
+        RUNTIME_FOR_EACH_IF.replacen("enum MainMsg", "enum Bool { No, Yes }\nenum MainMsg", 1);
+    let error = check_source(&source).expect_err("user-declared Bool contract must fail");
     assert!(
         error
             .to_string()
-            .contains("if condition requires enum Bool { False, True }"),
+            .contains("enum Bool conflicts with core Bool type"),
         "{error}"
     );
 }
@@ -252,7 +244,6 @@ module loop_ref_payload;
 record MainState;
 record HubState;
 record SinkState;
-enum Bool { False, True }
 enum MainMsg { Start }
 enum WorkerState { Holding(List<Bool,2>) }
 enum WorkerMsg { Work(ProcessRef<Sink>) }

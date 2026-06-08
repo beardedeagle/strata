@@ -1,12 +1,6 @@
 module runtime_for_each_if;
 
 record MainState;
-
-enum Bool {
-    False,
-    True,
-}
-
 enum MainMsg {
     Start,
 }

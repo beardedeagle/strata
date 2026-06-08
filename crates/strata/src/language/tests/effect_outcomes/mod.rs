@@ -8,7 +8,6 @@ module effect_outcomes;
 
 record MainState { outcome: Result<Unit,SendError<WorkerMsg>> }
 enum MainMsg { Start, SpawnOnly }
-enum Bool { False, True }
 enum WorkerState { Idle }
 enum WorkerMsg { Ping }
 

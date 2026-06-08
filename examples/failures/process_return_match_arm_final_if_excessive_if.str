@@ -7,7 +7,6 @@ record Assignment {
 }
 
 enum MainMsg { Start }
-enum Bool { False, True }
 enum Phase { Ready, Done }
 enum Route { Assign(Assignment) }
 enum WorkerState { Idle, SawReady, SawDone }

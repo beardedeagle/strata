@@ -531,12 +531,6 @@ fn runtime_fieldless_enum_equality_branches_at_mantle_runtime() {
 module runtime_enum_equality;
 
 record MainState;
-
-enum Bool {
-    False,
-    True,
-}
-
 enum MainMsg {
     Start,
 }

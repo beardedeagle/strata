@@ -5,10 +5,6 @@ record WorkerState {
     selected: Priority,
     level: U32,
 }
-enum Bool {
-    False,
-    True,
-}
 enum Priority {
     Normal,
     High,

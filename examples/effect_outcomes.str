@@ -7,12 +7,6 @@ record MainState {
 enum MainMsg {
     Start,
 }
-
-enum Bool {
-    False,
-    True,
-}
-
 enum WorkerState {
     Idle,
     Done,

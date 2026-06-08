@@ -7,12 +7,6 @@ record Job {
 }
 
 record WorkerState;
-
-enum Bool {
-    False,
-    True,
-}
-
 enum Phase {
     Ready,
     Done,

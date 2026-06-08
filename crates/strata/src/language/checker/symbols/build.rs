@@ -21,9 +21,9 @@ use crate::language::checked::{
 };
 use crate::language::diagnostic::{Error, Result};
 use crate::language::{
-    CAP_TYPE, COMPONENT_EXPORT_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE, PORT_CONNECT_TYPE,
-    PROC_RESULT_TYPE, PROCESS_REF_TYPE, PROTOCOL_BOUNDARY_TYPE, RESULT_TYPE, SEND_ERROR_TYPE,
-    SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
+    BOOL_TYPE, CAP_TYPE, COMPONENT_EXPORT_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE,
+    PORT_CONNECT_TYPE, PROC_RESULT_TYPE, PROCESS_REF_TYPE, PROTOCOL_BOUNDARY_TYPE, RESULT_TYPE,
+    SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
 };
 
 impl SemanticIndex {
@@ -139,8 +139,9 @@ impl SemanticIndex {
             }
 
             let mut variants = BTreeMap::new();
+            let is_core_bool_enum = index == 0 && item.name.as_str() == BOOL_TYPE;
             for (variant_index, variant) in item.variants.iter().enumerate() {
-                if is_builtin_value_constructor_name(variant.name.as_str()) {
+                if !is_core_bool_enum && is_builtin_value_constructor_name(variant.name.as_str()) {
                     return Err(Error::new(format!(
                         "enum {} variant {} uses reserved builtin value constructor name",
                         item.name, variant.name

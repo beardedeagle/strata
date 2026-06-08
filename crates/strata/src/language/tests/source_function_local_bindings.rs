@@ -4,8 +4,6 @@ mod shadowing;
 
 const SOURCE_FUNCTION_LOCAL_BINDINGS: &str = r#"
 module source_function_local_bindings;
-
-enum Bool { False, True }
 enum Phase { Idle, Active }
 record Work { phase: Phase }
 record Route {
@@ -218,8 +216,6 @@ fn bounded_alias_chains_match_direct_source_function_result() {
         let source = format!(
             r#"
 module source_function_local_binding_chain_{chain_len};
-
-enum Bool {{ False, True }}
 enum Phase {{ Idle, Active }}
 record Work {{ phase: Phase }}
 record Route {{
@@ -495,8 +491,6 @@ proc Main mailbox bounded(1) {
 fn rejects_source_local_binding_in_runtime_if_branch() {
     let source = r#"
 module source_local_binding_in_runtime_if_branch;
-
-enum Bool { False, True }
 enum Phase { Idle, Active }
 record MainState { selected: Phase }
 enum MainMsg { Start }

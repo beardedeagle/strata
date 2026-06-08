@@ -6,9 +6,9 @@ use super::import_scope::{ImportScopeContext, ValueScope};
 use super::import_symbols::{NamedOwner, owner_of};
 use super::source_program::SourceUnitId;
 use super::{
-    CAP_TYPE, COMPONENT_EXPORT_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE, PORT_CONNECT_TYPE,
-    PROC_RESULT_TYPE, PROCESS_REF_TYPE, PROTOCOL_BOUNDARY_TYPE, RESULT_TYPE, SEND_ERROR_TYPE,
-    SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
+    BOOL_FALSE, BOOL_TRUE, BOOL_TYPE, CAP_TYPE, COMPONENT_EXPORT_TYPE, LIST_TYPE, MAP_TYPE,
+    OPTION_TYPE, PORT_CONNECT_TYPE, PROC_RESULT_TYPE, PROCESS_REF_TYPE, PROTOCOL_BOUNDARY_TYPE,
+    RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
 };
 
 pub(super) fn validate_identifier_value(
@@ -368,6 +368,7 @@ fn is_builtin_type_constructor(name: &str) -> bool {
             | LIST_TYPE
             | MAP_TYPE
             | UNIT_TYPE
+            | BOOL_TYPE
             | OPTION_TYPE
             | RESULT_TYPE
             | SEND_ERROR_TYPE
@@ -390,5 +391,7 @@ fn is_builtin_value_constructor(name: &str) -> bool {
             | "Denied"
             | "Exhausted"
             | "BackendUnavailable"
+            | BOOL_FALSE
+            | BOOL_TRUE
     )
 }

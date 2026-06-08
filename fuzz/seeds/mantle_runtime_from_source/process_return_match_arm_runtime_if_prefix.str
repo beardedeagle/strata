@@ -5,12 +5,6 @@ record Assignment {
     phase: Phase,
     flag: Bool,
 }
-
-enum Bool {
-    False,
-    True,
-}
-
 enum MainMsg {
     Start,
 }

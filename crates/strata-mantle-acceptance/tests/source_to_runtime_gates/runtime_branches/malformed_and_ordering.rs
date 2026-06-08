@@ -110,7 +110,6 @@ fn statement_if_before_final_runtime_if_traces_branch_at_action_position() {
 module runtime_if_statement_trace_order;
 
 record MainState;
-enum Bool { False, True }
 enum MainMsg { Start }
 enum WorkerState { Idle, WarmReady, ColdReady }
 enum WorkerMsg { Branch(Bool) }

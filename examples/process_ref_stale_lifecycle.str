@@ -5,7 +5,6 @@ record WorkerState;
 record SenderState { sent: Result<Unit,SendError<WorkerMsg>> }
 
 enum MainMsg { Start }
-enum Bool { False, True }
 enum WorkerMsg { StopNow, Work }
 enum SenderMsg { Attempt(ProcessRef<Worker>) }
 

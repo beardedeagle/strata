@@ -4,7 +4,6 @@ record SenderState { sent: Result<Unit,SendError<WorkerMsg>> }
 
 enum MainState { Booted }
 enum MainMsg { Start }
-enum Bool { False, True }
 enum WorkerState { Idle, Done }
 enum WorkerMsg { Work }
 enum SenderMsg { Target(ProcessRef<Worker>) }
