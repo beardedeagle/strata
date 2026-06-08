@@ -612,7 +612,7 @@ fn reject_core_bool_conflicts(module: &Module) -> Result<()> {
     for item in &module.enums {
         reject_core_bool_type_name("enum", &item.name)?;
         for variant in &item.variants {
-            reject_core_bool_value_name("enum variant", &variant.name)?;
+            reject_core_bool_type_name("enum variant", &variant.name)?;
         }
     }
     for function in &module.functions {

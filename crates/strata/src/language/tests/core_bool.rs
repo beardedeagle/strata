@@ -102,6 +102,10 @@ fn core_bool_rejects_conflicting_user_declarations() {
             "record field True conflicts with core Bool value constructor",
         ),
         (
+            "enum Flag { Bool, On }",
+            "enum variant Bool conflicts with core Bool type",
+        ),
+        (
             "enum Flag { False, On }",
             "enum variant False conflicts with core Bool value constructor",
         ),
