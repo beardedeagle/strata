@@ -113,6 +113,10 @@ fn core_bool_rejects_conflicting_user_declarations() {
             "fn True(flag: Bool) -> Bool ! [] ~ [] @det { return flag; }",
             "module function True conflicts with core Bool value constructor",
         ),
+        (
+            "fn Bool(flag: Bool) -> Bool ! [] ~ [] @det { return flag; }",
+            "module function Bool conflicts with core Bool type",
+        ),
     ] {
         let source = format!(
             r#"
@@ -141,6 +145,39 @@ proc Main mailbox bounded(1) {{
             "expected {expected:?} for {declaration}, got {err}"
         );
     }
+}
+
+#[test]
+fn core_bool_rejects_process_function_conflict() {
+    let source = r#"
+module core_bool_process_function_conflict;
+record MainState;
+enum MainMsg { Start }
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn Bool(flag: Bool) -> Bool ! [] ~ [] @det {
+        return flag;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("process function Bool should fail");
+    assert!(
+        err.to_string()
+            .contains("process function Bool conflicts with core Bool type"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]

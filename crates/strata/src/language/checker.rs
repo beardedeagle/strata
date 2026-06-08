@@ -616,7 +616,7 @@ fn reject_core_bool_conflicts(module: &Module) -> Result<()> {
         }
     }
     for function in &module.functions {
-        reject_core_bool_value_name("module function", &function.name)?;
+        reject_core_bool_type_name("module function", &function.name)?;
     }
     for process in &module.processes {
         reject_core_bool_type_name("process", &process.name)?;
@@ -628,12 +628,12 @@ fn reject_core_bool_conflicts(module: &Module) -> Result<()> {
                 reject_core_bool_type_name("supervisor child", &child.name)?;
             }
         }
-        reject_core_bool_value_name("process init function", &process.init.name)?;
+        reject_core_bool_type_name("process init function", &process.init.name)?;
         for function in &process.functions {
-            reject_core_bool_value_name("process function", &function.name)?;
+            reject_core_bool_type_name("process function", &function.name)?;
         }
         for step in &process.steps {
-            reject_core_bool_value_name("process step function", &step.name)?;
+            reject_core_bool_type_name("process step function", &step.name)?;
         }
     }
     Ok(())

@@ -742,8 +742,9 @@ ident =
 `security`, `send`, `spawn`, `supervise`, `target`, `temporary`, `transient`,
 `type`, `var`, and `via` are reserved everywhere identifiers are accepted. The
 single `_` token is reserved for wildcard patterns.
-`ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`, `PortConnect`,
-`ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`, `SendError`,
-`SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` are
-reserved type names because they name built-in transition, process-reference,
-capability descriptor, collection, effect outcome, and scalar value types.
+`Bool`, `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`,
+`PortConnect`, `ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`,
+`SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and
+`I64` are reserved type names because they name built-in truth, transition,
+process-reference, capability descriptor, collection, effect outcome, and scalar
+value types.

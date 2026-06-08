@@ -139,7 +139,7 @@ impl SemanticIndex {
             }
 
             let mut variants = BTreeMap::new();
-            let is_core_bool_enum = index == 0 && item.name.as_str() == BOOL_TYPE;
+            let is_core_bool_enum = item.name.as_str() == BOOL_TYPE;
             for (variant_index, variant) in item.variants.iter().enumerate() {
                 if !is_core_bool_enum && is_builtin_value_constructor_name(variant.name.as_str()) {
                     return Err(Error::new(format!(
