@@ -8,12 +8,6 @@ record CheckFlags {
 }
 
 record WorkerState;
-
-enum Bool {
-    False,
-    True,
-}
-
 enum MainMsg {
     Start,
 }

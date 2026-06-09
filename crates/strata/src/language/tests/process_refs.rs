@@ -162,6 +162,26 @@ fn rejects_process_ref_named_like_process_declaration() {
 }
 
 #[test]
+fn rejects_process_ref_named_like_core_bool_builtin() {
+    for name in ["Bool", "True", "False"] {
+        let source = ACTOR_PING.replace(
+            "let worker: ProcessRef<Worker> = spawn Worker;\n        send worker Ping;",
+            &format!("let {name}: ProcessRef<Worker> = spawn Worker;\n        send {name} Ping;"),
+        );
+
+        let err = check_source(&source)
+            .expect_err("core Bool constructor process reference name should be rejected");
+
+        assert!(
+            err.to_string().contains(&format!(
+                "process Main process reference {name} conflicts with a declared type or value constructor"
+            )),
+            "unexpected error for {name}: {err}"
+        );
+    }
+}
+
+#[test]
 fn allows_same_spawn_target_in_distinct_terminal_step_patterns() {
     let source = r#"
 module spawn_by_message;

@@ -3,7 +3,6 @@ module effect_outcome_mailbox_full;
 record MainState { sent: Result<Unit,SendError<WorkerMsg>> }
 
 enum MainMsg { Start }
-enum Bool { False, True }
 enum WorkerState { Idle, Done }
 enum WorkerMsg { Work }
 

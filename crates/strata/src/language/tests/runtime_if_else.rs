@@ -115,10 +115,6 @@ fn runtime_if_else_without_branch_effects_keeps_action_prefix_empty() {
 module runtime_if_else_no_effects;
 
 record MainState;
-enum Bool {
-    False,
-    True,
-}
 enum MainMsg {
     Start,
 }
@@ -498,40 +494,19 @@ fn statement_runtime_if_rejects_action_nesting_above_limit() {
 }
 
 #[test]
-fn runtime_if_else_disambiguates_fieldless_variant_from_payload_type() {
+fn runtime_if_else_rejects_user_variant_named_true() {
     let source = RUNTIME_IF_ELSE.replace(
         "enum MainMsg {\n    Start,\n}",
         "enum OtherBool {\n    True,\n}\nenum MainMsg {\n    Start,\n}",
     );
-    let checked = check_source(&source).expect("typed payload should disambiguate True");
-    let artifact =
-        lower_to_artifact(&checked, &source).expect("disambiguated runtime equality should lower");
-    let worker = artifact
-        .processes
-        .iter()
-        .find(|process| process.debug_name == "Worker")
-        .expect("Worker artifact should exist");
-    let condition = match &worker.transitions[0].next_state {
-        NextState::IfElse { condition, .. } => condition,
-        other => panic!("expected if/else next state, got {other:?}"),
-    };
-    let bool_type = artifact_type_id(&artifact, "Bool");
-    assert!(matches!(
-        condition,
-        ArtifactValueTemplate::Equality {
-            ty,
-            operand_ty,
-            operator: ArtifactValueEqualityOperator::Equal,
-            left,
-            right,
-        } if *ty == bool_type
-            && *operand_ty == bool_type
-            && matches!(left.as_ref(), ArtifactValueTemplate::ReceivedPayload { ty } if *ty == bool_type)
-            && matches!(
-                right.as_ref(),
-                ArtifactValueTemplate::Literal { ty, value } if *ty == bool_type && value == &artifact_value("True")
-            )
-    ));
+    let error = check_source(&source).expect_err("user True variant must conflict");
+
+    assert!(
+        error
+            .to_string()
+            .contains("enum variant True conflicts with core Bool value constructor"),
+        "{error}"
+    );
 }
 
 #[test]

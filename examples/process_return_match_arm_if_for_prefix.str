@@ -9,12 +9,6 @@ record Assignment {
     enabled: Bool,
     jobs: List<Job,2>,
 }
-
-enum Bool {
-    False,
-    True,
-}
-
 enum MainMsg {
     Start,
 }

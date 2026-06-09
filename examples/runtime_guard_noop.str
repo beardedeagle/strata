@@ -1,12 +1,6 @@
 module runtime_guard_noop;
 
 record MainState;
-
-enum Bool {
-    False,
-    True,
-}
-
 enum MainMsg {
     Start,
 }

@@ -3,7 +3,7 @@ use super::support::*;
 #[test]
 fn forged_remote_distributed_target_requirements_fail_before_runtime_admission() {
     let gate = GateHarness::new();
-    let seed_artifact = "target/strata/hello.mta";
+    let seed_artifact = "target/strata/hello_target_requirement_seed.mta";
     gate.check("examples/hello.str");
     gate.build("examples/hello.str", seed_artifact);
     let seed = gate.read_artifact(seed_artifact);

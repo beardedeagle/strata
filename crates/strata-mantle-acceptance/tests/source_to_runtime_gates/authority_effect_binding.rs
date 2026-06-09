@@ -11,8 +11,6 @@ port WorkerPort protocol WorkerProtocol target Worker requires Cap<PortConnect<W
 
 record MainState { sent: Result<Unit,SendError<WorkerMsg>> }
 enum MainMsg { Start }
-enum Bool { False, True }
-
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;

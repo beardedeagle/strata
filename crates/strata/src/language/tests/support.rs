@@ -4,13 +4,13 @@ pub(super) use super::super::checked::{
     CheckedNextState, CheckedOutputId, CheckedProcess, CheckedProcessId, CheckedProcessRefId,
     CheckedSendTarget, CheckedSpawnKind, CheckedSpawnSiteId, CheckedStateId, CheckedStepResult,
     CheckedSupervisorChildMode, CheckedTransition, CheckedTypeKind, CheckedValueBooleanOperator,
-    CheckedValueEqualityOperator, CheckedValueTemplate,
+    CheckedValueEqualityOperator, CheckedValueShape, CheckedValueTemplate,
 };
 pub(super) use super::super::lexer::{Lexer, TokenKind};
 pub(super) use super::super::*;
 pub(super) use mantle_artifact::{
     ArtifactAction, ArtifactEffect, ArtifactMessageVariant, ArtifactSendTarget, ArtifactTypeKind,
-    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator,
+    ArtifactValue, ArtifactValueBooleanOperator, ArtifactValueEqualityOperator, ArtifactValueShape,
     ArtifactValueTemplate, MAX_ACTIONS_PER_PROCESS, MAX_COMPONENT_COUNT,
     MAX_EFFECT_OUTCOMES_PER_TRANSITION, MAX_ENUM_VARIANTS_PER_TYPE, MAX_FIELD_VALUE_BYTES,
     MAX_IDENTIFIER_BYTES, MAX_MAILBOX_BOUND, MAX_MESSAGE_VARIANTS_PER_PROCESS, MAX_PORT_COUNT,

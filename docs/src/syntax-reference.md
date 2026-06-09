@@ -678,14 +678,14 @@ parentheses for explicit grouping. Fully concrete predicates fold during
 checking. Runtime-bound predicates lower as typed Mantle value templates over
 typed Bool-producing operands, not as source strings or function names.
 
-Pure conditionals require the exact fieldless source contract
-`enum Bool { False, True }`. Both branches are value expressions checked against
-the same expected type. Concrete conditions select one branch before lowering;
-runtime-bound expression-form conditionals lower as typed Mantle value
+Pure conditionals require core `Bool`, whose fieldless `False` and `True` values
+are always available and cannot be redeclared. Both branches are value
+expressions checked against the same expected type. Concrete conditions select one branch before lowering.
+Runtime-bound expression-form conditionals lower as typed Mantle value
 templates. Expression branch bodies cannot contain statements or effects.
 
 Final-position `return_if_else` is runtime control flow in `step` bodies. The
-condition must have the same `Bool` contract, but it may depend on received
+condition must produce core `Bool`, but it may depend on received
 payload or current-state payload bindings. Each branch is a block body with its
 own statements and terminal return. Branch statement prefixes are limited to
 `emit`, `send`, bounded `for` actions, and one direct statement-level
@@ -742,8 +742,9 @@ ident =
 `security`, `send`, `spawn`, `supervise`, `target`, `temporary`, `transient`,
 `type`, `var`, and `via` are reserved everywhere identifiers are accepted. The
 single `_` token is reserved for wildcard patterns.
-`ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`, `PortConnect`,
-`ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`, `SendError`,
-`SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` are
-reserved type names because they name built-in transition, process-reference,
-capability descriptor, collection, effect outcome, and scalar value types.
+`Bool`, `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`,
+`PortConnect`, `ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`,
+`SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and
+`I64` are reserved type names because they name built-in truth, transition,
+process-reference, capability descriptor, collection, effect outcome, and scalar
+value types.

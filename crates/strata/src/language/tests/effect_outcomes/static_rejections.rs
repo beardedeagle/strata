@@ -10,7 +10,6 @@ module spawn_outcome_direct_equality;
 
 enum MainState { Ready }
 enum MainMsg { Start }
-enum Bool { False, True }
 enum WorkerState { Idle }
 enum WorkerMsg { Work }
 
@@ -65,7 +64,6 @@ module send_outcome_direct_equality;
 
 enum MainState { Ready }
 enum MainMsg { Start }
-enum Bool { False, True }
 enum WorkerState { Idle }
 enum WorkerMsg { Work }
 
@@ -121,7 +119,6 @@ module outcome_payload_structural_equality;
 
 enum MainState { Ready }
 enum MainMsg { Start }
-enum Bool { False, True }
 record Job { phase: Phase }
 enum Phase { Ready }
 enum WorkerState { Idle }

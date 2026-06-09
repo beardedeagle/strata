@@ -2,8 +2,6 @@ use super::support::*;
 
 const FUNCTION_IF_ELSE: &str = r#"
 module source_function_if_else;
-
-enum Bool { False, True }
 enum Mode { Cold, Warm }
 enum Readiness { ColdReady, WarmReady }
 record MainState {
@@ -129,42 +127,22 @@ fn parses_checks_and_lowers_source_function_braced_return_if_else() {
 }
 
 #[test]
-fn rejects_if_else_without_declared_bool_contract() {
-    let source = FUNCTION_IF_ELSE.replace("enum Bool { False, True }", "enum Bool { No, Yes }");
+fn rejects_if_else_user_declared_bool_contracts() {
+    for declaration in [
+        "enum Bool { No, Yes }",
+        "enum Bool { True, False }",
+        "enum Bool { False, True(Unit) }",
+    ] {
+        let source =
+            FUNCTION_IF_ELSE.replacen("enum Mode", &format!("{declaration}\nenum Mode"), 1);
+        let err = check_source(&source).expect_err("user-declared Bool contract should fail");
 
-    let err = check_source(&source).expect_err("malformed Bool contract should fail");
-
-    assert!(
-        err.to_string()
-            .contains("if condition requires enum Bool { False, True }")
-    );
-}
-
-#[test]
-fn rejects_if_else_reversed_bool_contract() {
-    let source = FUNCTION_IF_ELSE.replace("enum Bool { False, True }", "enum Bool { True, False }");
-
-    let err = check_source(&source).expect_err("reversed Bool contract should fail");
-
-    assert!(
-        err.to_string()
-            .contains("if condition requires enum Bool { False, True }")
-    );
-}
-
-#[test]
-fn rejects_if_else_payload_bool_contract() {
-    let source = FUNCTION_IF_ELSE.replace(
-        "enum Bool { False, True }",
-        "enum Bool { False, True(Mode) }",
-    );
-
-    let err = check_source(&source).expect_err("payload Bool contract should fail");
-
-    assert!(
-        err.to_string()
-            .contains("if condition requires enum Bool { False, True }")
-    );
+        assert!(
+            err.to_string()
+                .contains("enum Bool conflicts with core Bool type"),
+            "unexpected error for {declaration}: {err}"
+        );
+    }
 }
 
 #[test]
@@ -197,7 +175,6 @@ fn lowers_if_else_runtime_bound_condition_as_typed_next_state() {
 module source_function_if_else_runtime_condition;
 
 record MainState;
-enum Bool { False, True }
 enum MainMsg { Boot, Start(Bool) }
 
 proc Main mailbox bounded(1) {
@@ -244,7 +221,6 @@ fn rejects_direct_if_else_non_bool_condition() {
 module source_function_if_else_direct_non_bool;
 
 record MainState;
-enum Bool { False, True }
 enum Mode { Cold, Warm }
 enum MainMsg { Start }
 
@@ -277,7 +253,6 @@ fn rejects_direct_if_else_branch_type_mismatch() {
 module source_function_if_else_direct_branch_mismatch;
 
 record MainState;
-enum Bool { False, True }
 enum Other { ElseBad }
 enum MainMsg { Start }
 

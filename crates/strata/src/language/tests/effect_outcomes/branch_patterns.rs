@@ -136,7 +136,6 @@ module payload_send_outcome_branch;
 
 enum MainState { Ready }
 enum MainMsg { Start }
-enum Bool { False, True }
 record Job { phase: Phase }
 enum Phase { Ready }
 enum WorkerState { Idle }
@@ -200,7 +199,6 @@ module process_ref_send_outcome_branch;
 
 enum MainState { Ready }
 enum MainMsg { Start }
-enum Bool { False, True }
 enum WorkerState { Idle }
 enum WorkerMsg { Forward(ProcessRef<Worker>) }
 
@@ -262,7 +260,6 @@ module spawn_outcome_branch;
 
 enum MainState { Ready }
 enum MainMsg { Start }
-enum Bool { False, True }
 enum WorkerState { Idle }
 enum WorkerMsg { Work }
 
@@ -323,8 +320,6 @@ enum MainState { Ready }
 enum MainMsg { Start }
 enum WorkerState { Idle }
 enum WorkerMsg { Work }
-enum Bool { False, True }
-
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;

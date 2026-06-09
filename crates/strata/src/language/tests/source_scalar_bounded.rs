@@ -67,8 +67,6 @@ fn hidden_value_if_failure_source(condition: &str, then_expr: &str, else_expr: &
     format!(
         r#"
 module hidden_value_if_failure;
-
-enum Bool {{ False, True }}
 record MainState {{ value: U8 }}
 enum MainMsg {{ Start }}
 
@@ -92,8 +90,6 @@ fn hidden_return_if_failure_source(condition: &str, then_expr: &str, else_expr: 
     format!(
         r#"
 module hidden_return_if_failure;
-
-enum Bool {{ False, True }}
 record MainState {{ value: U8 }}
 enum MainMsg {{ Start }}
 
@@ -121,8 +117,6 @@ fn bounded_scalar_shape_source(case: &ScalarBoundedCase) -> String {
     format!(
         r#"
 module source_scalar_bounded_shapes_{name};
-
-enum Bool {{ False, True }}
 record MainState {{
     direct: U8,
     via_binding: U8,

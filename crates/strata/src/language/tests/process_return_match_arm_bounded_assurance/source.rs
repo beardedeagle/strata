@@ -155,7 +155,6 @@ record Assignment {{
     enabled: Bool,
     jobs: List<Job,1>,
 }}
-enum Bool {{ False, True }}
 enum MainMsg {{ Start }}
 enum Phase {{ Ready, Done }}
 enum Route {{ Assign(Assignment) }}

@@ -8,12 +8,6 @@ record CheckFlags {
     outer_flag: Bool,
     inner_flag: Bool,
 }
-
-enum Bool {
-    False,
-    True,
-}
-
 enum MainMsg {
     Start,
 }

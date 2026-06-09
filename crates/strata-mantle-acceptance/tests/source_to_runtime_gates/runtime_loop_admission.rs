@@ -193,7 +193,6 @@ module runtime_for_each_ref_payload;
 record MainState;
 record HubState;
 record SinkState;
-enum Bool { False, True }
 enum MainMsg { Start }
 enum WorkerState { Holding(List<Bool,2>) }
 enum WorkerMsg { Work(ProcessRef<Sink>) }

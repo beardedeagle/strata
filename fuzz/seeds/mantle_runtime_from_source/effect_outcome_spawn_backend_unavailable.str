@@ -4,8 +4,6 @@ record MainState;
 record WorkerState;
 enum MainMsg { Start }
 enum WorkerMsg { Work }
-enum Bool { False, True }
-
 proc Main mailbox bounded(1) {
     type State = MainState;
     type Msg = MainMsg;

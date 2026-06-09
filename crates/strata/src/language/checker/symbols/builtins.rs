@@ -1,6 +1,8 @@
 use super::super::super::ast::{Enum, Identifier, Module, TypeRef};
 use super::super::super::diagnostic::{Error, Result};
-use super::super::super::{OPTION_TYPE, RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE};
+use super::super::super::{
+    BOOL_FALSE, BOOL_TRUE, OPTION_TYPE, RESULT_TYPE, SEND_ERROR_TYPE, SPAWN_ERROR_TYPE,
+};
 use super::type_validation::BuiltinTypeSymbols;
 use super::{SemanticIndex, Symbol, TypeDecl};
 
@@ -18,6 +20,8 @@ pub(super) fn is_builtin_value_constructor_name(name: &str) -> bool {
             | "Denied"
             | "Exhausted"
             | "BackendUnavailable"
+            | BOOL_FALSE
+            | BOOL_TRUE
     )
 }
 

@@ -488,8 +488,6 @@ fn rejects_excessive_unary_predicate_nesting_while_parsing() {
     let value = format!("{}False", "!".repeat(MAX_VALUE_NESTING + 1));
     let source = r#"
 module excessive_unary_predicate_nesting;
-
-enum Bool { False, True }
 record MainState { flag: Bool }
 enum MainMsg { Start }
 

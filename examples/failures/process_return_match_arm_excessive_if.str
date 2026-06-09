@@ -2,7 +2,6 @@ module process_return_match_arm_excessive_if;
 
 record MainState;
 enum MainMsg { Start }
-enum Bool { False, True }
 enum Phase { Ready, Done }
 enum Route { Assign(Phase) }
 enum WorkerState { Idle, SawReady, SawDone }

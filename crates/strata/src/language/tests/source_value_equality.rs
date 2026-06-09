@@ -2,8 +2,6 @@ use super::support::*;
 
 const SOURCE_EQUALITY: &str = r#"
 module source_value_equality;
-
-enum Bool { False, True }
 enum Mode { Cold, Warm }
 record MainState {
     bool_eq: Bool,
@@ -76,8 +74,6 @@ fn folds_concrete_bool_and_fieldless_enum_equality() {
 fn folds_concrete_equality_before_static_map_key_validation() {
     let source = r#"
 module source_value_equality_map_key;
-
-enum Bool { False, True }
 enum Mode { Cold, Warm }
 record MainState { modes: Map<Bool,Mode,1> }
 enum MainMsg { Start }
@@ -107,8 +103,6 @@ proc Main mailbox bounded(1) {
 fn folds_concrete_boolean_predicate_composition() {
     let source = r#"
 module source_boolean_predicates;
-
-enum Bool { False, True }
 record MainState {
     all_true: Bool,
     false_and: Bool,
@@ -211,8 +205,6 @@ fn rejects_boolean_predicate_non_bool_operands() {
 fn accepts_parenthesized_non_bool_value_grouping() {
     let source = r#"
 module source_grouping_accepts_value;
-
-enum Bool { False, True }
 enum Mode { Cold, Warm }
 record MainState { mode: Mode }
 enum MainMsg { Start }
@@ -239,12 +231,9 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
-fn infers_ambiguous_fieldless_variant_from_typed_equality_peer() {
+fn resolves_core_bool_constructor_from_typed_equality_peer() {
     let source = r#"
 module source_value_equality_context;
-
-enum Bool { False, True }
-enum Other { True }
 record MainState;
 enum MainMsg { Start }
 
@@ -266,22 +255,20 @@ proc Main mailbox bounded(1) {
 }
 "#;
 
-    check_source(source).expect("typed Bool operand should disambiguate True");
+    check_source(source).expect("typed Bool operand should resolve core True");
 }
 
 #[test]
 fn equality_operand_diagnostics_do_not_use_match_scrutinee_wording() {
     for source in [
         r#"
-module source_equality_ambiguous_operand;
-
-enum Bool { False, True }
-enum Other { True }
+module source_equality_payload_operand;
+enum Other { Maybe(Bool) }
 record MainState;
 enum MainMsg { Start }
 
 fn same(flag: Bool) -> Bool ! [] ~ [] @det {
-    return True == True;
+    return Maybe == Maybe;
 }
 
 proc Main mailbox bounded(1) {
@@ -298,10 +285,8 @@ proc Main mailbox bounded(1) {
 }
 "#,
         r#"
-module runtime_equality_ambiguous_operand;
-
-enum Bool { False, True }
-enum Other { True }
+module runtime_equality_payload_operand;
+enum Other { Maybe(Bool) }
 record MainState;
 enum MainMsg { Start }
 
@@ -314,7 +299,7 @@ proc Main mailbox bounded(1) {
     }
 
     fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
-        if (True == True) {
+        if (Maybe == Maybe) {
             return Stop(state);
         } else {
             return Stop(state);
@@ -323,10 +308,10 @@ proc Main mailbox bounded(1) {
 }
 "#,
     ] {
-        let err = check_source(source).expect_err("ambiguous equality operand should fail");
+        let err = check_source(source).expect_err("payload equality operand should fail");
         let err = err.to_string();
         assert!(
-            err.contains("equality operand True"),
+            err.contains("equality operand Maybe"),
             "expected equality operand context, got {err}"
         );
         assert!(
@@ -376,8 +361,6 @@ fn rejects_bound_record_list_and_map_equality() {
         (
             r#"
 module source_record_equality_reject;
-
-enum Bool { False, True }
 enum Phase { Ready }
 record Job { phase: Phase }
 record MainState;
@@ -405,8 +388,6 @@ proc Main mailbox bounded(1) {
         (
             r#"
 module source_list_equality_reject;
-
-enum Bool { False, True }
 record MainState;
 enum MainMsg { Start }
 
@@ -432,8 +413,6 @@ proc Main mailbox bounded(1) {
         (
             r#"
 module source_map_equality_reject;
-
-enum Bool { False, True }
 enum Phase { Ready }
 record MainState;
 enum MainMsg { Start }
@@ -470,8 +449,6 @@ proc Main mailbox bounded(1) {
 fn rejects_direct_builtin_payload_enum_equality_between_runtime_values() {
     let source = r#"
 module source_builtin_payload_enum_equality_reject;
-
-enum Bool { False, True }
 enum Phase { Ready }
 record MainState;
 enum MainMsg { Start }
@@ -510,7 +487,6 @@ module source_process_ref_equality;
 
 record MainState;
 record WorkerState;
-enum Bool { False, True }
 enum MainMsg { Start }
 enum WorkerMsg { Ping }
 
@@ -598,8 +574,6 @@ fn source_with_equality_expr(expr: &str) -> String {
     format!(
         r#"
 module source_value_equality_reject;
-
-enum Bool {{ False, True }}
 enum Mode {{ Cold, Warm }}
 enum Other {{ OtherCold }}
 enum Phase {{ Ready }}

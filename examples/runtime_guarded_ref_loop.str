@@ -6,12 +6,6 @@ record BatchRequest {
     enabled: Bool,
     items: List<Bool,2>,
 }
-
-enum Bool {
-    False,
-    True,
-}
-
 enum MainMsg {
     Start,
 }

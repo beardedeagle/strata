@@ -3,7 +3,6 @@ module function_return_if_block_seed;
 record MainState {
     selected: Readiness,
 }
-enum Bool { False, True }
 enum Mode { Cold, Warm }
 enum Readiness { ColdReady, WarmReady }
 enum MainMsg { Start }

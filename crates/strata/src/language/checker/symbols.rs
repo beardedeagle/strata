@@ -615,5 +615,5 @@ impl SemanticIndex {
 }
 
 fn bool_contract_error() -> Error {
-    Error::new("if condition requires enum Bool { False, True }")
+    Error::new("if condition must have type Bool")
 }
