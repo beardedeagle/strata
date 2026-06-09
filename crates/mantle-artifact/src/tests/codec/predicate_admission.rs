@@ -28,7 +28,7 @@ fn admission_rejects_malformed_equality_operand_type() {
 
     assert!(
         err.to_string().contains(
-            "operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
+            "operand_type_id must be Bool, String, Bytes, a scalar value type, or a fieldless enum value type"
         ),
         "{err}"
     );
@@ -213,7 +213,7 @@ fn admission_rejects_payload_bearing_enum_equality_operand_type() {
 
     assert!(
         err.to_string().contains(
-            "operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
+            "operand_type_id must be Bool, String, Bytes, a scalar value type, or a fieldless enum value type"
         ),
         "{err}"
     );

@@ -68,6 +68,9 @@ impl<'a> CheckedTypeInterner<'a> {
     }
 
     fn value_shape(&mut self, ty: &TypeRef) -> Result<CheckedValueShape> {
+        if let Some(primitive) = self.semantic_index.primitive_type(ty)? {
+            return Ok(CheckedValueShape::Primitive(primitive));
+        }
         if let Some(scalar) = self.semantic_index.scalar_type(ty)? {
             return Ok(CheckedValueShape::Scalar(scalar));
         }

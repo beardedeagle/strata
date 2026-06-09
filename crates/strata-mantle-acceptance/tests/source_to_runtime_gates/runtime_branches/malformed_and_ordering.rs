@@ -34,7 +34,7 @@ fn runtime_if_else_rejects_malformed_equality_operand_type_before_runtime() {
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains(
-            "mantle: error: process Worker transition 0 if condition.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
+            "mantle: error: process Worker transition 0 if condition.operand_type_id must be Bool, String, Bytes, a scalar value type, or a fieldless enum value type"
         ),
         "unexpected diagnostic\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );

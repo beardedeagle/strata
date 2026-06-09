@@ -27,6 +27,8 @@ pub enum MapProjectionMode {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ArtifactValue {
     Atom(String),
+    String(String),
+    Bytes(Vec<u8>),
     Scalar(ArtifactScalarValue),
     EnumVariant {
         variant: String,

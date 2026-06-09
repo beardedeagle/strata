@@ -1,4 +1,5 @@
 use super::*;
+use crate::language::{SourceBytesLiteral, SourceStringLiteral};
 use mantle_artifact::{ArtifactScalarType, ArtifactScalarValue};
 
 impl Parser {
@@ -156,6 +157,14 @@ impl Parser {
         }
         if self.peek_keyword("if") {
             return self.parse_if_else_value_expr(depth);
+        }
+        if self.peek_string_literal() {
+            let literal = self.expect_string_literal()?;
+            return Ok(ValueExpr::StringLiteral(SourceStringLiteral::new(literal)?));
+        }
+        if self.peek_bytes_literal() {
+            let literal = self.expect_bytes_literal()?;
+            return Ok(ValueExpr::BytesLiteral(SourceBytesLiteral::new(literal)?));
         }
         if self.peek_number() {
             return self.parse_scalar_literal(false, None);

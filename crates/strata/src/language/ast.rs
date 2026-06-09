@@ -1,4 +1,7 @@
-use mantle_artifact::{ArtifactScalarValue, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES};
+use mantle_artifact::{
+    ArtifactPrimitiveType, ArtifactScalarValue, MAX_FIELD_VALUE_BYTES, MAX_IDENTIFIER_BYTES,
+    MAX_PRIMITIVE_DATA_BYTES,
+};
 
 use super::diagnostic::{Error, Result};
 
@@ -65,6 +68,60 @@ impl TryFrom<String> for OutputLiteral {
     type Error = Error;
 
     fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceStringLiteral(String);
+
+impl SourceStringLiteral {
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        validate_primitive_literal_len(ArtifactPrimitiveType::String, value.len())?;
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for SourceStringLiteral {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<String> for SourceStringLiteral {
+    type Error = Error;
+
+    fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceBytesLiteral(Vec<u8>);
+
+impl SourceBytesLiteral {
+    pub fn new(value: impl Into<Vec<u8>>) -> Result<Self> {
+        let value = value.into();
+        validate_primitive_literal_len(ArtifactPrimitiveType::Bytes, value.len())?;
+        Ok(Self(value))
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl TryFrom<Vec<u8>> for SourceBytesLiteral {
+    type Error = Error;
+
+    fn try_from(value: Vec<u8>) -> Result<Self> {
         Self::new(value)
     }
 }
@@ -144,6 +201,16 @@ fn is_reserved_identifier(value: &str) -> bool {
             | "var"
             | "via"
     )
+}
+
+fn validate_primitive_literal_len(primitive: ArtifactPrimitiveType, len: usize) -> Result<()> {
+    if len > MAX_PRIMITIVE_DATA_BYTES {
+        return Err(Error::new(format!(
+            "{} literal exceeds maximum primitive data length of {MAX_PRIMITIVE_DATA_BYTES} bytes",
+            primitive.source_name()
+        )));
+    }
+    Ok(())
 }
 
 fn validate_output_literal(value: &str) -> Result<()> {
@@ -526,6 +593,8 @@ pub enum ReturnExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueExpr {
     Identifier(Identifier),
+    StringLiteral(SourceStringLiteral),
+    BytesLiteral(SourceBytesLiteral),
     ScalarLiteral(ArtifactScalarValue),
     Call {
         name: Identifier,

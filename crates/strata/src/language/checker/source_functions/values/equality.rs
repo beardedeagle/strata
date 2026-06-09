@@ -1,5 +1,6 @@
 use super::*;
 use crate::language::checker::symbols::BuiltinValueShape;
+use mantle_artifact::ArtifactPrimitiveType;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EqualityOperandKind {
@@ -94,10 +95,16 @@ fn source_equality_operand_type(
                 .equality_fieldless_enum_variant_type(scope.module, name)
                 .map_err(|err| {
                     Error::new(format!(
-                        "equality operand {name} must be a Bool, scalar value, or fieldless enum value: {err}"
+                        "equality operand {name} must be a Bool, String, Bytes, scalar value, or fieldless enum value: {err}"
                     ))
                 })
         }
+        ValueExpr::StringLiteral(_) => Ok(TypeRef::Named(Identifier::new(
+            ArtifactPrimitiveType::String.source_name(),
+        )?)),
+        ValueExpr::BytesLiteral(_) => Ok(TypeRef::Named(Identifier::new(
+            ArtifactPrimitiveType::Bytes.source_name(),
+        )?)),
         ValueExpr::ScalarLiteral(_) | ValueExpr::ScalarArithmetic { .. } => {
             source_scalar_expr_type(scope, value, bindings, expected_type)
         }
@@ -109,13 +116,25 @@ fn source_equality_operand_type(
                 if scope.semantic_index.scalar_type(expected_type)?.is_some() {
                     return source_scalar_expr_type(scope, value, bindings, Some(expected_type));
                 }
+                if scope
+                    .semantic_index
+                    .primitive_type(expected_type)?
+                    .is_some()
+                    && let Some(function) = source_function_group_option(scope, name)?
+                        .and_then(|functions| functions.first())
+                    && scope
+                        .semantic_index
+                        .same_type(&function.return_type, expected_type)
+                {
+                    return Ok(expected_type.clone());
+                }
             } else if let Some(function) =
                 source_function_group_option(scope, name)?.and_then(|functions| functions.first())
             {
                 return Ok(function.return_type.clone());
             }
             Err(Error::new(
-                "equality operands must be Bool, scalar values, or fieldless enum values",
+                "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
             ))
         }
         ValueExpr::IfElse { .. } => {
@@ -127,8 +146,15 @@ fn source_equality_operand_type(
             if scope.semantic_index.scalar_type(expected_type)?.is_some() {
                 return source_scalar_expr_type(scope, value, bindings, Some(expected_type));
             }
+            if scope
+                .semantic_index
+                .primitive_type(expected_type)?
+                .is_some()
+            {
+                return Ok(expected_type.clone());
+            }
             Err(Error::new(
-                "equality operands must be Bool, scalar values, or fieldless enum values",
+                "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
             ))
         }
         ValueExpr::Grouped { value } => {
@@ -165,7 +191,7 @@ fn source_equality_operand_type(
         | ValueExpr::ScalarOrdering { .. }
         | ValueExpr::BooleanNot { .. }
         | ValueExpr::BooleanBinary { .. } => Err(Error::new(
-            "equality operands must be Bool, scalar values, or fieldless enum values",
+            "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
         )),
     }
 }
@@ -212,6 +238,9 @@ fn validate_source_equality_operand_type_at_depth(
     }
     if scope.semantic_index.scalar_type(operand_type)?.is_some() {
         validate_source_scalar_operand_type(scope, operand_type)?;
+        return Ok(EqualityOperandKind::Structural);
+    }
+    if scope.semantic_index.primitive_type(operand_type)?.is_some() {
         return Ok(EqualityOperandKind::Structural);
     }
     if scope

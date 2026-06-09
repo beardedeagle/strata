@@ -557,9 +557,9 @@ type_arg =
 Checking accepts `ProcResult<StateType>` for `step`, `ProcessRef<ProcessName>`
 for direct process authority surfaces, `Cap<Spawn<ProcessName>>` and
 `Cap<PortConnect<PortName>>` in process authorities, and `List<T,N>` /
-`Map<K,V,N>` over source value types. `Unit`, `Option<T>`, `Result<T,E>`,
-`SendError<M>`, and `SpawnError<A>` are built-in value shapes for explicit
-domain failure and typed effect outcomes.
+`Map<K,V,N>` over source value types. `String`, `Bytes`, `Unit`, `Option<T>`,
+`Result<T,E>`, `SendError<M>`, and `SpawnError<A>` are built-in value shapes for
+primitive data, explicit domain failure, and typed effect outcomes.
 
 ## Values
 
@@ -621,6 +621,8 @@ value_unary_expr =
 
 value_primary_expr =
     ident
+  | string_literal
+  | bytes_literal
   | suffixed_integer_literal
   | ident "(" value_expr ")"
   | ident "{" record_value_field ("," record_value_field)* ","? "}"
@@ -642,6 +644,21 @@ map_value_entries =
 suffixed_integer_literal =
     number scalar_suffix
 
+string_literal =
+    '"' (printable character | string_escape)* '"'
+
+bytes_literal =
+    'b"' (printable ASCII byte | bytes_escape)* '"'
+
+string_escape =
+    '\\"' | '\\\\' | '\\n' | '\\r' | '\\t' | '\\u{' hex+ '}'
+
+bytes_escape =
+    '\\"' | '\\\\' | '\\n' | '\\r' | '\\t' | '\\x' hex hex
+
+hex =
+    ASCII hex digit
+
 scalar_suffix =
     "_u8" | "_u16" | "_u32" | "_u64"
   | "_i8" | "_i16" | "_i32" | "_i64"
@@ -658,11 +675,12 @@ expected bounded source value type.
 
 Typed equality predicates are deliberately narrow. `left == right`
 and `left != right` are supported only when both operands have the same checked
-type and that type is `Bool`, a scalar integer type, or a payload-free enum.
-Fully concrete source equality folds during checking. Runtime-bound equality
-lowers as a typed Mantle value template; operands are not runtime dispatch
-strings. String equality, record/list/map structural equality,
-process-reference equality, and payload enum equality remain unsupported.
+type and that type is `Bool`, `String`, `Bytes`, a scalar integer type, or a
+payload-free enum. Fully concrete source equality folds during checking.
+Runtime-bound equality lowers as a typed Mantle value template; operands are not
+runtime dispatch strings. Structural record/list/map equality, dynamic string
+predicates, process-reference equality, and payload enum equality remain
+unsupported.
 
 Scalar literals require explicit suffixes in value positions. Arithmetic uses
 `+`, `-`, `*`, `/`, and `%`; ordering uses `<`, `<=`, `>`, and `>=`. Scalar
@@ -723,10 +741,15 @@ runtime `if`; third-level terminal runtime branches remain rejected.
 The literal surface is intentionally narrow:
 
 - decimal numbers are accepted for mailbox bounds;
-- string literals are accepted for `emit`;
-- string escapes are not supported;
-- newline and carriage return characters are not allowed inside string
-  literals.
+- suffixed integer literals are accepted for scalar source values;
+- string literals are accepted as immutable `String` values and for `emit` text;
+- bytes literals are accepted as immutable `Bytes` values;
+- source `String` literals support only `\"`, `\\`, `\n`, `\r`, `\t`, and
+  `\u{HEX}` escapes;
+- source `Bytes` literals support printable ASCII plus `\"`, `\\`, `\n`,
+  `\r`, `\t`, and `\xNN` escapes;
+- newline and carriage return characters are not allowed raw inside string or
+  bytes literals.
 
 ## Identifiers
 

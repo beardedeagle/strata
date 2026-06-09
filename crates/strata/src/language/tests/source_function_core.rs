@@ -178,7 +178,7 @@ proc Main mailbox bounded(1) {"#,
     let err = check_source(&source).expect_err("undeclared function parameter type should fail");
 
     assert!(err.to_string().contains(
-        "module function unused parameter input must use a declared record, enum, scalar, list, or map type without process-reference authority, found Missing"
+        "module function unused parameter input must use a declared record, enum, scalar, primitive, list, or map type without process-reference authority, found Missing"
     ));
 }
 
@@ -196,7 +196,7 @@ proc Main mailbox bounded(1) {"#,
     let err = check_source(&source).expect_err("undeclared function return type should fail");
 
     assert!(err.to_string().contains(
-        "module function unused return type must use a declared record, enum, scalar, list, or map type without process-reference authority, found Missing"
+        "module function unused return type must use a declared record, enum, scalar, primitive, list, or map type without process-reference authority, found Missing"
     ));
 }
 

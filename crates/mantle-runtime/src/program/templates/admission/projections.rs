@@ -33,7 +33,9 @@ impl LoadedTemplateAdmission<'_> {
         match type_entry.kind {
             ArtifactTypeKind::ProcessRef { .. } => Ok(true),
             ArtifactTypeKind::Value => match type_entry.value_shape()? {
-                ArtifactValueShape::Atom | ArtifactValueShape::Scalar { .. } => Ok(false),
+                ArtifactValueShape::Atom
+                | ArtifactValueShape::Primitive { .. }
+                | ArtifactValueShape::Scalar { .. } => Ok(false),
                 ArtifactValueShape::Record { fields } => {
                     for field in fields {
                         if self.type_contains_process_ref_at_depth(field.ty, depth + 1)? {

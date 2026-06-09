@@ -94,6 +94,10 @@ fn collection_state_compilation_and_runtime_performance_smoke() {
         boundary_contracts::run_check_lower_profile
     );
     run_profile!(
+        source_data_primitives::CHECK_LOWER_PROFILE,
+        source_data_primitives::run_check_lower_profile
+    );
+    run_profile!(
         component_composition::CHECK_LOWER_PROFILE,
         component_composition::run_check_lower_profile
     );
@@ -149,6 +153,10 @@ fn collection_state_compilation_and_runtime_performance_smoke() {
     run_profile!(
         boundary_contracts::RUNTIME_PROFILE,
         boundary_contracts::run_runtime_profile
+    );
+    run_profile!(
+        source_data_primitives::RUNTIME_PROFILE,
+        source_data_primitives::run_runtime_profile
     );
     run_profile!(ARTIFACT_CODEC_PROFILE, run_artifact_codec_profile);
     run_profile!(JSONL_RUNTIME_PROFILE, run_jsonl_runtime_profile);
@@ -268,6 +276,8 @@ mod platform_resources;
 mod profile_selection;
 #[path = "performance_smoke/profiles.rs"]
 mod profiles;
+#[path = "performance_smoke/source_data_primitives.rs"]
+mod source_data_primitives;
 
 use platform_resources::{capture_cpu_time, capture_memory};
 #[derive(Clone, Copy, Debug)]

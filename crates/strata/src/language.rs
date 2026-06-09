@@ -26,8 +26,9 @@ pub use ast::{
     FunctionBody, FunctionParam, Identifier, Import, ListPattern, ListValue, MapPattern,
     MapPatternCompleteness, MapPatternEntry, MapValue, MapValueEntry, Match, MatchArm, Module,
     OutputLiteral, Param, Pattern, Port, PortBinding, Process, Protocol, Record, RecordField,
-    RecordValue, RecordValueField, ReturnExpr, Statement, TypeRef, ValueBooleanOperator,
-    ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator, ValueScalarOrderingOperator,
+    RecordValue, RecordValueField, ReturnExpr, SourceBytesLiteral, SourceStringLiteral, Statement,
+    TypeRef, ValueBooleanOperator, ValueEqualityOperator, ValueExpr, ValueScalarArithmeticOperator,
+    ValueScalarOrderingOperator,
 };
 pub use authority_effect_artifact::{
     AUTHORITY_EFFECT_ARTIFACT_EXTENSION, AUTHORITY_EFFECT_HASH_ALG, AUTHORITY_EFFECT_SCHEMA_ID,
@@ -89,6 +90,8 @@ const PORT_CONNECT_TYPE: &str = "PortConnect";
 const COMPONENT_EXPORT_TYPE: &str = "ComponentExport";
 const LIST_TYPE: &str = "List";
 const MAP_TYPE: &str = "Map";
+const STRING_TYPE: &str = "String";
+const BYTES_TYPE: &str = "Bytes";
 const UNIT_TYPE: &str = "Unit";
 const OPTION_TYPE: &str = "Option";
 const RESULT_TYPE: &str = "Result";

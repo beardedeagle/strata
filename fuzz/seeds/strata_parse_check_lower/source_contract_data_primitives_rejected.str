@@ -1,0 +1,13 @@
+module source_contract_data_primitives_rejected;
+record MainState { value: Bytes }
+enum MainMsg { Start }
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState { value: b"\xz1" };
+    }
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}

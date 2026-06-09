@@ -53,6 +53,51 @@ fn artifact_value_parse_rejects_unbalanced_top_level_delimiters() {
 }
 
 #[test]
+fn primitive_value_labels_are_canonical_lowercase_hex_data() {
+    let string = ArtifactValue::String("ready".to_string());
+    let bytes = ArtifactValue::Bytes(vec![0x00, 0xff, b'a']);
+
+    assert_eq!(string.label(), "String(7265616479)");
+    assert_eq!(bytes.label(), "Bytes(00ff61)");
+    assert_eq!(
+        ArtifactValue::parse("String(7265616479)").expect("string primitive should parse"),
+        string
+    );
+    assert_eq!(
+        ArtifactValue::parse("Bytes(00ff61)").expect("bytes primitive should parse"),
+        bytes
+    );
+
+    for (label, expected) in [
+        ("String(7265616479", "is not a String value"),
+        ("String(ff)", "not valid UTF-8"),
+        ("String(FF)", "non-lowercase-hex data"),
+        ("Bytes(0)", "hex encoding must have even length"),
+        ("Bytes(0g)", "non-lowercase-hex data"),
+    ] {
+        let err = ArtifactValue::parse(label).expect_err("malformed primitive value should fail");
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+}
+
+#[test]
+fn primitive_value_validation_rejects_programmatic_oversized_data() {
+    let value = ArtifactValue::Bytes(vec![0; MAX_PRIMITIVE_DATA_BYTES + 1]);
+    let err = value
+        .validate("oversized primitive")
+        .expect_err("oversized primitive values should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("oversized primitive exceeds maximum primitive data length"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn artifact_value_labels_preserve_record_and_map_entry_order() {
     let record = ArtifactValue::parse("MainState{signature:WarmReady,body:WarmReady}")
         .expect("ordered record value should parse");

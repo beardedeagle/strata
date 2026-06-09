@@ -9,6 +9,7 @@ use crate::validation::{
 };
 mod boundaries;
 mod codec;
+mod primitives;
 mod process_validation;
 mod validation;
 mod value_template;
@@ -17,6 +18,7 @@ pub use boundaries::{
     ArtifactComponent, ArtifactComponentInstance, ArtifactComposition, ArtifactPort,
     ArtifactPortBinding, ArtifactProtocol,
 };
+pub use primitives::ArtifactPrimitiveType;
 pub use validation::validate_value_enum_membership;
 pub(in crate::artifact) use validation::{
     validate_artifact_identity, validate_unique_process_ref_list,
@@ -164,6 +166,9 @@ pub struct ArtifactType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactValueShape {
     Atom,
+    Primitive {
+        primitive: ArtifactPrimitiveType,
+    },
     Scalar {
         scalar: ArtifactScalarType,
     },
@@ -210,6 +215,14 @@ impl ArtifactType {
             label: label.into(),
             kind: ArtifactTypeKind::Value,
             shape: Some(ArtifactValueShape::Scalar { scalar }),
+        }
+    }
+
+    pub fn primitive(label: impl Into<String>, primitive: ArtifactPrimitiveType) -> Self {
+        Self {
+            label: label.into(),
+            kind: ArtifactTypeKind::Value,
+            shape: Some(ArtifactValueShape::Primitive { primitive }),
         }
     }
 

@@ -126,12 +126,14 @@ runtime branches cannot return; state changes still occur only through the
 enclosing immutable whole-value `Continue`, `Stop`, or `Panic` return.
 
 Scalar ordering comparisons, scalar equality, and checked scalar arithmetic are
-supported over matching fixed-width integer types. Runtime-bound scalar
-predicates and runtime-bound pure value conditionals lower as typed Mantle
-templates. Mantle admission and runtime evaluation also validate checked scalar
-arithmetic templates and typed value-if templates in admitted value-template
-positions. Unbounded loops, Mantle-side import resolution, floats, string
-equality, and a standard library remain outside the buildable runtime surface.
+supported over matching fixed-width integer types. Exact `String` and `Bytes`
+equality is supported over matching primitive types. Runtime-bound scalar and
+primitive predicates and runtime-bound pure value conditionals lower as typed
+Mantle templates. Mantle admission and runtime evaluation also validate checked
+scalar arithmetic templates, primitive value templates, and typed value-if
+templates in admitted value-template positions. Unbounded loops, Mantle-side
+import resolution, floats, dynamic string operations, structural collection
+comparison, and a standard library remain outside the buildable runtime surface.
 
 ## Runtime Iteration
 

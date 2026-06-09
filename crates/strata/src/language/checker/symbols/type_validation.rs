@@ -312,6 +312,7 @@ impl SourceValueTypeValidator<'_> {
             return Ok(());
         }
         let result = match decl {
+            TypeDecl::Primitive(_) => Ok(()),
             TypeDecl::Scalar(_) => Ok(()),
             TypeDecl::Unit => Ok(()),
             TypeDecl::Record(index) => self.validate_record(ty, index),

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mantle_artifact::{ArtifactScalarType, MAX_PORT_COUNT};
+use mantle_artifact::{ArtifactPrimitiveType, ArtifactScalarType, MAX_PORT_COUNT};
 
 use super::boundaries::{
     port_id_from_map, process_id_from_map, protocol_id_from_map, reject_boundary_name_conflict,
@@ -21,9 +21,9 @@ use crate::language::checked::{
 };
 use crate::language::diagnostic::{Error, Result};
 use crate::language::{
-    BOOL_TYPE, CAP_TYPE, COMPONENT_EXPORT_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE,
+    BOOL_TYPE, BYTES_TYPE, CAP_TYPE, COMPONENT_EXPORT_TYPE, LIST_TYPE, MAP_TYPE, OPTION_TYPE,
     PORT_CONNECT_TYPE, PROC_RESULT_TYPE, PROCESS_REF_TYPE, PROTOCOL_BOUNDARY_TYPE, RESULT_TYPE,
-    SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, SPAWN_TYPE, UNIT_TYPE,
+    SEND_ERROR_TYPE, SPAWN_ERROR_TYPE, SPAWN_TYPE, STRING_TYPE, UNIT_TYPE,
 };
 
 impl SemanticIndex {
@@ -53,6 +53,12 @@ impl SemanticIndex {
         let send_error_type = symbols.intern_str(SEND_ERROR_TYPE)?;
         let spawn_error_type = symbols.intern_str(SPAWN_ERROR_TYPE)?;
         types.insert(unit_type, TypeDecl::Unit);
+        let mut primitive_type_symbols = Vec::with_capacity(ArtifactPrimitiveType::ALL.len());
+        for primitive in ArtifactPrimitiveType::ALL {
+            let symbol = symbols.intern_str(primitive.source_name())?;
+            types.insert(symbol, TypeDecl::Primitive(primitive));
+            primitive_type_symbols.push(symbol);
+        }
         let mut scalar_type_symbols = Vec::with_capacity(ArtifactScalarType::ALL.len());
         for scalar in ArtifactScalarType::ALL {
             let symbol = symbols.intern_str(scalar.source_name())?;
@@ -78,10 +84,15 @@ impl SemanticIndex {
             reject_reserved_type_name(record.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, map_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, unit_type)?;
+            reject_reserved_type_name_literal(record.name.as_str(), STRING_TYPE)?;
+            reject_reserved_type_name_literal(record.name.as_str(), BYTES_TYPE)?;
             reject_reserved_type_name(record.name.as_str(), symbol, option_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, result_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, send_error_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, spawn_error_type)?;
+            for primitive_symbol in &primitive_type_symbols {
+                reject_reserved_type_name(record.name.as_str(), symbol, *primitive_symbol)?;
+            }
             for scalar_symbol in &scalar_type_symbols {
                 reject_reserved_type_name(record.name.as_str(), symbol, *scalar_symbol)?;
             }
@@ -116,10 +127,15 @@ impl SemanticIndex {
             reject_reserved_type_name(item.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, map_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, unit_type)?;
+            reject_reserved_type_name_literal(item.name.as_str(), STRING_TYPE)?;
+            reject_reserved_type_name_literal(item.name.as_str(), BYTES_TYPE)?;
             reject_reserved_type_name(item.name.as_str(), symbol, option_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, result_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, send_error_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, spawn_error_type)?;
+            for primitive_symbol in &primitive_type_symbols {
+                reject_reserved_type_name(item.name.as_str(), symbol, *primitive_symbol)?;
+            }
             for scalar_symbol in &scalar_type_symbols {
                 reject_reserved_type_name(item.name.as_str(), symbol, *scalar_symbol)?;
             }

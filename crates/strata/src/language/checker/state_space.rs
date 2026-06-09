@@ -238,6 +238,8 @@ impl<'module> StateSpace<'module> {
                 ))
             }
             ValueExpr::Call { .. }
+            | ValueExpr::StringLiteral(_)
+            | ValueExpr::BytesLiteral(_)
             | ValueExpr::ScalarLiteral(_)
             | ValueExpr::Record(_)
             | ValueExpr::List(_)

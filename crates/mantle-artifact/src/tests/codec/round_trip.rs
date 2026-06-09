@@ -231,6 +231,70 @@ fn artifact_round_trips_equality_condition_template() {
 }
 
 #[test]
+fn artifact_round_trips_primitive_shapes_and_values() {
+    let mut artifact = valid_artifact();
+    let bool_type = append_bool_type(&mut artifact);
+    let text_value_type =
+        append_primitive_type(&mut artifact, "String", ArtifactPrimitiveType::String);
+    let octet_value_type =
+        append_primitive_type(&mut artifact, "Bytes", ArtifactPrimitiveType::Bytes);
+
+    artifact.processes[0].state_type = text_value_type;
+    artifact.processes[0].state_values = vec![state_value(text_value_type, "String(7265616479)")];
+    artifact.processes[1].transitions[0].next_state = NextState::IfElse {
+        condition: ArtifactValueTemplate::Equality {
+            ty: bool_type,
+            operand_ty: text_value_type,
+            operator: ArtifactValueEqualityOperator::Equal,
+            left: Box::new(ArtifactValueTemplate::Literal {
+                ty: text_value_type,
+                value: artifact_value("String(7265616479)"),
+            }),
+            right: Box::new(ArtifactValueTemplate::Literal {
+                ty: text_value_type,
+                value: artifact_value("String(7265616479)"),
+            }),
+        },
+        then_state: Box::new(NextState::Value(StateId::new(1))),
+        else_state: Box::new(NextState::Current),
+    };
+    artifact.processes[1].transitions[0].actions = vec![ArtifactAction::IfElse {
+        condition: ArtifactValueTemplate::Equality {
+            ty: bool_type,
+            operand_ty: octet_value_type,
+            operator: ArtifactValueEqualityOperator::NotEqual,
+            left: Box::new(ArtifactValueTemplate::Literal {
+                ty: octet_value_type,
+                value: artifact_value("Bytes(00ff)"),
+            }),
+            right: Box::new(ArtifactValueTemplate::Literal {
+                ty: octet_value_type,
+                value: artifact_value("Bytes(01ff)"),
+            }),
+        },
+        then_actions: vec![ArtifactAction::Emit {
+            output: OutputId::new(0),
+        }],
+        else_actions: Vec::new(),
+    }];
+
+    let encoded = artifact.encode();
+    let decoded = MantleArtifact::decode(&encoded).expect("primitive artifact should decode");
+
+    assert_eq!(decoded, artifact);
+    assert!(encoded.contains("type.11.shape=primitive"));
+    assert!(encoded.contains("type.11.primitive_type=string"));
+    assert!(encoded.contains("type.12.shape=primitive"));
+    assert!(encoded.contains("type.12.primitive_type=bytes"));
+    assert!(encoded.contains("process.0.state_value.0.value=String(7265616479)"));
+    assert!(
+        encoded
+            .contains("process.1.transition.0.next_state_condition.left.value=String(7265616479)")
+    );
+    assert!(encoded.contains("process.1.transition.0.action.0.condition.left.value=Bytes(00ff)"));
+}
+
+#[test]
 fn artifact_round_trips_boolean_predicate_condition_template() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);

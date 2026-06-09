@@ -14,7 +14,9 @@ pub(super) fn substitute_static_arm_bindings(
             .iter()
             .find_map(|binding| (binding.name == &name).then(|| binding.value.clone()))
             .unwrap_or(ValueExpr::Identifier(name)),
-        ValueExpr::ScalarLiteral(_) => value,
+        ValueExpr::StringLiteral(_) | ValueExpr::BytesLiteral(_) | ValueExpr::ScalarLiteral(_) => {
+            value
+        }
         ValueExpr::Call { name, arg } => ValueExpr::Call {
             name,
             arg: Box::new(substitute_static_arm_bindings(*arg, bindings)),

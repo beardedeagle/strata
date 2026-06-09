@@ -676,7 +676,10 @@ fn validate_single_embedded_process_ref(value: &RuntimeValue, pid: u64) -> Resul
                 }
                 Ok(())
             }
-            RuntimeValue::Atom(_) | RuntimeValue::Scalar(_) => Ok(()),
+            RuntimeValue::Atom(_)
+            | RuntimeValue::String(_)
+            | RuntimeValue::Bytes(_)
+            | RuntimeValue::Scalar(_) => Ok(()),
         }
     }
 

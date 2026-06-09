@@ -43,12 +43,13 @@ fn validate_equality_operand_type_at_depth(
     let type_entry = artifact.type_entry(operand_ty)?;
     match &type_entry.kind {
         ArtifactTypeKind::ProcessRef { .. } => Err(Error::new(format!(
-            "{field}.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
+            "{field}.operand_type_id must be Bool, String, Bytes, a scalar value type, or a fieldless enum value type"
         ))),
         ArtifactTypeKind::Value => match type_entry.value_shape()? {
             ArtifactValueShape::Atom if type_entry.label == "Unit" => {
                 Ok(EqualityOperandKind::Structural)
             }
+            ArtifactValueShape::Primitive { .. } => Ok(EqualityOperandKind::Structural),
             ArtifactValueShape::Scalar { .. } => Ok(EqualityOperandKind::Structural),
             ArtifactValueShape::Enum { variants }
                 if variants
@@ -63,7 +64,7 @@ fn validate_equality_operand_type_at_depth(
                 Ok(EqualityOperandKind::BuiltinVariantPatternOnly)
             }
             _ => Err(Error::new(format!(
-                "{field}.operand_type_id must be Bool, a scalar value type, or a fieldless enum value type"
+                "{field}.operand_type_id must be Bool, String, Bytes, a scalar value type, or a fieldless enum value type"
             ))),
         },
     }

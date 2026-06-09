@@ -14,6 +14,18 @@ impl fmt::Display for OutputLiteral {
     }
 }
 
+impl fmt::Display for SourceStringLiteral {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_source_string_literal(f, self.as_str())
+    }
+}
+
+impl fmt::Display for SourceBytesLiteral {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_source_bytes_literal(f, self.as_slice())
+    }
+}
+
 impl fmt::Display for TypeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -74,6 +86,8 @@ impl ValueExpr {
         }
         match self {
             Self::Identifier(name) => write!(f, "{name}"),
+            Self::StringLiteral(value) => write!(f, "{value}"),
+            Self::BytesLiteral(value) => write!(f, "{value}"),
             Self::ScalarLiteral(value) => write!(f, "{}", value.label()),
             Self::Call { name, arg } => write!(f, "{name}({arg})"),
             Self::EnumVariant { name, payload } => write!(f, "{name}({payload})"),
@@ -163,6 +177,8 @@ impl ValueExpr {
             } => 6,
             Self::BooleanNot { .. } => 7,
             Self::Identifier(_)
+            | Self::StringLiteral(_)
+            | Self::BytesLiteral(_)
             | Self::ScalarLiteral(_)
             | Self::Call { .. }
             | Self::EnumVariant { .. }
@@ -173,6 +189,38 @@ impl ValueExpr {
             | Self::Grouped { .. } => 8,
         }
     }
+}
+
+fn write_source_string_literal(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
+    f.write_str("\"")?;
+    for ch in value.chars() {
+        match ch {
+            '\\' => f.write_str("\\\\")?,
+            '"' => f.write_str("\\\"")?,
+            '\n' => f.write_str("\\n")?,
+            '\r' => f.write_str("\\r")?,
+            '\t' => f.write_str("\\t")?,
+            ch if ch.is_control() => write!(f, "\\u{{{:x}}}", ch as u32)?,
+            ch => write!(f, "{ch}")?,
+        }
+    }
+    f.write_str("\"")
+}
+
+fn write_source_bytes_literal(f: &mut fmt::Formatter<'_>, value: &[u8]) -> fmt::Result {
+    f.write_str("b\"")?;
+    for byte in value {
+        match *byte {
+            b'\\' => f.write_str("\\\\")?,
+            b'"' => f.write_str("\\\"")?,
+            b'\n' => f.write_str("\\n")?,
+            b'\r' => f.write_str("\\r")?,
+            b'\t' => f.write_str("\\t")?,
+            0x20..=0x7e => write!(f, "{}", char::from(*byte))?,
+            byte => write!(f, "\\x{byte:02x}")?,
+        }
+    }
+    f.write_str("\"")
 }
 
 impl fmt::Display for RecordValue {

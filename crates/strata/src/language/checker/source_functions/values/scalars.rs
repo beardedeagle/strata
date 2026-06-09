@@ -162,7 +162,9 @@ pub(super) fn source_scalar_expr_type(
         ValueExpr::Grouped { value } => {
             source_scalar_expr_type(scope, value, bindings, expected_type)
         }
-        ValueExpr::Record(_)
+        ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
+        | ValueExpr::Record(_)
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
         | ValueExpr::EnumVariant { .. }

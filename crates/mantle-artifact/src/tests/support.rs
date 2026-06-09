@@ -211,6 +211,18 @@ pub(super) fn append_bool_type(artifact: &mut MantleArtifact) -> TypeId {
     ty
 }
 
+pub(super) fn append_primitive_type(
+    artifact: &mut MantleArtifact,
+    label: &str,
+    primitive: ArtifactPrimitiveType,
+) -> TypeId {
+    let ty = TypeId::from_index(artifact.types.len()).expect("test type index should fit");
+    artifact
+        .types
+        .push(ArtifactType::primitive(label, primitive));
+    ty
+}
+
 pub(super) fn append_list_type(
     artifact: &mut MantleArtifact,
     label: &str,

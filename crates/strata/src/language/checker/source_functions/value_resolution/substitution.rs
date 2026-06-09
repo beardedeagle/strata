@@ -5,7 +5,9 @@ pub(super) fn substitute_source_value_bindings(
     bindings: &[SourceSubstitution],
 ) -> ValueExpr {
     match value {
-        ValueExpr::ScalarLiteral(_) => value,
+        ValueExpr::StringLiteral(_) | ValueExpr::BytesLiteral(_) | ValueExpr::ScalarLiteral(_) => {
+            value
+        }
         ValueExpr::Identifier(name) => bindings
             .iter()
             .find_map(|binding| (name == binding.name).then(|| binding.value.clone()))

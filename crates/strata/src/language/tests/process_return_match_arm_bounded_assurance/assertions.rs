@@ -387,7 +387,8 @@ fn assert_value_has_no_source_bindings(value: &ArtifactValue) {
                 assert_value_has_no_source_bindings(&entry.value);
             }
         }
-        ArtifactValue::Scalar(_) => {}
+        ArtifactValue::String(value) => assert_no_source_binding_string(value),
+        ArtifactValue::Bytes(_) | ArtifactValue::Scalar(_) => {}
         ArtifactValue::ProcessRef { .. } => {}
     }
 }

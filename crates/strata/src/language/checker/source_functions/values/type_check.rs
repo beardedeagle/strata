@@ -151,6 +151,15 @@ fn check_source_value_type_inner(
             "expected scalar literal or scalar expression for type {expected_type}"
         )));
     }
+    if scope
+        .semantic_index
+        .primitive_type(expected_type)?
+        .is_some()
+    {
+        return Err(Error::new(format!(
+            "expected primitive literal for type {expected_type}"
+        )));
+    }
     if let Ok(record) = scope
         .semantic_index
         .record_decl(scope.module, expected_type)
@@ -326,6 +335,8 @@ fn check_enum_source_value_type(
             check_source_value_type_inner(scope, payload_type, payload, bindings, depth + 1)
         }
         ValueExpr::Call { .. }
+        | ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
         | ValueExpr::ScalarLiteral(_)
         | ValueExpr::Record(_)
         | ValueExpr::List(_)

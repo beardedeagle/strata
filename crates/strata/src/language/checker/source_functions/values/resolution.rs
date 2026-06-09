@@ -21,8 +21,10 @@ pub(in crate::language::checker) fn resolve_source_value_expr(
     }
 
     match value {
-        ValueExpr::Identifier(_) => Ok(value.clone()),
-        ValueExpr::ScalarLiteral(_) => Ok(value.clone()),
+        ValueExpr::Identifier(_)
+        | ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
+        | ValueExpr::ScalarLiteral(_) => Ok(value.clone()),
         ValueExpr::Call { name, arg } => {
             resolve_source_call_or_constructor(scope, expected_type, name, arg, bindings, depth + 1)
         }

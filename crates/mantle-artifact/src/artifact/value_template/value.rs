@@ -4,8 +4,15 @@ use super::projection::{
     ProjectionKeySetKind, labels, validate_projection_key_set, validate_projection_keys,
 };
 use crate::validation::{validate_count, validate_ident_field, validate_value_label};
-use crate::{Error, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result, TypeId};
+use crate::{
+    Error, MAX_PRIMITIVE_DATA_BYTES, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result,
+    TypeId,
+};
 use std::fmt::Write as _;
+
+const STRING_VALUE_PREFIX: &str = "String(";
+const BYTES_VALUE_PREFIX: &str = "Bytes(";
+const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
 
 impl ArtifactValue {
     pub fn parse(label: &str) -> Result<Self> {
@@ -46,6 +53,8 @@ impl ArtifactValue {
         }
         match self {
             Self::Atom(value) => validate_ident_field(field, value),
+            Self::String(value) => validate_primitive_data_len(field, value.len()),
+            Self::Bytes(value) => validate_primitive_data_len(field, value.len()),
             Self::Scalar(value) => value.ty().validate_value(field, value.value()),
             Self::EnumVariant { variant, payload } => {
                 validate_ident_field(&format!("{field}.variant"), variant)?;
@@ -138,6 +147,10 @@ impl ArtifactValue {
     pub fn write_label(&self, output: &mut String) {
         match self {
             Self::Atom(value) => output.push_str(value),
+            Self::String(value) => {
+                write_data_value_label(output, STRING_VALUE_PREFIX, value.as_bytes())
+            }
+            Self::Bytes(value) => write_data_value_label(output, BYTES_VALUE_PREFIX, value),
             Self::Scalar(value) => {
                 let _ = write!(output, "{}{}", value.value(), value.ty().suffix());
             }
@@ -194,6 +207,8 @@ impl ArtifactValue {
     pub fn label_len(&self) -> Result<usize> {
         match self {
             Self::Atom(value) => Ok(value.len()),
+            Self::String(value) => data_value_label_len(STRING_VALUE_PREFIX, value.len()),
+            Self::Bytes(value) => data_value_label_len(BYTES_VALUE_PREFIX, value.len()),
             Self::Scalar(value) => {
                 checked_add_len(decimal_len_i128(value.value()), value.ty().suffix().len())
             }
@@ -255,6 +270,10 @@ impl ArtifactValue {
     fn consume_label(&self, input: &mut &str) -> bool {
         match self {
             Self::Atom(value) => consume_literal(input, value),
+            Self::String(value) => {
+                consume_data_value_label(input, STRING_VALUE_PREFIX, value.as_bytes())
+            }
+            Self::Bytes(value) => consume_data_value_label(input, BYTES_VALUE_PREFIX, value),
             Self::Scalar(value) => {
                 consume_i128(input, value.value()) && consume_literal(input, value.ty().suffix())
             }
@@ -338,6 +357,8 @@ impl ArtifactValue {
     pub fn contains_process_ref(&self) -> bool {
         match self {
             Self::Atom(_) => false,
+            Self::String(_) => false,
+            Self::Bytes(_) => false,
             Self::Scalar(_) => false,
             Self::EnumVariant { payload, .. } => payload.contains_process_ref(),
             Self::Record { fields, .. } => fields
@@ -565,6 +586,35 @@ fn entry_key_labels(entries: &[super::model::ArtifactMapEntry]) -> String {
     output
 }
 
+fn validate_primitive_data_len(field: &str, len: usize) -> Result<()> {
+    if len > MAX_PRIMITIVE_DATA_BYTES {
+        return Err(Error::new(format!(
+            "{field} exceeds maximum primitive data length of {MAX_PRIMITIVE_DATA_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn write_data_value_label(output: &mut String, prefix: &str, bytes: &[u8]) {
+    output.push_str(prefix);
+    write_hex_bytes(output, bytes);
+    output.push(')');
+}
+
+fn write_hex_bytes(output: &mut String, bytes: &[u8]) {
+    for byte in bytes {
+        output.push(HEX_TABLE[usize::from(byte >> 4)] as char);
+        output.push(HEX_TABLE[usize::from(byte & 0x0f)] as char);
+    }
+}
+
+fn data_value_label_len(prefix: &str, bytes_len: usize) -> Result<usize> {
+    let hex_len = bytes_len
+        .checked_mul(2)
+        .ok_or_else(|| Error::new("artifact value label length overflowed"))?;
+    checked_add_lens([prefix.len(), hex_len, 1])
+}
+
 fn checked_add_len(left: usize, right: usize) -> Result<usize> {
     left.checked_add(right)
         .ok_or_else(|| Error::new("artifact value label length overflowed"))
@@ -584,6 +634,40 @@ fn consume_literal(input: &mut &str, expected: &str) -> bool {
     };
     *input = remaining;
     true
+}
+
+fn consume_data_value_label(input: &mut &str, prefix: &str, bytes: &[u8]) -> bool {
+    consume_literal(input, prefix) && consume_hex_bytes(input, bytes) && consume_literal(input, ")")
+}
+
+fn consume_hex_bytes(input: &mut &str, expected: &[u8]) -> bool {
+    let Some(hex_len) = expected.len().checked_mul(2) else {
+        return false;
+    };
+    if input.len() < hex_len {
+        return false;
+    }
+    let (hex, remaining) = input.split_at(hex_len);
+    if !hex
+        .as_bytes()
+        .chunks_exact(2)
+        .zip(expected)
+        .all(|(pair, &byte)| {
+            hex_nibble(pair[0]) == Some(byte >> 4) && hex_nibble(pair[1]) == Some(byte & 0x0f)
+        })
+    {
+        return false;
+    }
+    *input = remaining;
+    true
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
 }
 
 fn consume_i128(input: &mut &str, value: i128) -> bool {

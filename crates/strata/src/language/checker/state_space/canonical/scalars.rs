@@ -154,6 +154,8 @@ fn canonical_scalar_expr_type(
             Ok(expected_type.clone())
         }
         ValueExpr::Call { .. }
+        | ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
         | ValueExpr::Record(_)
         | ValueExpr::List(_)
         | ValueExpr::Map(_)

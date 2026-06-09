@@ -500,7 +500,9 @@ fn validate_value_expr_expected<'a, 'f>(
         ValueExpr::Identifier(name) => {
             validate_identifier_value_expected(context, scope, name, expected)
         }
-        ValueExpr::ScalarLiteral(_) => Ok(()),
+        ValueExpr::StringLiteral(_) | ValueExpr::BytesLiteral(_) | ValueExpr::ScalarLiteral(_) => {
+            Ok(())
+        }
         ValueExpr::Call { name, arg } => {
             validate_function_or_variant_call(context, scope, name)?;
             let arg_expected = call_arg_type(context, name, expected);
