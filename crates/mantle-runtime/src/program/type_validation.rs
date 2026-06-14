@@ -1,4 +1,5 @@
 use super::*;
+use mantle_artifact::ArtifactPrimitiveType;
 
 impl LoadedProgram {
     pub(in crate::program) fn validate_type_shape(
