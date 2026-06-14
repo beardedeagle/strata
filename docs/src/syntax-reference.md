@@ -640,8 +640,10 @@ map_value_entries =
 suffixed_integer_literal =
     number scalar_suffix
 
-string_literal = '"' (printable character | string_escape)* '"'
-bytes_literal = 'b"' (printable ASCII byte | bytes_escape)* '"'
+string_literal = '"' (string_literal_char | string_escape)* '"'
+bytes_literal = 'b"' (bytes_literal_char | bytes_escape)* '"'
+string_literal_char = printable character except '"' or '\\'
+bytes_literal_char = printable ASCII byte except '"' or '\\'
 string_escape = '\\"' | '\\\\' | '\\n' | '\\r' | '\\t' | '\\u{' hex{1,6} '}'
 bytes_escape = '\\"' | '\\\\' | '\\n' | '\\r' | '\\t' | '\\x' hex hex
 hex = ASCII hex digit

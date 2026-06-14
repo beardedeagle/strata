@@ -275,7 +275,7 @@ pub(crate) const FEATURES: &[Feature] = &[
         [
             ParserCoverage => ("crates/strata/src/language/tests/source_data_primitives.rs", "primitive_literal_display_is_canonical"),
             CheckerValidation => ("crates/strata/src/language/tests/source_data_primitives.rs", "checks_lowers_and_preserves_typed_string_and_bytes_values"),
-            CheckedIrLowering => ("crates/strata/src/language/tests/source_data_primitives.rs", "condition.left.operand_type_id=1"),
+            CheckedIrLowering => ("crates/strata/src/language/tests/source_data_primitives.rs", "condition.left.operand_type_id={}"),
             ArtifactAdmission => ("crates/mantle-artifact/src/tests/codec/round_trip.rs", "artifact_round_trips_primitive_shapes_and_values"),
             RuntimeExecution => ("crates/mantle-runtime/src/run/tests/scalar_templates.rs", "runtime_uses_primitive_equality_for_branch_selection"),
             Diagnostics => ("docs/src/diagnostics.md", "String literal exceeds maximum primitive data length"),

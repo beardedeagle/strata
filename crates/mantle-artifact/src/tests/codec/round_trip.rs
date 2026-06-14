@@ -282,10 +282,19 @@ fn artifact_round_trips_primitive_shapes_and_values() {
     let decoded = MantleArtifact::decode(&encoded).expect("primitive artifact should decode");
 
     assert_eq!(decoded, artifact);
-    assert!(encoded.contains("type.11.shape=primitive"));
-    assert!(encoded.contains("type.11.primitive_type=string"));
-    assert!(encoded.contains("type.12.shape=primitive"));
-    assert!(encoded.contains("type.12.primitive_type=bytes"));
+    assert!(encoded.contains(&format!("type.{}.shape=primitive", text_value_type.index())));
+    assert!(encoded.contains(&format!(
+        "type.{}.primitive_type=string",
+        text_value_type.index()
+    )));
+    assert!(encoded.contains(&format!(
+        "type.{}.shape=primitive",
+        octet_value_type.index()
+    )));
+    assert!(encoded.contains(&format!(
+        "type.{}.primitive_type=bytes",
+        octet_value_type.index()
+    )));
     assert!(encoded.contains("process.0.state_value.0.value=String(7265616479)"));
     assert!(
         encoded

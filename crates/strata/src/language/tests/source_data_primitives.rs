@@ -34,28 +34,41 @@ fn checks_lowers_and_preserves_typed_string_and_bytes_values() {
 
     let artifact = lower_to_artifact(&checked, SOURCE_DATA_PRIMITIVES)
         .expect("source data primitives should lower");
+    let string_type = artifact_type_id(&artifact, "String");
+    let bytes_type = artifact_type_id(&artifact, "Bytes");
     assert_eq!(
-        artifact.types[artifact_type_id(&artifact, "String").index()].shape,
+        artifact.types[string_type.index()].shape,
         Some(ArtifactValueShape::Primitive {
             primitive: ArtifactPrimitiveType::String,
         })
     );
     assert_eq!(
-        artifact.types[artifact_type_id(&artifact, "Bytes").index()].shape,
+        artifact.types[bytes_type.index()].shape,
         Some(ArtifactValueShape::Primitive {
             primitive: ArtifactPrimitiveType::Bytes,
         })
     );
 
     let encoded = artifact.encode();
-    assert!(encoded.contains("type.1.shape=primitive"));
-    assert!(encoded.contains("type.1.primitive_type=string"));
-    assert!(encoded.contains("type.2.shape=primitive"));
-    assert!(encoded.contains("type.2.primitive_type=bytes"));
-    assert!(encoded.contains("target_requirements.feature.7=typed_value_templates"));
-    assert!(encoded.contains("condition.left.operand_type_id=1"));
+    assert!(encoded.contains(&format!("type.{}.shape=primitive", string_type.index())));
+    assert!(encoded.contains(&format!(
+        "type.{}.primitive_type=string",
+        string_type.index()
+    )));
+    assert!(encoded.contains(&format!("type.{}.shape=primitive", bytes_type.index())));
+    assert!(encoded.contains(&format!("type.{}.primitive_type=bytes", bytes_type.index())));
+    assert!(encoded.lines().any(|line| {
+        line.starts_with("target_requirements.feature.") && line.ends_with("=typed_value_templates")
+    }));
+    assert!(encoded.contains(&format!(
+        "condition.left.operand_type_id={}",
+        string_type.index()
+    )));
     assert!(encoded.contains("condition.left.right.value=String(7265616479)"));
-    assert!(encoded.contains("condition.right.operand_type_id=2"));
+    assert!(encoded.contains(&format!(
+        "condition.right.operand_type_id={}",
+        bytes_type.index()
+    )));
     assert!(encoded.contains("condition.right.right.value=Bytes(010262696e)"));
 }
 

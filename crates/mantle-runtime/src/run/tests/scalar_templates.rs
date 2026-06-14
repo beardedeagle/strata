@@ -273,10 +273,11 @@ fn runtime_rejects_loaded_payload_enum_variants_that_collide_with_primitive_valu
         }],
     );
 
-    assert_loaded_admission_rejects_before_artifact_loaded(
-        &program,
-        "loaded type.12 payload-bearing enum variant Bytes collides with reserved primitive value label",
+    let expected = format!(
+        "loaded type.{} payload-bearing enum variant Bytes collides with reserved primitive value label",
+        payload_type.index()
     );
+    assert_loaded_admission_rejects_before_artifact_loaded(&program, &expected);
 }
 
 #[test]
