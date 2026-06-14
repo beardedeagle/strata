@@ -220,48 +220,10 @@ used in source function parameters and returns, source-local bindings, process
 local pure functions, record fields, message payloads, list/map values, and
 runtime `if` predicates through `Bool`.
 
-## String And Bytes Values
-
-`String` and `Bytes` are reserved built-in source value types. They are
-immutable data primitives, not executable binding keys, source-name dispatch
-inputs, debug-label dispatch inputs, authority descriptors, or hidden runtime
-control strings.
-
-`String` literals use double quotes with canonical escapes: `\"`, `\\`, `\n`,
-`\r`, `\t`, and `\u{HEX}` Unicode scalar values. `Bytes` literals use the
-`b"..."` prefix with printable ASCII bytes plus `\"`, `\\`, `\n`, `\r`,
-`\t`, and `\xNN` byte escapes. Display and Mantle artifact labels are canonical:
-strings and bytes lower to typed primitive data values rendered as lowercase
-hex, for example `String(7265616479)` and `Bytes(010262696e)`.
-
-These primitives can appear in records, enum payloads, process state, messages,
-source functions, process-local pure functions, `List`, and `Map` values when
-the surrounding type is otherwise a source value type. Equality is exact and
-only compares two checked operands of the same primitive type. There is no
-prefix predicate, dynamic concatenation, dynamic byte buffer, implicit
-string/byte coercion, structural record/list/map equality, or authority encoded
-inside primitive data.
-
-Lowering emits primitive value shapes and typed value templates. Literal data and
-already-approved metadata, diagnostics, and provenance text may cross the
-Strata/Mantle boundary; executable meaning remains typed-ID and table based.
-Mantle admits primitive artifact values by shape and executes them as immutable
-typed data, never by source string or debug label dispatch.
-
 ## Built-In Values
 
-The buildable value surface includes these built-in value shapes:
-
-```strata
-Bool
-String
-Bytes
-Unit
-Option<T>
-Result<T,E>
-SendError<M>
-SpawnError<A>
-```
+The buildable value surface includes `Bool`, `String`, `Bytes`, `Unit`, `Option<T>`, `Result<T,E>`, `SendError<M>`, and `SpawnError<A>`.
+`String` and `Bytes` are reserved immutable data primitives, not dispatch keys or authority carriers. Literals use canonical `"..."` and `b"..."` forms with only the escapes documented in the syntax reference; lowering emits typed primitive shapes/templates and lowercase-hex labels such as `String(7265616479)` and `Bytes(010262696e)`. Payload-bearing enum constructors named `String` or `Bytes` are rejected; exact equality requires matching primitive types and adds no dynamic string operations, coercions, structural equality, or authority-in-data.
 
 `Bool` has the fieldless core values `False` and `True`. `Bool`, `False`, and
 `True` are always available to Strata source and cannot be redeclared by user

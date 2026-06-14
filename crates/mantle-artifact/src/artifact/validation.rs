@@ -232,6 +232,9 @@ impl MantleArtifact {
                         &format!("type.{type_index}.enum_variant.{variant_index}"),
                         &variant.label,
                     )?;
+                    if variant.payload_type.is_some() {
+                        validate_payload_enum_variant_label(type_index, &variant.label)?;
+                    }
                     if !seen.insert(variant.label.as_str()) {
                         return Err(Error::new(format!(
                             "type.{type_index} duplicates enum variant {}",
@@ -536,6 +539,17 @@ fn validate_value_type_entry(field: &str, ty: TypeId, type_entry: &ArtifactType)
             ty.as_u32()
         ))),
     }
+}
+
+fn validate_payload_enum_variant_label(type_index: usize, variant: &str) -> Result<()> {
+    for primitive in ArtifactPrimitiveType::ALL {
+        if variant == primitive.source_name() {
+            return Err(Error::new(format!(
+                "type.{type_index} payload-bearing enum variant {variant} collides with reserved primitive value label"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn enum_variant_entry(

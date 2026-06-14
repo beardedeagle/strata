@@ -84,8 +84,6 @@ impl SemanticIndex {
             reject_reserved_type_name(record.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, map_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, unit_type)?;
-            reject_reserved_type_name_literal(record.name.as_str(), STRING_TYPE)?;
-            reject_reserved_type_name_literal(record.name.as_str(), BYTES_TYPE)?;
             reject_reserved_type_name(record.name.as_str(), symbol, option_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, result_type)?;
             reject_reserved_type_name(record.name.as_str(), symbol, send_error_type)?;
@@ -127,8 +125,6 @@ impl SemanticIndex {
             reject_reserved_type_name(item.name.as_str(), symbol, list_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, map_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, unit_type)?;
-            reject_reserved_type_name_literal(item.name.as_str(), STRING_TYPE)?;
-            reject_reserved_type_name_literal(item.name.as_str(), BYTES_TYPE)?;
             reject_reserved_type_name(item.name.as_str(), symbol, option_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, result_type)?;
             reject_reserved_type_name(item.name.as_str(), symbol, send_error_type)?;
@@ -160,6 +156,14 @@ impl SemanticIndex {
                 if !is_core_bool_enum && is_builtin_value_constructor_name(variant.name.as_str()) {
                     return Err(Error::new(format!(
                         "enum {} variant {} uses reserved builtin value constructor name",
+                        item.name, variant.name
+                    )));
+                }
+                if variant.payload_type.is_some()
+                    && matches!(variant.name.as_str(), STRING_TYPE | BYTES_TYPE)
+                {
+                    return Err(Error::new(format!(
+                        "enum {} payload-bearing variant {} collides with reserved primitive value label",
                         item.name, variant.name
                     )));
                 }

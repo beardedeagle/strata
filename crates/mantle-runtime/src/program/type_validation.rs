@@ -69,6 +69,9 @@ impl LoadedProgram {
                         &format!("loaded type.{type_index}.enum_variant.{variant_index}"),
                         &variant.label,
                     )?;
+                    if variant.payload_type.is_some() {
+                        validate_loaded_payload_enum_variant_label(type_index, &variant.label)?;
+                    }
                     if !seen.insert(variant.label.as_str()) {
                         return Err(Error::new(format!(
                             "loaded type.{type_index} duplicates enum variant {}",
@@ -405,6 +408,17 @@ impl LoadedProgram {
         }
         Ok(())
     }
+}
+
+fn validate_loaded_payload_enum_variant_label(type_index: usize, variant: &str) -> Result<()> {
+    for primitive in ArtifactPrimitiveType::ALL {
+        if variant == primitive.source_name() {
+            return Err(Error::new(format!(
+                "loaded type.{type_index} payload-bearing enum variant {variant} collides with reserved primitive value label"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn runtime_value_not_member_error(

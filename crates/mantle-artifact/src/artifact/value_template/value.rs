@@ -644,21 +644,17 @@ fn consume_hex_bytes(input: &mut &str, expected: &[u8]) -> bool {
     let Some(hex_len) = expected.len().checked_mul(2) else {
         return false;
     };
-    if input.len() < hex_len {
+    let input_bytes = input.as_bytes();
+    if input_bytes.len() < hex_len {
         return false;
     }
-    let (hex, remaining) = input.split_at(hex_len);
-    if !hex
-        .as_bytes()
-        .chunks_exact(2)
-        .zip(expected)
-        .all(|(pair, &byte)| {
-            hex_nibble(pair[0]) == Some(byte >> 4) && hex_nibble(pair[1]) == Some(byte & 0x0f)
-        })
-    {
+    let hex = &input_bytes[..hex_len];
+    if !hex.chunks_exact(2).zip(expected).all(|(pair, &byte)| {
+        hex_nibble(pair[0]) == Some(byte >> 4) && hex_nibble(pair[1]) == Some(byte & 0x0f)
+    }) {
         return false;
     }
-    *input = remaining;
+    *input = &input[hex_len..];
     true
 }
 

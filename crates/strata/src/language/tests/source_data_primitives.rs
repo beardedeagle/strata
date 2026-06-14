@@ -52,6 +52,7 @@ fn checks_lowers_and_preserves_typed_string_and_bytes_values() {
     assert!(encoded.contains("type.1.primitive_type=string"));
     assert!(encoded.contains("type.2.shape=primitive"));
     assert!(encoded.contains("type.2.primitive_type=bytes"));
+    assert!(encoded.contains("target_requirements.feature.7=typed_value_templates"));
     assert!(encoded.contains("condition.left.operand_type_id=1"));
     assert!(encoded.contains("condition.left.right.value=String(7265616479)"));
     assert!(encoded.contains("condition.right.operand_type_id=2"));
@@ -129,6 +130,44 @@ proc Main mailbox bounded(1) {
 }
 
 #[test]
+fn primitive_equality_diagnostic_describes_ambiguous_equality_operand() {
+    let source = r#"
+module primitive_equality_if_else_diagnostic;
+record MainState;
+enum MainMsg { Start }
+
+fn same_text(flag: Bool) -> Bool ! [] ~ [] @det {
+    return (if (flag) { "ready" } else { "wait" }) == (if (flag) { "ready" } else { "done" });
+}
+
+proc Main mailbox bounded(1) {
+    type State = MainState;
+    type Msg = MainMsg;
+
+    fn init() -> MainState ! [] ~ [] @det {
+        return MainState;
+    }
+
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {
+        return Stop(state);
+    }
+}
+"#;
+
+    let err = check_source(source).expect_err("ambiguous primitive equality operand should fail");
+    let message = err.to_string();
+    assert!(
+        message
+            .contains("equality operand type is ambiguous; use a typed local binding or literal"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        !message.contains("scalar equality operand"),
+        "primitive equality diagnostic should not be scalar-only: {err}"
+    );
+}
+
+#[test]
 fn rejects_malformed_and_oversized_primitive_literals() {
     for (source, expected) in [
         (
@@ -170,6 +209,48 @@ proc Main mailbox bounded(1) {{
             .contains("String literal exceeds maximum primitive data length"),
         "unexpected error: {err}"
     );
+
+    let oversized_bytes = "\\x61".repeat(MAX_PRIMITIVE_DATA_BYTES + 1);
+    let source = format!(
+        r#"module oversized_bytes;
+record MainState {{ value: Bytes }}
+enum MainMsg {{ Start }}
+proc Main mailbox bounded(1) {{
+    type State = MainState;
+    type Msg = MainMsg;
+    fn init() -> MainState ! [] ~ [] @det {{ return MainState {{ value: b"{oversized_bytes}" }}; }}
+    fn step(state: MainState, Start) -> ProcResult<MainState> ! [] ~ [] @det {{ return Stop(state); }}
+}}
+"#
+    );
+    let err = parse_source(&source).expect_err("oversized bytes literal should fail parse");
+    assert!(
+        err.to_string()
+            .contains("Bytes literal exceeds maximum primitive data length"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rejects_payload_enum_variants_that_collide_with_primitive_value_labels() {
+    for (source, expected_variant) in [
+        (
+            r#"module primitive_string_variant; enum Payload { String(String), Other } enum MainMsg { Start } proc Main mailbox bounded(1) { type State = Payload; type Msg = MainMsg; fn init() -> Payload ! [] ~ [] @det { return Other; } fn step(state: Payload, Start) -> ProcResult<Payload> ! [] ~ [] @det { return Stop(state); } }"#,
+            "String",
+        ),
+        (
+            r#"module primitive_bytes_variant; enum Payload { Bytes(Bytes), Other } enum MainMsg { Start } proc Main mailbox bounded(1) { type State = Payload; type Msg = MainMsg; fn init() -> Payload ! [] ~ [] @det { return Other; } fn step(state: Payload, Start) -> ProcResult<Payload> ! [] ~ [] @det { return Stop(state); } }"#,
+            "Bytes",
+        ),
+    ] {
+        let err = check_source(source)
+            .expect_err("payload enum variants must not collide with primitive value labels");
+        let message = err.to_string();
+        assert!(
+            message.contains("payload-bearing variant") && message.contains(expected_variant),
+            "unexpected error: {err}"
+        );
+    }
 }
 
 #[test]

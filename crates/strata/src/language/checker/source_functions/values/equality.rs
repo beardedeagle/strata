@@ -140,7 +140,7 @@ fn source_equality_operand_type(
         ValueExpr::IfElse { .. } => {
             let Some(expected_type) = expected_type else {
                 return Err(Error::new(
-                    "scalar equality operand type is ambiguous; use a typed local binding or scalar literal",
+                    "equality operand type is ambiguous; use a typed local binding or literal",
                 ));
             };
             if scope.semantic_index.scalar_type(expected_type)?.is_some() {

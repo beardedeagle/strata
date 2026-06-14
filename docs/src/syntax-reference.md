@@ -554,12 +554,8 @@ type_arg =
   | number
 ```
 
-Checking accepts `ProcResult<StateType>` for `step`, `ProcessRef<ProcessName>`
-for direct process authority surfaces, `Cap<Spawn<ProcessName>>` and
-`Cap<PortConnect<PortName>>` in process authorities, and `List<T,N>` /
-`Map<K,V,N>` over source value types. `String`, `Bytes`, `Unit`, `Option<T>`,
-`Result<T,E>`, `SendError<M>`, and `SpawnError<A>` are built-in value shapes for
-primitive data, explicit domain failure, and typed effect outcomes.
+Checking accepts `ProcResult<StateType>` for `step`, `ProcessRef<ProcessName>` for direct process authority surfaces, `Cap<Spawn<ProcessName>>` and `Cap<PortConnect<PortName>>` in process authorities, and `List<T,N>` / `Map<K,V,N>` over source value types.
+`String`, `Bytes`, `Unit`, `Option<T>`, `Result<T,E>`, `SendError<M>`, and `SpawnError<A>` are built-in value shapes for primitive data, explicit domain failure, and typed effect outcomes.
 
 ## Values
 
@@ -644,20 +640,11 @@ map_value_entries =
 suffixed_integer_literal =
     number scalar_suffix
 
-string_literal =
-    '"' (printable character | string_escape)* '"'
-
-bytes_literal =
-    'b"' (printable ASCII byte | bytes_escape)* '"'
-
-string_escape =
-    '\\"' | '\\\\' | '\\n' | '\\r' | '\\t' | '\\u{' hex+ '}'
-
-bytes_escape =
-    '\\"' | '\\\\' | '\\n' | '\\r' | '\\t' | '\\x' hex hex
-
-hex =
-    ASCII hex digit
+string_literal = '"' (printable character | string_escape)* '"'
+bytes_literal = 'b"' (printable ASCII byte | bytes_escape)* '"'
+string_escape = '\\"' | '\\\\' | '\\n' | '\\r' | '\\t' | '\\u{' hex{1,6} '}'
+bytes_escape = '\\"' | '\\\\' | '\\n' | '\\r' | '\\t' | '\\x' hex hex
+hex = ASCII hex digit
 
 scalar_suffix =
     "_u8" | "_u16" | "_u32" | "_u64"
@@ -673,14 +660,9 @@ List and map constructors are explicit. Optional type and capacity arguments are
 accepted for readability; the checker still validates each value against the
 expected bounded source value type.
 
-Typed equality predicates are deliberately narrow. `left == right`
-and `left != right` are supported only when both operands have the same checked
-type and that type is `Bool`, `String`, `Bytes`, a scalar integer type, or a
-payload-free enum. Fully concrete source equality folds during checking.
-Runtime-bound equality lowers as a typed Mantle value template; operands are not
-runtime dispatch strings. Structural record/list/map equality, dynamic string
-predicates, process-reference equality, and payload enum equality remain
-unsupported.
+Typed equality predicates are deliberately narrow. `left == right` and `left != right` require operands with the same checked type: `Bool`, `String`, `Bytes`, a scalar integer type, or a payload-free enum.
+Fully concrete source equality folds during checking. Runtime-bound equality lowers as a typed Mantle value template; operands are not runtime dispatch strings.
+Structural record/list/map equality, dynamic string predicates, process-reference equality, and payload enum equality remain unsupported.
 
 Scalar literals require explicit suffixes in value positions. Arithmetic uses
 `+`, `-`, `*`, `/`, and `%`; ordering uses `<`, `<=`, `>`, and `>=`. Scalar
@@ -742,14 +724,9 @@ The literal surface is intentionally narrow:
 
 - decimal numbers are accepted for mailbox bounds;
 - suffixed integer literals are accepted for scalar source values;
-- string literals are accepted as immutable `String` values and for `emit` text;
-- bytes literals are accepted as immutable `Bytes` values;
-- source `String` literals support only `\"`, `\\`, `\n`, `\r`, `\t`, and
-  `\u{HEX}` escapes;
-- source `Bytes` literals support printable ASCII plus `\"`, `\\`, `\n`,
-  `\r`, `\t`, and `\xNN` escapes;
-- newline and carriage return characters are not allowed raw inside string or
-  bytes literals.
+- string literals are accepted as immutable `String` values and for `emit` text, with only `\"`, `\\`, `\n`, `\r`, `\t`, and valid one-to-six-digit `\u{HEX}` escapes;
+- bytes literals are accepted as immutable `Bytes` values, with printable ASCII plus `\"`, `\\`, `\n`, `\r`, `\t`, and `\xNN` escapes;
+- newline and carriage return characters are not allowed raw inside string or bytes literals.
 
 ## Identifiers
 
@@ -767,7 +744,5 @@ ident =
 single `_` token is reserved for wildcard patterns.
 `Bool`, `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`,
 `PortConnect`, `ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`,
-`SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and
-`I64` are reserved type names because they name built-in truth, transition,
-process-reference, capability descriptor, collection, effect outcome, and scalar
-value types.
+`SendError`, `SpawnError`, `String`, `Bytes`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` are reserved type names because they name built-in truth,
+transition, process-reference, capability descriptor, collection, primitive data, effect outcome, and scalar value types.

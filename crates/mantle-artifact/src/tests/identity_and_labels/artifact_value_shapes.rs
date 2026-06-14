@@ -84,6 +84,29 @@ fn primitive_value_labels_are_canonical_lowercase_hex_data() {
 }
 
 #[test]
+fn validate_rejects_payload_enum_variants_that_collide_with_primitive_value_labels() {
+    let mut artifact = valid_artifact();
+    artifact.types[WORKER_STATE.index()] = ArtifactType::enum_value_with_payloads(
+        "WorkerState",
+        vec![ArtifactEnumVariant {
+            label: "String".to_string(),
+            payload_type: Some(JOB),
+        }],
+    );
+
+    let err = artifact
+        .validate()
+        .expect_err("primitive value labels must stay unambiguous");
+
+    assert!(
+        err.to_string().contains(
+            "type.2 payload-bearing enum variant String collides with reserved primitive value label"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn primitive_value_validation_rejects_programmatic_oversized_data() {
     let value = ArtifactValue::Bytes(vec![0; MAX_PRIMITIVE_DATA_BYTES + 1]);
     let err = value
@@ -93,6 +116,19 @@ fn primitive_value_validation_rejects_programmatic_oversized_data() {
     assert!(
         err.to_string()
             .contains("oversized primitive exceeds maximum primitive data length"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn primitive_state_label_match_rejects_non_ascii_hex_without_panic() {
+    let value = ArtifactValue::Bytes(vec![0]);
+    let err = validate_state_value_identity_label(&value, "Bytes(aé)")
+        .expect_err("malformed primitive state labels should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("does not match ordered value label"),
         "unexpected error: {err}"
     );
 }

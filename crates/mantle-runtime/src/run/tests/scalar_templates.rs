@@ -252,6 +252,34 @@ fn runtime_rejects_loaded_invalid_scalar_arithmetic_result_type_before_artifact_
 }
 
 #[test]
+fn runtime_rejects_loaded_payload_enum_variants_that_collide_with_primitive_value_labels() {
+    let mut artifact = artifact_with_scalar_main_state();
+    let string_type = append_primitive_type(&mut artifact, ArtifactPrimitiveType::String);
+    let payload_type =
+        TypeId::from_index(artifact.types.len()).expect("test type index should fit");
+    artifact.types.push(ArtifactType::enum_value_with_payloads(
+        "Payload",
+        vec![ArtifactEnumVariant {
+            label: "Text".to_string(),
+            payload_type: Some(string_type),
+        }],
+    ));
+    let mut program = LoadedProgram::from_artifact(&artifact).expect("artifact should load");
+    program.types[payload_type.index()] = ArtifactType::enum_value_with_payloads(
+        "Payload",
+        vec![ArtifactEnumVariant {
+            label: "Bytes".to_string(),
+            payload_type: Some(string_type),
+        }],
+    );
+
+    assert_loaded_admission_rejects_before_artifact_loaded(
+        &program,
+        "loaded type.12 payload-bearing enum variant Bytes collides with reserved primitive value label",
+    );
+}
+
+#[test]
 fn runtime_rejects_loaded_malformed_value_if_before_artifact_loaded() {
     let artifact = artifact_with_scalar_main_state();
     let u32_type = artifact.processes[0].state_type;
