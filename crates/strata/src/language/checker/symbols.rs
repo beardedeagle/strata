@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use mantle_artifact::ArtifactScalarType;
+use mantle_artifact::{ArtifactPrimitiveType, ArtifactScalarType};
 
 use super::super::ast::{Enum, EnumVariant, Identifier, Module, Process, Record, TypeRef};
 use super::super::checked::{
@@ -322,7 +322,7 @@ impl SemanticIndex {
     pub(super) fn enum_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Enum> {
         match self.type_decl(ty)? {
             TypeDecl::Enum(index) => Ok(&module.enums[index]),
-            TypeDecl::Record(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
+            TypeDecl::Record(_) | TypeDecl::Primitive(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
                 Err(Error::new(format!("type {ty} is not declared as an enum")))
             }
         }
@@ -331,9 +331,22 @@ impl SemanticIndex {
     pub(super) fn record_decl<'a>(&self, module: &'a Module, ty: &TypeRef) -> Result<&'a Record> {
         match self.type_decl(ty)? {
             TypeDecl::Record(index) => Ok(&module.records[index]),
-            TypeDecl::Enum(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
+            TypeDecl::Enum(_) | TypeDecl::Primitive(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
                 Err(Error::new(format!("type {ty} is not declared as a record")))
             }
+        }
+    }
+
+    pub(super) fn primitive_type(&self, ty: &TypeRef) -> Result<Option<ArtifactPrimitiveType>> {
+        if ty.as_named().is_none() {
+            return Ok(None);
+        }
+        match self.type_decl(ty) {
+            Ok(TypeDecl::Primitive(primitive)) => Ok(Some(primitive)),
+            Ok(TypeDecl::Unit | TypeDecl::Scalar(_) | TypeDecl::Record(_) | TypeDecl::Enum(_)) => {
+                Ok(None)
+            }
+            Err(err) => Err(err),
         }
     }
 
@@ -343,7 +356,9 @@ impl SemanticIndex {
         }
         match self.type_decl(ty) {
             Ok(TypeDecl::Scalar(scalar)) => Ok(Some(scalar)),
-            Ok(TypeDecl::Unit | TypeDecl::Record(_) | TypeDecl::Enum(_)) => Ok(None),
+            Ok(
+                TypeDecl::Unit | TypeDecl::Primitive(_) | TypeDecl::Record(_) | TypeDecl::Enum(_),
+            ) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -399,7 +414,7 @@ impl SemanticIndex {
         }
         let enum_index = match self.type_decl(ty)? {
             TypeDecl::Enum(index) => index,
-            TypeDecl::Record(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
+            TypeDecl::Record(_) | TypeDecl::Primitive(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
                 return Err(Error::new(format!("type {ty} is not declared as an enum")));
             }
         };
@@ -557,7 +572,7 @@ impl SemanticIndex {
             .ok_or_else(|| context.not_accepted_error(process, message))?;
         let enum_index = match self.type_decl(&process.msg_type)? {
             TypeDecl::Enum(index) => index,
-            TypeDecl::Record(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
+            TypeDecl::Record(_) | TypeDecl::Primitive(_) | TypeDecl::Scalar(_) | TypeDecl::Unit => {
                 return Err(Error::new(format!(
                     "type {} is not declared as an enum",
                     process.msg_type

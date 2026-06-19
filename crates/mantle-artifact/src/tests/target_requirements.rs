@@ -89,6 +89,26 @@ fn validate_rejects_underdeclared_target_requirements() {
 }
 
 #[test]
+fn validate_rejects_underdeclared_primitive_target_requirement() {
+    let mut artifact = valid_artifact();
+    append_primitive_type(&mut artifact, "String", ArtifactPrimitiveType::String);
+    let mut features = test_target_requirements().features;
+    features.retain(|feature| *feature != RuntimeFeature::TypedValueTemplates);
+    artifact.target_requirements = ArtifactTargetRequirements::new(TEST_SOURCE_LANGUAGE, features);
+
+    let err = artifact
+        .validate()
+        .expect_err("primitive shapes should require typed value templates");
+
+    assert!(
+        err.to_string().contains(
+            "target requirements do not declare required runtime feature typed_value_templates"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
 fn validate_checks_artifact_shape_before_target_requirement_coverage() {
     let mut artifact = valid_artifact();
     let bool_type = append_bool_type(&mut artifact);

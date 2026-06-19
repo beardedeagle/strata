@@ -161,7 +161,9 @@ pub(super) fn scalar_template_expr_type(
         ValueExpr::Grouped { value } => {
             scalar_template_expr_type(semantic_index, value, bindings, expected_type)
         }
-        ValueExpr::Record(_)
+        ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
+        | ValueExpr::Record(_)
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
         | ValueExpr::EnumVariant { .. }

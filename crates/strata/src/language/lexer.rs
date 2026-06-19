@@ -6,6 +6,7 @@ pub(super) enum TokenKind {
     Ident(String),
     Number(String),
     StringLiteral(String),
+    BytesLiteral(Vec<u8>),
     Symbol(char),
     EqualEqual,
     BangEqual,
@@ -127,6 +128,12 @@ impl<'a> Lexer<'a> {
                 push_source_token(&mut tokens, TokenKind::StringLiteral(literal), offset)?;
                 continue;
             }
+            if ch == 'b' && self.peek_next_char() == Some('"') {
+                self.bump_char();
+                let literal = self.read_bytes_literal(offset)?;
+                push_source_token(&mut tokens, TokenKind::BytesLiteral(literal), offset)?;
+                continue;
+            }
             if is_ident_start(ch) {
                 let ident = self.read_ident()?;
                 push_source_token(&mut tokens, TokenKind::Ident(ident), offset)?;
@@ -202,11 +209,10 @@ impl<'a> Lexer<'a> {
 
     fn read_string_literal(&mut self, start: usize) -> Result<String> {
         self.bump_char();
-        let literal_start = self.offset;
+        let mut literal = String::new();
         while let Some((offset, ch)) = self.peek_char() {
             match ch {
                 '"' => {
-                    let literal = self.source[literal_start..offset].to_string();
                     self.bump_char();
                     return Ok(literal);
                 }
@@ -216,11 +222,16 @@ impl<'a> Lexer<'a> {
                     )));
                 }
                 '\\' => {
+                    self.bump_char();
+                    literal.push(self.read_string_escape(start, offset)?);
+                }
+                ch if ch.is_control() => {
                     return Err(Error::new(format!(
-                        "string escapes are not supported at byte {offset}"
+                        "string literal contains unescaped control character at byte {offset}"
                     )));
                 }
                 _ => {
+                    literal.push(ch);
                     self.bump_char();
                 }
             }
@@ -228,6 +239,156 @@ impl<'a> Lexer<'a> {
         Err(Error::new(format!(
             "unterminated string literal at byte {start}"
         )))
+    }
+
+    fn read_string_escape(&mut self, start: usize, offset: usize) -> Result<char> {
+        let Some((_, escape)) = self.peek_char() else {
+            return Err(Error::new(format!(
+                "unterminated string literal at byte {start}"
+            )));
+        };
+        self.bump_char();
+        match escape {
+            '"' => Ok('"'),
+            '\\' => Ok('\\'),
+            'n' => Ok('\n'),
+            'r' => Ok('\r'),
+            't' => Ok('\t'),
+            'u' => self.read_unicode_escape(start, offset),
+            _ => Err(Error::new(format!(
+                "unsupported string escape \\{escape} at byte {offset}"
+            ))),
+        }
+    }
+
+    fn read_unicode_escape(&mut self, start: usize, offset: usize) -> Result<char> {
+        if self.bump_char() != Some('{') {
+            return Err(Error::new(format!(
+                "unicode string escape at byte {offset} must use \\u{{HEX}}"
+            )));
+        }
+        let mut value = 0u32;
+        let mut len = 0usize;
+        while let Some((ch_offset, ch)) = self.peek_char() {
+            if ch == '}' {
+                self.bump_char();
+                if len == 0 {
+                    return Err(Error::new(format!(
+                        "unicode string escape at byte {offset} must contain hex digits"
+                    )));
+                }
+                return char::from_u32(value).ok_or_else(|| {
+                    Error::new(format!(
+                        "unicode string escape at byte {offset} is not a valid scalar value"
+                    ))
+                });
+            }
+            let Some(nibble) = ch.to_digit(16) else {
+                return Err(Error::new(format!(
+                    "unicode string escape at byte {ch_offset} contains non-hex digit"
+                )));
+            };
+            if len >= 6 {
+                return Err(Error::new(format!(
+                    "unicode string escape at byte {offset} exceeds six hex digits"
+                )));
+            }
+            value = (value << 4) | nibble;
+            len += 1;
+            self.bump_char();
+        }
+        Err(Error::new(format!(
+            "unterminated string literal at byte {start}"
+        )))
+    }
+
+    fn read_bytes_literal(&mut self, start: usize) -> Result<Vec<u8>> {
+        self.bump_char();
+        let mut literal = Vec::new();
+        while let Some((offset, ch)) = self.peek_char() {
+            match ch {
+                '"' => {
+                    self.bump_char();
+                    return Ok(literal);
+                }
+                '\n' | '\r' => {
+                    return Err(Error::new(format!(
+                        "unterminated bytes literal at byte {start}"
+                    )));
+                }
+                '\\' => {
+                    self.bump_char();
+                    literal.push(self.read_bytes_escape(start, offset)?);
+                }
+                ch if ch.is_ascii() && !ch.is_control() => {
+                    literal.push(ch as u8);
+                    self.bump_char();
+                }
+                _ => {
+                    return Err(Error::new(format!(
+                        "bytes literal raw data must be printable ASCII or escaped at byte {offset}"
+                    )));
+                }
+            }
+        }
+        Err(Error::new(format!(
+            "unterminated bytes literal at byte {start}"
+        )))
+    }
+
+    fn read_bytes_escape(&mut self, start: usize, offset: usize) -> Result<u8> {
+        let Some((_, escape)) = self.peek_char() else {
+            return Err(Error::new(format!(
+                "unterminated bytes literal at byte {start}"
+            )));
+        };
+        self.bump_char();
+        match escape {
+            '"' => Ok(b'"'),
+            '\\' => Ok(b'\\'),
+            'n' => Ok(b'\n'),
+            'r' => Ok(b'\r'),
+            't' => Ok(b'\t'),
+            'x' => self.read_hex_escape_byte(start, offset),
+            _ => Err(Error::new(format!(
+                "unsupported bytes escape \\{escape} at byte {offset}"
+            ))),
+        }
+    }
+
+    fn read_hex_escape_byte(&mut self, start: usize, offset: usize) -> Result<u8> {
+        let Some((_, high)) = self.peek_char() else {
+            return Err(Error::new(format!(
+                "unterminated bytes literal at byte {start}"
+            )));
+        };
+        self.bump_char();
+        let Some((_, low)) = self.peek_char() else {
+            return Err(Error::new(format!(
+                "unterminated bytes literal at byte {start}"
+            )));
+        };
+        self.bump_char();
+        let high = hex_nibble(high).ok_or_else(|| {
+            Error::new(format!(
+                "bytes escape at byte {offset} must use two hex digits"
+            ))
+        })?;
+        let low = hex_nibble(low).ok_or_else(|| {
+            Error::new(format!(
+                "bytes escape at byte {offset} must use two hex digits"
+            ))
+        })?;
+        Ok((high << 4) | low)
+    }
+}
+
+fn hex_nibble(ch: char) -> Option<u8> {
+    match ch {
+        '0'..='9' => Some(ch as u8 - b'0'),
+        'a'..='f' => Some(ch as u8 - b'a' + 10),
+        'A'..='F' => Some(ch as u8 - b'A' + 10),
+        _ => None,
     }
 }
 

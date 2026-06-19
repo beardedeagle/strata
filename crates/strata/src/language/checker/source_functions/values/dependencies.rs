@@ -11,7 +11,10 @@ pub(super) fn source_value_uses_any_binding(
 
 pub(super) fn source_value_requires_resolution(value: &ValueExpr) -> bool {
     match value {
-        ValueExpr::Identifier(_) | ValueExpr::ScalarLiteral(_) => false,
+        ValueExpr::Identifier(_)
+        | ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
+        | ValueExpr::ScalarLiteral(_) => false,
         ValueExpr::Call { .. } => true,
         ValueExpr::EnumVariant { payload, .. } => source_value_requires_resolution(payload),
         ValueExpr::Record(record) => record

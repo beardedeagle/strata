@@ -2,6 +2,7 @@ use super::Symbol;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum TypeDecl {
+    Primitive(mantle_artifact::ArtifactPrimitiveType),
     Scalar(mantle_artifact::ArtifactScalarType),
     Unit,
     Record(usize),
@@ -11,6 +12,7 @@ pub(super) enum TypeDecl {
 impl TypeDecl {
     pub(super) fn kind(self) -> &'static str {
         match self {
+            Self::Primitive(_) => "primitive",
             Self::Scalar(_) => "scalar",
             Self::Unit => "builtin",
             Self::Record(_) => "record",

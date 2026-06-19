@@ -662,6 +662,8 @@ fn concrete_source_enum_value<'a>(
         ValueExpr::Identifier(name) => Ok((name, None)),
         ValueExpr::EnumVariant { name, payload } => Ok((name, Some(payload.as_ref()))),
         ValueExpr::Call { .. }
+        | ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
         | ValueExpr::ScalarLiteral(_)
         | ValueExpr::Record(_)
         | ValueExpr::IfElse { .. }
@@ -687,6 +689,8 @@ fn concrete_source_record_value<'a>(
     match value {
         ValueExpr::Record(record) => Ok(record),
         ValueExpr::Identifier(_)
+        | ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
         | ValueExpr::ScalarLiteral(_)
         | ValueExpr::Call { .. }
         | ValueExpr::EnumVariant { .. }

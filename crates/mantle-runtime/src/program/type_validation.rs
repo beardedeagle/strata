@@ -1,4 +1,5 @@
 use super::*;
+use mantle_artifact::ArtifactPrimitiveType;
 
 impl LoadedProgram {
     pub(in crate::program) fn validate_type_shape(
@@ -30,6 +31,7 @@ impl LoadedProgram {
     fn validate_value_shape(&self, type_index: usize, shape: &ArtifactValueShape) -> Result<()> {
         match shape {
             ArtifactValueShape::Atom => Ok(()),
+            ArtifactValueShape::Primitive { .. } => Ok(()),
             ArtifactValueShape::Scalar { .. } => Ok(()),
             ArtifactValueShape::Record { fields } => {
                 if fields.is_empty() || fields.len() > MAX_VALUE_TEMPLATE_FIELDS {
@@ -68,6 +70,9 @@ impl LoadedProgram {
                         &format!("loaded type.{type_index}.enum_variant.{variant_index}"),
                         &variant.label,
                     )?;
+                    if variant.payload_type.is_some() {
+                        validate_loaded_payload_enum_variant_label(type_index, &variant.label)?;
+                    }
                     if !seen.insert(variant.label.as_str()) {
                         return Err(Error::new(format!(
                             "loaded type.{type_index} duplicates enum variant {}",
@@ -124,6 +129,9 @@ impl LoadedProgram {
         values::validate_non_process_ref_value(field, value)?;
         match type_entry.value_shape()? {
             ArtifactValueShape::Atom => self.validate_atom_value(field, ty, type_entry, value),
+            ArtifactValueShape::Primitive { primitive } => {
+                self.validate_primitive_value(field, ty, type_entry, *primitive, value)
+            }
             ArtifactValueShape::Scalar { scalar } => {
                 self.validate_scalar_value(field, ty, type_entry, *scalar, value)
             }
@@ -160,6 +168,26 @@ impl LoadedProgram {
             type_entry.label,
             ty.as_u32()
         )))
+    }
+
+    fn validate_primitive_value(
+        &self,
+        field: &str,
+        ty: TypeId,
+        type_entry: &ArtifactType,
+        expected: ArtifactPrimitiveType,
+        value: &RuntimeValue,
+    ) -> Result<()> {
+        match (expected, value) {
+            (ArtifactPrimitiveType::String, RuntimeValue::String(_))
+            | (ArtifactPrimitiveType::Bytes, RuntimeValue::Bytes(_)) => Ok(()),
+            _ => Err(Error::new(format!(
+                "{field} value {} does not match primitive type {} (type id {})",
+                value.label(),
+                type_entry.label,
+                ty.as_u32()
+            ))),
+        }
     }
 
     fn validate_scalar_value(
@@ -229,6 +257,8 @@ impl LoadedProgram {
             RuntimeValue::Record { .. }
             | RuntimeValue::List(_)
             | RuntimeValue::Map(_)
+            | RuntimeValue::String(_)
+            | RuntimeValue::Bytes(_)
             | RuntimeValue::Scalar(_)
             | RuntimeValue::ProcessRef { .. } => {
                 Err(runtime_value_not_member_error(field, ty, type_entry, value))
@@ -379,6 +409,17 @@ impl LoadedProgram {
         }
         Ok(())
     }
+}
+
+fn validate_loaded_payload_enum_variant_label(type_index: usize, variant: &str) -> Result<()> {
+    for primitive in ArtifactPrimitiveType::ALL {
+        if variant == primitive.source_name() {
+            return Err(Error::new(format!(
+                "loaded type.{type_index} payload-bearing enum variant {variant} collides with reserved primitive value label"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn runtime_value_not_member_error(

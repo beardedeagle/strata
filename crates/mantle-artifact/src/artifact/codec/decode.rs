@@ -348,6 +348,11 @@ fn decode_type(fields: &mut ArtifactFields, type_index: usize) -> Result<Artifac
 fn decode_type_shape(fields: &mut ArtifactFields, prefix: &str) -> Result<ArtifactValueShape> {
     match fields.take_required(&format!("{prefix}.shape"))? {
         "atom" => Ok(ArtifactValueShape::Atom),
+        "primitive" => Ok(ArtifactValueShape::Primitive {
+            primitive: ArtifactPrimitiveType::parse_artifact_name(
+                fields.take_required(&format!("{prefix}.primitive_type"))?,
+            )?,
+        }),
         "scalar" => scalar_decode::decode_scalar_shape(fields, prefix),
         "record" => {
             let field_count = fields.take_bounded_usize(

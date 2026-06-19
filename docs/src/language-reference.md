@@ -24,8 +24,10 @@ Mantle artifact internals.
 | Process references | `let worker: ProcessRef<Worker> = spawn Worker;`, `send worker Ping;`, `send worker via WorkerPort Ping;`, and `send reply_to Done;` for received typed references. |
 | Effect outcomes | Immutable step-local `Result` bindings for local `send` and the current local `spawn` success shape. |
 | Scalar values | Fixed-width integer source values `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` with explicit literal suffixes. |
+| Data primitives | Immutable `String` and `Bytes` source values constructed only from canonical literals. |
 | Collections | Immutable `List<T,N>` and `Map<K,V,N>` source values with explicit `List[...]` and `Map[key => value]` constructors. |
 | Scalar operators | `+`, `-`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=`, and scalar equality over matching integer types only. |
+| Primitive equality | Exact `String` and `Bytes` equality over matching primitive types; no concatenation, prefix predicates, coercion, or byte-buffer mutation. |
 | Boolean predicates | `!`, `&&`, and `||` over checked Bool-producing predicates. |
 | Pure conditionals | Expression-only `if (condition) { value } else { value }` over core `Bool`; concrete forms fold before lowering, and runtime-bound value forms lower as typed Mantle value templates. |
 | Source-local bindings | `let name: Type = value_expr;` inside pure source function block bodies before the terminal return. |
@@ -129,10 +131,11 @@ _
 `security`, `send`, `spawn`, `supervise`, `target`, `temporary`, `transient`,
 `type`, `var`, and `via` are reserved everywhere identifiers are accepted.
 `ProcResult`, `ProcessRef`, `Cap`, `Spawn`, `ProtocolBoundary`, `PortConnect`,
-`ComponentExport`, `List`, `Map`, `Unit`, `Option`, `Result`, `SendError`,
-`SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`, `I32`, and `I64` are
-reserved type names because they name built-in transition, process-reference,
-capability descriptor, collection, effect outcome, and scalar value types.
+`ComponentExport`, `List`, `Map`, `String`, `Bytes`, `Unit`, `Option`,
+`Result`, `SendError`, `SpawnError`, `U8`, `U16`, `U32`, `U64`, `I8`, `I16`,
+`I32`, and `I64` are reserved type names because they name built-in transition,
+process-reference, capability descriptor, collection, primitive data, effect
+outcome, and scalar value types.
 Type names beginning with `__strata_checked_` are reserved for checked IR and
 artifact metadata. Checked process-reference artifact labels under that prefix
 are keyed by resolved process IDs, not source process names.
@@ -219,16 +222,8 @@ runtime `if` predicates through `Bool`.
 
 ## Built-In Values
 
-The buildable value surface includes these built-in value shapes:
-
-```strata
-Bool
-Unit
-Option<T>
-Result<T,E>
-SendError<M>
-SpawnError<A>
-```
+The buildable value surface includes `Bool`, `String`, `Bytes`, `Unit`, `Option<T>`, `Result<T,E>`, `SendError<M>`, and `SpawnError<A>`.
+`String` and `Bytes` are reserved immutable data primitives, not dispatch keys or authority carriers. Literals use canonical `"..."` and `b"..."` forms with only the escapes documented in the syntax reference; lowering emits typed primitive shapes/templates and lowercase-hex labels such as `String(7265616479)` and `Bytes(010262696e)`. Payload-bearing enum constructors named `String` or `Bytes` are rejected; exact equality requires matching primitive types and adds no dynamic string operations, coercions, structural equality, or authority-in-data.
 
 `Bool` has the fieldless core values `False` and `True`. `Bool`, `False`, and
 `True` are always available to Strata source and cannot be redeclared by user
@@ -238,8 +233,8 @@ supervisor children, or boundary declarations. The checker resolves them to core
 typed IDs, lowering emits the canonical Mantle fieldless enum shape, and Mantle
 admits and executes only the typed artifact value shape rather than dispatching
 on source strings. This core surface does
-not introduce a general prelude, standard library, floats, string equality, or
-implicit truthiness.
+not introduce a general prelude, standard library, floats, dynamic string
+operations, or implicit truthiness.
 
 `Unit` has the single value `Unit`. `Option<T>` has `None` and `Some(T)`.
 `Result<T,E>` has `Ok(T)` and `Err(E)`. Local send outcomes use
@@ -484,8 +479,9 @@ fn route(work: Work) -> Phase ! [] ~ [] @det {
 ```
 
 Each binding uses `let name: Type = value_expr;`. The annotated type must be a
-declared source value type without process-reference authority: a record, enum,
-`List<T,N>`, or `Map<K,V,N>` whose contained types are also source values. A
+declared source value type without process-reference authority: `String`,
+`Bytes`, a scalar integer type, a record, enum, `List<T,N>`, or `Map<K,V,N>`
+whose contained types are also source values. A
 message enum that carries a direct `ProcessRef<T>` payload is valid as a message
 type, but it is not a pure source value type. The right-hand side is a pure
 source value expression and may refer to parameters, pattern bindings, earlier
@@ -707,6 +703,8 @@ The equality surface is `==` and `!=` over these operand families:
 
 - core `Bool` with fieldless `False` and `True` values;
 - fixed-width scalar integer values with matching scalar types;
+- immutable `String` values and immutable `Bytes` values with matching primitive
+  types;
 - fieldless values of the same payload-free enum type;
 - built-in `Option`, `Result`, `SendError`, and `SpawnError` values only when one
   side is a safe built-in variant pattern such as `None`, `Ok(Unit)`, or
@@ -718,10 +716,10 @@ Runtime-dependent operands lower as typed Mantle value templates and Mantle
 evaluates them from typed values. Equality does not dispatch through
 source names, function names, debug labels, or parser strings.
 
-String equality, structural record/list/map equality, payload enum equality,
-process-reference equality, direct equality between two spawn outcomes, and
-matching a preserved message payload by equality are not part of the buildable
-equality surface.
+Structural record/list/map equality, payload enum equality, process-reference
+equality, direct equality between two spawn outcomes, dynamic string predicates,
+and matching a preserved message payload by equality are not part of the
+buildable equality surface.
 
 ## Boolean Predicate Composition
 
@@ -744,8 +742,8 @@ predicates lower into typed Mantle value templates; Mantle validates the typed
 tree, validates all operands, evaluates it from typed runtime values, and
 records the selected branch through the existing `branch_selected` trace event.
 
-Predicate composition does not add floats, string equality, structural
-equality, payload enum equality, process-reference equality, assignment,
-mutation, or authority.
+Predicate composition does not add floats, dynamic string operations,
+structural equality, payload enum equality, process-reference equality,
+assignment, mutation, or authority.
 
 Runtime branching, runtime iteration, statements, effects, step patterns, state transitions, and limits are documented in [Runtime Reference](runtime-reference.md).

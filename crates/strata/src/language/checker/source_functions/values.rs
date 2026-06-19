@@ -108,7 +108,10 @@ pub(in crate::language::checker) fn validate_source_function_value_expr(
     bindings: &[SourceValueBinding<'_>],
 ) -> Result<()> {
     match value {
-        ValueExpr::Identifier(_) | ValueExpr::EnumVariant { .. } => {
+        ValueExpr::Identifier(_)
+        | ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
+        | ValueExpr::EnumVariant { .. } => {
             check_source_value_type(scope, expected_type, value, bindings)
         }
         ValueExpr::ScalarLiteral(literal) => {

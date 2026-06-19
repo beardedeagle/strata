@@ -13,6 +13,14 @@ Typed scalar values and value operators are part of the runtime-bearing
 surface: their source syntax, checked folding, typed lowering, Mantle artifact
 admission, typed value-if templates, runtime evaluation, and fail-closed
 diagnostics are all recorded in the inventory.
+Source contract data primitives are recorded as a runtime-bearing typed data
+surface: immutable `String` and `Bytes` literal syntax, exact primitive equality,
+checked primitive value shapes, lowercase-hex artifact labels, Mantle artifact
+admission, runtime typed-value execution, observability evidence, source-to-
+runtime gates, fuzz seeds, bounded/property coverage, performance-smoke
+profiles, diagnostics, and docs are tracked together. Source strings, labels,
+and primitive payload bytes remain data or metadata and never become executable
+runtime dispatch inputs.
 Typed effect outcomes are also runtime-bearing: source-visible send/spawn
 `Result` bindings, checked outcome templates, Mantle artifact admission, runtime
 commit-or-return behavior, spawn success process-reference evidence,

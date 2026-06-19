@@ -146,6 +146,8 @@ impl fmt::Display for JsonValueLabel<'_> {
 fn write_value_label_json(output: &mut impl fmt::Write, value: &ArtifactValue) -> fmt::Result {
     match value {
         ArtifactValue::Atom(value) => write_json_escaped(output, value),
+        ArtifactValue::String(value) => write_data_value_json(output, "String(", value.as_bytes()),
+        ArtifactValue::Bytes(value) => write_data_value_json(output, "Bytes(", value),
         ArtifactValue::Scalar(value) => write!(output, "{}{}", value.value(), value.ty().suffix()),
         ArtifactValue::EnumVariant { variant, payload } => {
             write_json_escaped(output, variant)?;
@@ -195,6 +197,16 @@ fn write_value_label_json(output: &mut impl fmt::Write, value: &ArtifactValue) -
             write!(output, "type{}#{pid}", type_id.as_u32())
         }
     }
+}
+
+fn write_data_value_json(output: &mut impl fmt::Write, prefix: &str, bytes: &[u8]) -> fmt::Result {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    output.write_str(prefix)?;
+    for byte in bytes {
+        output.write_char(HEX[usize::from(byte >> 4)] as char)?;
+        output.write_char(HEX[usize::from(byte & 0x0f)] as char)?;
+    }
+    output.write_char(')')
 }
 
 pub(super) struct NullableU64(pub(super) Option<u64>);

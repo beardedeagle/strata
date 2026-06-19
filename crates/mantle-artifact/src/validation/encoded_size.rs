@@ -331,6 +331,14 @@ fn add_type_shape_bytes(
 ) -> Result<()> {
     match shape {
         ArtifactValueShape::Atom => add_field_bytes(total, prefix.child("shape"), "atom"),
+        ArtifactValueShape::Primitive { primitive } => {
+            add_field_bytes(total, prefix.child("shape"), "primitive")?;
+            add_field_bytes(
+                total,
+                prefix.child("primitive_type"),
+                primitive.artifact_name(),
+            )
+        }
         ArtifactValueShape::Scalar { scalar } => {
             add_field_bytes(total, prefix.child("shape"), "scalar")?;
             add_field_bytes(total, prefix.child("scalar_type"), scalar.artifact_name())

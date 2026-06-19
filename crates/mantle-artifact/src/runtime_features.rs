@@ -355,6 +355,9 @@ impl FeatureAccumulator {
 fn collect_shape_requirements(features: &mut FeatureAccumulator, shape: &ArtifactValueShape) {
     match shape {
         ArtifactValueShape::Atom | ArtifactValueShape::Record { .. } => {}
+        ArtifactValueShape::Primitive { .. } => {
+            features.push(RuntimeFeature::TypedValueTemplates);
+        }
         ArtifactValueShape::Scalar { .. } => {
             features.push(RuntimeFeature::ScalarValueTemplates);
         }

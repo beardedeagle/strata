@@ -69,7 +69,7 @@ fn validate_checked_equality_operand_type_at_depth(
             shape: CheckedValueShape::Atom,
         } if operand_ty.label() == "Unit" => Ok(EqualityOperandKind::Structural),
         CheckedTypeKind::Value {
-            shape: CheckedValueShape::Scalar(_),
+            shape: CheckedValueShape::Scalar(_) | CheckedValueShape::Primitive(_),
         } => Ok(EqualityOperandKind::Structural),
         CheckedTypeKind::Value {
             shape: CheckedValueShape::Enum { variants },
@@ -85,7 +85,7 @@ fn validate_checked_equality_operand_type_at_depth(
             Ok(EqualityOperandKind::BuiltinVariantPatternOnly)
         }
         _ => Err(Error::new(format!(
-            "equality operands must be Bool, scalar values, or fieldless enum values, found {operand_ty}"
+            "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values, found {operand_ty}"
         ))),
     }
 }
@@ -178,7 +178,10 @@ fn artifact_value_is_safe_builtin_variant_pattern(
         )));
     }
     match value {
-        ArtifactValue::Atom(_) | ArtifactValue::Scalar(_) => Ok(true),
+        ArtifactValue::Atom(_)
+        | ArtifactValue::String(_)
+        | ArtifactValue::Bytes(_)
+        | ArtifactValue::Scalar(_) => Ok(true),
         ArtifactValue::EnumVariant { variant, payload }
             if is_builtin_equality_variant_label(variant) =>
         {

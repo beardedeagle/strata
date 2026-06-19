@@ -25,6 +25,8 @@ mod runtime_effect_outcomes;
 mod runtime_loop_admission;
 #[path = "source_to_runtime_gates/runtime_loop_execution.rs"]
 mod runtime_loop_execution;
+#[path = "source_to_runtime_gates/source_data_primitives.rs"]
+mod source_data_primitives;
 #[path = "source_to_runtime_gates/source_functions.rs"]
 mod source_functions;
 #[path = "source_to_runtime_gates/source_units.rs"]

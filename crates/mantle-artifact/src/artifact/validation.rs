@@ -190,6 +190,7 @@ impl MantleArtifact {
     fn validate_value_shape(&self, type_index: usize, shape: &ArtifactValueShape) -> Result<()> {
         match shape {
             ArtifactValueShape::Atom => Ok(()),
+            ArtifactValueShape::Primitive { .. } => Ok(()),
             ArtifactValueShape::Scalar { .. } => Ok(()),
             ArtifactValueShape::Record { fields } => {
                 validate_count(
@@ -231,6 +232,9 @@ impl MantleArtifact {
                         &format!("type.{type_index}.enum_variant.{variant_index}"),
                         &variant.label,
                     )?;
+                    if variant.payload_type.is_some() {
+                        validate_payload_enum_variant_label(type_index, &variant.label)?;
+                    }
                     if !seen.insert(variant.label.as_str()) {
                         return Err(Error::new(format!(
                             "type.{type_index} duplicates enum variant {}",
@@ -298,6 +302,9 @@ impl MantleArtifact {
         value.validate_without_process_ref(field)?;
         match type_entry.value_shape()? {
             ArtifactValueShape::Atom => validate_atom_value(field, ty, type_entry, value),
+            ArtifactValueShape::Primitive { primitive } => {
+                validate_primitive_value(field, ty, type_entry, *primitive, value)
+            }
             ArtifactValueShape::Scalar { scalar } => {
                 validate_scalar_value(field, ty, type_entry, *scalar, value)
             }
@@ -365,6 +372,8 @@ impl MantleArtifact {
                 )
             }
             ArtifactValue::Record { .. }
+            | ArtifactValue::String(_)
+            | ArtifactValue::Bytes(_)
             | ArtifactValue::Scalar(_)
             | ArtifactValue::List(_)
             | ArtifactValue::Map(_)
@@ -532,6 +541,17 @@ fn validate_value_type_entry(field: &str, ty: TypeId, type_entry: &ArtifactType)
     }
 }
 
+fn validate_payload_enum_variant_label(type_index: usize, variant: &str) -> Result<()> {
+    for primitive in ArtifactPrimitiveType::ALL {
+        if variant == primitive.source_name() {
+            return Err(Error::new(format!(
+                "type.{type_index} payload-bearing enum variant {variant} collides with reserved primitive value label"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn enum_variant_entry(
     ty: TypeId,
     type_entry: &ArtifactType,
@@ -567,6 +587,25 @@ fn validate_atom_value(
         type_entry.label,
         ty.as_u32()
     )))
+}
+
+fn validate_primitive_value(
+    field: &str,
+    ty: TypeId,
+    type_entry: &ArtifactType,
+    expected: ArtifactPrimitiveType,
+    value: &ArtifactValue,
+) -> Result<()> {
+    match (expected, value) {
+        (ArtifactPrimitiveType::String, ArtifactValue::String(_))
+        | (ArtifactPrimitiveType::Bytes, ArtifactValue::Bytes(_)) => Ok(()),
+        _ => Err(Error::new(format!(
+            "{field} value {} does not match primitive type {} (type id {})",
+            value.label(),
+            type_entry.label,
+            ty.as_u32()
+        ))),
+    }
 }
 
 fn validate_scalar_value(

@@ -52,7 +52,7 @@ fn rejects_process_reference_carrier_enum_source_function_contract() {
 
     assert!(
         err.to_string().contains(
-            "function keep return type must use a declared record, enum, scalar, list, or map type without process-reference authority, found MainMsg"
+            "function keep return type must use a declared record, enum, scalar, primitive, list, or map type without process-reference authority, found MainMsg"
         ),
         "{err}"
     );
@@ -70,7 +70,7 @@ fn rejects_process_reference_carrier_enum_source_local_binding() {
 
     assert!(
         err.to_string().contains(
-            "source-local binding copy must use a declared record, enum, scalar, list, or map type without process-reference authority, found MainMsg"
+            "source-local binding copy must use a declared record, enum, scalar, primitive, list, or map type without process-reference authority, found MainMsg"
         ),
         "{err}"
     );

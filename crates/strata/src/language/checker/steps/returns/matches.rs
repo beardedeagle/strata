@@ -1,5 +1,6 @@
 use super::super::super::source_functions::validate_source_function_value_expr;
 use super::*;
+use crate::language::{SourceBytesLiteral, SourceStringLiteral};
 
 mod arm_statements;
 mod selected_actions;
@@ -301,6 +302,8 @@ fn concrete_artifact_enum_value<'a>(
             Ok((index, Some(payload)))
         }
         ArtifactValue::Record { .. }
+        | ArtifactValue::String(_)
+        | ArtifactValue::Bytes(_)
         | ArtifactValue::Scalar(_)
         | ArtifactValue::List(_)
         | ArtifactValue::Map(_)
@@ -390,6 +393,21 @@ fn artifact_to_source_value(
             "process references must be direct message payloads",
         ));
     }
+    if let Some(expected_primitive) = semantic_index.primitive_type(expected_type)? {
+        return match (expected_primitive, value) {
+            (mantle_artifact::ArtifactPrimitiveType::String, ArtifactValue::String(value)) => Ok(
+                ValueExpr::StringLiteral(SourceStringLiteral::new(value.clone())?),
+            ),
+            (mantle_artifact::ArtifactPrimitiveType::Bytes, ArtifactValue::Bytes(value)) => Ok(
+                ValueExpr::BytesLiteral(SourceBytesLiteral::new(value.clone())?),
+            ),
+            _ => Err(Error::new(format!(
+                "artifact value {} is not a primitive value of type {}",
+                value.label(),
+                expected_type
+            ))),
+        };
+    }
     if let Some(expected_scalar) = semantic_index.scalar_type(expected_type)? {
         let ArtifactValue::Scalar(value) = value else {
             return Err(Error::new(format!(
@@ -475,6 +493,8 @@ fn artifact_enum_to_source_value(
             })
         }
         ArtifactValue::Record { .. }
+        | ArtifactValue::String(_)
+        | ArtifactValue::Bytes(_)
         | ArtifactValue::Scalar(_)
         | ArtifactValue::List(_)
         | ArtifactValue::Map(_)

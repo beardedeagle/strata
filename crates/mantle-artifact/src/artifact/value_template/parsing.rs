@@ -3,7 +3,12 @@ use std::collections::BTreeSet;
 use super::model::{ArtifactMapEntry, ArtifactRecordField, ArtifactValue};
 use super::scalar::ArtifactScalarValue;
 use crate::validation::validate_ident_field;
-use crate::{Error, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result};
+use crate::{
+    Error, MAX_PRIMITIVE_DATA_BYTES, MAX_VALUE_TEMPLATE_DEPTH, MAX_VALUE_TEMPLATE_FIELDS, Result,
+};
+
+const STRING_VALUE_PREFIX: &str = "String(";
+const BYTES_VALUE_PREFIX: &str = "Bytes(";
 
 pub(super) fn parse_value(label: &str, depth: usize) -> Result<ArtifactValue> {
     if depth > MAX_VALUE_TEMPLATE_DEPTH {
@@ -13,6 +18,9 @@ pub(super) fn parse_value(label: &str, depth: usize) -> Result<ArtifactValue> {
     }
     if let Some(value) = ArtifactScalarValue::parse_label("artifact scalar value", label)? {
         return Ok(ArtifactValue::Scalar(value));
+    }
+    if let Some(value) = parse_primitive_data_value(label)? {
+        return Ok(value);
     }
     if let Some(body) = label.strip_prefix("List[") {
         let Some(body) = body.strip_suffix(']') else {
@@ -47,6 +55,59 @@ pub(super) fn parse_value(label: &str, depth: usize) -> Result<ArtifactValue> {
     }
     validate_ident_field("artifact atom value", label)?;
     Ok(ArtifactValue::Atom(label.to_string()))
+}
+
+fn parse_primitive_data_value(label: &str) -> Result<Option<ArtifactValue>> {
+    if let Some(body) = label.strip_prefix(STRING_VALUE_PREFIX) {
+        let Some(hex) = body.strip_suffix(')') else {
+            return Err(Error::new(format!("{label} is not a String value")));
+        };
+        let bytes = parse_hex_bytes("String value", hex)?;
+        let value = String::from_utf8(bytes)
+            .map_err(|_| Error::new(format!("String value {label} is not valid UTF-8")))?;
+        return Ok(Some(ArtifactValue::String(value)));
+    }
+    if let Some(body) = label.strip_prefix(BYTES_VALUE_PREFIX) {
+        let Some(hex) = body.strip_suffix(')') else {
+            return Err(Error::new(format!("{label} is not a Bytes value")));
+        };
+        return Ok(Some(ArtifactValue::Bytes(parse_hex_bytes(
+            "Bytes value",
+            hex,
+        )?)));
+    }
+    Ok(None)
+}
+
+fn parse_hex_bytes(field: &str, hex: &str) -> Result<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        return Err(Error::new(format!(
+            "{field} hex encoding must have even length"
+        )));
+    }
+    let len = hex.len() / 2;
+    if len > MAX_PRIMITIVE_DATA_BYTES {
+        return Err(Error::new(format!(
+            "{field} exceeds maximum primitive data length of {MAX_PRIMITIVE_DATA_BYTES} bytes"
+        )));
+    }
+    let mut bytes = Vec::with_capacity(len);
+    for pair in hex.as_bytes().chunks_exact(2) {
+        let high = hex_nibble(pair[0])
+            .ok_or_else(|| Error::new(format!("{field} contains non-lowercase-hex data")))?;
+        let low = hex_nibble(pair[1])
+            .ok_or_else(|| Error::new(format!("{field} contains non-lowercase-hex data")))?;
+        bytes.push((high << 4) | low);
+    }
+    Ok(bytes)
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
 }
 
 fn parse_record(constructor: &str, body: &str, depth: usize) -> Result<ArtifactValue> {

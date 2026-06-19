@@ -1,6 +1,6 @@
 use mantle_artifact::{
-    ArtifactMapEntry, ArtifactRecordField, ArtifactValue, MAX_STATE_VALUES_PER_PROCESS,
-    validate_state_value_label,
+    ArtifactMapEntry, ArtifactPrimitiveType, ArtifactRecordField, ArtifactValue,
+    MAX_STATE_VALUES_PER_PROCESS, validate_state_value_label,
 };
 
 use super::super::super::MAX_VALUE_NESTING;
@@ -71,7 +71,9 @@ pub(in crate::language::checker) fn source_value_uses_binding(
 ) -> bool {
     match value {
         ValueExpr::Identifier(name) => name == binding,
-        ValueExpr::ScalarLiteral(_) => false,
+        ValueExpr::StringLiteral(_) | ValueExpr::BytesLiteral(_) | ValueExpr::ScalarLiteral(_) => {
+            false
+        }
         ValueExpr::Call { arg, .. } => source_value_uses_binding(arg, binding),
         ValueExpr::EnumVariant { payload, .. } => source_value_uses_binding(payload, binding),
         ValueExpr::Record(record) => record
@@ -225,6 +227,9 @@ pub(super) fn canonical_value(
             _ => Err(Error::new("provided value is not the Unit value")),
         };
     }
+    if let Some(primitive) = semantic_index.primitive_type(expected_type)? {
+        return canonical_primitive_value(primitive, expected_type, value);
+    }
     if let Ok(record) = semantic_index.record_decl(module, expected_type) {
         return canonical_record_value(
             module,
@@ -300,6 +305,27 @@ fn canonical_if_else_value(
     )
 }
 
+fn canonical_primitive_value(
+    primitive: ArtifactPrimitiveType,
+    expected_type: &TypeRef,
+    value: &ValueExpr,
+) -> Result<ArtifactValue> {
+    match (primitive, value) {
+        (ArtifactPrimitiveType::String, ValueExpr::StringLiteral(value)) => {
+            Ok(ArtifactValue::String(value.as_str().to_owned()))
+        }
+        (ArtifactPrimitiveType::Bytes, ValueExpr::BytesLiteral(value)) => {
+            Ok(ArtifactValue::Bytes(value.as_slice().to_vec()))
+        }
+        (ArtifactPrimitiveType::String, _) => Err(Error::new(format!(
+            "expected string literal for type {expected_type}"
+        ))),
+        (ArtifactPrimitiveType::Bytes, _) => Err(Error::new(format!(
+            "expected bytes literal for type {expected_type}"
+        ))),
+    }
+}
+
 fn canonical_scalar_value(
     scalar: mantle_artifact::ArtifactScalarType,
     expected_type: &TypeRef,
@@ -373,6 +399,8 @@ fn canonical_enum_value(
             Ok(value)
         }
         ValueExpr::Call { .. }
+        | ValueExpr::StringLiteral(_)
+        | ValueExpr::BytesLiteral(_)
         | ValueExpr::ScalarLiteral(_)
         | ValueExpr::Record(_)
         | ValueExpr::List(_)

@@ -1,6 +1,7 @@
 use crate::language::ast::{ValueBooleanOperator, ValueEqualityOperator};
 use crate::language::checked::{CheckedValueBooleanOperator, CheckedValueEqualityOperator};
 use crate::language::checker::symbols::{BuiltinValueShape, ValueEnumVariant};
+use mantle_artifact::ArtifactPrimitiveType;
 
 use super::scalars::scalar_template_expr_type;
 use super::*;
@@ -270,10 +271,16 @@ fn equality_template_operand_type(
                 .equality_fieldless_enum_variant_type(module, name)
                 .map_err(|err| {
                     Error::new(format!(
-                        "equality operand {name} must be a Bool, scalar value, or fieldless enum value: {err}"
+                        "equality operand {name} must be a Bool, String, Bytes, scalar value, or fieldless enum value: {err}"
                     ))
                 })
         }
+        ValueExpr::StringLiteral(_) => Ok(TypeRef::Named(Identifier::new(
+            ArtifactPrimitiveType::String.source_name(),
+        )?)),
+        ValueExpr::BytesLiteral(_) => Ok(TypeRef::Named(Identifier::new(
+            ArtifactPrimitiveType::Bytes.source_name(),
+        )?)),
         ValueExpr::ScalarLiteral(literal) => {
             Ok(TypeRef::Named(Identifier::new(literal.ty().source_name())?))
         }
@@ -282,6 +289,27 @@ fn equality_template_operand_type(
         }
         ValueExpr::Grouped { value } => {
             equality_template_operand_type(module, semantic_index, value, bindings, expected_type)
+        }
+        ValueExpr::IfElse { .. } => {
+            let Some(expected_type) = expected_type else {
+                return Err(Error::new(
+                    "equality operand type is ambiguous; use a typed local binding or literal",
+                ));
+            };
+            if semantic_index.scalar_type(expected_type)?.is_some() {
+                return scalar_template_expr_type(
+                    semantic_index,
+                    value,
+                    bindings,
+                    Some(expected_type),
+                );
+            }
+            if semantic_index.primitive_type(expected_type)?.is_some() {
+                return Ok(expected_type.clone());
+            }
+            Err(Error::new(
+                "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
+            ))
         }
         ValueExpr::EnumVariant { name, .. } => {
             if let Some(expected_type) = expected_type
@@ -310,12 +338,11 @@ fn equality_template_operand_type(
         | ValueExpr::Record(_)
         | ValueExpr::List(_)
         | ValueExpr::Map(_)
-        | ValueExpr::IfElse { .. }
         | ValueExpr::Equality { .. }
         | ValueExpr::ScalarOrdering { .. }
         | ValueExpr::BooleanNot { .. }
         | ValueExpr::BooleanBinary { .. } => Err(Error::new(
-            "equality operands must be Bool, scalar values, or fieldless enum values",
+            "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
         )),
     }
 }
@@ -381,6 +408,9 @@ fn validate_equality_template_operand_type_at_depth(
         return Ok(EqualityOperandKind::Structural);
     }
     if semantic_index.scalar_type(operand_type)?.is_some() {
+        return Ok(EqualityOperandKind::Structural);
+    }
+    if semantic_index.primitive_type(operand_type)?.is_some() {
         return Ok(EqualityOperandKind::Structural);
     }
     if semantic_index

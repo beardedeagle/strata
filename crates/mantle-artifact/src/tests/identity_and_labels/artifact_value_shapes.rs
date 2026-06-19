@@ -53,6 +53,87 @@ fn artifact_value_parse_rejects_unbalanced_top_level_delimiters() {
 }
 
 #[test]
+fn primitive_value_labels_are_canonical_lowercase_hex_data() {
+    let string = ArtifactValue::String("ready".to_string());
+    let bytes = ArtifactValue::Bytes(vec![0x00, 0xff, b'a']);
+
+    assert_eq!(string.label(), "String(7265616479)");
+    assert_eq!(bytes.label(), "Bytes(00ff61)");
+    assert_eq!(
+        ArtifactValue::parse("String(7265616479)").expect("string primitive should parse"),
+        string
+    );
+    assert_eq!(
+        ArtifactValue::parse("Bytes(00ff61)").expect("bytes primitive should parse"),
+        bytes
+    );
+
+    for (label, expected) in [
+        ("String(7265616479", "is not a String value"),
+        ("String(ff)", "not valid UTF-8"),
+        ("String(FF)", "non-lowercase-hex data"),
+        ("Bytes(0)", "hex encoding must have even length"),
+        ("Bytes(0g)", "non-lowercase-hex data"),
+    ] {
+        let err = ArtifactValue::parse(label).expect_err("malformed primitive value should fail");
+        assert!(
+            err.to_string().contains(expected),
+            "expected {expected:?}, got {err}"
+        );
+    }
+}
+
+#[test]
+fn validate_rejects_payload_enum_variants_that_collide_with_primitive_value_labels() {
+    let mut artifact = valid_artifact();
+    artifact.types[WORKER_STATE.index()] = ArtifactType::enum_value_with_payloads(
+        "WorkerState",
+        vec![ArtifactEnumVariant {
+            label: "String".to_string(),
+            payload_type: Some(JOB),
+        }],
+    );
+
+    let err = artifact
+        .validate()
+        .expect_err("primitive value labels must stay unambiguous");
+
+    assert!(
+        err.to_string().contains(
+            "type.2 payload-bearing enum variant String collides with reserved primitive value label"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn primitive_value_validation_rejects_programmatic_oversized_data() {
+    let value = ArtifactValue::Bytes(vec![0; MAX_PRIMITIVE_DATA_BYTES + 1]);
+    let err = value
+        .validate("oversized primitive")
+        .expect_err("oversized primitive values should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("oversized primitive exceeds maximum primitive data length"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn primitive_state_label_match_rejects_non_ascii_hex_without_panic() {
+    let value = ArtifactValue::Bytes(vec![0]);
+    let err = validate_state_value_identity_label(&value, "Bytes(aé)")
+        .expect_err("malformed primitive state labels should fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("does not match ordered value label"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn artifact_value_labels_preserve_record_and_map_entry_order() {
     let record = ArtifactValue::parse("MainState{signature:WarmReady,body:WarmReady}")
         .expect("ordered record value should parse");

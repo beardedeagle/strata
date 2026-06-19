@@ -323,6 +323,7 @@ source-to-runtime-success-gates: build
         imports_main
         boundary_contracts_main
         component_composition_main
+        source_contract_data_primitives
         state_payload_enum
         collection_state
         state_payload_match
@@ -423,9 +424,9 @@ source-to-runtime-failure-gates: build
     expect_check_failure examples/failures/function_return_if_statement.str \
         'source function choose return-if then branch must not perform statements' function_return_if_statement
     expect_check_failure examples/failures/source_local_binding_process_ref.str \
-        'source-local binding worker_local must use a declared record, enum, scalar, list, or map type' source_local_binding_process_ref
+        'source-local binding worker_local must use a declared record, enum, scalar, primitive, list, or map type' source_local_binding_process_ref
     expect_check_failure examples/failures/source_local_binding_process_ref_carrier_enum.str \
-        'source-local binding copy must use a declared record, enum, scalar, list, or map type without process-reference authority' source_local_binding_process_ref_carrier_enum
+        'source-local binding copy must use a declared record, enum, scalar, primitive, list, or map type without process-reference authority' source_local_binding_process_ref_carrier_enum
     expect_check_failure examples/failures/source_local_binding_process_ref_shadow.str \
         'source-local binding worker conflicts with a process reference binding' source_local_binding_process_ref_shadow
     expect_check_failure examples/failures/source_function_parameter_process_ref_shadow.str \

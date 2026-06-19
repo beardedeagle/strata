@@ -4,6 +4,7 @@ pub const ARTIFACT_SCHEMA_VERSION: &str = "6";
 pub const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 pub const MAX_ARTIFACT_FIELDS: usize = 16_384;
 pub const MAX_FIELD_VALUE_BYTES: usize = 16 * 1024;
+pub const MAX_PRIMITIVE_DATA_BYTES: usize = 8 * 1024 - 8;
 pub const MAX_IDENTIFIER_BYTES: usize = 128;
 pub const MAX_TYPE_COUNT: usize = 4096;
 pub const MAX_PROCESS_COUNT: usize = 256;

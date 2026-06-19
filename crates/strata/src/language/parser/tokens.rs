@@ -65,6 +65,25 @@ impl Parser {
         }
     }
 
+    pub(super) fn expect_bytes_literal(&mut self) -> Result<Vec<u8>> {
+        if matches!(self.peek_kind(), TokenKind::BytesLiteral(_)) {
+            match self.advance_kind() {
+                TokenKind::BytesLiteral(value) => Ok(value),
+                _ => unreachable!("peeked bytes literal must advance as bytes literal"),
+            }
+        } else {
+            Err(self.error_here("expected bytes literal"))
+        }
+    }
+
+    pub(super) fn peek_string_literal(&self) -> bool {
+        matches!(self.peek_kind(), TokenKind::StringLiteral(_))
+    }
+
+    pub(super) fn peek_bytes_literal(&self) -> bool {
+        matches!(self.peek_kind(), TokenKind::BytesLiteral(_))
+    }
+
     pub(super) fn expect_at_ident(&mut self) -> Result<String> {
         if matches!(self.peek_kind(), TokenKind::AtIdent(_)) {
             match self.advance_kind() {

@@ -90,6 +90,12 @@ pub(crate) const DOMAINS: &[ProofDomain] = &[
         obligations: proof_obligations::CHECKER_LOWERING,
     },
     ProofDomain {
+        id: "source-contract-data-primitives",
+        title: "Immutable String and Bytes source contract data primitives",
+        feature_ids: &["source-contract-data-primitives"],
+        obligations: proof_obligations::RUNTIME_FUZZ_BOUNDED,
+    },
+    ProofDomain {
         id: "process-declarations",
         title: "Process declarations",
         feature_ids: &["process-init-step-results"],

@@ -7,6 +7,9 @@ use super::lower_type_id;
 pub(super) fn lower_value_shape(shape: &CheckedValueShape) -> ArtifactValueShape {
     match shape {
         CheckedValueShape::Atom => ArtifactValueShape::Atom,
+        CheckedValueShape::Primitive(primitive) => ArtifactValueShape::Primitive {
+            primitive: *primitive,
+        },
         CheckedValueShape::Scalar(scalar) => ArtifactValueShape::Scalar { scalar: *scalar },
         CheckedValueShape::Record { fields } => ArtifactValueShape::Record {
             fields: fields

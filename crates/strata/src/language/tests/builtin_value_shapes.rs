@@ -195,8 +195,10 @@ fn contains_enum_variant_value(value: &ArtifactValue) -> bool {
         ArtifactValue::Map(entries) => entries.iter().any(|entry| {
             contains_enum_variant_value(&entry.key) || contains_enum_variant_value(&entry.value)
         }),
-        ArtifactValue::Atom(_) | ArtifactValue::Scalar(_) | ArtifactValue::ProcessRef { .. } => {
-            false
-        }
+        ArtifactValue::Atom(_)
+        | ArtifactValue::String(_)
+        | ArtifactValue::Bytes(_)
+        | ArtifactValue::Scalar(_)
+        | ArtifactValue::ProcessRef { .. } => false,
     }
 }

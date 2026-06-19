@@ -98,6 +98,9 @@ fn collect_shape_requirements(features: &mut FeatureAccumulator, shape: &Checked
         CheckedValueShape::Scalar(_) => {
             features.push(RuntimeFeature::ScalarValueTemplates);
         }
+        CheckedValueShape::Primitive(_) => {
+            features.push(RuntimeFeature::TypedValueTemplates);
+        }
         CheckedValueShape::Enum { variants } => {
             if variants
                 .iter()

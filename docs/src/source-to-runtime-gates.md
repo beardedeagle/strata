@@ -80,6 +80,20 @@ not Mantle, resolves the reachable dependency graph before lowering:
 just run-example imports_main
 ```
 
+The source contract data primitive gate proves immutable `String` and `Bytes`
+values survive source checking, lowering, Mantle artifact admission, runtime
+execution, and observability as typed primitive data rather than string dispatch:
+
+```sh
+just run-example source_contract_data_primitives
+```
+
+BDD scenario: Given immutable `String` and `Bytes` state/message values in a
+checked `.str` program, when Strata builds the typed `.mta` and Mantle runs it,
+then the trace and output show typed primitive data survived checking, lowering,
+admission, runtime branch evaluation, and process termination without source
+string dispatch.
+
 The typed boundary contract gate proves protocol, port, component, and
 process-local `PortConnect` declarations check before lowering and run through
 Mantle-admitted typed IDs:

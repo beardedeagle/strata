@@ -57,93 +57,96 @@ Read them in this order:
    payload.
 28. `runtime_scalar_priority.str` for typed scalar payload computation,
    runtime-bound value conditionals, and Mantle-backed scalar branch selection.
-29. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
+29. `source_contract_data_primitives.str` for immutable `String` and `Bytes`
+   data in records, messages, functions, collections, exact equality, and
+   Mantle typed primitive runtime values.
+30. `runtime_payload_projection_if.str` for Mantle-backed runtime branching over
    a projected field from an immutable received record payload.
-30. `runtime_payload_projection_next_state.str` for Mantle-backed runtime
+31. `runtime_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable received record
    payload.
-31. `runtime_state_payload_projection_if.str` for Mantle-backed runtime
+32. `runtime_state_payload_projection_if.str` for Mantle-backed runtime
    branching over a projected field from an immutable current-state record
    payload.
-32. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
+33. `runtime_state_payload_projection_next_state.str` for Mantle-backed runtime
    next-state branching over a projected field from an immutable current-state
    record payload.
-33. `runtime_nested_if_actions.str` for one bounded layer of nested
+34. `runtime_nested_if_actions.str` for one bounded layer of nested
    statement-level runtime branch actions.
-34. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
+35. `runtime_final_if_guarded_loop.str` for bounded loop action prefixes inside
    final-position runtime branches.
-35. `runtime_final_if_nested_if_actions.str` for one direct nested
+36. `runtime_final_if_nested_if_actions.str` for one direct nested
    statement-level runtime branch action inside final-position runtime
    branches.
-36. `runtime_final_if_nested_terminal_if.str` for one direct nested terminal
+37. `runtime_final_if_nested_terminal_if.str` for one direct nested terminal
    final-position runtime branch inside final-position runtime branches.
-37. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
+38. `runtime_guard_noop.str` for omitted `else` and explicit no-op runtime
    branch behavior.
-38. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
+39. `runtime_for_each.str` for Mantle-backed bounded runtime iteration over a
    typed list payload.
-39. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
-40. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
+40. `runtime_for_each_empty.str` for the zero-iteration runtime collection case.
+41. `runtime_for_each_if.str` for Mantle-backed runtime branch selection inside
    bounded loop bodies.
-41. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
+42. `runtime_for_each_nested_if_actions.str` for one bounded nested runtime
    branch inside a bounded loop-body branch.
-42. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
-43. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
+43. `runtime_guarded_for_each.str` for guarding a whole bounded runtime loop.
+44. `runtime_guarded_ref_loop.str` for routing a guarded bounded loop through a
    received direct process reference.
-44. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
+45. `runtime_guarded_ref_loop_jobs.str` for routing ordinary immutable `Job`
    values through a guarded loop and received direct process reference.
-45. `runtime_loop_element_projection.str` for projecting immutable record
+46. `runtime_loop_element_projection.str` for projecting immutable record
    fields from guarded runtime loop elements.
-46. `actor_payload_match.str` for the same payload binding through a whole-body
+47. `actor_payload_match.str` for the same payload binding through a whole-body
    `match msg`.
-47. `actor_payload_split_match.str` for payload-sensitive same-message
+48. `actor_payload_split_match.str` for payload-sensitive same-message
    splitting inside a whole-body `match msg`.
-48. `actor_payload_split_signature.str` for payload-sensitive same-message
+49. `actor_payload_split_signature.str` for payload-sensitive same-message
    splitting across step parameter patterns.
-49. `actor_payload_split_signature_wildcard.str` for payload-sensitive
+50. `actor_payload_split_signature_wildcard.str` for payload-sensitive
    step-signature wildcard fallback over discovered concrete payload cases.
-50. `actor_payload_state_match_split.str` for payload-sensitive same-message
+51. `actor_payload_state_match_split.str` for payload-sensitive same-message
    splitting across state-match step clauses.
-51. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
+52. `actor_payload_state_match_wildcard.str` for payload-sensitive state-match
    wildcard fallback over discovered concrete payload cases.
-52. `nested_patterns.str` for nested immutable constructor, record, list, and
+53. `nested_patterns.str` for nested immutable constructor, record, list, and
    map payload destructuring.
-53. `actor_reply.str` for transporting typed process references through message
+54. `actor_reply.str` for transporting typed process references through message
    payloads.
-54. `process_ref_stale_lifecycle.str` for a transported old runtime PID
+55. `process_ref_stale_lifecycle.str` for a transported old runtime PID
    returning `Err(Stopped(message))` without retargeting to a newer worker.
-55. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
+56. `actor_emit_spawn_send.str` for one transition with declared emit, spawn,
    and send authority.
-56. `imports_main.str`, with `imports_types.str` and `imports_worker.str`, for
+57. `imports_main.str`, with `imports_types.str` and `imports_worker.str`, for
    source-unit imports checked and lowered from one root source path.
-57. `boundary_contracts_main.str`, with `boundary_contracts_worker.str`, for
+58. `boundary_contracts_main.str`, with `boundary_contracts_worker.str`, for
    typed protocol, port, and component boundary contracts.
-58. `component_composition_main.str`, with `component_composition_worker.str`,
+59. `component_composition_main.str`, with `component_composition_worker.str`,
    for checked local component-instance and port-binding composition admission.
-59. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
+60. `effect_outcomes.str` for immutable typed local send/spawn outcomes,
    commit-or-return state evidence, and the typed send-error contract
    shape.
-60. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
-61. `effect_outcome_stopped_target.str` for a source-visible `Stopped`
+61. `effect_outcome_mailbox_full.str` for a source-visible `Full` send outcome.
+62. `effect_outcome_stopped_target.str` for a source-visible `Stopped`
    send outcome after a normally terminated target.
-62. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
+63. `effect_outcome_crashed_target.str` for the fail-closed boundary where a
    source-created `Panic(...)` prevents a later observer from recovering the
    crash as a source-visible send outcome.
-63. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
+64. `effect_outcome_spawn_denied.str` for source-visible local spawn authority
    denial before process acceptance.
-64. `effect_outcome_spawn_exhausted.str` for source-visible local spawn capacity
+65. `effect_outcome_spawn_exhausted.str` for source-visible local spawn capacity
    exhaustion before process acceptance under `--max-runtime-processes 1`.
-65. `effect_outcome_spawn_backend_unavailable.str` for source-visible local
+66. `effect_outcome_spawn_backend_unavailable.str` for source-visible local
    spawn backend unavailability before process acceptance under
    `--disable-local-spawn-backend`.
-66. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
+67. `actor_panic_no_replay.str` for fail-closed actor failure and no replay
    after message dequeue.
-67. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
+68. `local_supervision_restart.str`, `local_supervision_permanent_stop.str`,
    `local_supervision_temporary.str`, `local_supervision_transient_restart.str`,
    `local_supervision_transient.str`, and
    `local_supervision_inactive_send_outcome.str` for local `one_for_one`
    supervision, lexical child sends, restart modes, stopped-child send outcomes,
    and restart observability.
-68. `local_supervision_inactive_crashed_send_outcome.str` for source-visible
+69. `local_supervision_inactive_crashed_send_outcome.str` for source-visible
    `Err(Crashed(message))` when an inactive temporary supervised child failed
    before the send was accepted.
 

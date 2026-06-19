@@ -253,7 +253,7 @@ pub(crate) const FEATURES: &[Feature] = &[
             ParserCoverage => ("crates/strata/src/language/tests/source_value_equality.rs", "folds_concrete_bool_and_fieldless_enum_equality"),
             CheckerValidation => ("crates/strata/src/language/tests/source_value_equality.rs", "folds_concrete_boolean_predicate_composition"),
             CheckedIrLowering => ("crates/strata-mantle-acceptance/tests/source_to_runtime_gates/runtime_branches.rs", "runtime_if_else_composed_predicate_branches_on_payload_at_mantle_runtime"),
-            Diagnostics => ("docs/src/diagnostics.md", "equality operands must be Bool, scalar values, or fieldless enum values"),
+            Diagnostics => ("docs/src/diagnostics.md", "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values"),
             RunnableExample => ("examples/runtime_if_else.str", "if (flag == True)"),
             PositiveTest => ("crates/strata/src/language/tests/source_value_equality.rs", "folds_concrete_boolean_predicate_composition"),
             NegativeTest => ("crates/strata/src/language/tests/source_value_equality.rs", "rejects_source_equality_invalid_operand_types"),

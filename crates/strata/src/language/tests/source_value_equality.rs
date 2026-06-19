@@ -331,19 +331,19 @@ fn rejects_source_equality_invalid_operand_types() {
         ("Cold == True", "equality operands must have the same type"),
         (
             "Job { phase: Ready } == Job { phase: Ready }",
-            "equality operands must be Bool, scalar values, or fieldless enum values",
+            "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
         ),
         (
             "List<Bool,2>[True, False] == List<Bool,2>[True, False]",
-            "equality operands must be Bool, scalar values, or fieldless enum values",
+            "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
         ),
         (
             "Map<Mode,Mode,1>[Cold => Warm] == Map<Mode,Mode,1>[Cold => Warm]",
-            "equality operands must be Bool, scalar values, or fieldless enum values",
+            "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
         ),
         (
             "Wrapped(Ready) == Wrapped(Ready)",
-            "equality operands must be Bool, scalar values, or fieldless enum values",
+            "equality operands must be Bool, String, Bytes, scalar values, or fieldless enum values",
         ),
     ] {
         let source = source_with_equality_expr(expr);
@@ -527,14 +527,14 @@ proc Worker mailbox bounded(1) {
     let err = check_source(source).expect_err("process-reference equality should fail");
     assert!(
         err.to_string().contains(
-            "equality operand worker must be a Bool, scalar value, or fieldless enum value"
+            "equality operand worker must be a Bool, String, Bytes, scalar value, or fieldless enum value"
         ),
         "{err}"
     );
 }
 
 #[test]
-fn rejects_non_equality_operators_and_arithmetic_conditions() {
+fn rejects_non_equality_operators_and_accepts_primitive_equality() {
     for (expr, expected) in [
         (
             "True < True",
@@ -562,12 +562,14 @@ fn rejects_non_equality_operators_and_arithmetic_conditions() {
         );
     }
 
-    let source = source_with_equality_expr("\"a\" == \"a\"");
-    let err = parse_source(&source).expect_err("unsupported string equality syntax should fail");
-    assert!(
-        err.to_string().contains("expected identifier"),
-        "expected string equality syntax rejection, got {err}"
-    );
+    for expr in ["\"a\" == \"a\"", "b\"\\x01\" != b\"\\x02\""] {
+        let source = source_with_equality_expr(expr);
+        let checked = check_source(&source).expect("primitive equality should check");
+        assert_eq!(
+            checked_state_labels(&checked.processes()[0]),
+            ["MainState{value:True}"]
+        );
+    }
 }
 
 fn source_with_equality_expr(expr: &str) -> String {

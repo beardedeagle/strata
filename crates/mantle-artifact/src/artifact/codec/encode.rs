@@ -193,6 +193,12 @@ fn encode_type_shape(encoded: &mut String, prefix: &str, shape: &ArtifactValueSh
         ArtifactValueShape::Atom => {
             encoded.push_str(&format!("{prefix}.shape=atom\n"));
         }
+        ArtifactValueShape::Primitive { primitive } => {
+            encoded.push_str(&format!(
+                "{prefix}.shape=primitive\n{prefix}.primitive_type={}\n",
+                primitive.artifact_name()
+            ));
+        }
         ArtifactValueShape::Scalar { scalar } => {
             encoded.push_str(&format!(
                 "{prefix}.shape=scalar\n{prefix}.scalar_type={}\n",

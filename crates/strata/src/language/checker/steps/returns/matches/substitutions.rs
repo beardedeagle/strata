@@ -16,7 +16,9 @@ pub(super) fn substitute_step_return_bindings(
             .find(|binding| binding.name == &name)
             .map(|binding| binding.value.clone())
             .unwrap_or(ValueExpr::Identifier(name)),
-        ValueExpr::ScalarLiteral(_) => value,
+        ValueExpr::StringLiteral(_) | ValueExpr::BytesLiteral(_) | ValueExpr::ScalarLiteral(_) => {
+            value
+        }
         ValueExpr::Call { name, arg } => ValueExpr::Call {
             name,
             arg: Box::new(substitute_step_return_bindings(*arg, bindings)),
